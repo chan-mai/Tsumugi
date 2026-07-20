@@ -8,7 +8,7 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build -w @tsumugi/dashboard && npm run build -w tsumugi",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run typecheck && vitest run",
     "test:unit": "vitest run --project unit",

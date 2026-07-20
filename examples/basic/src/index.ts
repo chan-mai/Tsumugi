@@ -1,4 +1,5 @@
-import { defineTsumugi, enqueue } from 'tsumugi';
+import { bearerAuth, defineTsumugi, enqueue } from 'tsumugi';
+import { ui } from 'tsumugi/ui';
 import { Performer } from 'tsumugi/performer';
 
 class Hello extends Performer<{ name: string }, void, {}, Env> {
@@ -10,7 +11,11 @@ class Hello extends Performer<{ name: string }, void, {}, Env> {
 // binding名とperformerの対応はここ1箇所だけ
 const performers = { HELLO: Hello };
 
-const tsumugi = defineTsumugi<Env>({ performers });
+const tsumugi = defineTsumugi<Env>({
+	performers,
+	auth: bearerAuth('dev-token', { cookie: 'tsumugi_token' }),
+	ui: ui({ tokenCookie: 'tsumugi_token' }),
+});
 
 export { TsumugiJobShard } from 'tsumugi';
 

@@ -27,6 +27,7 @@ export default defineConfig({
 				resolve: {
 					alias: {
 						'tsumugi/performer': src('performer.ts'),
+						'tsumugi/ui': src('ui.ts'),
 						tsumugi: src('index.ts'),
 					},
 				},

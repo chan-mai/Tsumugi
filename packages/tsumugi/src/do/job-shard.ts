@@ -189,7 +189,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const now = this.clock.now();
 
 		if (result.ok) {
-			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'COMPLETED', { now });
+			// 1回実行して成功したならattemptsは1,失敗時だけ数えると完了ジョブが0回に見える
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'COMPLETED', { now, countAttempt: true });
 			await this.#armAlarm(now);
 			return;
 		}

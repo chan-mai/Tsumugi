@@ -12,7 +12,7 @@ const KID = 'test-key-1';
 
 let signingKey: CryptoKey;
 let jwks: Jwks;
-/** 署名だけ違う鍵, 正しい鍵で検証できないことを確かめる */
+/** 署名だけ違う鍵,正しい鍵で検証できないことを確かめる */
 let attackerKey: CryptoKey;
 
 const bytesToBase64Url = (bytes: Uint8Array) => {

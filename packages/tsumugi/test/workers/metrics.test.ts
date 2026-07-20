@@ -93,7 +93,7 @@ describe('tickからの書き出し', () => {
 
 		const jobId = await stub.enqueue({ binding: 'MET', payload: {} });
 		await runDurableObjectAlarm(stub);
-		// ここまでは SCHEDULED と QUEUED だけなので何も書かれない
+		// ここまではSCHEDULEDとQUEUEDだけなので何も書かれない
 		expect(points).toHaveLength(0);
 
 		await runInDurableObject(stub, (instance) => {

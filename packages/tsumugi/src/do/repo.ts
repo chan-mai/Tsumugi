@@ -135,7 +135,7 @@ export class JobRepo {
 		id: string,
 		from: readonly JobState[],
 		to: JobState,
-		patch: { now: number; dispatchedAt?: number | null; attempts?: number; runAfter?: number },
+		patch: { now: number; dispatchedAt?: number | null; attempts?: number; runAfter?: number; countAttempt?: boolean },
 	): boolean {
 		for (const state of from) assertTransition(state, to);
 		const sets = ['state = ?', 'updated_at = ?'];
@@ -152,6 +152,8 @@ export class JobRepo {
 			sets.push('run_after = ?');
 			args.push(patch.runAfter);
 		}
+		// 現在値を読まずに加算する,成功報告の経路で読み取りを増やさないため
+		if (patch.countAttempt) sets.push('attempts = attempts + 1');
 		const placeholders = from.map(() => '?').join(', ');
 		const cursor = this.sql.exec(`UPDATE job SET ${sets.join(', ')} WHERE id = ? AND state IN (${placeholders})`, ...args, id, ...from);
 		this.writes++;

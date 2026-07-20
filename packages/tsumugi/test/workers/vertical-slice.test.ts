@@ -101,6 +101,9 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		expect(performed[0]).toMatchObject({ payload: { name: 'world' }, attempt: 1, jobId, hasSignal: true });
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
+		// 1回実行して成功したのでattemptsは1,失敗時だけ数えると完了ジョブが0回に見える
+		const row = await runInDurableObject(shard('HELLO'), (instance) => (instance as any).repo.find(jobId) as { attempts: number });
+		expect(row.attempts).toBe(1);
 	});
 
 	it('performerが例外を投げたらリトライのためSCHEDULEDへ戻る', async () => {

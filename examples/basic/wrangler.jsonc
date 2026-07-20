@@ -8,7 +8,15 @@
   },
   // exportsフィールドは片道切符なので当面migrations配列を使う
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TsumugiJobShard"] }],
-  "d1_databases": [{ "binding": "TSUMUGI_DB", "database_name": "tsumugi-example", "database_id": "00000000-0000-0000-0000-000000000000" }],
+  "d1_databases": [
+    {
+      "binding": "TSUMUGI_DB",
+      "database_name": "tsumugi-example",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      // 読み取りモデルのマイグレーション,利用者は./node_modules/tsumugi/migrationsを指す
+      "migrations_dir": "../../packages/tsumugi/migrations",
+    },
+  ],
   "queues": {
     "producers": [{ "binding": "TSUMUGI_QUEUE", "queue": "tsumugi-example" }],
     "consumers": [{ "queue": "tsumugi-example", "max_batch_size": 10, "max_retries": 5 }],
