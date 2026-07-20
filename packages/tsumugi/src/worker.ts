@@ -5,6 +5,7 @@ import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from './do/job-sh
 import { handleBatch, type ConsumerEnv, type PerformerRegistry } from './queue/consumer.js';
 import type { AuthMiddleware } from './api/auth.js';
 import { createRest, type RestEnv } from './api/rest.js';
+import type { Ui } from './ui/serve.js';
 
 export type BindingConfig = {
 	/**
@@ -28,6 +29,11 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	 * 同梱の`bearerAuth`でも任意のHonoミドルウェアでもよい
 	 */
 	auth?: AuthMiddleware;
+	/**
+	 * 管理ダッシュボード, `tsumugi/ui`の`ui()`を渡す
+	 * 別サブパスにしているので使わなければバンドルに載らない(ADR-0025)
+	 */
+	ui?: Ui;
 };
 
 export type Tsumugi<Env extends ConsumerEnv> = ExportedHandler<Env> & {
@@ -95,7 +101,7 @@ export function defineTsumugi<Env extends ConsumerEnv>(config: TsumugiConfig<Env
 	const bindings = config.bindings ?? {};
 	const router = createRouter<Env>(bindings);
 
-	const rest = config.auth ? createRest<Env & RestEnv>(config.auth) : null;
+	const rest = config.auth ? createRest<Env & RestEnv>(config.auth, config.ui) : null;
 
 	return {
 		async fetch(request, env, ctx): Promise<Response> {

@@ -14,5 +14,7 @@ export default defineConfig({
 	clean: true,
 	// Workers向けなのでNode向けのshimは入れない
 	platform: 'neutral',
+	// ダッシュボードのHTML文字列は同梱する,非公開のワークスペースパッケージなので外部化できない
+	noExternal: ['@tsumugi/dashboard'],
 	target: 'es2022',
 });

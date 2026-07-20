@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { InvalidJobIdError, shardNameOf } from '../core/ids.js';
 import type { TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
+import type { Ui } from '../ui/serve.js';
 import type { AuthMiddleware } from './auth.js';
 
 export type RestEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };
@@ -16,15 +17,18 @@ function stubOf(env: RestEnv, jobId: string): DurableObjectStub<TsumugiJobShard>
  * 一覧と詳細はD1の読み取りモデルから引く(ADR-0008)
  * 稼働中も投影済みなのでページングもソートも通常のSQL
  */
-export function createRest<Env extends RestEnv>(auth: AuthMiddleware): Hono<{ Bindings: Env }> {
+export function createRest<Env extends RestEnv>(auth: AuthMiddleware, dashboard?: Ui): Hono<{ Bindings: Env }> {
 	const app = new Hono<{ Bindings: Env }>();
-	app.use('*', auth);
+	// 認証はAPIにのみ掛ける
+	// HTMLの殻はデータを含まず,未認証で返すことでSPAがトークン入力を出せる(ADR-0013)
+	app.use('/api/*', auth);
 
 	app.get('/api/jobs', async (c) => {
 		const url = new URL(c.req.url);
 		const state = url.searchParams.get('state');
 		const binding = url.searchParams.get('binding');
-		const limit = Math.min(Number(url.searchParams.get('limit') ?? 50) || 50, LIST_LIMIT_MAX);
+		const limit = Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, LIST_LIMIT_MAX);
+		const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
 
 		const where: string[] = [];
 		const args: unknown[] = [];
@@ -38,14 +42,21 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware): Hono<{ Bi
 		}
 		const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
-		const { results } = await c.env.TSUMUGI_DB.prepare(
-			`SELECT id, binding, state, priority, attempts, max_attempts, created_at, updated_at, dispatched_at
-			 FROM job ${clause} ORDER BY updated_at DESC, id DESC LIMIT ?`,
-		)
-			.bind(...args, limit)
-			.all();
+		const [page, total] = await c.env.TSUMUGI_DB.batch<Record<string, unknown>>([
+			c.env.TSUMUGI_DB.prepare(
+				`SELECT id, binding, state, priority, attempts, max_attempts, created_at, updated_at, dispatched_at
+				 FROM job ${clause} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
+			).bind(...args, limit, offset),
+			c.env.TSUMUGI_DB.prepare(`SELECT COUNT(*) AS total FROM job ${clause}`).bind(...args),
+		]);
 
-		return c.json({ jobs: results });
+		return c.json({ jobs: page?.results ?? [], total: (total?.results?.[0]?.total as number) ?? 0 });
+	});
+
+	/** フィルタの選択肢, 投影済みのbindingを列挙する */
+	app.get('/api/bindings', async (c) => {
+		const { results } = await c.env.TSUMUGI_DB.prepare(`SELECT DISTINCT binding FROM job ORDER BY binding`).all<{ binding: string }>();
+		return c.json({ bindings: results.map((row) => row.binding) });
 	});
 
 	app.get('/api/stats', async (c) => {
@@ -85,6 +96,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware): Hono<{ Bi
 			throw error;
 		}
 	});
+
+	// APIに該当しないGETはSPAへ渡す,クライアント側でルーティングする
+	if (dashboard) {
+		app.get('*', (c) => c.html(dashboard.render()));
+	}
 
 	return app;
 }

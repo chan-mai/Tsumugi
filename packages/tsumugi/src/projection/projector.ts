@@ -5,7 +5,7 @@ export type OutboxRow = { seq: number; job_id: string; snapshot: string };
 /**
  * D1への投影(ADR-0008)
  *
- * `WHERE excluded.seq > job.seq`が番人, 同じ範囲を何度流しても結果は不変
+ * `WHERE excluded.seq > job.seq`が番人,同じ範囲を何度流しても結果は不変
  * 再送や順序の入れ替わりでも古い状態が新しい状態を上書きしない
  */
 const UPSERT = `

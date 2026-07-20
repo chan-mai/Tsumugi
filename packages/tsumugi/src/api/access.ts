@@ -13,7 +13,7 @@ export type AccessOptions = {
 	aud: string;
 	/** JWKSの再取得間隔 */
 	cacheTtlMs?: number;
-	/** テスト用の差し替え口, 既定は公開鍵エンドポイントへのfetch */
+	/** テスト用の差し替え口,既定は公開鍵エンドポイントへのfetch */
 	fetchJwks?: (certsUrl: string) => Promise<Jwks>;
 };
 
@@ -47,7 +47,7 @@ function decodeJson<T>(segment: string): T | null {
 	}
 }
 
-/** 検証済みのクレーム, 失敗時はnull */
+/** 検証済みのクレーム,失敗時はnull */
 export async function verifyAccessJwt(token: string, options: AccessOptions, now: number): Promise<Claims | null> {
 	const parts = token.split('.');
 	if (parts.length !== 3) return null;
