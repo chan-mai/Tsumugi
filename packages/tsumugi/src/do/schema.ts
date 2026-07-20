@@ -30,6 +30,19 @@ export const SCHEMA = [
 	`CREATE INDEX IF NOT EXISTS job_active ON job (state, run_after)`,
 	`CREATE INDEX IF NOT EXISTS job_concurrency_key ON job (concurrency_key, state)`,
 	`CREATE INDEX IF NOT EXISTS job_run ON job (run_id, node_id)`,
+	// 重複排除(ADR-0021 / ADR-0022),ジョブ本体ではなくキーだけを一定期間残す
+	// KVには条件付き書き込みが無く「無ければ入れる」を不可分に実行できないためDO内に置く
+	`CREATE TABLE IF NOT EXISTS unique_key (
+		key TEXT PRIMARY KEY,
+		job_id TEXT NOT NULL,
+		expires_at INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS unique_key_expiry ON unique_key (expires_at)`,
+	// binding単位のポリシー, tickが同期で読めるようSQLiteに置く
+	`CREATE TABLE IF NOT EXISTS setting (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`,
 ] as const;
 
 export function applySchema(sql: SqlStorage): void {

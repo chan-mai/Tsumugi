@@ -34,6 +34,10 @@ export type EnqueueInput = {
 	backoff?: Backoff;
 	delayMs?: number;
 	runAt?: number;
+	/** uniqueKeyの予約を保持する期間,経過後は同じキーでも新規ジョブになる */
+	uniqueForMs?: number;
+	/** 分割している場合の投入先の決定に使う(ADR-0011) */
+	partitionKey?: string;
 };
 
 export const DEFAULT_POLICY: Policy = {
@@ -50,12 +54,14 @@ const DEFAULTS: {
 	timeoutMs: number;
 	backoff: Backoff;
 	guarantee: DeliveryGuarantee;
+	uniqueForMs: number;
 } = {
 	priority: 0,
 	maxAttempts: 3,
 	timeoutMs: 60_000,
 	backoff: { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 3_600_000, jitter: true },
 	guarantee: 'at-least-once',
+	uniqueForMs: 24 * 60 * 60 * 1_000,
 };
 
 /**
@@ -77,10 +83,42 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
+	#policyLoaded = false;
 
 	get repo(): JobRepo {
 		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage.sql);
 		return this.#repo;
+	}
+
+	/** 自分が何番のshardかは名前から読む,ルーティングの判断はworker側が持つ */
+	get shardIndex(): number {
+		const name = this.ctx.id.name;
+		if (!name) return 0;
+		const at = name.lastIndexOf('#');
+		if (at < 0) return 0;
+		const parsed = Number(name.slice(at + 1));
+		return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+	}
+
+	/** ポリシーはSQLiteに置く, tickが同期で読めるようにするため */
+	#loadPolicy(): void {
+		if (this.#policyLoaded) return;
+		const raw = this.repo.readSetting('policy');
+		if (raw) this.policy = { ...DEFAULT_POLICY, ...(JSON.parse(raw) as Partial<Policy>) };
+		this.#policyLoaded = true;
+	}
+
+	async configure(policy: Partial<Policy>): Promise<void> {
+		this.#applyPolicy(policy);
+	}
+
+	/** 内容が変わっていなければ書き込まない, enqueueのたびに1回増えるのを避ける */
+	#applyPolicy(policy: Partial<Policy>): void {
+		const encoded = JSON.stringify(policy);
+		this.policy = { ...DEFAULT_POLICY, ...policy };
+		this.#policyLoaded = true;
+		if (this.repo.readSetting('policy') === encoded) return;
+		this.repo.writeSetting('policy', encoded);
 	}
 
 	async enqueue(input: EnqueueInput): Promise<string> {
@@ -93,13 +131,25 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 個別RPCの逐次enqueueはDOの1,000 req/sソフト上限に律速され実測78件/秒しか出ない
 	 * 上限を回避する唯一の手段なので,単発のenqueueもこれに委ねる
 	 */
-	async enqueueMany(inputs: readonly EnqueueInput[]): Promise<string[]> {
+	async enqueueMany(inputs: readonly EnqueueInput[], policy?: Partial<Policy>): Promise<string[]> {
 		const now = this.clock.now();
+		this.#loadPolicy();
+		if (policy) this.#applyPolicy(policy);
 		const ids: string[] = [];
 
 		for (const input of inputs) {
-			const shard = 0;
-			const id = formatJobId({ binding: input.binding, shard, localId: createId() });
+			const id = formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createId() });
+
+			if (input.uniqueKey !== undefined) {
+				const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
+				const existing = this.repo.reserveUniqueKey(input.uniqueKey, id, expiresAt, now);
+				// 衝突は正常系として扱い先行するジョブIDを返す, enqueueが冪等になる(ADR-0021)
+				if (existing !== null) {
+					ids.push(existing);
+					continue;
+				}
+			}
+
 			this.repo.insert({
 				id,
 				binding: input.binding,
@@ -192,6 +242,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	async #tick(): Promise<void> {
 		const now = this.clock.now();
+		this.#loadPolicy();
 		const jobs = this.repo.activeJobs(TICK_LIMIT);
 		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket });
 		this.#bucket = output.bucket;

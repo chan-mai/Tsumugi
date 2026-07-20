@@ -128,4 +128,37 @@ export class JobRepo {
 	payloadOf(row: JobRow): unknown {
 		return JSON.parse(row.payload);
 	}
+
+	/**
+	 * 重複排除の予約(ADR-0021 / ADR-0022)
+	 * 取れたらnull,既に取られていれば先行するジョブIDを返す
+	 * DOはシングルスレッドなので検査と挿入が何もせずとも不可分になる
+	 */
+	reserveUniqueKey(key: string, jobId: string, expiresAt: number, now: number): string | null {
+		this.sql.exec(`DELETE FROM unique_key WHERE expires_at <= ?`, now);
+		this.writes++;
+		const cursor = this.sql.exec(
+			`INSERT INTO unique_key (key, job_id, expires_at) VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING`,
+			key,
+			jobId,
+			expiresAt,
+		);
+		this.writes++;
+		if (cursor.rowsWritten > 0) return null;
+
+		const rows = this.sql.exec<{ job_id: string }>(`SELECT job_id FROM unique_key WHERE key = ?`, key).toArray();
+		this.reads++;
+		return rows[0]?.job_id ?? null;
+	}
+
+	readSetting(key: string): string | undefined {
+		const rows = this.sql.exec<{ value: string }>(`SELECT value FROM setting WHERE key = ?`, key).toArray();
+		this.reads++;
+		return rows[0]?.value;
+	}
+
+	writeSetting(key: string, value: string): void {
+		this.sql.exec(`INSERT INTO setting (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value);
+		this.writes++;
+	}
 }
