@@ -1,5 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
+
+const src = (path: string) => fileURLToPath(new URL(`./packages/tsumugi/src/entries/${path}`, import.meta.url));
 
 export default defineConfig({
 	test: {
@@ -14,6 +17,16 @@ export default defineConfig({
 			},
 			{
 				// workerdを起動する統合テスト,純粋関数では分からないことだけを対象にする
+				//
+				// examples/basicが読む`tsumugi`をsrcへ向ける
+				// distを読ませるとDOの変更にビルドが要り,忘れると古い実装をテストして緑になる
+				// 公開パッケージとして正しいかはbuild/publint/attwが別途見る
+				resolve: {
+					alias: {
+						'tsumugi/performer': src('performer.ts'),
+						tsumugi: src('index.ts'),
+					},
+				},
 				plugins: [cloudflareTest({ wrangler: { configPath: './examples/basic/wrangler.jsonc' } })],
 				test: {
 					name: 'workers',

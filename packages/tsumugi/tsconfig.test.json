@@ -1,7 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["@cloudflare/vitest-pool-workers/types"]
+    "types": ["@cloudflare/vitest-pool-workers/types"],
+    "paths": {
+      "tsumugi": ["./src/entries/index.ts"],
+      "tsumugi/performer": ["./src/entries/performer.ts"]
+    }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "../../examples/basic/worker-configuration.d.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "../../examples/basic/worker-configuration.d.ts", "../../examples/basic/src/**/*.ts"]
 }

@@ -84,6 +84,7 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 	let slots = Math.max(0, policy.concurrency - inFlight);
 	let blockedByCapacity = false;
 	let blockedByTokens = false;
+	let dispatchedSilence: number | null = null;
 
 	for (const { job } of ready) {
 		if (slots <= 0) {
@@ -102,6 +103,10 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		slots--;
 		bucket = { tokens: bucket.tokens - 1, refilledAt: bucket.refilledAt };
 		if (key !== null) keyInFlight.set(key, (keyInFlight.get(key) ?? 0) + 1);
+		// 今まさに投入したジョブの沈黙判定時刻,入力のスナップショットではまだSCHEDULEDなので個別に数える
+		// これを忘れると投入後にDOを起こす予定が立たず,沈黙したジョブが永久に回収されない
+		const deadline = now + job.timeoutMs + policy.reaperGraceMs;
+		if (dispatchedSilence === null || deadline < dispatchedSilence) dispatchedSilence = deadline;
 	}
 
 	// 5.次に起きるべき時刻
@@ -113,6 +118,7 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		reaped.size > 0 ? now : null,
 		futureRunAfter,
 		nextSilence,
+		dispatchedSilence,
 		blockedByTokens ? tokenReadyAt(bucket, policy, now) : null,
 		// 枠待ちは完了報告が次のtickを起こすのでここでは予約しない
 		blockedByCapacity ? null : null,

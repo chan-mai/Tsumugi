@@ -102,7 +102,7 @@ export class JobRepo {
 		id: string,
 		from: readonly JobState[],
 		to: JobState,
-		patch: { now: number; dispatchedAt?: number | null; attempts?: number },
+		patch: { now: number; dispatchedAt?: number | null; attempts?: number; runAfter?: number },
 	): boolean {
 		for (const state of from) assertTransition(state, to);
 		const sets = ['state = ?', 'updated_at = ?'];
@@ -114,6 +114,10 @@ export class JobRepo {
 		if (patch.attempts !== undefined) {
 			sets.push('attempts = ?');
 			args.push(patch.attempts);
+		}
+		if (patch.runAfter !== undefined) {
+			sets.push('run_after = ?');
+			args.push(patch.runAfter);
 		}
 		const placeholders = from.map(() => '?').join(', ');
 		const cursor = this.sql.exec(`UPDATE job SET ${sets.join(', ')} WHERE id = ? AND state IN (${placeholders})`, ...args, id, ...from);

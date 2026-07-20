@@ -24,11 +24,7 @@ class Boom extends Performer<unknown, void, {}, ConsumerEnv> {
 
 const registry = { HELLO: Hello, BOOM: Boom };
 
-/**
- * examples/basicはビルド済みのdistからTsumugiJobShardをimportし,このテストはsrcからimportする
- * 実体は同じでも型としては別物になるため,ここで一度だけ橋渡しする
- */
-const consumerEnv = env as unknown as ConsumerEnv;
+const consumerEnv: ConsumerEnv = env;
 
 /** DOに送られたメッセージを横取りしてconsumerへ手で渡す, Queuesの配送自体はここでの関心ではない */
 function captureQueue() {
@@ -107,7 +103,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
 	});
 
-	it('performerが例外を投げたらFAILEDになる', async () => {
+	it('performerが例外を投げたらリトライのためSCHEDULEDへ戻る', async () => {
 		const stub = shard('BOOM');
 		const { sent, queue } = captureQueue();
 
@@ -124,7 +120,8 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 
 		// 失敗してもQueuesのretryには乗せず必ずackする(ADR-0004)
 		expect(acked).toHaveLength(1);
-		expect(await stateOf('BOOM', jobId)).toBe('FAILED');
+		// リトライ方針はDOが持つので,状態はFAILEDではなくSCHEDULEDに戻る
+		expect(await stateOf('BOOM', jobId)).toBe('SCHEDULED');
 	});
 });
 

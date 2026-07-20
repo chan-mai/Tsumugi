@@ -282,6 +282,19 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 });
 
 describe('nextAlarmAt', () => {
+	it('投入したジョブの沈黙判定時刻を含める', () => {
+		// 入力のスナップショットでは投入対象はまだSCHEDULEDなので, nextSilenceには現れない
+		// ここを取りこぼすと投入後にDOを起こす予定が立たず,沈黙したジョブが永久に回収されない
+		const out = schedule({
+			now: T0,
+			jobs: [job({ id: 'a', timeoutMs: 60_000 })],
+			policy: policy({ reaperGraceMs: 30_000 }),
+			bucket: unlimited,
+		});
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
+		expect(out.nextAlarmAt).toBe(T0 + 60_000 + 30_000);
+	});
+
 	it('やることが何も無ければnull', () => {
 		const out = schedule({ now: T0, jobs: [], policy: policy(), bucket: unlimited });
 		expect(out.nextAlarmAt).toBeNull();

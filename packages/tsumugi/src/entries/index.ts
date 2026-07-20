@@ -5,6 +5,7 @@ export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
 export type { DispatchMessage, EnqueueInput, ShardEnv } from '../do/job-shard.js';
 export { systemClock, fixedClock } from '../do/clock.js';
 export type { Clock } from '../do/clock.js';
+export { TsumugiTimeoutError } from '../queue/consumer.js';
 export type { ConsumerEnv, PerformerCtor, PerformerRegistry } from '../queue/consumer.js';
 export { Performer } from '../core/api.js';
 export { InvalidJobIdError, formatJobId, parseJobId, shardName, shardNameOf } from '../core/ids.js';

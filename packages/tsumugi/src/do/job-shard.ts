@@ -1,8 +1,9 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createId } from '@paralleldrive/cuid2';
 import { formatJobId } from '../core/ids.js';
+import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
-import type { Backoff, Bucket, DeliveryGuarantee, JobState, Policy } from '../core/types.js';
+import type { Backoff, Bucket, DeliveryGuarantee, Policy } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import { JobRepo } from './repo.js';
 
@@ -12,6 +13,9 @@ export type DispatchMessage = {
 	binding: string;
 	attempt: number;
 	payload: unknown;
+	timeoutMs: number;
+	/** at-most-onceのジョブは実行前にclaimを取る必要がある(ADR-0007) */
+	claimRequired: boolean;
 };
 
 export type ShardEnv = {
@@ -117,12 +121,62 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return ids;
 	}
 
-	/** consumerからの完了報告 */
+	/**
+	 * consumerからの完了報告
+	 * 失敗ならバックオフを計算してSCHEDULEDへ戻す,試行回数を使い切っていればFAILED
+	 * リトライ方針をここが持つのでQueuesの`max_retries`に縛られない(ADR-0004)
+	 */
 	async report(jobId: string, result: { ok: boolean }): Promise<void> {
 		const now = this.clock.now();
-		const to: JobState = result.ok ? 'COMPLETED' : 'FAILED';
-		this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], to, { now });
-		await this.#armAlarm(now);
+
+		if (result.ok) {
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'COMPLETED', { now });
+			await this.#armAlarm(now);
+			return;
+		}
+
+		const row = this.repo.find(jobId);
+		if (!row) return;
+
+		const attempts = row.attempts + 1;
+		const next = nextAttempt({
+			attempts,
+			maxAttempts: row.max_attempts,
+			backoff: JSON.parse(row.backoff) as Backoff,
+			now,
+			// 乱数はここで作ってcoreに渡す, coreは純粋に保つ(ADR-0018)
+			rand: Math.random(),
+		});
+
+		if (next.kind === 'exhausted') {
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'FAILED', { now, attempts });
+			await this.#armAlarm(now);
+			return;
+		}
+
+		this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'SCHEDULED', {
+			now,
+			attempts,
+			runAfter: next.runAfter,
+			dispatchedAt: null,
+		});
+		await this.#armAlarm(next.runAfter);
+	}
+
+	/**
+	 * at-most-onceのジョブの実行権
+	 * Queues自体がat-least-onceなので重複配送が来る,単一SQLのrowsWritten判定で勝者を1本に絞る(ADR-0007)
+	 */
+	async claim(jobId: string): Promise<boolean> {
+		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now: this.clock.now() });
+	}
+
+	/**
+	 * 実行前のジョブの取り消し
+	 * QUEUED以降はconsumerが既に実行を始めているかもしれず,取り消せたと嘘をつかない(ADR-0012)
+	 */
+	async cancel(jobId: string): Promise<boolean> {
+		return this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now: this.clock.now() });
 	}
 
 	async alarm(): Promise<void> {
@@ -151,7 +205,14 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 					// 先に状態を進めてから投入する,投入に失敗してもQUEUEDのまま残りreaperが拾える
 					if (!this.repo.compareAndSet(decision.id, ['SCHEDULED'], 'QUEUED', { now, dispatchedAt: now })) break;
 					messages.push({
-						body: { jobId: row.id, binding: row.binding, attempt: row.attempts + 1, payload: this.repo.payloadOf(row) },
+						body: {
+							jobId: row.id,
+							binding: row.binding,
+							attempt: row.attempts + 1,
+							payload: this.repo.payloadOf(row),
+							timeoutMs: row.timeout_ms,
+							claimRequired: row.guarantee === 'at-most-once',
+						},
 					});
 					break;
 				}
