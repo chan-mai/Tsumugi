@@ -3,6 +3,8 @@ import { resolveShard } from './core/shard.js';
 import type { Policy } from './core/types.js';
 import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from './do/job-shard.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry } from './queue/consumer.js';
+import type { AuthMiddleware } from './api/auth.js';
+import { createRest, type RestEnv } from './api/rest.js';
 
 export type BindingConfig = {
 	/**
@@ -21,6 +23,11 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	 */
 	performers: PerformerRegistry<Env>;
 	bindings?: Record<string, BindingConfig>;
+	/**
+	 * 認証ミドルウェア,未設定ならREST APIもダッシュボードも生えない(ADR-0013)
+	 * 同梱の`bearerAuth`でも任意のHonoミドルウェアでもよい
+	 */
+	auth?: AuthMiddleware;
 };
 
 export type Tsumugi<Env extends ConsumerEnv> = ExportedHandler<Env> & {
@@ -88,10 +95,13 @@ export function defineTsumugi<Env extends ConsumerEnv>(config: TsumugiConfig<Env
 	const bindings = config.bindings ?? {};
 	const router = createRouter<Env>(bindings);
 
+	const rest = config.auth ? createRest<Env & RestEnv>(config.auth) : null;
+
 	return {
-		async fetch(): Promise<Response> {
-			// M4でREST APIとダッシュボードに置き換える
-			return new Response('tsumugi');
+		async fetch(request, env, ctx): Promise<Response> {
+			// 認証が設定されるまで何も生えない,設定漏れが「動かない」として現れる(ADR-0013)
+			if (!rest) return new Response('not found', { status: 404 });
+			return rest.fetch(request, env as Env & RestEnv, ctx);
 		},
 		async queue(batch, env): Promise<void> {
 			await handleBatch(batch as MessageBatch<DispatchMessage>, env, config.performers);

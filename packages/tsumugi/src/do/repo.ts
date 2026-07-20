@@ -70,6 +70,39 @@ export class JobRepo {
 			JSON.stringify(job.payload),
 		);
 		this.writes++;
+		this.#appendOutbox(job.id);
+	}
+
+	/**
+	 * D1への投影待ちに積む(ADR-0008)
+	 * D1へUPSERTする内容そのものを持たせ,投影側が追加の読み取りをしなくて済むようにする
+	 */
+	#appendOutbox(id: string): void {
+		const row = this.sql.exec<JobRow>(`SELECT * FROM job WHERE id = ?`, id).toArray()[0];
+		this.reads++;
+		if (!row) return;
+		this.sql.exec(`INSERT INTO outbox (job_id, snapshot) VALUES (?, ?)`, id, JSON.stringify(row));
+		this.writes++;
+	}
+
+	outboxBatch(limit: number): { seq: number; job_id: string; snapshot: string }[] {
+		const rows = this.sql
+			.exec<{ seq: number; job_id: string; snapshot: string }>(`SELECT seq, job_id, snapshot FROM outbox ORDER BY seq LIMIT ?`, limit)
+			.toArray();
+		this.reads++;
+		return rows;
+	}
+
+	/** D1への書き込みが成功してから呼ぶ,失敗時はカーソルを進めない */
+	deleteOutboxThrough(seq: number): void {
+		this.sql.exec(`DELETE FROM outbox WHERE seq <= ?`, seq);
+		this.writes++;
+	}
+
+	countOutbox(): number {
+		const row = this.sql.exec<{ c: number }>(`SELECT COUNT(*) AS c FROM outbox`).one();
+		this.reads++;
+		return row.c;
 	}
 
 	/** スケジューラに渡す稼働中ジョブ,有界にするためlimitを必須にする */
@@ -122,7 +155,9 @@ export class JobRepo {
 		const placeholders = from.map(() => '?').join(', ');
 		const cursor = this.sql.exec(`UPDATE job SET ${sets.join(', ')} WHERE id = ? AND state IN (${placeholders})`, ...args, id, ...from);
 		this.writes++;
-		return cursor.rowsWritten > 0;
+		if (cursor.rowsWritten === 0) return false;
+		this.#appendOutbox(id);
+		return true;
 	}
 
 	payloadOf(row: JobRow): unknown {
