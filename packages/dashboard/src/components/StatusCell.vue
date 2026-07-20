@@ -3,7 +3,7 @@ import { computed } from 'vue';
 
 const props = defineProps<{ state: string }>();
 
-/** 状態ごとの見え方, バッジではなくアイコンと文字で表す */
+/** 状態ごとの見え方,バッジではなくアイコンと文字で表す */
 const STATES: Record<string, { label: string; color: string; mark: string; pulse?: boolean }> = {
 	SCHEDULED: { label: 'Scheduled', color: 'text-yellow-500', mark: '' },
 	QUEUED: { label: 'Queued', color: 'text-yellow-500', mark: 'M8 4.5v4l2.5 1.5' },

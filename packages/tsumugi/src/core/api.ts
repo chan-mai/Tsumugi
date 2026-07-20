@@ -24,6 +24,34 @@ export abstract class Performer<Payload = unknown, Result = unknown, Req extends
 
 export type Performers = Record<string, Performer<any, any, any, any>>;
 
+/**
+ * 別Workerのperformerに渡す実行文脈
+ * RPCの引数にAbortSignal非対応のため`signal`なし
+ * タイムアウトは呼び出し側の待機打ち切りのみ,リモートへは非伝播
+ */
+export type RemoteJobContext = Omit<JobContext, 'signal'>;
+
+/**
+ * service binding越しのperformerを指す印
+ * 登録簿にクラスの代わりに置くとconsumerがRPCで呼ぶ(ADR-0026)
+ */
+export type RemoteRef<P extends Performer<any, any, any, any> = Performer<any, any, any, any>> = {
+	readonly kind: 'remote';
+	/** wrangler設定のservice binding名 */
+	readonly binding: string;
+	/** 型のためだけの幻影プロパティ,実体なし */
+	readonly __performer?: P;
+};
+
+/** performerの別Worker配置,型引数に相手の実装を渡すとpayloadの型が効く */
+export function remote<P extends Performer<any, any, any, any> = Performer<any, any, any, any>>(binding: string): RemoteRef<P> {
+	return { kind: 'remote', binding };
+}
+
+export function isRemoteRef(value: unknown): value is RemoteRef {
+	return typeof value === 'object' && value !== null && (value as RemoteRef).kind === 'remote';
+}
+
 type PayloadOf<P> = P extends Performer<infer T, any, any, any> ? T : never;
 type ReqOf<P> = P extends Performer<any, any, infer R, any> ? R : {};
 

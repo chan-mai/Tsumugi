@@ -6,7 +6,7 @@ import { gzipSync } from 'node:zlib';
 const html = readFileSync(new URL('../dist/index.html', import.meta.url), 'utf8');
 
 // JSON.stringifyはU+2028/U+2029をエスケープしない
-// JS上では行終端子として扱われるため, 混入した瞬間に構文エラーになる
+// JS上では行終端子として扱われるため,混入した瞬間に構文エラーになる
 const literal = JSON.stringify(html)
 	.replace(/\u2028/g, '\\u2028')
 	.replace(/\u2029/g, '\\u2029');

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
 import { Performer } from '../../src/core/api.js';
 import { defineTsumugi } from '../../src/worker.js';
-import type { RestEnv } from '../../src/api/rest.js';
+import { SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
 
 const T0 = 2_200_000_000_000;
 const TOKEN = 'secret-token';
@@ -164,5 +164,50 @@ describe('ジョブの投入', () => {
 		const res = await call(withAuth, 'GET', '/api/bindings', { authorization: `Bearer ${TOKEN}` });
 		const { bindings } = await res.json<{ bindings: string[] }>();
 		expect(bindings).toContain('REST');
+	});
+});
+
+describe('一覧の並べ替え', () => {
+	const list = (query: string) => call(withAuth, 'GET', `/api/jobs?${query}`, { authorization: `Bearer ${TOKEN}` });
+
+	/** 時刻をずらした投入,全て同時刻だと並び順の検証が素通りする */
+	async function seedAt(now: number): Promise<void> {
+		await runInDurableObject(shard('SORT#0'), (instance) => {
+			(instance as any).clock = { now: () => now };
+			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+		});
+		await shard('SORT#0').enqueue({ binding: 'SORT', payload: {} });
+		await runDurableObjectAlarm(shard('SORT#0'));
+	}
+
+	it('許可した全ての列でSQLが通る', async () => {
+		// 許可リストの判定は単体で見ているが,列がスキーマに実在するかはここでしか分からない
+		for (const column of SORTABLE_COLUMNS) {
+			for (const order of ['asc', 'desc']) {
+				const res = await list(`sort=${column}&order=${order}`);
+				expect([column, order, res.status]).toEqual([column, order, 200]);
+			}
+		}
+	});
+
+	it('不正な列でも500にせず既定で返す', async () => {
+		const res = await list('sort=payload; DROP TABLE job');
+		expect(res.status).toBe(200);
+	});
+
+	it('向きの指定が結果に効く', async () => {
+		for (const offset of [0, 60_000, 120_000]) await seedAt(T0 + offset);
+
+		const times = async (order: string) => {
+			const body = await (await list(`binding=SORT&sort=created_at&order=${order}`)).json<{ jobs: { created_at: number }[] }>();
+			return body.jobs.map((j) => j.created_at);
+		};
+
+		const asc = await times('asc');
+		const desc = await times('desc');
+
+		expect(new Set(asc).size).toBeGreaterThan(1);
+		expect(asc).toEqual([...asc].sort((a, b) => a - b));
+		expect(desc).toEqual([...asc].reverse());
 	});
 });

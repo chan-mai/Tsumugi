@@ -14,7 +14,7 @@ watch(
 	() => props.jobId,
 	async (id) => {
 		if (!id) return;
-		// 閉じるアニメーションの間に中身が消えないよう, 開く時だけ差し替える
+		// 閉じるアニメーションの間に中身が消えないよう,開く時だけ差し替える
 		job.value = null;
 		error.value = null;
 		try {

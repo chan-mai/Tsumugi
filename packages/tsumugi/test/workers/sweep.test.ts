@@ -55,7 +55,7 @@ describe('DOの掃除', () => {
 	});
 
 	it('掃除の間隔より短い間ではDELETEを撃たない', async () => {
-		// tickは完了報告のたびに走るので, 毎回撃つと消すものが無くても書き込みが増える
+		// tickは完了報告のたびに走るので,毎回撃つと消すものが無くても書き込みが増える
 		const { queue } = captureQueue();
 		await install('SWEEP5#0', T0, queue);
 		await shard('SWEEP5#0').enqueue({ binding: 'SWEEP5', payload: {} });
@@ -88,7 +88,7 @@ describe('DOの掃除', () => {
 		await install('SWEEP3#0', T0, queue);
 		const first = await shard('SWEEP3#0').enqueue({ binding: 'SWEEP3', payload: {}, uniqueKey: 'k', uniqueForMs: 1_000 });
 
-		// enqueueが途絶えてもtickが掃除するので, 期限後は同じキーで通る
+		// enqueueが途絶えてもtickが掃除するので,期限後は同じキーで通る
 		await install('SWEEP3#0', T0 + 2_000, queue);
 		await runDurableObjectAlarm(shard('SWEEP3#0'));
 

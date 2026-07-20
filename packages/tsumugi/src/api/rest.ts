@@ -64,6 +64,16 @@ export function validateCreateJob(body: unknown, bindings: readonly string[]): {
 	return { input };
 }
 
+/** 並べ替えを許す列, SQLへの直接差し込みのため許可リスト外は不可 */
+export const SORTABLE_COLUMNS = ['updated_at', 'created_at', 'binding', 'state', 'priority', 'attempts'] as const;
+export type SortColumn = (typeof SORTABLE_COLUMNS)[number];
+
+/** 不正な指定は既定へ,エラー化するとUIが止まる */
+export function resolveSort(sort: string | null, order: string | null): { column: SortColumn; desc: boolean } {
+	const column = (SORTABLE_COLUMNS as readonly string[]).includes(sort ?? '') ? (sort as SortColumn) : 'updated_at';
+	return { column, desc: order !== 'asc' };
+}
+
 /**
  * 一覧と詳細はD1の読み取りモデルから引く(ADR-0008)
  * 稼働中も投影済みなのでページングもソートも通常のSQL
@@ -81,6 +91,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const binding = url.searchParams.get('binding');
 		const limit = Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, LIST_LIMIT_MAX);
 		const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
+		const { column, desc } = resolveSort(url.searchParams.get('sort'), url.searchParams.get('order'));
 
 		const where: string[] = [];
 		const args: unknown[] = [];
@@ -96,8 +107,9 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 		const [page, total] = await c.env.TSUMUGI_DB.batch<Record<string, unknown>>([
 			c.env.TSUMUGI_DB.prepare(
+				// columnは許可リスト由来のため差し込み可, idの副次キーで同値時の順序を固定
 				`SELECT id, binding, state, priority, attempts, max_attempts, created_at, updated_at, dispatched_at
-				 FROM job ${clause} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
+				 FROM job ${clause} ORDER BY ${column} ${desc ? 'DESC' : 'ASC'}, id DESC LIMIT ? OFFSET ?`,
 			).bind(...args, limit, offset),
 			c.env.TSUMUGI_DB.prepare(`SELECT COUNT(*) AS total FROM job ${clause}`).bind(...args),
 		]);
