@@ -5,8 +5,10 @@ import JobDetailModal from './components/JobDetailModal.vue';
 import NewJobModal from './components/NewJobModal.vue';
 import Pagination from './components/Pagination.vue';
 import RowActions from './components/RowActions.vue';
+import SortHeader from './components/SortHeader.vue';
 import StatusCell from './components/StatusCell.vue';
 import TokenPrompt from './components/TokenPrompt.vue';
+import ViewMenu from './components/ViewMenu.vue';
 import { getBindings, getStats, isUnauthorized, listJobs, tokenCookie, type Job } from './api';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
@@ -19,6 +21,8 @@ const state = ref('');
 const binding = ref('');
 const page = ref(0);
 const pageSize = ref(20);
+const sort = ref('updated_at');
+const desc = ref(true);
 const selected = ref<string | null>(null);
 const creating = ref(false);
 const message = ref<string | null>(null);
@@ -34,6 +38,8 @@ async function load() {
 			listJobs({
 				state: state.value || undefined,
 				binding: binding.value || undefined,
+				sort: sort.value,
+				order: desc.value ? 'desc' : 'asc',
 				limit: pageSize.value,
 				offset: page.value * pageSize.value,
 			}),
@@ -62,11 +68,20 @@ function restartTimer() {
 	if (autoRefresh.value) timer = setInterval(load, 3_000);
 }
 
-watch([state, binding, pageSize], () => {
+watch([state, binding, pageSize, sort, desc], () => {
 	page.value = 0;
 	load();
 });
 watch(page, load);
+
+/** 同一列で向きの反転,別列なら降順から */
+function sortBy(column: string) {
+	if (sort.value === column) desc.value = !desc.value;
+	else {
+		sort.value = column;
+		desc.value = true;
+	}
+}
 
 onMounted(() => {
 	load();
@@ -80,7 +95,7 @@ const durationOf = (job: Job) =>
 
 /**
  * 画面幅に応じて列を落とす
- * 横スクロールに頼ると狭い画面で操作しづらいので, 重要度の低い列から隠す
+ * 横スクロールに頼ると狭い画面で操作しづらいので,重要度の低い列から隠す
  */
 const COLUMN = {
 	id: 'hidden lg:table-cell',
@@ -90,6 +105,40 @@ const COLUMN = {
 	processingTime: 'hidden xl:table-cell',
 };
 const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
+
+/** Viewで切り替え可能な列, BindingとStatusは行の識別に要るため固定 */
+const TOGGLEABLE = [
+	{ key: 'id', label: 'ID' },
+	{ key: 'startedAt', label: 'Started at' },
+	{ key: 'updatedAt', label: 'Updated at' },
+	{ key: 'attempts', label: 'Attempts' },
+	{ key: 'processingTime', label: 'Processing time' },
+];
+const VIEW_KEY = 'tsumugi:columns';
+
+function loadVisible(): Record<string, boolean> {
+	const all = Object.fromEntries(TOGGLEABLE.map((c) => [c.key, true]));
+	try {
+		// 壊れた値では既定へ復帰,画面が出ない方が損
+		return { ...all, ...(JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as Record<string, boolean>) };
+	} catch {
+		return all;
+	}
+}
+
+const visible = ref(loadVisible());
+
+function toggleColumn(key: string) {
+	visible.value = { ...visible.value, [key]: !visible.value[key] };
+	try {
+		localStorage.setItem(VIEW_KEY, JSON.stringify(visible.value));
+	} catch {
+		// プライベートモード等の書き込み不可,表示自体は継続
+	}
+}
+
+/** 画面幅の規則へViewの選択を重ねる,効かせるのは消す方向のみ */
+const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[key] : 'hidden');
 </script>
 
 <template>
@@ -126,6 +175,7 @@ const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground
 				<div class="flex items-center gap-2">
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
+					<ViewMenu :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
 					<button
 						type="button"
 						class="flex h-8 items-center gap-2 rounded-card border border-border bg-background px-3 text-sm hover:bg-accent"
@@ -154,13 +204,22 @@ const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground
 				<table class="w-full caption-bottom text-sm">
 					<thead class="[&_tr]:border-b [&_tr]:border-border">
 						<tr>
-							<th :class="HEAD">Binding</th>
-							<th :class="[HEAD, COLUMN.id]">ID</th>
-							<th :class="HEAD">Status</th>
-							<th :class="[HEAD, COLUMN.startedAt]">Started at</th>
-							<th :class="[HEAD, COLUMN.updatedAt]">Updated at</th>
-							<th :class="[HEAD, COLUMN.attempts]">Attempts</th>
-							<th :class="[HEAD, COLUMN.processingTime]">Processing time</th>
+							<th :class="HEAD">
+								<SortHeader label="Binding" column="binding" :sort="sort" :desc="desc" @sort="sortBy" />
+							</th>
+							<!-- IDは並べ替えの意味を持たないため非活性 -->
+							<th :class="[HEAD, columnClass('id')]">ID</th>
+							<th :class="HEAD">
+								<SortHeader label="Status" column="state" :sort="sort" :desc="desc" @sort="sortBy" />
+							</th>
+							<th :class="[HEAD, columnClass('startedAt')]">Started at</th>
+							<th :class="[HEAD, columnClass('updatedAt')]">
+								<SortHeader label="Updated at" column="updated_at" :sort="sort" :desc="desc" @sort="sortBy" />
+							</th>
+							<th :class="[HEAD, columnClass('attempts')]">
+								<SortHeader label="Attempts" column="attempts" :sort="sort" :desc="desc" @sort="sortBy" />
+							</th>
+							<th :class="[HEAD, columnClass('processingTime')]">Processing time</th>
 							<th class="h-12 w-12 px-4" />
 						</tr>
 					</thead>
@@ -173,16 +232,16 @@ const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground
 						>
 							<td class="p-4 align-middle">
 								{{ job.binding }}
-								<!-- ID列を隠す幅では行の識別ができなくなるので, ここに畳んで出す -->
-								<span class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ job.id }}</span>
+								<!-- ID列を隠す幅では行の識別ができなくなるので,ここに畳んで出す -->
+								<span v-if="visible.id" class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ job.id }}</span>
 							</td>
-							<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="COLUMN.id">{{ job.id }}</td>
+							<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ job.id }}</td>
 							<td class="p-4 align-middle"><StatusCell :state="job.state" /></td>
-							<td class="p-4 align-middle whitespace-nowrap" :class="COLUMN.startedAt">{{ at(job.dispatched_at) }}</td>
-							<td class="p-4 align-middle whitespace-nowrap" :class="COLUMN.updatedAt">{{ at(job.updated_at) }}</td>
-							<td class="p-4 align-middle tabular-nums" :class="COLUMN.attempts">{{ job.attempts }} / {{ job.max_attempts }}</td>
-							<td class="p-4 align-middle tabular-nums" :class="COLUMN.processingTime">{{ durationOf(job) }}</td>
-							<!-- 行のクリックで詳細が開くので, 操作メニューまで伝播させない -->
+							<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('startedAt')">{{ at(job.dispatched_at) }}</td>
+							<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('updatedAt')">{{ at(job.updated_at) }}</td>
+							<td class="p-4 align-middle tabular-nums" :class="columnClass('attempts')">{{ job.attempts }} / {{ job.max_attempts }}</td>
+							<td class="p-4 align-middle tabular-nums" :class="columnClass('processingTime')">{{ durationOf(job) }}</td>
+							<!-- 行のクリックで詳細が開くので,操作メニューまで伝播させない -->
 							<td class="p-4 align-middle" @click.stop>
 								<RowActions :job-id="job.id" :state="job.state" @changed="load" @message="message = $event" />
 							</td>

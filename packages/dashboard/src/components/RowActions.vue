@@ -12,7 +12,7 @@ async function act(kind: 'retry' | 'cancel') {
 	busy.value = true;
 	try {
 		const result = await (kind === 'retry' ? retryJob(props.jobId) : cancelJob(props.jobId));
-		// 409は状態が合わず操作できなかった場合, 成功したと見せかけない
+		// 409は状態が合わず操作できなかった場合,成功したと見せかけない
 		emit('message', result.ok ? 'Accepted' : 'Not allowed in the current state');
 		emit('changed');
 	} catch {

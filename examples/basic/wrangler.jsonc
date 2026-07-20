@@ -22,6 +22,14 @@
     "consumers": [{ "queue": "tsumugi-example", "max_batch_size": 10, "max_retries": 5 }],
   },
   "analytics_engine_datasets": [{ "binding": "TSUMUGI_METRICS", "dataset": "tsumugi_jobs" }],
+  // 別Workerのperformer, entrypointへのクラス名指定でRPC呼び出しになる(ADR-0026)
+  "services": [
+    {
+      "binding": "MAIL_SERVICE",
+      "service": "tsumugi-example-remote-performer",
+      "entrypoint": "SendMail",
+    },
+  ],
   // D1の読み取りモデルの保持はscheduledで行う
   "triggers": { "crons": ["0 * * * *"] },
 }

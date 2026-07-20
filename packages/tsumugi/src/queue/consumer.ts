@@ -1,11 +1,19 @@
-import type { Performer } from '../core/api.js';
+import { isRemoteRef, type Performer, type RemoteJobContext, type RemoteRef } from '../core/api.js';
 import { shardNameOf } from '../core/ids.js';
 import type { DispatchMessage, TsumugiJobShard } from '../do/job-shard.js';
 
 export type PerformerCtor<Env> = new (env: Env) => Performer<any, any, any, Env>;
 
-/** binding名からperformerを引くための登録簿,コード側で宣言し型推論の源にもなる */
-export type PerformerRegistry<Env> = Record<string, PerformerCtor<Env>>;
+/** service binding越しに見えるperformerの形, `RemotePerformer`の派生が満たす */
+export type RemotePerformerService = {
+	perform(payload: unknown, ctx: RemoteJobContext): Promise<unknown>;
+};
+
+/**
+ * binding名からperformerを引く登録簿,コード側の宣言が型推論の源も兼ねる
+ * `remote('SERVICE')`を置くとservice binding越しの呼び出しになる(ADR-0026)
+ */
+export type PerformerRegistry<Env> = Record<string, PerformerCtor<Env> | RemoteRef>;
 
 export type ConsumerEnv = {
 	JOB_SHARD: DurableObjectNamespace<TsumugiJobShard>;
@@ -83,12 +91,19 @@ async function handleOne<Env extends ConsumerEnv>(
 			return;
 		}
 
-		const ctor = performers[binding];
-		if (!ctor) throw new Error(`performerが未登録: ${binding}`);
+		const entry = performers[binding];
+		if (!entry) throw new Error(`performerが未登録: ${binding}`);
+		const base = { jobId, attempt, idempotencyKey: jobId };
 
-		await withTimeout(jobId, timeoutMs, (signal) =>
-			Promise.resolve(new ctor(env).perform(payload, { jobId, attempt, idempotencyKey: jobId, signal })),
-		);
+		if (isRemoteRef(entry)) {
+			const service = (env as Record<string, unknown>)[entry.binding] as RemotePerformerService | undefined;
+			// 設定漏れの即時失敗,握り潰すと黙って失敗し続ける
+			if (typeof service?.perform !== 'function') throw new Error(`service bindingが未設定: ${entry.binding}`);
+			// signalは非対応,中断の依頼はリモートに届かない(ADR-0026)
+			await withTimeout(jobId, timeoutMs, () => Promise.resolve(service.perform(payload, base)));
+		} else {
+			await withTimeout(jobId, timeoutMs, (signal) => Promise.resolve(new entry(env).perform(payload, { ...base, signal })));
+		}
 		ok = true;
 	} catch (error) {
 		console.error(`tsumugi: perform failed (${jobId})`, error);

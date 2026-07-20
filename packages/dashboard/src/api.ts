@@ -55,12 +55,14 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 	return res.json() as Promise<T>;
 }
 
-export type ListParams = { state?: string; binding?: string; limit: number; offset: number };
+export type ListParams = { state?: string; binding?: string; sort?: string; order?: 'asc' | 'desc'; limit: number; offset: number };
 
 export const listJobs = (params: ListParams) => {
 	const query = new URLSearchParams();
 	if (params.state) query.set('state', params.state);
 	if (params.binding) query.set('binding', params.binding);
+	if (params.sort) query.set('sort', params.sort);
+	if (params.order) query.set('order', params.order);
 	query.set('limit', String(params.limit));
 	query.set('offset', String(params.offset));
 	return call<{ jobs: Job[]; total: number }>(`/api/jobs?${query}`);

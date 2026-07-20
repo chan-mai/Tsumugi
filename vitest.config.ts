@@ -34,7 +34,17 @@ export default defineConfig({
 				plugins: [
 					cloudflareTest({
 						wrangler: { configPath: './examples/basic/wrangler.jsonc' },
-						miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+						miniflare: {
+							bindings: { TEST_MIGRATIONS: migrations },
+							// examples/basicのservice bindingの相手,未定義ではworkerd自体が起動しない
+							workers: [
+								{
+									name: 'tsumugi-example-remote-performer',
+									modules: true,
+									scriptPath: fileURLToPath(new URL('./packages/tsumugi/test/workers/mail-service.mjs', import.meta.url)),
+								},
+							],
+						},
 					}),
 				],
 				test: {
