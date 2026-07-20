@@ -5,7 +5,10 @@ import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
 import type { Backoff, Bucket, DeliveryGuarantee, Policy } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
+import { writeMetrics } from '../analytics/writer.js';
+import { project } from '../projection/projector.js';
 import { JobRepo } from './repo.js';
+import type { JobRow } from './schema.js';
 
 /** Queuesに載せるメッセージ,ペイロードはここに同梱してconsumerがDOを引かずに済むようにする */
 export type DispatchMessage = {
@@ -20,6 +23,9 @@ export type DispatchMessage = {
 
 export type ShardEnv = {
 	TSUMUGI_QUEUE: Queue<DispatchMessage>;
+	TSUMUGI_DB: D1Database;
+	/** 任意,未設定ならメトリクスを書かない */
+	TSUMUGI_METRICS?: AnalyticsEngineDataset;
 };
 
 export type EnqueueInput = {
@@ -69,6 +75,9 @@ const DEFAULTS: {
  * alarmのwall time上限は15分なので, tickは必ず有界にし残りは次のtickへ送る
  */
 const TICK_LIMIT = 200;
+
+/** 1回の投影で流すアウトボックスの上限, D1のバッチ上限とtickの時間を考えて抑える */
+const PROJECTION_LIMIT = 200;
 
 /**
  * ジョブの調停役(ADR-0002)
@@ -222,6 +231,21 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
+	 * ダッシュボードからの手動リトライ
+	 * FAILEDとSTALLEDは終端だが不可逆ではない(ADR-0012)
+	 */
+	async retry(jobId: string): Promise<boolean> {
+		const now = this.clock.now();
+		const ok = this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', {
+			now,
+			runAfter: now,
+			dispatchedAt: null,
+		});
+		if (ok) await this.#armAlarm(now);
+		return ok;
+	}
+
+	/**
 	 * 実行前のジョブの取り消し
 	 * QUEUED以降はconsumerが既に実行を始めているかもしれず,取り消せたと嘘をつかない(ADR-0012)
 	 */
@@ -285,10 +309,29 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 		if (messages.length > 0) await this.env.TSUMUGI_QUEUE.sendBatch(messages);
 
+		const projected = await this.#project();
+
 		// 上限まで読んだなら残りがある可能性が高いので即座に自分を起こし直す
-		const hasMore = jobs.length >= TICK_LIMIT;
+		const hasMore = jobs.length >= TICK_LIMIT || projected >= PROJECTION_LIMIT;
 		const next = hasMore ? now : output.nextAlarmAt;
 		if (next !== null) await this.ctx.storage.setAlarm(next);
+	}
+
+	/**
+	 * アウトボックスをD1へ流す(ADR-0008)
+	 * D1への書き込みが成功してから削除するので,失敗すればカーソルは進まず次のtickで追いつく
+	 */
+	async #project(): Promise<number> {
+		const rows = this.repo.outboxBatch(PROJECTION_LIMIT);
+		if (rows.length === 0) return 0;
+		await project(this.env.TSUMUGI_DB, rows);
+		// 明細と同じ材料から時系列を書く, sweepで明細が消えてもこちらは残る(ADR-0016)
+		writeMetrics(
+			this.env.TSUMUGI_METRICS,
+			rows.map((row) => JSON.parse(row.snapshot) as JobRow),
+		);
+		this.repo.deleteOutboxThrough(rows[rows.length - 1]!.seq);
+		return rows.length;
 	}
 
 	/** 予定より早い時刻にalarmが張られている場合は上書きしない */

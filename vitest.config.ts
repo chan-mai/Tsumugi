@@ -1,8 +1,11 @@
 import { fileURLToPath } from 'node:url';
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
 const src = (path: string) => fileURLToPath(new URL(`./packages/tsumugi/src/entries/${path}`, import.meta.url));
+
+// D1の読み取りモデルはマイグレーションで作る,テストでも本番と同じSQLを適用する
+const migrations = await readD1Migrations(fileURLToPath(new URL('./packages/tsumugi/migrations', import.meta.url)));
 
 export default defineConfig({
 	test: {
@@ -27,10 +30,16 @@ export default defineConfig({
 						tsumugi: src('index.ts'),
 					},
 				},
-				plugins: [cloudflareTest({ wrangler: { configPath: './examples/basic/wrangler.jsonc' } })],
+				plugins: [
+					cloudflareTest({
+						wrangler: { configPath: './examples/basic/wrangler.jsonc' },
+						miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+					}),
+				],
 				test: {
 					name: 'workers',
 					include: ['packages/*/test/workers/**/*.test.ts'],
+					setupFiles: ['./packages/tsumugi/test/workers/setup.ts'],
 				},
 			},
 		],

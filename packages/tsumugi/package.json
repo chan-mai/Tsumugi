@@ -54,6 +54,7 @@
     "tsdown": "^0.22.12"
   },
   "dependencies": {
-    "@paralleldrive/cuid2": "^3.3.0"
+    "@paralleldrive/cuid2": "^3.3.0",
+    "hono": "^4.12.31"
   }
 }

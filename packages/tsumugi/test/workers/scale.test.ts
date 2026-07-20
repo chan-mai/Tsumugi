@@ -121,8 +121,8 @@ describe('ポリシーの永続化', () => {
 		await shard('POL2#0').enqueueMany([{ binding: 'POL2', payload: {} }], policy);
 		const after = await writesOf('POL2#0');
 
-		// 増えるのはジョブのinsert 1回だけ,ポリシーの再書き込みは起きない
-		expect(after - before).toBe(1);
+		// 増えるのはジョブのinsertとアウトボックス追記の2回だけ,ポリシーの再書き込みは起きない
+		expect(after - before).toBe(2);
 	});
 });
 

@@ -142,8 +142,9 @@ describe('DOの書き込み回数', () => {
 		const after = await runInDurableObject(stub, (instance) => (instance as any).repo.writes as number);
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
-		// insert + QUEUEDへの遷移 + COMPLETEDへの遷移 の3回
-		// アウトボックス(M4)を足すと増えるので,増えたら意識的に予算を更新すること
-		expect(after - before).toBe(3);
+		// 内訳: insert / QUEUEDへの遷移/ COMPLETEDへの遷移 の3回+それぞれのアウトボックス追記3回= 6
+		// 残り1回は投影後のアウトボックス削除,これはバッチ単位なので件数が増えれば償却される
+		// ジョブあたり6回はスパイクの実測と一致する,増やす時は課金への影響を意識して更新すること
+		expect(after - before).toBe(7);
 	});
 });

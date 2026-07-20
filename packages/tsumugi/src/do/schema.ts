@@ -43,6 +43,13 @@ export const SCHEMA = [
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	)`,
+	// D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
+	// D1書き込みが成功するまで削除しないので,失敗してもカーソルが進まず次回で追いつく
+	`CREATE TABLE IF NOT EXISTS outbox (
+		seq INTEGER PRIMARY KEY AUTOINCREMENT,
+		job_id TEXT NOT NULL,
+		snapshot TEXT NOT NULL
+	)`,
 ] as const;
 
 export function applySchema(sql: SqlStorage): void {

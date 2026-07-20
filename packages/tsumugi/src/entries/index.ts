@@ -1,5 +1,15 @@
 // ジョブ管理Worker本体が使うエントリ
 export { defineTsumugi, enqueue, enqueueMany, shardFor } from '../worker.js';
+export { bearerAuth } from '../api/auth.js';
+export type { AuthMiddleware } from '../api/auth.js';
+export { cloudflareAccess, clearJwksCache, verifyAccessJwt } from '../api/access.js';
+export type { AccessJwk, AccessOptions, Jwks } from '../api/access.js';
+export { createRest } from '../api/rest.js';
+export type { RestEnv } from '../api/rest.js';
+export { project } from '../projection/projector.js';
+export { toPoint, writeMetrics } from '../analytics/writer.js';
+export type { MetricPoint } from '../analytics/writer.js';
+export type { OutboxRow } from '../projection/projector.js';
 export type { BindingConfig, Tsumugi, TsumugiConfig } from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
 export type { DispatchMessage, EnqueueInput, ShardEnv } from '../do/job-shard.js';
