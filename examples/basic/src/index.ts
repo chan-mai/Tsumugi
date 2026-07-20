@@ -1,15 +1,26 @@
-import { DurableObject } from 'cloudflare:workers';
+import { defineTsumugi, enqueue } from 'tsumugi';
+import { Performer } from 'tsumugi/performer';
 
-// M1でTsumugiのJob DOに置き換える,ここではバインディングの疎通確認のみ
-export class JobShard extends DurableObject {
-	async ping(): Promise<string> {
-		return 'pong';
+class Hello extends Performer<{ name: string }, void, {}, Env> {
+	async perform(payload: { name: string }): Promise<void> {
+		console.log(`hello, ${payload.name}`);
 	}
 }
 
+// binding名とperformerの対応はここ1箇所だけ
+const performers = { HELLO: Hello };
+
+const tsumugi = defineTsumugi<Env>({ performers });
+
+export { TsumugiJobShard } from 'tsumugi';
+
 export default {
-	async fetch(): Promise<Response> {
-		return new Response('tsumugi example');
+	...tsumugi,
+	async fetch(request, env, ctx) {
+		if (new URL(request.url).pathname === '/enqueue') {
+			const id = await enqueue(env, { binding: 'HELLO', payload: { name: 'world' } });
+			return Response.json({ id });
+		}
+		return tsumugi.fetch!(request, env, ctx);
 	},
-	async queue(): Promise<void> {},
-};
+} satisfies ExportedHandler<Env>;

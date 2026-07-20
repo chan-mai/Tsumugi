@@ -14,16 +14,18 @@ export type JobContext = {
 	signal: AbortSignal;
 };
 
-export abstract class Performer<Payload = unknown, Result = unknown, Req extends Requirements = {}> {
+export abstract class Performer<Payload = unknown, Result = unknown, Req extends Requirements = {}, Env = unknown> {
 	/** 型のためだけの幻影プロパティ,実体なし */
 	declare protected readonly __requirements?: Req;
+	/** Cloudflareのバインディング, WorkerEntrypointと同じくコンストラクタで受け取る */
+	constructor(protected readonly env: Env) {}
 	abstract perform(payload: Payload, ctx: JobContext): Result | Promise<Result>;
 }
 
-export type Performers = Record<string, Performer<any, any, any>>;
+export type Performers = Record<string, Performer<any, any, any, any>>;
 
-type PayloadOf<P> = P extends Performer<infer T, any, any> ? T : never;
-type ReqOf<P> = P extends Performer<any, any, infer R> ? R : {};
+type PayloadOf<P> = P extends Performer<infer T, any, any, any> ? T : never;
+type ReqOf<P> = P extends Performer<any, any, infer R, any> ? R : {};
 
 /** 必須の印が1つでも立っているか */
 type HasRequired<R extends Requirements> = true extends R[keyof R] ? true : false;

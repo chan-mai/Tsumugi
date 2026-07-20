@@ -4,10 +4,10 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
   "durable_objects": {
-    "bindings": [{ "name": "JOB_SHARD", "class_name": "JobShard" }],
+    "bindings": [{ "name": "JOB_SHARD", "class_name": "TsumugiJobShard" }],
   },
   // exportsフィールドは片道切符なので当面migrations配列を使う
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["JobShard"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TsumugiJobShard"] }],
   "d1_databases": [{ "binding": "TSUMUGI_DB", "database_name": "tsumugi-example", "database_id": "00000000-0000-0000-0000-000000000000" }],
   "queues": {
     "producers": [{ "binding": "TSUMUGI_QUEUE", "queue": "tsumugi-example" }],

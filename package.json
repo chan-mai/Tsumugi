@@ -10,9 +10,9 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run typecheck && vitest run",
+    "test": "npm run typecheck && npm run build -w tsumugi && vitest run",
     "test:unit": "vitest run --project unit",
-    "test:workers": "vitest run --project workers",
+    "test:workers": "npm run build -w tsumugi && vitest run --project workers",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
