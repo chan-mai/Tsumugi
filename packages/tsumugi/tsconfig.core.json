@@ -1,0 +1,11 @@
+{
+  // coreはworkerd APIに依存してはならない(ADR-0018)
+  // typesを空にすることでDurableObjectState等の参照が即コンパイルエラーになる
+  // lintルールではなく型検査で境界を機械的に強制
+  // Web標準の型のみtypes/core-standard-globals.d.tsで補う
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": ["src/core/**/*.ts", "types/core-standard-globals.d.ts"]
+}

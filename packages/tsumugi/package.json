@@ -1,0 +1,56 @@
+{
+  "name": "tsumugi",
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "A job management system built on the Cloudflare stack",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chan-mai/Tsumugi.git",
+    "directory": "packages/tsumugi"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./performer": {
+      "types": "./dist/performer.d.ts",
+      "default": "./dist/performer.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./ui": {
+      "types": "./dist/ui.d.ts",
+      "default": "./dist/ui.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.test.json",
+    "build": "tsdown",
+    "check:pack": "publint && attw --pack . --profile esm-only",
+    "check:size": "node scripts/size-check.mjs"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@cloudflare/workers-types": "^5.20260714.1",
+    "publint": "^0.3.21",
+    "tsdown": "^0.22.12"
+  }
+}

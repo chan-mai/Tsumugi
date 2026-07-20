@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+
+#ダッシュボードのビルド生成物(packages/dashboardからemit)
+packages/tsumugi/src/entries/dashboard.gen.ts
+
+docs/dec
