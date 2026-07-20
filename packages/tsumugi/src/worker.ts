@@ -101,7 +101,13 @@ export function defineTsumugi<Env extends ConsumerEnv>(config: TsumugiConfig<Env
 	const bindings = config.bindings ?? {};
 	const router = createRouter<Env>(bindings);
 
-	const rest = config.auth ? createRest<Env & RestEnv>(config.auth, config.ui) : null;
+	const rest = config.auth
+		? createRest<Env & RestEnv>(config.auth, {
+				...(config.ui ? { dashboard: config.ui } : {}),
+				bindings: Object.keys(config.performers),
+				enqueue: (env, input) => router.enqueueMany(env as unknown as Env, [input]).then(([id]) => id as string),
+			})
+		: null;
 
 	return {
 		async fetch(request, env, ctx): Promise<Response> {

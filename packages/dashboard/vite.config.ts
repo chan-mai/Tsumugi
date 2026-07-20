@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 
-// 単一HTMLに全てインライン化する, 配布物はこのHTMLを文字列として持つ(ADR-0025)
+// 単一HTMLに全てインライン化する,配布物はこのHTMLを文字列として持つ(ADR-0025)
 export default defineConfig({
 	plugins: [vue(), tailwindcss(), viteSingleFile()],
 	build: {
@@ -17,7 +17,7 @@ export default defineConfig({
 	},
 	esbuild: { legalComments: 'none' },
 	server: {
-		// 開発時はwrangler devへ流す, インライン化はビルド時のみ
+		// 開発時はwrangler devへ流す,インライン化はビルド時のみ
 		proxy: { '/api': 'http://127.0.0.1:8787' },
 	},
 });

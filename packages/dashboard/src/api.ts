@@ -66,6 +66,30 @@ export const listJobs = (params: ListParams) => {
 	return call<{ jobs: Job[]; total: number }>(`/api/jobs?${query}`);
 };
 
+export type CreateJobInput = {
+	binding: string;
+	payload: unknown;
+	maxAttempts?: number;
+	delayMs?: number;
+	priority?: number;
+	uniqueKey?: string;
+	concurrencyKey?: string;
+};
+
+export const createJob = async (input: CreateJobInput) => {
+	const res = await fetch(`${base()}/api/jobs`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(input),
+	});
+	if (res.status === 401) throw new UnauthorizedError();
+	const body = (await res.json()) as { id?: string; error?: string };
+	// 検証に落ちた理由はサーバが返すので,そのまま見せる
+	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	return { id: body.id as string };
+};
+
 export const getStats = () => call<{ byState: Record<string, number> }>('/api/stats');
 export const getBindings = () => call<{ bindings: string[] }>('/api/bindings');
 export const getJob = (id: string) => call<{ job: Job }>(`/api/jobs/${encodeURIComponent(id)}`);

@@ -120,3 +120,49 @@ describe('REST API', () => {
 		expect(res.status).toBe(400);
 	});
 });
+
+describe('ジョブの投入', () => {
+	const authorized = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+
+	const post = (body: unknown, headers: Record<string, string> = authorized) =>
+		withAuth.fetch!(
+			new Request('https://example.com/api/jobs', { method: 'POST', headers, body: JSON.stringify(body) }),
+			env as RestEnv,
+			{
+				waitUntil: () => {},
+				passThroughOnException: () => {},
+			} as unknown as ExecutionContext,
+		);
+
+	it('投入するとジョブIDが返る', async () => {
+		const res = await post({ binding: 'REST', payload: { n: 1 } });
+		expect(res.status).toBe(201);
+		const { id } = await res.json<{ id: string }>();
+		expect(id).toMatch(/^REST#0:/);
+	});
+
+	it('未登録のbindingは400', async () => {
+		const res = await post({ binding: 'NOPE', payload: {} });
+		expect(res.status).toBe(400);
+	});
+
+	it('壊れたJSONは400', async () => {
+		const res = await withAuth.fetch!(
+			new Request('https://example.com/api/jobs', { method: 'POST', headers: authorized, body: '{' }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		expect(res.status).toBe(400);
+	});
+
+	it('認証が無ければ401', async () => {
+		const res = await post({ binding: 'REST', payload: {} }, { 'content-type': 'application/json' });
+		expect(res.status).toBe(401);
+	});
+
+	it('登録済みbindingが選択肢として返る', async () => {
+		const res = await call(withAuth, 'GET', '/api/bindings', { authorization: `Bearer ${TOKEN}` });
+		const { bindings } = await res.json<{ bindings: string[] }>();
+		expect(bindings).toContain('REST');
+	});
+});

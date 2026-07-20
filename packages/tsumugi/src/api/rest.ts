@@ -13,11 +13,63 @@ function stubOf(env: RestEnv, jobId: string): DurableObjectStub<TsumugiJobShard>
 	return env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardNameOf(jobId)));
 }
 
+export type RestOptions<Env extends RestEnv> = {
+	dashboard?: Ui;
+	/** 登録済みperformerの名前,投入先の検証と選択肢に使う */
+	bindings?: readonly string[];
+	enqueue?: (env: Env, input: CreateJobInput) => Promise<string>;
+};
+
+export type CreateJobInput = {
+	binding: string;
+	payload: unknown;
+	maxAttempts?: number;
+	delayMs?: number;
+	priority?: number;
+	concurrencyKey?: string;
+	uniqueKey?: string;
+};
+
+/** 投入内容の検証,通らなければ理由を返す */
+export function validateCreateJob(body: unknown, bindings: readonly string[]): { input: CreateJobInput } | { error: string } {
+	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
+	const raw = body as Record<string, unknown>;
+
+	if (typeof raw.binding !== 'string' || raw.binding.length === 0) return { error: 'binding is required' };
+	// 未登録のbindingを許すと投入はできるが実行時に必ず失敗する,入口で弾く
+	if (bindings.length > 0 && !bindings.includes(raw.binding)) return { error: `unknown binding: ${raw.binding}` };
+	if (!('payload' in raw)) return { error: 'payload is required' };
+
+	const numbers: [keyof CreateJobInput, unknown][] = [
+		['maxAttempts', raw.maxAttempts],
+		['delayMs', raw.delayMs],
+		['priority', raw.priority],
+	];
+	for (const [name, value] of numbers) {
+		if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) return { error: `${name} must be a number` };
+	}
+	if (typeof raw.maxAttempts === 'number' && raw.maxAttempts < 1) return { error: 'maxAttempts must be at least 1' };
+	if (typeof raw.delayMs === 'number' && raw.delayMs < 0) return { error: 'delayMs must not be negative' };
+
+	for (const name of ['concurrencyKey', 'uniqueKey'] as const) {
+		if (raw[name] !== undefined && typeof raw[name] !== 'string') return { error: `${name} must be a string` };
+	}
+
+	const input: CreateJobInput = { binding: raw.binding, payload: raw.payload };
+	if (typeof raw.maxAttempts === 'number') input.maxAttempts = raw.maxAttempts;
+	if (typeof raw.delayMs === 'number') input.delayMs = raw.delayMs;
+	if (typeof raw.priority === 'number') input.priority = raw.priority;
+	if (typeof raw.concurrencyKey === 'string' && raw.concurrencyKey) input.concurrencyKey = raw.concurrencyKey;
+	if (typeof raw.uniqueKey === 'string' && raw.uniqueKey) input.uniqueKey = raw.uniqueKey;
+	return { input };
+}
+
 /**
  * 一覧と詳細はD1の読み取りモデルから引く(ADR-0008)
  * 稼働中も投影済みなのでページングもソートも通常のSQL
  */
-export function createRest<Env extends RestEnv>(auth: AuthMiddleware, dashboard?: Ui): Hono<{ Bindings: Env }> {
+export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
+	const { dashboard, bindings = [], enqueue } = options;
 	const app = new Hono<{ Bindings: Env }>();
 	// 認証はAPIにのみ掛ける
 	// HTMLの殻はデータを含まず,未認証で返すことでSPAがトークン入力を出せる(ADR-0013)
@@ -53,10 +105,31 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, dashboard?
 		return c.json({ jobs: page?.results ?? [], total: (total?.results?.[0]?.total as number) ?? 0 });
 	});
 
-	/** フィルタの選択肢, 投影済みのbindingを列挙する */
+	/**
+	 * フィルタと投入先の選択肢
+	 * 登録済みperformerを返す,投影済みのbindingだけだと一度も動いていないものが選べない
+	 */
 	app.get('/api/bindings', async (c) => {
+		if (bindings.length > 0) return c.json({ bindings: [...bindings].sort() });
 		const { results } = await c.env.TSUMUGI_DB.prepare(`SELECT DISTINCT binding FROM job ORDER BY binding`).all<{ binding: string }>();
 		return c.json({ bindings: results.map((row) => row.binding) });
+	});
+
+	app.post('/api/jobs', async (c) => {
+		if (!enqueue) return c.json({ error: 'job creation is not available' }, 501);
+
+		let body: unknown;
+		try {
+			body = await c.req.json();
+		} catch {
+			return c.json({ error: 'body must be valid JSON' }, 400);
+		}
+
+		const parsed = validateCreateJob(body, bindings);
+		if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+
+		const id = await enqueue(c.env, parsed.input);
+		return c.json({ id }, 201);
 	});
 
 	app.get('/api/stats', async (c) => {
