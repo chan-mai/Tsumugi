@@ -19,7 +19,7 @@ export type Ui = {
 	render(): string;
 };
 
-/** 注入済みHTMLの使い回し, リクエストごとに数十KBの置換をしない */
+/** 注入済みHTMLの使い回し,リクエストごとに数十KBの置換をしない */
 const rendered = new Map<string, string>();
 
 function inject(basePath: string, tokenCookie: string | undefined): string {

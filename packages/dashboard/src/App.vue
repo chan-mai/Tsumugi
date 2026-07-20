@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import FilterMenu from './components/FilterMenu.vue';
 import JobDetailModal from './components/JobDetailModal.vue';
+import NewJobModal from './components/NewJobModal.vue';
 import Pagination from './components/Pagination.vue';
 import RowActions from './components/RowActions.vue';
 import StatusCell from './components/StatusCell.vue';
@@ -19,6 +20,7 @@ const binding = ref('');
 const page = ref(0);
 const pageSize = ref(20);
 const selected = ref<string | null>(null);
+const creating = ref(false);
 const message = ref<string | null>(null);
 const error = ref<string | null>(null);
 const unauthorized = ref(false);
@@ -135,6 +137,16 @@ const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground
 						<span class="size-2 rounded-full" :class="autoRefresh ? 'animate-pulse bg-green-500' : 'bg-gray-300'" aria-hidden="true" />
 						{{ autoRefresh ? 'Live' : 'Paused' }}
 					</button>
+					<button
+						type="button"
+						class="flex h-8 items-center gap-1.5 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
+						@click="creating = true"
+					>
+						<svg viewBox="0 0 16 16" class="size-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+							<path d="M8 3.5v9M3.5 8h9" />
+						</svg>
+						Job
+					</button>
 				</div>
 			</div>
 
@@ -186,5 +198,14 @@ const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground
 		</div>
 
 		<JobDetailModal :job-id="selected" @close="selected = null" />
+		<NewJobModal
+			:open="creating"
+			:bindings="bindings"
+			@close="creating = false"
+			@created="
+				message = 'Job created';
+				load();
+			"
+		/>
 	</div>
 </template>

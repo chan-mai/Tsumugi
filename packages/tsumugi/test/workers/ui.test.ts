@@ -33,7 +33,7 @@ const authorized = { authorization: `Bearer ${TOKEN}` };
 
 beforeEach(() => clearUiCache());
 
-describe('ダッシュボードの配信 (ADR-0025)', () => {
+describe('ダッシュボードの配信(ADR-0025)', () => {
 	it('ルートでHTMLが返る', async () => {
 		const res = await call(handler(), '/', authorized);
 		expect(res.status).toBe(200);
@@ -98,7 +98,7 @@ describe('ダッシュボードの配信 (ADR-0025)', () => {
 	});
 
 	it('認証未設定なら404でHTMLも出さない', async () => {
-		// fail-closed, ダッシュボードの存在自体を明かさない(ADR-0013)
+		// fail-closed,ダッシュボードの存在自体を明かさない(ADR-0013)
 		const res = await call(handler({ auth: false }), '/');
 		expect(res.status).toBe(404);
 		expect(await res.text()).not.toContain('<!doctype html>');
