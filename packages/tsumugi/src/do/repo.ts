@@ -167,6 +167,61 @@ export class JobRepo {
 	}
 
 	/**
+	 * 終端に達した古いジョブをDOから落とす
+	 *
+	 * DOのSQLiteは1インスタンス10GBが上限で,行数が増えるとtickのクエリも重くなる
+	 * 明細はD1の読み取りモデルに投影済みなので, DO側に残し続ける理由がない
+	 *
+	 * 投影が滞っていても消して構わない
+	 * アウトボックスはD1へUPSERTする内容そのものを持っており,ジョブ行を参照しないため
+	 */
+	sweepTerminal(before: number, limit: number): number {
+		const cursor = this.sql.exec(
+			`DELETE FROM job WHERE id IN (
+				SELECT id FROM job
+				WHERE state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED') AND updated_at < ?
+				LIMIT ?
+			)`,
+			before,
+			limit,
+		);
+		this.writes++;
+		return cursor.rowsWritten;
+	}
+
+	/**
+	 * 掃除する対象があるかを1回の読み取りで見る
+	 * 対象が無くてもDELETEを撃つと書き込みが増える,読み取りは書き込みより桁で安価
+	 */
+	hasSweepable(before: number, now: number): { jobs: boolean; uniqueKeys: boolean; anyTerminal: boolean } {
+		const row = this.sql
+			.exec<{ jobs: number; unique_keys: number; any_terminal: number }>(
+				`SELECT
+					EXISTS(SELECT 1 FROM job WHERE state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED') AND updated_at < ?) AS jobs,
+					EXISTS(SELECT 1 FROM unique_key WHERE expires_at <= ?) AS unique_keys,
+					EXISTS(SELECT 1 FROM job WHERE state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED')) AS any_terminal`,
+				before,
+				now,
+			)
+			.one();
+		this.reads++;
+		return { jobs: row.jobs === 1, uniqueKeys: row.unique_keys === 1, anyTerminal: row.any_terminal === 1 };
+	}
+
+	/** 期限切れの重複排除キー, enqueueが途絶えても溜まらないようtickでも掃除する */
+	sweepExpiredUniqueKeys(now: number): number {
+		const cursor = this.sql.exec(`DELETE FROM unique_key WHERE expires_at <= ?`, now);
+		this.writes++;
+		return cursor.rowsWritten;
+	}
+
+	countJobs(): number {
+		const row = this.sql.exec<{ c: number }>(`SELECT COUNT(*) AS c FROM job`).one();
+		this.reads++;
+		return row.c;
+	}
+
+	/**
 	 * 重複排除の予約(ADR-0021 / ADR-0022)
 	 * 取れたらnull,既に取られていれば先行するジョブIDを返す
 	 * DOはシングルスレッドなので検査と挿入が何もせずとも不可分になる

@@ -69,7 +69,7 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 	it('同じキーのジョブは上限までしか投入されない', async () => {
 		const { sent, queue } = captureQueue();
 		await install('CKEY#0', T0, queue);
-		await shard('CKEY#0').configure({ concurrency: 100, perKeyConcurrency: 1 });
+		await shard('CKEY#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 1 } });
 
 		const inputs = Array.from({ length: 100 }, (_, i) => ({
 			binding: 'CKEY',
@@ -85,7 +85,7 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 	it('別のキーは巻き添えにならない', async () => {
 		const { sent, queue } = captureQueue();
 		await install('CKEY2#0', T0, queue);
-		await shard('CKEY2#0').configure({ concurrency: 100, perKeyConcurrency: 1 });
+		await shard('CKEY2#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 1 } });
 
 		// 実装がcontinueではなくbreakしていると,先頭のキーが詰まった時点で全体が止まる
 		await shard('CKEY2#0').enqueueMany([
@@ -103,7 +103,7 @@ describe('ポリシーの永続化', () => {
 	it('configureした値がtickに反映される', async () => {
 		const { sent, queue } = captureQueue();
 		await install('POL#0', T0, queue);
-		await shard('POL#0').configure({ concurrency: 2, perKeyConcurrency: 100 });
+		await shard('POL#0').configure({ policy: { concurrency: 2, perKeyConcurrency: 100 } });
 
 		await shard('POL#0').enqueueMany(Array.from({ length: 10 }, () => ({ binding: 'POL', payload: {} })));
 		await runDurableObjectAlarm(shard('POL#0'));
@@ -114,11 +114,11 @@ describe('ポリシーの永続化', () => {
 	it('同じ内容のポリシーを渡し続けても書き込みが増えない', async () => {
 		const { queue } = captureQueue();
 		await install('POL2#0', T0, queue);
-		const policy = { concurrency: 5 };
+		const settings = { policy: { concurrency: 5 } };
 
-		await shard('POL2#0').enqueueMany([{ binding: 'POL2', payload: {} }], policy);
+		await shard('POL2#0').enqueueMany([{ binding: 'POL2', payload: {} }], settings);
 		const before = await writesOf('POL2#0');
-		await shard('POL2#0').enqueueMany([{ binding: 'POL2', payload: {} }], policy);
+		await shard('POL2#0').enqueueMany([{ binding: 'POL2', payload: {} }], settings);
 		const after = await writesOf('POL2#0');
 
 		// 増えるのはジョブのinsertとアウトボックス追記の2回だけ,ポリシーの再書き込みは起きない
@@ -143,7 +143,7 @@ describe('enqueueMany', () => {
 	it('tickは有界で,上限を超える分は次のtickへ送る', async () => {
 		const { sent, queue } = captureQueue();
 		await install('BOUND#0', T0, queue);
-		await shard('BOUND#0').configure({ concurrency: 10_000, perKeyConcurrency: 10_000 });
+		await shard('BOUND#0').configure({ policy: { concurrency: 10_000, perKeyConcurrency: 10_000 } });
 
 		await shard('BOUND#0').enqueueMany(Array.from({ length: 300 }, () => ({ binding: 'BOUND', payload: {} })));
 		await runDurableObjectAlarm(shard('BOUND#0'));
