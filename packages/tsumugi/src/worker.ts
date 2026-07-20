@@ -1,10 +1,11 @@
 import { shardName } from './core/ids.js';
 import { resolveShard } from './core/shard.js';
 import type { Policy } from './core/types.js';
-import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from './do/job-shard.js';
+import type { DispatchMessage, EnqueueInput, ShardSettings, TsumugiJobShard } from './do/job-shard.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry } from './queue/consumer.js';
 import type { AuthMiddleware } from './api/auth.js';
 import { createRest, type RestEnv } from './api/rest.js';
+import { sweepReadModel, type SweepOptions } from './projection/sweep.js';
 import type { Ui } from './ui/serve.js';
 
 export type BindingConfig = {
@@ -15,6 +16,11 @@ export type BindingConfig = {
 	shards?: number;
 	/** 流量制御3軸とエージング(ADR-0009 / ADR-0020) */
 	policy?: Partial<Policy>;
+	/**
+	 * 終端に達したジョブをDOに残す時間,既定5分
+	 * 明細はD1へ投影済みなのでDOに残す理由がなく,溜めるとtickのクエリが重くなる
+	 */
+	sweepAfterMs?: number;
 };
 
 export type TsumugiConfig<Env extends ConsumerEnv> = {
@@ -34,6 +40,11 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	 * 別サブパスにしているので使わなければバンドルに載らない(ADR-0025)
 	 */
 	ui?: Ui;
+	/**
+	 * D1の読み取りモデルの保持設定
+	 * cronトリガーを設定すると`scheduled`で古い終端ジョブを落とす
+	 */
+	retention?: SweepOptions;
 };
 
 export type Tsumugi<Env extends ConsumerEnv> = ExportedHandler<Env> & {
@@ -59,21 +70,28 @@ function createRouter<Env extends ConsumerEnv>(bindings: Record<string, BindingC
 	const shardOf = (env: Env, binding: string, partitionKey: string | undefined) => {
 		const config = bindings[binding];
 		const shard = resolveShard(binding, config?.shards ?? 1, partitionKey);
-		return { stub: shardFor(env, binding, shard), policy: config?.policy };
+		const settings: ShardSettings | undefined =
+			config?.policy || config?.sweepAfterMs !== undefined
+				? {
+						...(config.policy ? { policy: config.policy } : {}),
+						...(config.sweepAfterMs !== undefined ? { sweepAfterMs: config.sweepAfterMs } : {}),
+					}
+				: undefined;
+		return { stub: shardFor(env, binding, shard), settings };
 	};
 
 	return {
 		shardOf,
 		async enqueueMany(env: Env, inputs: readonly EnqueueInput[]): Promise<string[]> {
 			// 宛先DOごとにまとめる,個別RPCの逐次投入はDOの1,000 req/sソフト上限に律速される
-			type Group = { stub: DurableObjectStub<TsumugiJobShard>; policy: Partial<Policy> | undefined; items: EnqueueInput[] };
+			type Group = { stub: DurableObjectStub<TsumugiJobShard>; settings: ShardSettings | undefined; items: EnqueueInput[] };
 			const groups = new Map<string, Group>();
 			const order: string[] = [];
 
 			for (const input of inputs) {
-				const { stub, policy } = shardOf(env, input.binding, input.partitionKey);
+				const { stub, settings } = shardOf(env, input.binding, input.partitionKey);
 				const key = stub.id.toString();
-				const group = groups.get(key) ?? { stub, policy, items: [] };
+				const group = groups.get(key) ?? { stub, settings, items: [] };
 				group.items.push(input);
 				groups.set(key, group);
 				order.push(key);
@@ -82,7 +100,7 @@ function createRouter<Env extends ConsumerEnv>(bindings: Record<string, BindingC
 			const results = new Map<string, string[]>();
 			await Promise.all(
 				[...groups.entries()].map(async ([key, group]) => {
-					results.set(key, await group.stub.enqueueMany(group.items, group.policy));
+					results.set(key, await group.stub.enqueueMany(group.items, group.settings));
 				}),
 			);
 
@@ -117,6 +135,11 @@ export function defineTsumugi<Env extends ConsumerEnv>(config: TsumugiConfig<Env
 		},
 		async queue(batch, env): Promise<void> {
 			await handleBatch(batch as MessageBatch<DispatchMessage>, env, config.performers);
+		},
+		async scheduled(_controller, env): Promise<void> {
+			// DO側の掃除はtickが行う,ここはD1の読み取りモデルだけ
+			const removed = await sweepReadModel((env as Env & RestEnv).TSUMUGI_DB, Date.now(), config.retention ?? {});
+			if (removed > 0) console.log(`tsumugi: swept ${removed} jobs from the read model`);
 		},
 		shardFor(env, binding, partitionKey) {
 			return router.shardOf(env, binding, partitionKey).stub;

@@ -28,6 +28,13 @@ export type ShardEnv = {
 	TSUMUGI_METRICS?: AnalyticsEngineDataset;
 };
 
+/** DOに持たせる設定,流量制御と保持期間 */
+export type ShardSettings = {
+	policy?: Partial<Policy>;
+	/** 終端に達したジョブをDOに残す時間 */
+	sweepAfterMs?: number;
+};
+
 export type EnqueueInput = {
 	binding: string;
 	payload: unknown;
@@ -79,6 +86,12 @@ const TICK_LIMIT = 200;
 /** 1回の投影で流すアウトボックスの上限, D1のバッチ上限とtickの時間を考えて抑える */
 const PROJECTION_LIMIT = 200;
 
+/** 1 tickで落とす終端ジョブの上限, tickを有界に保つ */
+const SWEEP_LIMIT = 200;
+
+/** 終端に達したジョブをDOに残す時間,投影が追いつく余裕を見て既定5分 */
+const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
+
 /**
  * ジョブの調停役(ADR-0002)
  *
@@ -89,6 +102,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/** テストから差し替えるためpublicにしている */
 	clock: Clock = systemClock;
 	policy: Policy = DEFAULT_POLICY;
+	sweepAfterMs: number = DEFAULT_SWEEP_AFTER_MS;
 
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
@@ -112,22 +126,27 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/** ポリシーはSQLiteに置く, tickが同期で読めるようにするため */
 	#loadPolicy(): void {
 		if (this.#policyLoaded) return;
-		const raw = this.repo.readSetting('policy');
-		if (raw) this.policy = { ...DEFAULT_POLICY, ...(JSON.parse(raw) as Partial<Policy>) };
+		const raw = this.repo.readSetting('settings');
+		if (raw) {
+			const settings = JSON.parse(raw) as ShardSettings;
+			this.policy = { ...DEFAULT_POLICY, ...settings.policy };
+			this.sweepAfterMs = settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS;
+		}
 		this.#policyLoaded = true;
 	}
 
-	async configure(policy: Partial<Policy>): Promise<void> {
-		this.#applyPolicy(policy);
+	async configure(settings: ShardSettings): Promise<void> {
+		this.#applySettings(settings);
 	}
 
 	/** 内容が変わっていなければ書き込まない, enqueueのたびに1回増えるのを避ける */
-	#applyPolicy(policy: Partial<Policy>): void {
-		const encoded = JSON.stringify(policy);
-		this.policy = { ...DEFAULT_POLICY, ...policy };
+	#applySettings(settings: ShardSettings): void {
+		const encoded = JSON.stringify(settings);
+		this.policy = { ...DEFAULT_POLICY, ...settings.policy };
+		this.sweepAfterMs = settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS;
 		this.#policyLoaded = true;
-		if (this.repo.readSetting('policy') === encoded) return;
-		this.repo.writeSetting('policy', encoded);
+		if (this.repo.readSetting('settings') === encoded) return;
+		this.repo.writeSetting('settings', encoded);
 	}
 
 	async enqueue(input: EnqueueInput): Promise<string> {
@@ -140,10 +159,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 個別RPCの逐次enqueueはDOの1,000 req/sソフト上限に律速され実測78件/秒しか出ない
 	 * 上限を回避する唯一の手段なので,単発のenqueueもこれに委ねる
 	 */
-	async enqueueMany(inputs: readonly EnqueueInput[], policy?: Partial<Policy>): Promise<string[]> {
+	async enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]> {
 		const now = this.clock.now();
 		this.#loadPolicy();
-		if (policy) this.#applyPolicy(policy);
+		if (settings) this.#applySettings(settings);
 		const ids: string[] = [];
 
 		for (const input of inputs) {
@@ -311,10 +330,12 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		if (messages.length > 0) await this.env.TSUMUGI_QUEUE.sendBatch(messages);
 
 		const projected = await this.#project();
+		const { deleted, retryAt } = this.#sweep(now);
 
 		// 上限まで読んだなら残りがある可能性が高いので即座に自分を起こし直す
-		const hasMore = jobs.length >= TICK_LIMIT || projected >= PROJECTION_LIMIT;
-		const next = hasMore ? now : output.nextAlarmAt;
+		const hasMore = jobs.length >= TICK_LIMIT || projected >= PROJECTION_LIMIT || deleted >= SWEEP_LIMIT;
+		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt].filter((v): v is number => v !== null);
+		const next = candidates.length > 0 ? Math.min(...candidates) : null;
 		if (next !== null) await this.ctx.storage.setAlarm(next);
 	}
 
@@ -333,6 +354,24 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		);
 		this.repo.deleteOutboxThrough(rows[rows.length - 1]!.seq);
 		return rows.length;
+	}
+
+	/**
+	 * 溜まったものを落とす
+	 * 投影済みの終端ジョブと期限切れの重複排除キーを対象にする
+	 */
+	#sweep(now: number): { deleted: number; retryAt: number | null } {
+		const before = now - this.sweepAfterMs;
+		// 対象の有無を先に読む,状態をメモリに持つとDOのエビクトで掃除が止まる
+		const sweepable = this.repo.hasSweepable(before, now);
+		if (sweepable.uniqueKeys) this.repo.sweepExpiredUniqueKeys(now);
+		const deleted = sweepable.jobs ? this.repo.sweepTerminal(before, SWEEP_LIMIT) : 0;
+
+		// 終端ジョブを抱えている間は起き直す
+		// 稼働中が無くなるとalarmが張られず,掃除する機会が永久に来ない
+		// 消していなければ最初の読み取りの結果をそのまま使える
+		const anyTerminal = deleted > 0 ? this.repo.hasSweepable(before, now).anyTerminal : sweepable.anyTerminal;
+		return { deleted, retryAt: anyTerminal ? now + this.sweepAfterMs : null };
 	}
 
 	/** 予定より早い時刻にalarmが張られている場合は上書きしない */

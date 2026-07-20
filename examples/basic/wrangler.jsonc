@@ -22,4 +22,6 @@
     "consumers": [{ "queue": "tsumugi-example", "max_batch_size": 10, "max_retries": 5 }],
   },
   "analytics_engine_datasets": [{ "binding": "TSUMUGI_METRICS", "dataset": "tsumugi_jobs" }],
+  // D1の読み取りモデルの保持はscheduledで行う
+  "triggers": { "crons": ["0 * * * *"] },
 }
