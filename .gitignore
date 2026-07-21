@@ -11,3 +11,7 @@ packages/tsumugi/src/entries/dashboard.gen.ts
 site/.vitepress/cache/
 
 docs/dec
+
+# publish時にルートから複写する(prepack)
+packages/tsumugi/README.md
+packages/tsumugi/LICENSE
