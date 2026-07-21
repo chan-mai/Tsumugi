@@ -243,7 +243,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 							<td class="p-4 align-middle tabular-nums" :class="columnClass('processingTime')">{{ durationOf(job) }}</td>
 							<!-- 行のクリックで詳細が開くので,操作メニューまで伝播させない -->
 							<td class="p-4 align-middle" @click.stop>
-								<RowActions :job-id="job.id" :state="job.state" @changed="load" @message="message = $event" />
+								<RowActions :job-id="job.id" :state="job.state" :retryable="job.retryable" @changed="load" @message="message = $event" />
 							</td>
 						</tr>
 						<tr v-if="jobs.length === 0">

@@ -1,19 +1,29 @@
 <script setup lang="ts">
 import { Menu, MenuButton, MenuItem, MenuItems, TransitionRoot } from '@headlessui/vue';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { cancelJob, retryJob } from '../api';
 
-const props = defineProps<{ jobId: string; state: string }>();
+const props = defineProps<{ jobId: string; state: string; retryable?: boolean }>();
 const emit = defineEmits<{ changed: []; message: [text: string] }>();
 
 const busy = ref(false);
+/** 410を受けたら以後は押させない, 一覧はD1から引くので再読込しても行は消えない */
+const gone = ref(false);
+
+const canRetry = computed(() => !gone.value && props.retryable !== false);
+const canCancel = computed(() => !gone.value && props.state === 'SCHEDULED');
+
+/** retryableはサーバの近似,実際に消えているかは押して410が返って初めて分かる */
+const retryTitle = computed(() =>
+	gone.value || props.retryable === false ? 'Removed from the coordinator after the retention period' : undefined,
+);
 
 async function act(kind: 'retry' | 'cancel') {
 	busy.value = true;
 	try {
 		const result = await (kind === 'retry' ? retryJob(props.jobId) : cancelJob(props.jobId));
-		// 409は状態が合わず操作できなかった場合,成功したと見せかけない
-		emit('message', result.ok ? 'Accepted' : 'Not allowed in the current state');
+		if (result.gone) gone.value = true;
+		emit('message', result.message);
 		emit('changed');
 	} catch {
 		emit('message', 'Request failed');
@@ -47,28 +57,31 @@ async function act(kind: 'retry' | 'cancel') {
 		>
 			<MenuItems
 				static
-				class="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-background p-1 text-sm shadow-md focus:outline-none"
+				class="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-background p-1 text-sm shadow-md focus:outline-none"
 			>
-				<MenuItem v-slot="{ active }" :disabled="busy">
+				<MenuItem v-slot="{ active }" :disabled="busy || !canRetry">
 					<button
 						type="button"
 						class="w-full rounded-sm border-none px-2 py-1.5 text-left"
-						:class="active ? 'bg-accent' : ''"
-						@click="act('retry')"
+						:class="[active && canRetry ? 'bg-accent' : '', canRetry ? '' : 'cursor-not-allowed text-muted-foreground']"
+						:title="retryTitle"
+						@click="canRetry && act('retry')"
 					>
 						Retry
 					</button>
 				</MenuItem>
-				<MenuItem v-slot="{ active }" :disabled="busy">
+				<MenuItem v-slot="{ active }" :disabled="busy || !canCancel">
 					<button
 						type="button"
-						class="w-full rounded-sm border-none px-2 py-1.5 text-left text-destructive"
-						:class="active ? 'bg-accent' : ''"
-						@click="act('cancel')"
+						class="w-full rounded-sm border-none px-2 py-1.5 text-left"
+						:class="[active && canCancel ? 'bg-accent' : '', canCancel ? 'text-destructive' : 'cursor-not-allowed text-muted-foreground']"
+						title="Only scheduled jobs can be cancelled"
+						@click="canCancel && act('cancel')"
 					>
 						Cancel
 					</button>
 				</MenuItem>
+				<p v-if="!canRetry && !canCancel" class="px-2 py-1.5 text-xs text-muted-foreground">No actions available</p>
 			</MenuItems>
 		</TransitionRoot>
 	</Menu>

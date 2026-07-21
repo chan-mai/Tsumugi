@@ -230,7 +230,7 @@ describe('cancel (ADR-0012)', () => {
 		await install('BOOM', clock, queue);
 
 		const jobId = await shard('BOOM').enqueue({ binding: 'BOOM', payload: {}, delayMs: 60_000 });
-		expect(await shard('BOOM').cancel(jobId)).toBe(true);
+		expect(await shard('BOOM').cancel(jobId)).toEqual({ ok: true });
 		expect(await stateOf('BOOM', jobId)).toBe('CANCELLED');
 	});
 
@@ -243,7 +243,8 @@ describe('cancel (ADR-0012)', () => {
 		await runDurableObjectAlarm(shard('BOOM'));
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 
-		expect(await shard('BOOM').cancel(jobId)).toBe(false);
+		// 状態違いであってDOから消えたのではない, 区別できることをここでも固定する(ADR-0027)
+		expect(await shard('BOOM').cancel(jobId)).toEqual({ ok: false, reason: 'invalid-state' });
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 	});
 });

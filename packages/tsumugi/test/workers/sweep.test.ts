@@ -189,7 +189,7 @@ describe('状態を変える操作はalarmを張る', () => {
 		await runDurableObjectAlarm(shard('CANCEL#0'));
 		expect(await alarmOf('CANCEL#0')).toBe(T0 + 60 * 60 * 1000);
 
-		expect(await shard('CANCEL#0').cancel(jobId)).toBe(true);
+		expect(await shard('CANCEL#0').cancel(jobId)).toEqual({ ok: true });
 		expect(await alarmOf('CANCEL#0')).toBe(T0);
 	});
 
@@ -202,7 +202,7 @@ describe('状態を変える操作はalarmを張る', () => {
 		await shard('CANCEL2#0').report(sent[0]!.jobId, { ok: true });
 
 		const before = await alarmOf('CANCEL2#0');
-		expect(await shard('CANCEL2#0').cancel(jobId)).toBe(false);
+		expect(await shard('CANCEL2#0').cancel(jobId)).toEqual({ ok: false, reason: 'invalid-state' });
 		expect(await alarmOf('CANCEL2#0')).toBe(before);
 	});
 });

@@ -18,6 +18,11 @@ export type RestOptions<Env extends RestEnv> = {
 	/** 登録済みperformerの名前,投入先の検証と選択肢に使う */
 	bindings?: readonly string[];
 	enqueue?: (env: Env, input: CreateJobInput) => Promise<string>;
+	/**
+	 * bindingごとの失敗ジョブの保持期間
+	 * 一覧に`retryable`を載せるために要る, 押すまで分からないボタンを出さないため(ADR-0027)
+	 */
+	failedRetentionMs?: (binding: string) => number;
 };
 
 export type CreateJobInput = {
@@ -79,7 +84,20 @@ export function resolveSort(sort: string | null, order: string | null): { column
  * 稼働中も投影済みなのでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings = [], enqueue } = options;
+	const { dashboard, bindings = [], enqueue, failedRetentionMs } = options;
+
+	/**
+	 * 一覧の1行にretryの可否を載せる
+	 * 読み取りモデルはDOに行が在るかを知らないので保持期間から引き算する
+	 * 実際の可否はDOが持つため410が最終的な答え, ここは押す前に分かるようにするための近似
+	 */
+	const withRetryable = (row: Record<string, unknown>, now: number) => {
+		const retryableState = row.state === 'FAILED' || row.state === 'STALLED';
+		if (!retryableState) return { ...row, retryable: false };
+		if (!failedRetentionMs) return { ...row, retryable: true };
+		const keepFor = failedRetentionMs(String(row.binding));
+		return { ...row, retryable: Number(row.updated_at) > now - keepFor };
+	};
 	const app = new Hono<{ Bindings: Env }>();
 	// 認証はAPIにのみ掛ける
 	// HTMLの殻はデータを含まず,未認証で返すことでSPAがトークン入力を出せる(ADR-0013)
@@ -114,7 +132,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			c.env.TSUMUGI_DB.prepare(`SELECT COUNT(*) AS total FROM job ${clause}`).bind(...args),
 		]);
 
-		return c.json({ jobs: page?.results ?? [], total: (total?.results?.[0]?.total as number) ?? 0 });
+		const now = Date.now();
+		return c.json({
+			jobs: (page?.results ?? []).map((row) => withRetryable(row, now)),
+			total: (total?.results?.[0]?.total as number) ?? 0,
+		});
 	});
 
 	/**
@@ -155,15 +177,30 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.get('/api/jobs/:id', async (c) => {
 		const job = await c.env.TSUMUGI_DB.prepare(`SELECT * FROM job WHERE id = ?`).bind(c.req.param('id')).first();
 		if (!job) return c.json({ error: 'not found' }, 404);
-		return c.json({ job });
+		return c.json({ job: withRetryable(job, Date.now()) });
 	});
+
+	/**
+	 * 断られた理由をHTTPの意味に写す
+	 * goneは410, 資源が在ったが失われた状態を指す, 状態違いの409とは利用者の打つ手が違う
+	 */
+	function refusal(result: { ok: false; reason: 'invalid-state' | 'gone' }) {
+		return result.reason === 'gone'
+			? ({
+					body: { ok: false, error: 'job is no longer available: removed from the coordinator after the retention period' },
+					status: 410,
+				} as const)
+			: ({ body: { ok: false, error: 'not allowed in the current state' }, status: 409 } as const);
+	}
 
 	app.post('/api/jobs/:id/retry', async (c) => {
 		const id = c.req.param('id');
 		try {
 			// 変更は真実の源であるDOへ問い合わせる
-			const ok = await stubOf(c.env, id).retry(id);
-			return c.json({ ok }, ok ? 200 : 409);
+			const result = await stubOf(c.env, id).retry(id);
+			if (result.ok) return c.json({ ok: true }, 200);
+			const { body, status } = refusal(result);
+			return c.json(body, status);
 		} catch (error) {
 			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' }, 400);
 			throw error;
@@ -173,9 +210,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.post('/api/jobs/:id/cancel', async (c) => {
 		const id = c.req.param('id');
 		try {
-			const ok = await stubOf(c.env, id).cancel(id);
 			// SCHEDULED以外は取り消し不可(ADR-0012)
-			return c.json({ ok }, ok ? 200 : 409);
+			const result = await stubOf(c.env, id).cancel(id);
+			if (result.ok) return c.json({ ok: true }, 200);
+			const { body, status } = refusal(result);
+			return c.json(body, status);
 		} catch (error) {
 			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' }, 400);
 			throw error;

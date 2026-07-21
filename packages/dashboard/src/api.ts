@@ -12,6 +12,8 @@ export type Job = {
 	unique_key?: string | null;
 	concurrency_key?: string | null;
 	guarantee?: string;
+	/** サーバが保持期間から出す近似, 最終的な可否はretryの応答が決める */
+	retryable?: boolean;
 };
 
 declare global {
@@ -55,6 +57,25 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 	return res.json() as Promise<T>;
 }
 
+export type MutationOutcome = { ok: boolean; gone: boolean; message: string };
+
+/**
+ * retry / cancelの結果
+ * 410は保持期間を過ぎてDOから消えた状態, 一覧には残るので押しても二度と通らない
+ */
+async function mutate(path: string): Promise<MutationOutcome> {
+	const res = await fetch(`${base()}${path}`, { method: 'POST', credentials: 'same-origin' });
+	if (res.status === 401) throw new UnauthorizedError();
+	if (res.ok) return { ok: true, gone: false, message: 'Accepted' };
+
+	const body = (await res.json().catch(() => ({}))) as { error?: string };
+	return {
+		ok: false,
+		gone: res.status === 410,
+		message: body.error ?? `Request failed (${res.status})`,
+	};
+}
+
 export type ListParams = { state?: string; binding?: string; sort?: string; order?: 'asc' | 'desc'; limit: number; offset: number };
 
 export const listJobs = (params: ListParams) => {
@@ -95,5 +116,5 @@ export const createJob = async (input: CreateJobInput) => {
 export const getStats = () => call<{ byState: Record<string, number> }>('/api/stats');
 export const getBindings = () => call<{ bindings: string[] }>('/api/bindings');
 export const getJob = (id: string) => call<{ job: Job }>(`/api/jobs/${encodeURIComponent(id)}`);
-export const retryJob = (id: string) => call<{ ok: boolean }>(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
-export const cancelJob = (id: string) => call<{ ok: boolean }>(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+export const retryJob = (id: string) => mutate(`/api/jobs/${encodeURIComponent(id)}/retry`);
+export const cancelJob = (id: string) => mutate(`/api/jobs/${encodeURIComponent(id)}/cancel`);

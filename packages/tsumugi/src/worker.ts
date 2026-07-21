@@ -1,5 +1,6 @@
 import { shardName } from './core/ids.js';
 import { createClient, type BindingConfig, type ClientEnv } from './client/enqueue.js';
+import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from './do/job-shard.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry } from './queue/consumer.js';
 import type { AuthMiddleware } from './api/auth.js';
@@ -60,6 +61,8 @@ export function defineTsumugi<Env extends ConsumerEnv>(config: TsumugiConfig<Env
 				...(config.ui ? { dashboard: config.ui } : {}),
 				bindings: Object.keys(config.performers),
 				enqueue: (env, input) => client.enqueue(env as unknown as Env, input),
+				// 一覧のretryable判定に使う, UI側が押す前に可否を出せるようにする(ADR-0027)
+				failedRetentionMs: (binding) => config.bindings?.[binding]?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 			})
 		: null;
 
