@@ -1,35 +1,17 @@
 <script setup lang="ts">
 import { Menu, MenuButton, MenuItem, MenuItems, TransitionRoot } from '@headlessui/vue';
-import { computed, ref } from 'vue';
-import { cancelJob, retryJob } from '../api';
+import { computed, toRef } from 'vue';
+import { useJobActions } from '../useJobActions';
 
 const props = defineProps<{ jobId: string; state: string; retryable?: boolean }>();
 const emit = defineEmits<{ changed: []; message: [text: string] }>();
 
-const busy = ref(false);
-/** 410を受けたら以後は押させない, 一覧はD1から引くので再読込しても行は消えない */
-const gone = ref(false);
+const source = computed(() => ({ state: props.state, retryable: props.retryable }));
+const { busy, canRetry, canCancel, goneReason, act } = useJobActions(toRef(source));
 
-const canRetry = computed(() => !gone.value && props.retryable !== false);
-const canCancel = computed(() => !gone.value && props.state === 'SCHEDULED');
-
-/** retryableはサーバの近似,実際に消えているかは押して410が返って初めて分かる */
-const retryTitle = computed(() =>
-	gone.value || props.retryable === false ? 'Removed from the coordinator after the retention period' : undefined,
-);
-
-async function act(kind: 'retry' | 'cancel') {
-	busy.value = true;
-	try {
-		const result = await (kind === 'retry' ? retryJob(props.jobId) : cancelJob(props.jobId));
-		if (result.gone) gone.value = true;
-		emit('message', result.message);
-		emit('changed');
-	} catch {
-		emit('message', 'Request failed');
-	} finally {
-		busy.value = false;
-	}
+async function run(kind: 'retry' | 'cancel') {
+	emit('message', await act(kind, props.jobId));
+	emit('changed');
 }
 </script>
 
@@ -64,8 +46,8 @@ async function act(kind: 'retry' | 'cancel') {
 						type="button"
 						class="w-full rounded-sm border-none px-2 py-1.5 text-left"
 						:class="[active && canRetry ? 'bg-accent' : '', canRetry ? '' : 'cursor-not-allowed text-muted-foreground']"
-						:title="retryTitle"
-						@click="canRetry && act('retry')"
+						:title="goneReason"
+						@click="canRetry && run('retry')"
 					>
 						Retry
 					</button>
@@ -76,7 +58,7 @@ async function act(kind: 'retry' | 'cancel') {
 						class="w-full rounded-sm border-none px-2 py-1.5 text-left"
 						:class="[active && canCancel ? 'bg-accent' : '', canCancel ? 'text-destructive' : 'cursor-not-allowed text-muted-foreground']"
 						title="Only scheduled jobs can be cancelled"
-						@click="canCancel && act('cancel')"
+						@click="canCancel && run('cancel')"
 					>
 						Cancel
 					</button>
