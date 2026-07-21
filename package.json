@@ -3,14 +3,10 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "workspaces": [
-    "packages/*",
-    "examples/*"
-  ],
   "scripts": {
-    "build": "npm run build -w @tsumugi/dashboard && npm run build -w tsumugi",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run typecheck && vitest run",
+    "build": "pnpm --filter @tsumugi/dashboard build && pnpm --filter tsumugi build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm typecheck && vitest run",
     "test:unit": "vitest run --project unit",
     "test:workers": "vitest run --project workers",
     "format": "prettier --write .",
@@ -22,5 +18,12 @@
     "typescript": "^5.7.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.112.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "workerd"
+    ]
   }
 }

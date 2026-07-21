@@ -10,57 +10,62 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run format:check
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
 
   typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
 
   # coreの純粋関数, workerdを起動しないので速い
   unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run test:unit
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:unit
 
   # workerdを起動する統合テスト
   workers:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run test:workers
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:workers
 
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npm run check:pack -w tsumugi
-      - run: npm run check:size -w tsumugi
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter tsumugi check:pack
+      - run: pnpm --filter tsumugi check:size
