@@ -24,18 +24,32 @@ const call = (path: string, database: D1Database) =>
 		{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 	);
 
-/** 台帳を差し替えたD1に見せかける, 実際のテスト用D1は壊さない */
-function withLedger(rows: { name: string }[] | 'missing'): D1Database {
-	return {
-		...env.TSUMUGI_DB,
-		prepare(query: string) {
-			if (query.includes('d1_migrations')) {
-				if (rows === 'missing') throw new Error('no such table: d1_migrations');
-				return { all: async () => ({ results: rows }) } as unknown as D1PreparedStatement;
+/**
+ * 台帳の応答だけ差し替えたD1を返す, 実際のテスト用D1は壊さない
+ *
+ * D1のメソッドはプロトタイプにあり展開では失われる
+ * `prepare`しか使わない経路では気づけず, `batch`を通した時に初めて壊れる
+ */
+function proxyD1(onMigrationsQuery: () => D1PreparedStatement): D1Database {
+	const base = env.TSUMUGI_DB;
+	return new Proxy(base, {
+		get(target, prop, receiver) {
+			if (prop === 'prepare') {
+				return (query: string) => (query.includes('d1_migrations') ? onMigrationsQuery() : target.prepare(query));
 			}
-			return env.TSUMUGI_DB.prepare(query);
+			const value = Reflect.get(target, prop, receiver);
+			return typeof value === 'function' ? value.bind(target) : value;
 		},
-	} as unknown as D1Database;
+	});
+}
+
+const ledgerOf = (rows: { name: string }[]) => ({ all: async () => ({ results: rows }) }) as unknown as D1PreparedStatement;
+
+function withLedger(rows: { name: string }[] | 'missing'): D1Database {
+	return proxyD1(() => {
+		if (rows === 'missing') throw new Error('no such table: d1_migrations');
+		return ledgerOf(rows);
+	});
 }
 
 describe('マイグレーション適用漏れの検出', () => {
@@ -69,18 +83,18 @@ describe('マイグレーション適用漏れの検出', () => {
 		expect(res.status).toBe(200);
 	});
 
+	it('batchを使う経路も通る', async () => {
+		// 展開でモックを作るとプロトタイプのメソッドが落ち, ここで初めて壊れる
+		const res = await call('/api/jobs', withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
+		expect(res.status).toBe(200);
+	});
+
 	it('通った結果は使い回してD1を叩き直さない', async () => {
 		let calls = 0;
-		const counting = {
-			...env.TSUMUGI_DB,
-			prepare(query: string) {
-				if (query.includes('d1_migrations')) {
-					calls++;
-					return { all: async () => ({ results: EXPECTED_MIGRATIONS.map((name) => ({ name })) }) } as unknown as D1PreparedStatement;
-				}
-				return env.TSUMUGI_DB.prepare(query);
-			},
-		} as unknown as D1Database;
+		const counting = proxyD1(() => {
+			calls++;
+			return ledgerOf(EXPECTED_MIGRATIONS.map((name) => ({ name })));
+		});
 
 		const check = cachedCheck();
 		await check(counting);
@@ -91,16 +105,9 @@ describe('マイグレーション適用漏れの検出', () => {
 
 	it('未適用の結果は使い回さない, 適用後に自力で復帰する', async () => {
 		let applied = false;
-		const flipping = {
-			...env.TSUMUGI_DB,
-			prepare(query: string) {
-				if (query.includes('d1_migrations')) {
-					const rows = applied ? EXPECTED_MIGRATIONS.map((name) => ({ name })) : [{ name: '0001_create_job_read_model.sql' }];
-					return { all: async () => ({ results: rows }) } as unknown as D1PreparedStatement;
-				}
-				return env.TSUMUGI_DB.prepare(query);
-			},
-		} as unknown as D1Database;
+		const flipping = proxyD1(() =>
+			ledgerOf(applied ? EXPECTED_MIGRATIONS.map((name) => ({ name })) : [{ name: '0001_create_job_read_model.sql' }]),
+		);
 
 		const check = cachedCheck();
 		expect((await check(flipping)).ok).toBe(false);
