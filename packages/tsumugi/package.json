@@ -44,6 +44,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.test.json",
     "build": "tsdown",
+    "prepare": "npm run build",
     "check:pack": "publint && attw --pack . --profile esm-only",
     "check:size": "node scripts/size-check.mjs"
   },
