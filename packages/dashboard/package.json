@@ -8,7 +8,7 @@
   "scripts": {
     "build": "vite build && node scripts/emit-module.mjs",
     "dev": "vite",
-    "prepare": "npm run build"
+    "prepare": "pnpm build"
   },
   "dependencies": {
     "@headlessui/vue": "^1.7.23",
