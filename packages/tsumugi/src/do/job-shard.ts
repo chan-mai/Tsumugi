@@ -28,6 +28,12 @@ export type ShardEnv = {
 	TSUMUGI_METRICS?: AnalyticsEngineDataset;
 };
 
+/**
+ * retry / cancelの結果
+ * `gone`は保持期間を過ぎてDOから消えた状態, 一覧はD1から引くので画面には残り続ける(ADR-0027)
+ */
+export type MutationResult = { ok: true } | { ok: false; reason: 'invalid-state' | 'gone' };
+
 /** DOに持たせる設定,流量制御と保持期間 */
 export type ShardSettings = {
 	policy?: Partial<Policy>;
@@ -101,7 +107,7 @@ const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
  * 失敗ジョブをDOに残す時間, 既定7日
  * D1の読み取りモデルの既定と揃える, 揃えないと一覧に見えるのに再開できないジョブが出る(ADR-0027)
  */
-const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function retentionOf(settings: ShardSettings): Retention {
 	return {
@@ -272,27 +278,34 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * ダッシュボードからの手動リトライ
 	 * FAILEDとSTALLEDは終端だが不可逆ではない(ADR-0012)
 	 */
-	async retry(jobId: string): Promise<boolean> {
+	async retry(jobId: string): Promise<MutationResult> {
 		const now = this.clock.now();
 		const ok = this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', {
 			now,
 			runAfter: now,
 			dispatchedAt: null,
 		});
-		if (ok) await this.#armAlarm(now);
-		return ok;
+		if (ok) {
+			await this.#armAlarm(now);
+			return { ok: true };
+		}
+		// 理由を分けて返す, 保持期間を過ぎて消えたのか状態が違うのかで利用者の打つ手が変わる(ADR-0027)
+		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
 	}
 
 	/**
 	 * 実行前のジョブの取り消し
 	 * QUEUED以降はconsumerが既に実行を始めているかもしれず,取り消せたと嘘をつかない(ADR-0012)
 	 */
-	async cancel(jobId: string): Promise<boolean> {
+	async cancel(jobId: string): Promise<MutationResult> {
 		const now = this.clock.now();
 		const ok = this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now });
 		// 投影のためにtickを呼ぶ,張らないと静かなシャードで読み取りモデルが取り消し前のまま残る
-		if (ok) await this.#armAlarm(now);
-		return ok;
+		if (ok) {
+			await this.#armAlarm(now);
+			return { ok: true };
+		}
+		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
 	}
 
 	async alarm(): Promise<void> {

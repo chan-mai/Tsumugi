@@ -205,6 +205,90 @@ describe('ジョブの投入', () => {
 	});
 });
 
+describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
+	// 一覧はD1から引くのでDOから消えても行は残る, 押す前と押した後の両方で分かる必要がある
+	const shortLived = defineTsumugi<RestEnv>({
+		performers: { GONE: Noop },
+		auth: bearerAuth(TOKEN),
+		bindings: { GONE: { failedRetentionMs: 1 } },
+	});
+	const authorized = { authorization: `Bearer ${TOKEN}` };
+
+	/** DOには行が無くD1にだけ残っている状態を作る */
+	async function orphan(id: string, state: string, updatedAt: number) {
+		await env.TSUMUGI_DB.prepare(
+			`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, created_at, updated_at, payload)
+			 VALUES (?, 1, 'GONE', ?, 0, 3, 3, 'at-least-once', ?, ?, '{}')`,
+		)
+			.bind(id, state, updatedAt, updatedAt)
+			.run();
+	}
+
+	const post = (handler: typeof withAuth, path: string) =>
+		handler.fetch!(
+			new Request(`https://example.com${path}`, { method: 'POST', headers: authorized }),
+			env as RestEnv,
+			{
+				waitUntil: () => {},
+				passThroughOnException: () => {},
+			} as unknown as ExecutionContext,
+		);
+
+	it('DOから消えたジョブのretryは410', async () => {
+		await orphan('GONE#0:swept', 'FAILED', T0 - 10 * 60 * 1000);
+		const res = await post(shortLived, '/api/jobs/GONE%230%3Aswept/retry');
+
+		// 状態違いの409と混ぜると,保持期間を延ばせば直るのかどうかが利用者に伝わらない
+		expect(res.status).toBe(410);
+		expect((await res.json<{ error: string }>()).error).toContain('retention');
+	});
+
+	it('状態が違うだけなら409', async () => {
+		const jobId = await seedJob();
+		const res = await post(withAuth, `/api/jobs/${encodeURIComponent(jobId)}/cancel`);
+		expect(res.status).toBe(409);
+	});
+
+	it('保持期間を過ぎた行はretryable=falseで返る', async () => {
+		// retryableは実時刻で判定するのでT0(未来の固定値)は使えない
+		await orphan('GONE#0:old', 'FAILED', Date.now() - 10 * 60 * 1000);
+		const res = await shortLived.fetch!(
+			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
+		expect(jobs.find((j) => j.id === 'GONE#0:old')?.retryable).toBe(false);
+	});
+
+	it('窓の内側の失敗ジョブはretryable=true', async () => {
+		const generous = defineTsumugi<RestEnv>({
+			performers: { GONE: Noop },
+			auth: bearerAuth(TOKEN),
+			bindings: { GONE: { failedRetentionMs: 7 * 24 * 60 * 60 * 1000 } },
+		});
+		await orphan('GONE#0:fresh', 'FAILED', Date.now());
+		const res = await generous.fetch!(
+			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
+		expect(jobs.find((j) => j.id === 'GONE#0:fresh')?.retryable).toBe(true);
+	});
+
+	it('終端でない状態はretryable=false', async () => {
+		await orphan('GONE#0:running', 'RUNNING', Date.now());
+		const res = await shortLived.fetch!(
+			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
+		expect(jobs.find((j) => j.id === 'GONE#0:running')?.retryable).toBe(false);
+	});
+});
+
 describe('一覧の並べ替え', () => {
 	const list = (query: string) => call(withAuth, 'GET', `/api/jobs?${query}`, { authorization: `Bearer ${TOKEN}` });
 
