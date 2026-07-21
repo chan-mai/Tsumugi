@@ -256,7 +256,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 			<Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" />
 		</div>
 
-		<JobDetailModal :job-id="selected" @close="selected = null" />
+		<JobDetailModal :job-id="selected" @close="selected = null" @changed="load" />
 		<NewJobModal
 			:open="creating"
 			:bindings="bindings"

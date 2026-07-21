@@ -3,12 +3,24 @@ import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } fro
 import { ref, watch } from 'vue';
 import StatusCell from './StatusCell.vue';
 import { getJob, type Job } from '../api';
+import { useJobActions } from '../useJobActions';
 
 const props = defineProps<{ jobId: string | null }>();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; changed: [] }>();
 
 const job = ref<Job | null>(null);
 const error = ref<string | null>(null);
+const message = ref<string | null>(null);
+
+const { busy, canRetry, canCancel, goneReason, act, reset } = useJobActions(job);
+
+async function load(id: string) {
+	try {
+		job.value = (await getJob(id)).job;
+	} catch (e) {
+		error.value = e instanceof Error ? e.message : String(e);
+	}
+}
 
 watch(
 	() => props.jobId,
@@ -17,13 +29,19 @@ watch(
 		// 閉じるアニメーションの間に中身が消えないよう,開く時だけ差し替える
 		job.value = null;
 		error.value = null;
-		try {
-			job.value = (await getJob(id)).job;
-		} catch (e) {
-			error.value = e instanceof Error ? e.message : String(e);
-		}
+		message.value = null;
+		reset();
+		await load(id);
 	},
 );
+
+async function run(kind: 'retry' | 'cancel') {
+	if (!props.jobId) return;
+	message.value = await act(kind, props.jobId);
+	// 投影は数秒遅れるので即時には変わらないが,反映され次第この再読込で追いつく
+	await load(props.jobId);
+	emit('changed');
+}
 
 const at = (value: number | null | undefined) => (value ? new Date(value).toLocaleString() : '-');
 
@@ -109,6 +127,30 @@ const pretty = (payload: string | undefined) => {
 							<div>
 								<p class="mb-1 text-muted-foreground">Payload</p>
 								<pre class="overflow-auto rounded-card bg-muted p-3 text-xs">{{ pretty(job.payload) }}</pre>
+							</div>
+
+							<div class="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+								<button
+									type="button"
+									class="h-8 rounded-card border border-border px-3 text-sm"
+									:class="canRetry ? 'bg-background hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
+									:disabled="busy || !canRetry"
+									:title="goneReason"
+									@click="run('retry')"
+								>
+									Retry
+								</button>
+								<button
+									type="button"
+									class="h-8 rounded-card border border-border px-3 text-sm"
+									:class="canCancel ? 'bg-background text-destructive hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
+									:disabled="busy || !canCancel"
+									title="Only scheduled jobs can be cancelled"
+									@click="run('cancel')"
+								>
+									Cancel
+								</button>
+								<span v-if="message" class="text-xs text-muted-foreground">{{ message }}</span>
 							</div>
 						</div>
 					</DialogPanel>
