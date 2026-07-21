@@ -2,7 +2,7 @@ import type { ActiveState, JobState } from './types.js';
 
 /**
  * 状態機械の遷移表(ADR-0012)
- * 重複配送や競合で終端状態のジョブが再び動き出さないための番人
+ * 重複配送や競合で終端状態のジョブが再び動き出すのを弾く
  * cancelをSCHEDULEDからのみ許すのは意図的, QUEUED以降は実行済みかもしれず「取り消せた」と嘘をつきたくない
  */
 export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {

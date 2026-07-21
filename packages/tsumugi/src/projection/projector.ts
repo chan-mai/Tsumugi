@@ -8,7 +8,7 @@ export type JobSnapshot = JobRow & { attempts_log?: AttemptRow[] };
 /**
  * D1への投影(ADR-0008)
  *
- * `WHERE excluded.seq > job.seq`が番人,同じ範囲を何度流しても結果は不変
+ * `WHERE excluded.seq > job.seq`で古い状態の上書きを弾く,同じ範囲を何度流しても結果は不変
  * 再送や順序の入れ替わりでも古い状態が新しい状態を上書きしない
  */
 const UPSERT = `
