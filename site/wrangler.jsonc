@@ -1,0 +1,12 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "tsumugi-docs",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./.vitepress/dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+  },
+  "routes": [{ "pattern": "tsumugi.mq1.dev", "custom_domain": true }],
+  "workers_dev": false,
+}

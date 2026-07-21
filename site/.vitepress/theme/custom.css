@@ -1,0 +1,100 @@
+/**
+ * ピンク #f7a1b2 と, インラインコードとインタラクティブなテキストの #ff3e65
+ *
+ * 本文の文字色はVitePress既定のまま触らない
+ * ホバーはいずれも白と混ぜて明るい方へシフトさせる, 新しい色は足さない
+ */
+
+:root {
+	--tsumugi-pink: #f7a1b2;
+	--tsumugi-pink-hover: color-mix(in srgb, var(--tsumugi-pink) 62%, #fff);
+	--tsumugi-pink-active: color-mix(in srgb, var(--tsumugi-pink) 40%, #fff);
+	--tsumugi-pink-tint: color-mix(in srgb, var(--tsumugi-pink) 22%, #fff);
+
+	/* インラインコードとリンク, 編集リンク, ページャ, 選択中の項目が引く */
+	--vp-c-brand-1: #ff3e65;
+	--vp-c-brand-2: color-mix(in srgb, #ff3e65 70%, #fff);
+	--vp-c-brand-3: var(--tsumugi-pink);
+	--vp-c-brand-soft: color-mix(in srgb, var(--tsumugi-pink) 32%, transparent);
+
+	--vp-c-brand: var(--vp-c-brand-1);
+	--vp-c-brand-light: var(--vp-c-brand-2);
+	--vp-c-brand-lighter: var(--tsumugi-pink-active);
+	--vp-c-brand-dark: var(--vp-c-brand-1);
+	--vp-c-brand-darker: var(--vp-c-brand-1);
+}
+
+.dark {
+	/* #ff3e65の指定はライトモードのみ, ダークはピンクのまま */
+	--vp-c-brand-1: var(--tsumugi-pink);
+	--vp-c-brand-2: var(--tsumugi-pink-hover);
+	--vp-c-brand-3: var(--tsumugi-pink);
+	--vp-c-brand-soft: color-mix(in srgb, var(--tsumugi-pink) 22%, transparent);
+
+	--vp-c-brand: var(--tsumugi-pink);
+	--vp-c-brand-light: var(--tsumugi-pink-hover);
+	--vp-c-brand-lighter: var(--tsumugi-pink-active);
+	--vp-c-brand-dark: var(--tsumugi-pink);
+	--vp-c-brand-darker: var(--tsumugi-pink);
+}
+
+/* ブランドボタン, 地はピンクでラベルは白 */
+:root,
+.dark {
+	--vp-button-brand-bg: var(--tsumugi-pink);
+	--vp-button-brand-text: #fff;
+	--vp-button-brand-border: var(--tsumugi-pink);
+
+	--vp-button-brand-hover-bg: var(--tsumugi-pink-hover);
+	--vp-button-brand-hover-text: #fff;
+	--vp-button-brand-hover-border: var(--tsumugi-pink-hover);
+
+	--vp-button-brand-active-bg: var(--tsumugi-pink-active);
+	--vp-button-brand-active-text: #fff;
+	--vp-button-brand-active-border: var(--tsumugi-pink-active);
+}
+
+/* ヒーロー */
+:root,
+.dark {
+	--vp-home-hero-name-color: transparent;
+	--vp-home-hero-name-background: var(--tsumugi-pink);
+
+	--vp-home-hero-image-background-image: var(--tsumugi-pink);
+	--vp-home-hero-image-filter: blur(44px);
+}
+
+@media (min-width: 640px) {
+	:root {
+		--vp-home-hero-image-filter: blur(56px);
+	}
+}
+
+@media (min-width: 960px) {
+	:root {
+		--vp-home-hero-image-filter: blur(68px);
+	}
+}
+
+/* カスタムブロックとコードのハイライト */
+:root {
+	--vp-custom-block-tip-bg: var(--tsumugi-pink-tint);
+	--vp-custom-block-tip-border: var(--tsumugi-pink);
+	--vp-custom-block-tip-text: var(--vp-c-text-1);
+
+	--vp-code-line-highlight-color: var(--tsumugi-pink-tint);
+}
+
+.dark {
+	--vp-custom-block-tip-bg: color-mix(in srgb, var(--tsumugi-pink) 16%, transparent);
+	--vp-custom-block-tip-border: var(--tsumugi-pink);
+	--vp-custom-block-tip-text: var(--vp-c-text-1);
+}
+
+.VPFeature {
+	transition: border-color 0.25s;
+}
+
+.VPFeature:hover {
+	border-color: var(--tsumugi-pink);
+}

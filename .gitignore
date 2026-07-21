@@ -7,4 +7,7 @@ dist/
 #ダッシュボードのビルド生成物(packages/dashboardからemit)
 packages/tsumugi/src/entries/dashboard.gen.ts
 
+#ドキュメントサイト
+site/.vitepress/cache/
+
 docs/dec
