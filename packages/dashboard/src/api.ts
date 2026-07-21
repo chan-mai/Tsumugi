@@ -63,7 +63,11 @@ export function saveToken(value: string): void {
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 	const res = await fetch(`${base()}${path}`, { ...init, credentials: 'same-origin' });
 	if (res.status === 401) throw new UnauthorizedError();
-	if (!res.ok) throw new Error(`${res.status}`);
+	if (!res.ok) {
+		// サーバが理由を返す場合はそのまま見せる, 数字だけでは何をすればよいか分からない
+		const body = (await res.json().catch(() => ({}))) as { error?: string };
+		throw new Error(body.error ?? `${res.status}`);
+	}
 	return res.json() as Promise<T>;
 }
 

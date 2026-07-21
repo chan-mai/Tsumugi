@@ -1,6 +1,7 @@
 import { and, asc, desc as sqlDesc, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
 import { job as readModel } from '../projection/tables.js';
 import { InvalidJobIdError, shardNameOf } from '../core/ids.js';
 import type { TsumugiJobShard } from '../do/job-shard.js';
@@ -157,6 +158,15 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	// 認証はAPIにのみ掛ける
 	// HTMLの殻はデータを含まず,未認証で返すことでSPAがトークン入力を出せる(ADR-0013)
 	app.use('/api/*', auth);
+
+	// マイグレーションの適用漏れをここで止める
+	// 通さないとD1のraw errorが出るだけで,原因が設定漏れだと分からない
+	const checkSchema = cachedCheck();
+	app.use('/api/*', async (c, next) => {
+		const status = await checkSchema(c.env.TSUMUGI_DB);
+		if (!status.ok) return c.json({ error: migrationErrorMessage(status.missing) }, 503);
+		await next();
+	});
 
 	app.get('/api/jobs', async (c) => {
 		const url = new URL(c.req.url);
