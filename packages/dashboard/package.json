@@ -7,7 +7,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "vite build && node scripts/emit-module.mjs",
-    "dev": "vite"
+    "dev": "vite",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@headlessui/vue": "^1.7.23",
