@@ -1,6 +1,15 @@
 import { assertTransition } from '../core/transitions.js';
-import type { Backoff, DeliveryGuarantee, JobState, JobView } from '../core/types.js';
+import type { Backoff, DeliveryGuarantee, JobState, JobView, Retention } from '../core/types.js';
 import { applySchema, type JobRow } from './schema.js';
+
+/**
+ * 掃除の対象条件, ?1は済んだジョブの期限 / ?2は失敗ジョブの期限
+ * 削除と判定で同じ式を使う, 片方だけ直すと消える条件と起きる条件がずれる
+ */
+const SWEEPABLE = `(
+	(state IN ('COMPLETED', 'CANCELLED') AND updated_at < ?1)
+	OR (state IN ('FAILED', 'STALLED') AND updated_at < ?2)
+)`;
 
 export type NewJob = {
 	id: string;
@@ -175,14 +184,17 @@ export class JobRepo {
 	 * 投影が滞っていても消して構わない
 	 * アウトボックスはD1へUPSERTする内容そのものを持っており,ジョブ行を参照しないため
 	 */
-	sweepTerminal(before: number, limit: number): number {
+	/**
+	 * 保持期間, 役割の違う2つを別の数字で持つ(ADR-0027)
+	 * doneMsは済んだジョブ, failedMsは人手で再開する余地のあるジョブ
+	 */
+	sweepTerminal(now: number, retention: Retention, limit: number): number {
 		const cursor = this.sql.exec(
 			`DELETE FROM job WHERE id IN (
-				SELECT id FROM job
-				WHERE state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED') AND updated_at < ?
-				LIMIT ?
+				SELECT id FROM job WHERE ${SWEEPABLE} LIMIT ?3
 			)`,
-			before,
+			now - retention.doneMs,
+			now - retention.failedMs,
 			limit,
 		);
 		this.writes++;
@@ -190,22 +202,29 @@ export class JobRepo {
 	}
 
 	/**
-	 * 掃除する対象があるかを1回の読み取りで見る
+	 * 掃除する対象と次に対象が出る時刻を1回の読み取りで見る
 	 * 対象が無くてもDELETEを撃つと書き込みが増える,読み取りは書き込みより桁で安価
+	 *
+	 * nextDueAtを返すのは無駄な起床を避けるため
+	 * 失敗ジョブだけが残る状態で短い間隔のalarmを張り続けると,何もしない書き込みが延々と積まれる
 	 */
-	hasSweepable(before: number, now: number): { jobs: boolean; uniqueKeys: boolean; anyTerminal: boolean } {
+	sweepState(now: number, retention: Retention): { jobs: boolean; uniqueKeys: boolean; nextDueAt: number | null } {
 		const row = this.sql
-			.exec<{ jobs: number; unique_keys: number; any_terminal: number }>(
+			.exec<{ jobs: number; unique_keys: number; next_due: number | null }>(
 				`SELECT
-					EXISTS(SELECT 1 FROM job WHERE state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED') AND updated_at < ?) AS jobs,
-					EXISTS(SELECT 1 FROM unique_key WHERE expires_at <= ?) AS unique_keys,
-					EXISTS(SELECT 1 FROM job WHERE state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED')) AS any_terminal`,
-				before,
+					EXISTS(SELECT 1 FROM job WHERE ${SWEEPABLE}) AS jobs,
+					EXISTS(SELECT 1 FROM unique_key WHERE expires_at <= ?3) AS unique_keys,
+					(SELECT MIN(CASE WHEN state IN ('FAILED', 'STALLED') THEN updated_at + ?5 ELSE updated_at + ?4 END)
+					 FROM job WHERE state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED')) AS next_due`,
+				now - retention.doneMs,
+				now - retention.failedMs,
 				now,
+				retention.doneMs,
+				retention.failedMs,
 			)
 			.one();
 		this.reads++;
-		return { jobs: row.jobs === 1, uniqueKeys: row.unique_keys === 1, anyTerminal: row.any_terminal === 1 };
+		return { jobs: row.jobs === 1, uniqueKeys: row.unique_keys === 1, nextDueAt: row.next_due };
 	}
 
 	/** 期限切れの重複排除キー, enqueueが途絶えても溜まらないようtickでも掃除する */

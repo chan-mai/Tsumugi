@@ -107,6 +107,75 @@ describe('DOの掃除', () => {
 	});
 });
 
+describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
+	/** 失敗させてFAILEDまで運ぶ */
+	async function failJob(name: string, binding: string, now: number, queue: { sent: DispatchMessage[]; queue: unknown }) {
+		await install(name, now, queue.queue);
+		const jobId = await shard(name).enqueue({ binding, payload: {}, maxAttempts: 1 });
+		await runDurableObjectAlarm(shard(name));
+		await shard(name).report(queue.sent[queue.sent.length - 1]!.jobId, { ok: false });
+		return jobId;
+	}
+
+	it('済んだジョブが消えても失敗ジョブは残る', async () => {
+		const q = captureQueue();
+		await install('SPLIT#0', T0, q.queue);
+		await shard('SPLIT#0').configure({ sweepAfterMs: 60_000, failedRetentionMs: 7 * 24 * 60 * 60 * 1000 });
+
+		const failed = await failJob('SPLIT#0', 'SPLIT', T0, q);
+		const done = await shard('SPLIT#0').enqueue({ binding: 'SPLIT', payload: {} });
+		await runDurableObjectAlarm(shard('SPLIT#0'));
+		await shard('SPLIT#0').report(done, { ok: true });
+
+		expect(await stateOf('SPLIT#0', failed)).toBe('FAILED');
+		expect(await stateOf('SPLIT#0', done)).toBe('COMPLETED');
+
+		// 済んだ側の保持だけを過ぎた時点
+		await install('SPLIT#0', T0 + 120_000, q.queue);
+		await runDurableObjectAlarm(shard('SPLIT#0'));
+
+		expect(await stateOf('SPLIT#0', done)).toBeUndefined();
+		// 手動リトライの窓が開いている限り消えてはならない
+		expect(await stateOf('SPLIT#0', failed)).toBe('FAILED');
+	});
+
+	it('失敗側の保持を過ぎれば落ちる', async () => {
+		const q = captureQueue();
+		await install('SPLIT2#0', T0, q.queue);
+		await shard('SPLIT2#0').configure({ sweepAfterMs: 1_000, failedRetentionMs: 60_000 });
+		const failed = await failJob('SPLIT2#0', 'SPLIT2', T0, q);
+
+		await install('SPLIT2#0', T0 + 120_000, q.queue);
+		await runDurableObjectAlarm(shard('SPLIT2#0'));
+		expect(await stateOf('SPLIT2#0', failed)).toBeUndefined();
+	});
+
+	it('既定では失敗ジョブが5分では消えない', async () => {
+		// 既定を短いままにすると一覧に見えるのに再開できないジョブが出る
+		const q = captureQueue();
+		const failed = await failJob('SPLIT3#0', 'SPLIT3', T0, q);
+
+		await install('SPLIT3#0', T0 + 60 * 60 * 1000, q.queue);
+		await runDurableObjectAlarm(shard('SPLIT3#0'));
+		expect(await stateOf('SPLIT3#0', failed)).toBe('FAILED');
+	});
+
+	it('次に対象が出る時刻までalarmを飛ばす', async () => {
+		// 一定間隔で起き直すと, 失敗ジョブだけが残る間ずっと何もしない書き込みが積まれる
+		const q = captureQueue();
+		await install('SPLIT4#0', T0, q.queue);
+		await shard('SPLIT4#0').configure({ sweepAfterMs: 1_000, failedRetentionMs: 60 * 60 * 1000 });
+		await failJob('SPLIT4#0', 'SPLIT4', T0, q);
+
+		await install('SPLIT4#0', T0 + 10_000, q.queue);
+		await runDurableObjectAlarm(shard('SPLIT4#0'));
+
+		const alarm = await runInDurableObject(shard('SPLIT4#0'), (_i, state) => state.storage.getAlarm());
+		// 失敗ジョブの期限は投入時刻+1時間, 短い間隔で起こしてはならない
+		expect(alarm).toBeGreaterThan(T0 + 30 * 60 * 1000);
+	});
+});
+
 describe('状態を変える操作はalarmを張る', () => {
 	// 張らないとアウトボックスが滞留し,200を返した直後の読み取りモデルが古いまま残る
 	const alarmOf = (name: string) => runInDurableObject(shard(name), (_i, state) => state.storage.getAlarm());

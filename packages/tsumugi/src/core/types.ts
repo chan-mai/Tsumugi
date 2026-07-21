@@ -69,3 +69,14 @@ export type ScheduleOutput = {
 	/** 次にスケジューラを起こす時刻,不要ならnull */
 	nextAlarmAt: number | null;
 };
+
+/**
+ * DOに終端ジョブを残す時間(ADR-0027)
+ * 済んだジョブと再開余地のあるジョブは役割が違うので別の数字で持つ
+ */
+export type Retention = {
+	/** COMPLETED / CANCELLED */
+	doneMs: number;
+	/** FAILED / STALLED, 手動リトライの窓 */
+	failedMs: number;
+};

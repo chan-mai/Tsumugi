@@ -28,10 +28,15 @@ export type BindingConfig = {
 	/** 流量制御3軸とエージング(ADR-0009 / ADR-0020) */
 	policy?: Partial<Policy>;
 	/**
-	 * 終端に達したジョブをDOに残す時間,既定5分
-	 * 明細はD1へ投影済みなのでDOに残す理由がなく,溜めるとtickのクエリが重くなる
+	 * 済んだジョブ(COMPLETED / CANCELLED)をDOに残す時間,既定5分
+	 * 明細はD1へ投影済みなのでDOに残す理由がない
 	 */
 	sweepAfterMs?: number;
+	/**
+	 * 失敗ジョブ(FAILED / STALLED)をDOに残す時間,既定7日
+	 * 手動リトライの窓そのもの, D1の保持と揃えてある(ADR-0027)
+	 */
+	failedRetentionMs?: number;
 };
 
 export type TsumugiClient<Env extends ClientEnv> = {
@@ -41,10 +46,11 @@ export type TsumugiClient<Env extends ClientEnv> = {
 };
 
 function settingsOf(config: BindingConfig | undefined): ShardSettings | undefined {
-	if (!config?.policy && config?.sweepAfterMs === undefined) return undefined;
+	if (!config?.policy && config?.sweepAfterMs === undefined && config?.failedRetentionMs === undefined) return undefined;
 	return {
 		...(config.policy ? { policy: config.policy } : {}),
 		...(config.sweepAfterMs !== undefined ? { sweepAfterMs: config.sweepAfterMs } : {}),
+		...(config.failedRetentionMs !== undefined ? { failedRetentionMs: config.failedRetentionMs } : {}),
 	};
 }
 
