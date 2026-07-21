@@ -3,7 +3,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { formatJobId } from '../core/ids.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
-import type { Backoff, Bucket, DeliveryGuarantee, Policy } from '../core/types.js';
+import type { Backoff, Bucket, DeliveryGuarantee, Policy, Retention } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
 import { project } from '../projection/projector.js';
@@ -31,8 +31,13 @@ export type ShardEnv = {
 /** DOに持たせる設定,流量制御と保持期間 */
 export type ShardSettings = {
 	policy?: Partial<Policy>;
-	/** 終端に達したジョブをDOに残す時間 */
+	/** 済んだジョブ(COMPLETED / CANCELLED)をDOに残す時間, 既定5分 */
 	sweepAfterMs?: number;
+	/**
+	 * 失敗ジョブ(FAILED / STALLED)をDOに残す時間, 既定7日
+	 * 手動リトライの窓そのもの, 短くすると一覧に見えるのに再開できないジョブが出る(ADR-0027)
+	 */
+	failedRetentionMs?: number;
 };
 
 export type EnqueueInput = {
@@ -89,8 +94,21 @@ const PROJECTION_LIMIT = 200;
 /** 1 tickで落とす終端ジョブの上限, tickを有界に保つ */
 const SWEEP_LIMIT = 200;
 
-/** 終端に達したジョブをDOに残す時間,投影が追いつく余裕を見て既定5分 */
+/** 済んだジョブをDOに残す時間,投影が追いつく余裕を見て既定5分 */
 const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
+
+/**
+ * 失敗ジョブをDOに残す時間, 既定7日
+ * D1の読み取りモデルの既定と揃える, 揃えないと一覧に見えるのに再開できないジョブが出る(ADR-0027)
+ */
+const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function retentionOf(settings: ShardSettings): Retention {
+	return {
+		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
+		failedMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
+	};
+}
 
 /**
  * ジョブの調停役(ADR-0002)
@@ -102,7 +120,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/** テストから差し替えるためpublicにしている */
 	clock: Clock = systemClock;
 	policy: Policy = DEFAULT_POLICY;
-	sweepAfterMs: number = DEFAULT_SWEEP_AFTER_MS;
+	retention: Retention = { doneMs: DEFAULT_SWEEP_AFTER_MS, failedMs: DEFAULT_FAILED_RETENTION_MS };
 
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
@@ -130,7 +148,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		if (raw) {
 			const settings = JSON.parse(raw) as ShardSettings;
 			this.policy = { ...DEFAULT_POLICY, ...settings.policy };
-			this.sweepAfterMs = settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS;
+			this.retention = retentionOf(settings);
 		}
 		this.#policyLoaded = true;
 	}
@@ -143,7 +161,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#applySettings(settings: ShardSettings): void {
 		const encoded = JSON.stringify(settings);
 		this.policy = { ...DEFAULT_POLICY, ...settings.policy };
-		this.sweepAfterMs = settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS;
+		this.retention = retentionOf(settings);
 		this.#policyLoaded = true;
 		if (this.repo.readSetting('settings') === encoded) return;
 		this.repo.writeSetting('settings', encoded);
@@ -365,17 +383,16 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 投影済みの終端ジョブと期限切れの重複排除キーを対象にする
 	 */
 	#sweep(now: number): { deleted: number; retryAt: number | null } {
-		const before = now - this.sweepAfterMs;
 		// 対象の有無を先に読む,状態をメモリに持つとDOのエビクトで掃除が止まる
-		const sweepable = this.repo.hasSweepable(before, now);
-		if (sweepable.uniqueKeys) this.repo.sweepExpiredUniqueKeys(now);
-		const deleted = sweepable.jobs ? this.repo.sweepTerminal(before, SWEEP_LIMIT) : 0;
+		const state = this.repo.sweepState(now, this.retention);
+		if (state.uniqueKeys) this.repo.sweepExpiredUniqueKeys(now);
+		const deleted = state.jobs ? this.repo.sweepTerminal(now, this.retention, SWEEP_LIMIT) : 0;
 
-		// 終端ジョブを抱えている間は起き直す
+		// 次に対象が出る時刻まで寝る
 		// 稼働中が無くなるとalarmが張られず,掃除する機会が永久に来ない
-		// 消していなければ最初の読み取りの結果をそのまま使える
-		const anyTerminal = deleted > 0 ? this.repo.hasSweepable(before, now).anyTerminal : sweepable.anyTerminal;
-		return { deleted, retryAt: anyTerminal ? now + this.sweepAfterMs : null };
+		// 一定間隔で起き直すと失敗ジョブだけが残る状態で何もしない書き込みが積まれる
+		const next = deleted > 0 ? this.repo.sweepState(now, this.retention).nextDueAt : state.nextDueAt;
+		return { deleted, retryAt: next === null ? null : Math.max(next, now + 1_000) };
 	}
 
 	/** 予定より早い時刻にalarmが張られている場合は上書きしない */
