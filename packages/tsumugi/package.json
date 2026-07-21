@@ -1,6 +1,6 @@
 {
   "name": "tsumugi",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "license": "MIT",
   "description": "A job management system built on the Cloudflare stack",
@@ -45,6 +45,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.test.json",
     "build": "tsdown",
     "prepare": "npm run build",
+    "prepack": "cp ../../README.md ../../LICENSE .",
+    "postpack": "rm -f README.md LICENSE",
     "check:pack": "publint && attw --pack . --profile esm-only",
     "check:size": "node scripts/size-check.mjs"
   },
