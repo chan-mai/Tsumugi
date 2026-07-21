@@ -89,10 +89,14 @@ describe('secretからのトークン解決', () => {
 	});
 
 	const get = (envOverride: Record<string, unknown>, headers: Record<string, string> = {}) =>
-		fromEnv.fetch!(new Request('https://example.com/api/jobs', { headers }), { ...env, ...envOverride } as RestEnv, {
-			waitUntil: () => {},
-			passThroughOnException: () => {},
-		} as unknown as ExecutionContext);
+		fromEnv.fetch!(
+			new Request('https://example.com/api/jobs', { headers }),
+			{ ...env, ...envOverride } as RestEnv,
+			{
+				waitUntil: () => {},
+				passThroughOnException: () => {},
+			} as unknown as ExecutionContext,
+		);
 
 	it('envのトークンと一致すれば通る', async () => {
 		const res = await get({ TSUMUGI_TOKEN: 'from-secret' }, { authorization: 'Bearer from-secret' });
