@@ -1,0 +1,2 @@
+# ローカル開発用, 本番は`wrangler secret put TSUMUGI_TOKEN`で設定する
+TSUMUGI_TOKEN="dev-token"

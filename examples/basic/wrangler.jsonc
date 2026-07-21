@@ -12,7 +12,7 @@
     {
       "binding": "TSUMUGI_DB",
       "database_name": "tsumugi-example",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "9945ba53-b1cb-45a2-8f01-c650518c2f2a",
       // 読み取りモデルのマイグレーション,利用者は./node_modules/tsumugi/migrationsを指す
       "migrations_dir": "../../packages/tsumugi/migrations",
     },
