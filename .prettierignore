@@ -3,3 +3,4 @@ dist/
 package-lock.json
 # wrangler types の生成物
 examples/*/worker-configuration.d.ts
+README.md
