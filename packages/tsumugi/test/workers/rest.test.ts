@@ -4,6 +4,7 @@ import { bearerAuth } from '../../src/api/auth.js';
 import { Performer } from '../../src/core/api.js';
 import { defineTsumugi } from '../../src/worker.js';
 import { SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
+import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
 
 const T0 = 2_200_000_000_000;
 const TOKEN = 'secret-token';
@@ -331,5 +332,113 @@ describe('一覧の並べ替え', () => {
 		expect(new Set(asc).size).toBeGreaterThan(1);
 		expect(asc).toEqual([...asc].sort((a, b) => a - b));
 		expect(desc).toEqual([...asc].reverse());
+	});
+});
+
+describe('試行履歴(ADR-0028)', () => {
+	const authorized = { authorization: `Bearer ${TOKEN}` };
+	const q = { send: async () => {}, sendBatch: async () => {} };
+
+	async function runFailing(name: string, binding: string, maxAttempts: number) {
+		await runInDurableObject(shard(name), (instance) => {
+			(instance as any).clock = { now: () => T0 };
+			(instance as any).env.TSUMUGI_QUEUE = q;
+		});
+		const jobId = await shard(name).enqueue({ binding, payload: {}, maxAttempts });
+		await runDurableObjectAlarm(shard(name));
+		await shard(name).report(jobId, { ok: false, error: 'Error: boom\nat somewhere' });
+		// 報告はアウトボックスに積むだけ, もう1回流さないとD1に届かない
+		await runDurableObjectAlarm(shard(name));
+		return jobId;
+	}
+
+	const detail = async (jobId: string) => {
+		const res = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`, authorized);
+		return res.json<{ job: { attempts: number; attempts_log: { attempt: number; state: string; error: string | null }[] } }>();
+	};
+
+	it('失敗の理由が残る', async () => {
+		const jobId = await runFailing('LOG#0', 'LOG', 1);
+		const { job } = await detail(jobId);
+
+		expect(job.attempts_log).toHaveLength(1);
+		expect(job.attempts_log[0]).toMatchObject({ attempt: 1, state: 'FAILED' });
+		expect(job.attempts_log[0]?.error).toContain('boom');
+	});
+
+	it('試行回数の数値を潰さない', async () => {
+		// 履歴を`attempts`という名前で返すと画面の n/m が壊れる
+		const jobId = await runFailing('LOG2#0', 'LOG2', 1);
+		const { job } = await detail(jobId);
+		expect(typeof job.attempts).toBe('number');
+		expect(job.attempts).toBe(1);
+	});
+
+	it('1回目で成功したジョブは履歴を持たない', async () => {
+		// ジョブ行から導出できる情報を書くと1ジョブあたりの書き込みが1回増える
+		await runInDurableObject(shard('LOG3#0'), (instance) => {
+			(instance as any).clock = { now: () => T0 };
+			(instance as any).env.TSUMUGI_QUEUE = q;
+		});
+		const jobId = await shard('LOG3#0').enqueue({ binding: 'LOG3', payload: {} });
+		await runDurableObjectAlarm(shard('LOG3#0'));
+		await shard('LOG3#0').report(jobId, { ok: true });
+		await runDurableObjectAlarm(shard('LOG3#0'));
+
+		const { job } = await detail(jobId);
+		// 保存はしないが表示はする, ジョブ行から組み立てて返す
+		expect(job.attempts_log).toHaveLength(1);
+		expect(job.attempts_log[0]).toMatchObject({ attempt: 1, state: 'COMPLETED', error: null });
+		expect(job.attempts).toBe(1);
+	});
+
+	it('失敗の後に成功すれば両方残る', async () => {
+		// 失敗だけ残すと,なぜ今COMPLETEDなのかが履歴から読めなくなる
+		await runInDurableObject(shard('LOG6#0'), (instance) => {
+			(instance as any).clock = { now: () => T0 };
+			(instance as any).env.TSUMUGI_QUEUE = q;
+		});
+		const jobId = await shard('LOG6#0').enqueue({ binding: 'LOG6', payload: {}, maxAttempts: 3 });
+		await runDurableObjectAlarm(shard('LOG6#0'));
+		await shard('LOG6#0').report(jobId, { ok: false, error: 'first failure' });
+
+		// リトライ待ちを越えて再投入させる
+		await runInDurableObject(shard('LOG6#0'), (instance) => {
+			(instance as any).clock = { now: () => T0 + 10 * 60 * 1000 };
+		});
+		await runDurableObjectAlarm(shard('LOG6#0'));
+		await shard('LOG6#0').report(jobId, { ok: true });
+		await runDurableObjectAlarm(shard('LOG6#0'));
+
+		const { job } = await detail(jobId);
+		expect(job.attempts_log.map((a) => [a.attempt, a.state])).toEqual([
+			[2, 'COMPLETED'],
+			[1, 'FAILED'],
+		]);
+	});
+
+	it('エラー本文を打ち切る', async () => {
+		// performerの例外はHTMLページ丸ごとのこともある, 無制限だとDOとD1を圧迫する
+		await runInDurableObject(shard('LOG4#0'), (instance) => {
+			(instance as any).clock = { now: () => T0 };
+			(instance as any).env.TSUMUGI_QUEUE = q;
+		});
+		const jobId = await shard('LOG4#0').enqueue({ binding: 'LOG4', payload: {}, maxAttempts: 1 });
+		await runDurableObjectAlarm(shard('LOG4#0'));
+		await shard('LOG4#0').report(jobId, { ok: false, error: 'x'.repeat(50_000) });
+		await runDurableObjectAlarm(shard('LOG4#0'));
+
+		const { job } = await detail(jobId);
+		expect(job.attempts_log[0]?.error?.length).toBe(ERROR_MAX_CHARS);
+	});
+
+	it('一覧には履歴を載せない', async () => {
+		// 1画面ぶんの履歴は数百KBになり得る
+		const jobId = await runFailing('LOG5#0', 'LOG5', 1);
+		const res = await call(withAuth, 'GET', '/api/jobs?binding=LOG5', authorized);
+		const { jobs } = await res.json<{ jobs: Record<string, unknown>[] }>();
+		const row = jobs.find((j) => j.id === jobId);
+		expect(row).toBeDefined();
+		expect(row).not.toHaveProperty('attempts_log');
 	});
 });

@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue';
 import { ref, watch } from 'vue';
+import AttemptLog from './AttemptLog.vue';
 import StatusCell from './StatusCell.vue';
-import { getJob, type Job } from '../api';
+import { getJob, type Attempt, type Job } from '../api';
 import { useJobActions } from '../useJobActions';
 
 const props = defineProps<{ jobId: string | null }>();
 const emit = defineEmits<{ close: []; changed: [] }>();
 
 const job = ref<Job | null>(null);
+const attempts = ref<Attempt[]>([]);
 const error = ref<string | null>(null);
 const message = ref<string | null>(null);
 
@@ -16,7 +18,9 @@ const { busy, canRetry, canCancel, goneReason, act, reset } = useJobActions(job)
 
 async function load(id: string) {
 	try {
-		job.value = (await getJob(id)).job;
+		const loaded = (await getJob(id)).job;
+		job.value = loaded;
+		attempts.value = loaded.attempts_log ?? [];
 	} catch (e) {
 		error.value = e instanceof Error ? e.message : String(e);
 	}
@@ -28,6 +32,7 @@ watch(
 		if (!id) return;
 		// 閉じるアニメーションの間に中身が消えないよう,開く時だけ差し替える
 		job.value = null;
+		attempts.value = [];
 		error.value = null;
 		message.value = null;
 		reset();
@@ -128,6 +133,8 @@ const pretty = (payload: string | undefined) => {
 								<p class="mb-1 text-muted-foreground">Payload</p>
 								<pre class="overflow-auto rounded-card bg-muted p-3 text-xs">{{ pretty(job.payload) }}</pre>
 							</div>
+
+							<AttemptLog :attempts="attempts" />
 
 							<div class="flex flex-wrap items-center gap-2 border-t border-border pt-4">
 								<button

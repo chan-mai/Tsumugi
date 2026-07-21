@@ -228,8 +228,27 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 失敗ならバックオフを計算してSCHEDULEDへ戻す,試行回数を使い切っていればFAILED
 	 * リトライ方針をここが持つのでQueuesの`max_retries`に縛られない(ADR-0004)
 	 */
-	async report(jobId: string, result: { ok: boolean }): Promise<void> {
+	async report(jobId: string, result: { ok: boolean; error?: string }): Promise<void> {
 		const now = this.clock.now();
+		const row = this.repo.find(jobId);
+		// 報告を受け付けられる状態かをここで見る
+		// compareAndSetに任せると記録が遷移の後になり,アウトボックスに履歴が載らない(ADR-0028)
+		if (!row || (row.state !== 'QUEUED' && row.state !== 'RUNNING')) return;
+
+		const attempts = row.attempts + 1;
+		// 1回目で成功したジョブの履歴はジョブ行から導出できるので書かない
+		// 導出できないのは失敗の理由と試行ごとの時刻だけ, 常時書くと1ジョブあたりの書き込みが1回増える
+		const worthRecording = !result.ok || attempts > 1;
+		// 遷移でdispatched_atが消えるので開始時刻は先に確保する
+		if (worthRecording)
+			this.#recordAttempt(
+				jobId,
+				attempts,
+				result.ok ? 'COMPLETED' : 'FAILED',
+				row.dispatched_at,
+				now,
+				result.ok ? null : (result.error ?? null),
+			);
 
 		if (result.ok) {
 			// 1回実行して成功したならattemptsは1,失敗時だけ数えると完了ジョブが0回に見える
@@ -238,10 +257,6 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			return;
 		}
 
-		const row = this.repo.find(jobId);
-		if (!row) return;
-
-		const attempts = row.attempts + 1;
 		const next = nextAttempt({
 			attempts,
 			maxAttempts: row.max_attempts,
@@ -406,6 +421,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 一定間隔で起き直すと失敗ジョブだけが残る状態で何もしない書き込みが積まれる
 		const next = deleted > 0 ? this.repo.sweepState(now, this.retention).nextDueAt : state.nextDueAt;
 		return { deleted, retryAt: next === null ? null : Math.max(next, now + 1_000) };
+	}
+
+	/** 履歴はアウトボックスに載るので, 記録してから遷移するとD1へ同じ便で運ばれる */
+	#recordAttempt(jobId: string, attempt: number, state: string, startedAt: number | null, finishedAt: number, error: string | null): void {
+		this.repo.recordAttempt({ job_id: jobId, attempt, state, started_at: startedAt, finished_at: finishedAt, error });
 	}
 
 	/** 予定より早い時刻にalarmが張られている場合は上書きしない */
