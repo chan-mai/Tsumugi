@@ -135,6 +135,31 @@ describe('REST API', () => {
 		expect(detail.status).toBe(200);
 	});
 
+	it('詳細が返す列を固定する', async () => {
+		// 展開すると投影の内部列(seq)やcamelCaseの重複まで公開される
+		const jobId = await seedJob();
+		const res = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`, authorized);
+		const { job } = await res.json<{ job: Record<string, unknown> }>();
+
+		expect(Object.keys(job).sort()).toEqual([
+			'attempts',
+			'attempts_log',
+			'binding',
+			'concurrency_key',
+			'created_at',
+			'dispatched_at',
+			'guarantee',
+			'id',
+			'max_attempts',
+			'payload',
+			'priority',
+			'retryable',
+			'state',
+			'unique_key',
+			'updated_at',
+		]);
+	});
+
 	it('存在しないジョブは404', async () => {
 		const res = await call(withAuth, 'GET', '/api/jobs/REST%230:missing', authorized);
 		expect(res.status).toBe(404);

@@ -1,4 +1,8 @@
+import { and, asc, desc as sqlDesc, eq, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
+import { job as readModel } from '../projection/tables.js';
 import { InvalidJobIdError, shardNameOf } from '../core/ids.js';
 import type { TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
@@ -109,13 +113,26 @@ export type AttemptRecord = {
 	error: string | null;
 };
 
-/** 並べ替えを許す列, SQLへの直接差し込みのため許可リスト外は不可 */
-export const SORTABLE_COLUMNS = ['updated_at', 'created_at', 'binding', 'state', 'priority', 'attempts'] as const;
-export type SortColumn = (typeof SORTABLE_COLUMNS)[number];
+/**
+ * 並べ替えを許す列
+ * 列オブジェクトへ解決してから使うので, 許可リスト外の文字列がSQLに届かない
+ */
+const SORT_COLUMNS = {
+	updated_at: readModel.updatedAt,
+	created_at: readModel.createdAt,
+	binding: readModel.binding,
+	state: readModel.state,
+	priority: readModel.priority,
+	attempts: readModel.attempts,
+} as const;
+
+export const SORTABLE_COLUMNS = Object.keys(SORT_COLUMNS) as (keyof typeof SORT_COLUMNS)[];
+export type SortColumn = keyof typeof SORT_COLUMNS;
 
 /** 不正な指定は既定へ,エラー化するとUIが止まる */
 export function resolveSort(sort: string | null, order: string | null): { column: SortColumn; desc: boolean } {
-	const column = (SORTABLE_COLUMNS as readonly string[]).includes(sort ?? '') ? (sort as SortColumn) : 'updated_at';
+	// `in`はプロトタイプ鎖まで見るので`constructor`等が素通りし,列の代わりに関数が渡る
+	const column = sort !== null && Object.hasOwn(SORT_COLUMNS, sort) ? (sort as SortColumn) : 'updated_at';
 	return { column, desc: order !== 'asc' };
 }
 
@@ -143,6 +160,15 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	// HTMLの殻はデータを含まず,未認証で返すことでSPAがトークン入力を出せる(ADR-0013)
 	app.use('/api/*', auth);
 
+	// マイグレーションの適用漏れをここで止める
+	// 通さないとD1のraw errorが出るだけで,原因が設定漏れだと分からない
+	const checkSchema = cachedCheck();
+	app.use('/api/*', async (c, next) => {
+		const status = await checkSchema(c.env.TSUMUGI_DB);
+		if (!status.ok) return c.json({ error: migrationErrorMessage(status.missing) }, 503);
+		await next();
+	});
+
 	app.get('/api/jobs', async (c) => {
 		const url = new URL(c.req.url);
 		const state = url.searchParams.get('state');
@@ -151,31 +177,42 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
 		const { column, desc } = resolveSort(url.searchParams.get('sort'), url.searchParams.get('order'));
 
-		const where: string[] = [];
-		const args: unknown[] = [];
-		if (state) {
-			where.push('state = ?');
-			args.push(state);
-		}
-		if (binding) {
-			where.push('binding = ?');
-			args.push(binding);
-		}
-		const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+		const d = drizzle(c.env.TSUMUGI_DB);
+		const filters = [state ? eq(readModel.state, state) : undefined, binding ? eq(readModel.binding, binding) : undefined].filter(
+			(f) => f !== undefined,
+		);
+		const clause = filters.length > 0 ? and(...filters) : undefined;
+		const sortBy = SORT_COLUMNS[column];
 
-		const [page, total] = await c.env.TSUMUGI_DB.batch<Record<string, unknown>>([
-			c.env.TSUMUGI_DB.prepare(
-				// columnは許可リスト由来のため差し込み可, idの副次キーで同値時の順序を固定
-				`SELECT id, binding, state, priority, attempts, max_attempts, created_at, updated_at, dispatched_at
-				 FROM job ${clause} ORDER BY ${column} ${desc ? 'DESC' : 'ASC'}, id DESC LIMIT ? OFFSET ?`,
-			).bind(...args, limit, offset),
-			c.env.TSUMUGI_DB.prepare(`SELECT COUNT(*) AS total FROM job ${clause}`).bind(...args),
+		// idの副次キーで同値時の順序を固定
+		const [page, total] = await d.batch([
+			d
+				.select({
+					id: readModel.id,
+					binding: readModel.binding,
+					state: readModel.state,
+					priority: readModel.priority,
+					attempts: readModel.attempts,
+					max_attempts: readModel.maxAttempts,
+					created_at: readModel.createdAt,
+					updated_at: readModel.updatedAt,
+					dispatched_at: readModel.dispatchedAt,
+				})
+				.from(readModel)
+				.where(clause)
+				.orderBy(desc ? sqlDesc(sortBy) : asc(sortBy), sqlDesc(readModel.id))
+				.limit(limit)
+				.offset(offset),
+			d
+				.select({ total: sql<number>`count(*)` })
+				.from(readModel)
+				.where(clause),
 		]);
 
 		const now = Date.now();
 		return c.json({
-			jobs: (page?.results ?? []).map((row) => withRetryable(row, now)),
-			total: (total?.results?.[0]?.total as number) ?? 0,
+			jobs: page.map((row) => withRetryable(row as Record<string, unknown>, now)),
+			total: total[0]?.total ?? 0,
 		});
 	});
 
@@ -185,8 +222,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	 */
 	app.get('/api/bindings', async (c) => {
 		if (bindings.length > 0) return c.json({ bindings: [...bindings].sort() });
-		const { results } = await c.env.TSUMUGI_DB.prepare(`SELECT DISTINCT binding FROM job ORDER BY binding`).all<{ binding: string }>();
-		return c.json({ bindings: results.map((row) => row.binding) });
+		const rows = await drizzle(c.env.TSUMUGI_DB)
+			.selectDistinct({ binding: readModel.binding })
+			.from(readModel)
+			.orderBy(asc(readModel.binding));
+		return c.json({ bindings: rows.map((row) => row.binding) });
 	});
 
 	app.post('/api/jobs', async (c) => {
@@ -207,20 +247,41 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	});
 
 	app.get('/api/stats', async (c) => {
-		const { results } = await c.env.TSUMUGI_DB.prepare(`SELECT state, COUNT(*) AS count FROM job GROUP BY state`).all<{
-			state: string;
-			count: number;
-		}>();
-		return c.json({ byState: Object.fromEntries(results.map((r) => [r.state, r.count])) });
+		const rows = await drizzle(c.env.TSUMUGI_DB)
+			.select({ state: readModel.state, count: sql<number>`count(*)` })
+			.from(readModel)
+			.groupBy(readModel.state);
+		return c.json({ byState: Object.fromEntries(rows.map((r) => [r.state, r.count])) });
 	});
 
 	app.get('/api/jobs/:id', async (c) => {
-		const job = await c.env.TSUMUGI_DB.prepare(`SELECT * FROM job WHERE id = ?`).bind(c.req.param('id')).first();
-		if (!job) return c.json({ error: 'not found' }, 404);
+		const rows = await drizzle(c.env.TSUMUGI_DB)
+			.select()
+			.from(readModel)
+			.where(eq(readModel.id, c.req.param('id')))
+			.limit(1);
+		const found = rows[0];
+		if (!found) return c.json({ error: 'not found' }, 404);
+
+		// 返す列を明示する, 展開すると投影の内部列(seq)やcamelCaseの重複まで出る
+		const job: Record<string, unknown> = {
+			id: found.id,
+			binding: found.binding,
+			state: found.state,
+			priority: found.priority,
+			attempts: found.attempts,
+			max_attempts: found.maxAttempts,
+			concurrency_key: found.concurrencyKey,
+			unique_key: found.uniqueKey,
+			guarantee: found.guarantee,
+			created_at: found.createdAt,
+			updated_at: found.updatedAt,
+			dispatched_at: found.dispatchedAt,
+			payload: found.payload,
+		};
 		// 履歴は詳細でだけ返す, 一覧に載せると1画面で数百KBになり得る(ADR-0028)
-		const { attempts_log, ...rest } = job as Record<string, unknown>;
 		// `attempts`は試行回数の数値なので別名にする, 潰すと画面の n/m が壊れる
-		return c.json({ job: { ...withRetryable(rest, Date.now()), attempts_log: attemptsOf(rest, parseAttempts(attempts_log)) } });
+		return c.json({ job: { ...withRetryable(job, Date.now()), attempts_log: attemptsOf(job, parseAttempts(found.attemptsLog)) } });
 	});
 
 	/**

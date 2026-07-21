@@ -25,6 +25,33 @@ const FORBIDDEN = {
 const CANARY = { 'dist/index.js': [/extends DurableObject/, /CREATE TABLE/] };
 
 const IMPORT = /(?:from|import)\s*["'](\.[^"']+)["']/g;
+// 動的importも拾う, 見逃すと依存を足しても検出しない
+const BARE_IMPORT = /(?:from|import)\s*\(?\s*["']([^."'][^"']*)["']/g;
+
+/**
+ * entryごとに載ってよい外部依存
+ * 外部依存はバンドルされずimport文として残るためgzip量に現れない
+ * 量ではなく集合で見る, 増えた時に気づけることが目的
+ */
+const ALLOWED_EXTERNALS = {
+	'dist/ui.js': [],
+	'dist/index.js': ['@paralleldrive/cuid2', 'drizzle-orm', 'hono'],
+	'dist/performer.js': [],
+	'dist/client.js': [],
+};
+
+/** import文に残る外部依存をパッケージ名の集合で返す, workerdの組み込みは利用者のバンドルに載らないので除く */
+function externalsOf(files) {
+	const found = new Set();
+	for (const path of files) {
+		for (const [, spec] of readFileSync(path, 'utf8').matchAll(BARE_IMPORT)) {
+			if (spec.startsWith('cloudflare:') || spec.startsWith('node:')) continue;
+			const parts = spec.split('/');
+			found.add(spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]);
+		}
+	}
+	return [...found].sort();
+}
 
 /**
  * entryが読み込むファイルの再帰的な収集
@@ -62,12 +89,22 @@ for (const [path, budget] of Object.entries(BUDGETS)) {
 	const source = files.map((f) => readFileSync(f, 'utf8')).join('\n');
 	const size = gzipSync(Buffer.from(source)).length;
 	const pct = Math.round((size / budget) * 100);
+	const externals = externalsOf(files);
+	const deps = externals.length > 0 ? `, 外部: ${externals.join(' ')}` : '';
 
 	if (size > budget) {
-		console.error(`✗ ${path} ${fmt(size)}/予算${fmt(budget)} (${pct}%) [${files.length}ファイル]`);
+		console.error(`✗ ${path} ${fmt(size)}/予算${fmt(budget)} (${pct}%) [${files.length}ファイル${deps}]`);
 		failed = true;
 	} else {
-		console.log(`✓ ${path} ${fmt(size)}/予算${fmt(budget)} (${pct}%) [${files.length}ファイル]`);
+		console.log(`✓ ${path} ${fmt(size)}/予算${fmt(budget)} (${pct}%) [${files.length}ファイル${deps}]`);
+	}
+
+	const allowed = ALLOWED_EXTERNALS[path] ?? [];
+	for (const dep of externals) {
+		if (!allowed.includes(dep)) {
+			console.error(`  ✗ 宣言していない外部依存: ${dep}`);
+			failed = true;
+		}
 	}
 
 	for (const pattern of FORBIDDEN[path] ?? []) {
