@@ -20,6 +20,13 @@ describe('一覧の並べ替え', () => {
 		}
 	});
 
+	it('プロトタイプ由来の名前は許可しない', () => {
+		// `in`で判定するとconstructor等が素通りし,列の代わりに関数が渡って500になる
+		for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
+			expect(resolveSort(name, null).column, name).toBe('updated_at');
+		}
+	});
+
 	it('asc以外の向きは降順として扱う', () => {
 		expect(resolveSort('attempts', 'desc').desc).toBe(true);
 		expect(resolveSort('attempts', 'nonsense').desc).toBe(true);

@@ -25,7 +25,8 @@ const FORBIDDEN = {
 const CANARY = { 'dist/index.js': [/extends DurableObject/, /CREATE TABLE/] };
 
 const IMPORT = /(?:from|import)\s*["'](\.[^"']+)["']/g;
-const BARE_IMPORT = /(?:from|import)\s*["']([^."'][^"']*)["']/g;
+// 動的importも拾う, 見逃すと依存を足しても検出しない
+const BARE_IMPORT = /(?:from|import)\s*\(?\s*["']([^."'][^"']*)["']/g;
 
 /**
  * entryごとに載ってよい外部依存

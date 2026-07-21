@@ -131,7 +131,8 @@ export type SortColumn = keyof typeof SORT_COLUMNS;
 
 /** 不正な指定は既定へ,エラー化するとUIが止まる */
 export function resolveSort(sort: string | null, order: string | null): { column: SortColumn; desc: boolean } {
-	const column = sort !== null && sort in SORT_COLUMNS ? (sort as SortColumn) : 'updated_at';
+	// `in`はプロトタイプ鎖まで見るので`constructor`等が素通りし,列の代わりに関数が渡る
+	const column = sort !== null && Object.hasOwn(SORT_COLUMNS, sort) ? (sort as SortColumn) : 'updated_at';
 	return { column, desc: order !== 'asc' };
 }
 
@@ -261,23 +262,26 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			.limit(1);
 		const found = rows[0];
 		if (!found) return c.json({ error: 'not found' }, 404);
-		// 投影とテストが読むスネークケースへ戻す
+
+		// 返す列を明示する, 展開すると投影の内部列(seq)やcamelCaseの重複まで出る
 		const job: Record<string, unknown> = {
-			...found,
+			id: found.id,
+			binding: found.binding,
+			state: found.state,
+			priority: found.priority,
+			attempts: found.attempts,
 			max_attempts: found.maxAttempts,
 			concurrency_key: found.concurrencyKey,
 			unique_key: found.uniqueKey,
+			guarantee: found.guarantee,
 			created_at: found.createdAt,
 			updated_at: found.updatedAt,
 			dispatched_at: found.dispatchedAt,
-			run_id: found.runId,
-			node_id: found.nodeId,
-			attempts_log: found.attemptsLog,
+			payload: found.payload,
 		};
 		// 履歴は詳細でだけ返す, 一覧に載せると1画面で数百KBになり得る(ADR-0028)
-		const { attempts_log, ...rest } = job as Record<string, unknown>;
 		// `attempts`は試行回数の数値なので別名にする, 潰すと画面の n/m が壊れる
-		return c.json({ job: { ...withRetryable(rest, Date.now()), attempts_log: attemptsOf(rest, parseAttempts(attempts_log)) } });
+		return c.json({ job: { ...withRetryable(job, Date.now()), attempts_log: attemptsOf(job, parseAttempts(found.attemptsLog)) } });
 	});
 
 	/**
