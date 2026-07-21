@@ -287,9 +287,11 @@ export class JobRepo {
 		this.db.delete(attempt).where(inArray(attempt.jobId, targets)).run();
 		this.writes++;
 
-		const deleted = this.db.delete(job).where(inArray(job.id, targets)).returning({ id: job.id }).all();
+		// 件数はカーソルから取る, returningだと削除した行を全件持ち帰ることになる
+		const { sql: text, params } = this.db.delete(job).where(inArray(job.id, targets)).toSQL();
+		const cursor = this.sql.exec(text, ...(params as SqlStorageValue[]));
 		this.writes++;
-		return deleted.length;
+		return cursor.rowsWritten;
 	}
 
 	/**
@@ -322,11 +324,13 @@ export class JobRepo {
 		return { jobs: row.jobs === 1, uniqueKeys: row.unique_keys === 1, nextDueAt: row.next_due };
 	}
 
-	/** 期限切れの重複排除キー, enqueueが途絶えても溜まらないようtickでも掃除する */
-	sweepExpiredUniqueKeys(now: number): number {
-		const deleted = this.db.delete(uniqueKey).where(lte(uniqueKey.expiresAt, now)).returning({ key: uniqueKey.key }).all();
+	/**
+	 * 期限切れの重複排除キー, enqueueが途絶えても溜まらないようtickでも掃除する
+	 * 件数を返さない, 上限が無いので数えると期限切れの全件を持ち帰ることになる
+	 */
+	sweepExpiredUniqueKeys(now: number): void {
+		this.db.delete(uniqueKey).where(lte(uniqueKey.expiresAt, now)).run();
 		this.writes++;
-		return deleted.length;
 	}
 
 	countJobs(): number {

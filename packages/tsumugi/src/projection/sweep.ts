@@ -35,6 +35,7 @@ export async function sweepReadModel(db: D1Database, now: number, options: Sweep
 		.where(and(inArray(job.state, TERMINAL), lt(job.updatedAt, before)))
 		.limit(limit);
 
-	const deleted = await d.delete(job).where(inArray(job.id, targets)).returning({ id: job.id });
-	return deleted.length;
+	// 件数はD1のmetaから取る, returningだと削除した行を全件持ち帰ることになる
+	const result = await d.delete(job).where(inArray(job.id, targets)).run();
+	return result.meta.changes ?? 0;
 }
