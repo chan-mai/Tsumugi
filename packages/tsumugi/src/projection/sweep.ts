@@ -1,3 +1,7 @@
+import { and, inArray, lt } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { job } from './tables.js';
+
 /**
  * 読み取りモデルの保持(ADR-0016)
  *
@@ -23,16 +27,14 @@ const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 export async function sweepReadModel(db: D1Database, now: number, options: SweepOptions = {}): Promise<number> {
 	const before = now - (options.olderThanMs ?? DEFAULT_RETENTION_MS);
 	const limit = options.limit ?? DEFAULT_SWEEP_LIMIT;
-	const placeholders = TERMINAL.map(() => '?').join(', ');
+	const d = drizzle(db);
 
-	const result = await db
-		.prepare(
-			`DELETE FROM job WHERE id IN (
-				SELECT id FROM job WHERE state IN (${placeholders}) AND updated_at < ? LIMIT ?
-			)`,
-		)
-		.bind(...TERMINAL, before, limit)
-		.run();
+	const targets = d
+		.select({ id: job.id })
+		.from(job)
+		.where(and(inArray(job.state, TERMINAL), lt(job.updatedAt, before)))
+		.limit(limit);
 
-	return result.meta.changes ?? 0;
+	const deleted = await d.delete(job).where(inArray(job.id, targets)).returning({ id: job.id });
+	return deleted.length;
 }
