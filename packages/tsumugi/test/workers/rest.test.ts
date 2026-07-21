@@ -82,6 +82,40 @@ describe('fail-closed認証(ADR-0013)', () => {
 	});
 });
 
+describe('secretからのトークン解決', () => {
+	const fromEnv = defineTsumugi<RestEnv>({
+		performers: { REST: Noop },
+		auth: bearerAuth((env: { TSUMUGI_TOKEN?: string }) => env.TSUMUGI_TOKEN),
+	});
+
+	const get = (envOverride: Record<string, unknown>, headers: Record<string, string> = {}) =>
+		fromEnv.fetch!(new Request('https://example.com/api/jobs', { headers }), { ...env, ...envOverride } as RestEnv, {
+			waitUntil: () => {},
+			passThroughOnException: () => {},
+		} as unknown as ExecutionContext);
+
+	it('envのトークンと一致すれば通る', async () => {
+		const res = await get({ TSUMUGI_TOKEN: 'from-secret' }, { authorization: 'Bearer from-secret' });
+		expect(res.status).toBe(200);
+	});
+
+	it('一致しなければ401', async () => {
+		const res = await get({ TSUMUGI_TOKEN: 'from-secret' }, { authorization: 'Bearer wrong' });
+		expect(res.status).toBe(401);
+	});
+
+	it('secret未設定なら誰も通さない', async () => {
+		// 解決できない場合に素通りさせると,設定漏れがそのまま公開になる
+		const res = await get({ TSUMUGI_TOKEN: undefined }, { authorization: 'Bearer anything' });
+		expect(res.status).toBe(401);
+	});
+
+	it('secret未設定でトークンも無ければ401', async () => {
+		const res = await get({ TSUMUGI_TOKEN: undefined });
+		expect(res.status).toBe(401);
+	});
+});
+
 describe('REST API', () => {
 	const authorized = { authorization: `Bearer ${TOKEN}` };
 

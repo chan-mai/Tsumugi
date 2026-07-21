@@ -270,7 +270,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * QUEUED以降はconsumerが既に実行を始めているかもしれず,取り消せたと嘘をつかない(ADR-0012)
 	 */
 	async cancel(jobId: string): Promise<boolean> {
-		return this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now: this.clock.now() });
+		const now = this.clock.now();
+		const ok = this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now });
+		// 投影のためにtickを呼ぶ,張らないと静かなシャードで読み取りモデルが取り消し前のまま残る
+		if (ok) await this.#armAlarm(now);
+		return ok;
 	}
 
 	async alarm(): Promise<void> {

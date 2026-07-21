@@ -39,11 +39,23 @@ function readCookie(header: string | undefined, name: string): string | undefine
 	return undefined;
 }
 
-/** シークレット1つで始められる最短の経路 */
-export function bearerAuth(token: string, options: BearerOptions = {}): AuthMiddleware {
-	if (token.length === 0) throw new Error('bearerAuthのトークンが空, fail-closedの前提が崩れる');
+/** `env`からトークンを引く関数, secretはモジュール初期化時に読めない */
+export type TokenResolver = (env: any) => string | undefined;
+
+/**
+ * シークレット1つで始められる最短の経路
+ *
+ * 関数を渡すとリクエストごとに`env`から引く
+ * Cloudflareのsecretは`env`経由でしか読めず,直書きを避けるにはこの形が要る
+ * 解決できなければ通さない,設定漏れを素通りにしない(ADR-0013)
+ */
+export function bearerAuth(token: string | TokenResolver, options: BearerOptions = {}): AuthMiddleware {
+	if (typeof token === 'string' && token.length === 0) throw new Error('bearerAuthのトークンが空, fail-closedの前提が崩れる');
 
 	return async (c, next) => {
+		const expected = typeof token === 'string' ? token : token(c.env);
+		if (!expected) return c.json({ error: 'unauthorized' }, 401);
+
 		const header = c.req.header('authorization') ?? '';
 		const [scheme, value] = header.split(' ');
 		const presented =
@@ -53,7 +65,7 @@ export function bearerAuth(token: string, options: BearerOptions = {}): AuthMidd
 					? readCookie(c.req.header('cookie'), options.cookie)
 					: undefined;
 
-		if (presented === undefined || !timingSafeEqual(presented, token)) {
+		if (presented === undefined || !timingSafeEqual(presented, expected)) {
 			return c.json({ error: 'unauthorized' }, 401);
 		}
 		await next();

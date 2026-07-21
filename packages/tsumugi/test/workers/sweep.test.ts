@@ -107,6 +107,37 @@ describe('DOの掃除', () => {
 	});
 });
 
+describe('状態を変える操作はalarmを張る', () => {
+	// 張らないとアウトボックスが滞留し,200を返した直後の読み取りモデルが古いまま残る
+	const alarmOf = (name: string) => runInDurableObject(shard(name), (_i, state) => state.storage.getAlarm());
+
+	it('cancelがalarmを張る', async () => {
+		const { queue } = captureQueue();
+		await install('CANCEL#0', T0, queue);
+
+		const jobId = await shard('CANCEL#0').enqueue({ binding: 'CANCEL', payload: {}, delayMs: 60 * 60 * 1000 });
+		// 投入直後のalarmは投影のためのnow, 1回流すと次は実行予定時刻まで飛ぶ
+		await runDurableObjectAlarm(shard('CANCEL#0'));
+		expect(await alarmOf('CANCEL#0')).toBe(T0 + 60 * 60 * 1000);
+
+		expect(await shard('CANCEL#0').cancel(jobId)).toBe(true);
+		expect(await alarmOf('CANCEL#0')).toBe(T0);
+	});
+
+	it('取り消せなければalarmを動かさない', async () => {
+		const { sent, queue } = captureQueue();
+		await install('CANCEL2#0', T0, queue);
+
+		const jobId = await shard('CANCEL2#0').enqueue({ binding: 'CANCEL2', payload: {} });
+		await runDurableObjectAlarm(shard('CANCEL2#0'));
+		await shard('CANCEL2#0').report(sent[0]!.jobId, { ok: true });
+
+		const before = await alarmOf('CANCEL2#0');
+		expect(await shard('CANCEL2#0').cancel(jobId)).toBe(false);
+		expect(await alarmOf('CANCEL2#0')).toBe(before);
+	});
+});
+
 describe('読み取りモデルの掃除', () => {
 	const insert = (id: string, state: string, updatedAt: number) =>
 		env.TSUMUGI_DB.prepare(
