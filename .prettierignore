@@ -5,3 +5,4 @@ pnpm-lock.yaml
 # wrangler types の生成物
 examples/*/worker-configuration.d.ts
 README.md
+docs/
