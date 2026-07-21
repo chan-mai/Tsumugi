@@ -44,7 +44,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.test.json",
     "build": "tsdown",
-    "prepare": "npm run build",
+    "prepare": "pnpm build",
     "prepack": "cp ../../README.md ../../LICENSE .",
     "postpack": "rm -f README.md LICENSE",
     "check:pack": "publint && attw --pack . --profile esm-only",
@@ -55,7 +55,7 @@
     "@cloudflare/workers-types": "^5.20260714.1",
     "publint": "^0.3.21",
     "tsdown": "^0.22.12",
-    "@tsumugi/dashboard": "*"
+    "@tsumugi/dashboard": "workspace:*"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",

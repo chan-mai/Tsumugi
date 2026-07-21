@@ -8,9 +8,9 @@
 ## インストール
 
 ```bash
-npm create cloudflare@latest my-jobs -- --type=hello-world
+pnpm create cloudflare@latest my-jobs --type=hello-world
 cd my-jobs
-npm install tsumugi
+pnpm add tsumugi
 ```
 
 ## リソース作成
@@ -18,8 +18,8 @@ npm install tsumugi
 D1とQueuesを先に作ります
 
 ```bash
-npx wrangler d1 create my-jobs
-npx wrangler queues create my-jobs
+pnpm wrangler d1 create my-jobs
+pnpm wrangler queues create my-jobs
 ```
 
 ## wrangler.jsonc
@@ -68,8 +68,8 @@ Tsumugiが使うbindingは4つです
 一覧と検索が参照するD1のテーブルを作成します
 
 ```bash
-npx wrangler d1 migrations apply my-jobs --local
-npx wrangler d1 migrations apply my-jobs --remote
+pnpm wrangler d1 migrations apply my-jobs --local
+pnpm wrangler d1 migrations apply my-jobs --remote
 ```
 
 ## Worker
@@ -118,7 +118,7 @@ export default {
 認証はfail-closedです。設定するまでREST APIもダッシュボードも404を返します
 
 ```bash
-npx wrangler secret put TSUMUGI_TOKEN
+pnpm wrangler secret put TSUMUGI_TOKEN
 ```
 
 ローカルで動かすときは`.dev.vars`に書きます
@@ -130,7 +130,7 @@ TSUMUGI_TOKEN=ローカル用のトークン
 ## 起動
 
 ```bash
-npx wrangler dev
+pnpm wrangler dev
 ```
 
 `/enqueue`にアクセスするとジョブIDが返ります。`/`を開くとダッシュボードが表示されるので、トークンを入力すると一覧を確認できます

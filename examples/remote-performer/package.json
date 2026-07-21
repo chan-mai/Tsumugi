@@ -9,6 +9,6 @@
     "types": "wrangler types"
   },
   "dependencies": {
-    "tsumugi": "*"
+    "tsumugi": "workspace:*"
   }
 }
