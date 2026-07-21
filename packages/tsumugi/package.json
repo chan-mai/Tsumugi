@@ -53,9 +53,10 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@cloudflare/workers-types": "^5.20260714.1",
+    "@tsumugi/dashboard": "workspace:*",
     "publint": "^0.3.21",
     "tsdown": "^0.22.12",
-    "@tsumugi/dashboard": "workspace:*"
+    "unrun": "^0.3.1"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",
