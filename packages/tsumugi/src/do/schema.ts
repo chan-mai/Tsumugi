@@ -43,6 +43,17 @@ export const SCHEMA = [
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	)`,
+	// 試行ごとの記録(ADR-0028), 失敗の事後調査に要る
+	// ジョブ行は最新の状態しか持たず,何回目がいつ何で落ちたかは残らない
+	`CREATE TABLE IF NOT EXISTS attempt (
+		job_id TEXT NOT NULL,
+		attempt INTEGER NOT NULL,
+		state TEXT NOT NULL,
+		started_at INTEGER,
+		finished_at INTEGER NOT NULL,
+		error TEXT,
+		PRIMARY KEY (job_id, attempt)
+	)`,
 	// D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
 	// D1書き込みが成功するまで削除しないので,失敗してもカーソルが進まず次回で追いつく
 	`CREATE TABLE IF NOT EXISTS outbox (
@@ -55,6 +66,16 @@ export const SCHEMA = [
 export function applySchema(sql: SqlStorage): void {
 	for (const statement of SCHEMA) sql.exec(statement);
 }
+
+/** 試行1回ぶんの記録 */
+export type AttemptRow = {
+	job_id: string;
+	attempt: number;
+	state: string;
+	started_at: number | null;
+	finished_at: number;
+	error: string | null;
+};
 
 /** SQLiteの行そのまま,射影はrepo.tsが担う */
 export type JobRow = {

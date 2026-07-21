@@ -62,6 +62,15 @@ function withTimeout<T>(jobId: string, timeoutMs: number, run: (signal: AbortSig
 }
 
 /**
+ * 例外を文字列にする, 打ち切りはDO側が持つのでここでは形だけ整える
+ * `stack`は1行目に`Name: message`を含むので繋げると重複する
+ */
+export function describeError(error: unknown): string {
+	if (!(error instanceof Error)) return String(error);
+	return error.stack ?? `${error.name}: ${error.message}`;
+}
+
+/**
  * Queuesのconsumer
  *
  * 成否によらず必ずackする(ADR-0004)
@@ -83,6 +92,7 @@ async function handleOne<Env extends ConsumerEnv>(
 ): Promise<void> {
 	const { jobId, binding, attempt, payload, timeoutMs, claimRequired } = message.body;
 	let ok = false;
+	let failure: string | undefined;
 
 	try {
 		if (claimRequired && !(await shardStub(env, jobId).claim(jobId))) {
@@ -106,13 +116,15 @@ async function handleOne<Env extends ConsumerEnv>(
 		}
 		ok = true;
 	} catch (error) {
+		// 本文をDOへ渡す, 捨てるとダッシュボードから失敗の理由が永久に分からない(ADR-0028)
+		failure = describeError(error);
 		console.error(`tsumugi: perform failed (${jobId})`, error);
 	}
 
 	message.ack();
 
 	try {
-		await shardStub(env, jobId).report(jobId, { ok });
+		await shardStub(env, jobId).report(jobId, failure === undefined ? { ok } : { ok, error: failure });
 	} catch (error) {
 		// 報告が失われるとジョブはQUEUEDのまま残る, reaperが沈黙として回収する
 		console.error(`tsumugi: report failed (${jobId})`, error);

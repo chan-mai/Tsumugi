@@ -69,6 +69,46 @@ export function validateCreateJob(body: unknown, bindings: readonly string[]): {
 	return { input };
 }
 
+/** 試行履歴, 壊れていても詳細画面ごと落とさない */
+export function parseAttempts(raw: unknown): AttemptRecord[] {
+	if (typeof raw !== 'string' || raw.length === 0) return [];
+	try {
+		const parsed = JSON.parse(raw) as AttemptRecord[];
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * 1回目で成功したジョブの履歴を組み立てる
+ *
+ * この1件はジョブ行から完全に導出できるので保存していない(ADR-0028)
+ * 表示のためだけに書くと1ジョブあたりのDO書き込みが常時1回増える
+ * 導出できるのはCOMPLETEDかつ開始時刻がある場合に限る,実行中や取り消しでは何も出さない
+ */
+export function attemptsOf(job: Record<string, unknown>, stored: AttemptRecord[]): AttemptRecord[] {
+	if (stored.length > 0) return stored;
+	if (job.state !== 'COMPLETED' || job.dispatched_at === null || job.dispatched_at === undefined) return [];
+	return [
+		{
+			attempt: Number(job.attempts) || 1,
+			state: 'COMPLETED',
+			started_at: Number(job.dispatched_at),
+			finished_at: Number(job.updated_at),
+			error: null,
+		},
+	];
+}
+
+export type AttemptRecord = {
+	attempt: number;
+	state: string;
+	started_at: number | null;
+	finished_at: number;
+	error: string | null;
+};
+
 /** 並べ替えを許す列, SQLへの直接差し込みのため許可リスト外は不可 */
 export const SORTABLE_COLUMNS = ['updated_at', 'created_at', 'binding', 'state', 'priority', 'attempts'] as const;
 export type SortColumn = (typeof SORTABLE_COLUMNS)[number];
@@ -177,7 +217,10 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.get('/api/jobs/:id', async (c) => {
 		const job = await c.env.TSUMUGI_DB.prepare(`SELECT * FROM job WHERE id = ?`).bind(c.req.param('id')).first();
 		if (!job) return c.json({ error: 'not found' }, 404);
-		return c.json({ job: withRetryable(job, Date.now()) });
+		// 履歴は詳細でだけ返す, 一覧に載せると1画面で数百KBになり得る(ADR-0028)
+		const { attempts_log, ...rest } = job as Record<string, unknown>;
+		// `attempts`は試行回数の数値なので別名にする, 潰すと画面の n/m が壊れる
+		return c.json({ job: { ...withRetryable(rest, Date.now()), attempts_log: attemptsOf(rest, parseAttempts(attempts_log)) } });
 	});
 
 	/**

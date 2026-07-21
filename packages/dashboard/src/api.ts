@@ -14,6 +14,16 @@ export type Job = {
 	guarantee?: string;
 	/** サーバが保持期間から出す近似, 最終的な可否はretryの応答が決める */
 	retryable?: boolean;
+	/** 詳細でのみ返る試行履歴, 新しい順 */
+	attempts_log?: Attempt[];
+};
+
+export type Attempt = {
+	attempt: number;
+	state: string;
+	started_at: number | null;
+	finished_at: number;
+	error: string | null;
 };
 
 declare global {

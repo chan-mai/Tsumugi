@@ -1,11 +1,20 @@
 import { assertTransition } from '../core/transitions.js';
 import type { Backoff, DeliveryGuarantee, JobState, JobView, Retention } from '../core/types.js';
-import { applySchema, type JobRow } from './schema.js';
+import { applySchema, type AttemptRow, type JobRow } from './schema.js';
 
 /**
  * 掃除の対象条件, ?1は済んだジョブの期限 / ?2は失敗ジョブの期限
  * 削除と判定で同じ式を使う, 片方だけ直すと消える条件と起きる条件がずれる
  */
+/**
+ * 1試行あたりのエラー本文の上限
+ * performerの例外はHTMLページ丸ごとのこともあり,無制限だとDOとD1の両方を圧迫する
+ */
+export const ERROR_MAX_CHARS = 2_000;
+
+/** 1ジョブあたりに残す試行の数, maxAttemptsを大きくしてもスナップショットが膨らまないようにする */
+export const ATTEMPT_KEEP = 20;
+
 const SWEEPABLE = `(
 	(state IN ('COMPLETED', 'CANCELLED') AND updated_at < ?1)
 	OR (state IN ('FAILED', 'STALLED') AND updated_at < ?2)
@@ -90,7 +99,38 @@ export class JobRepo {
 		const row = this.sql.exec<JobRow>(`SELECT * FROM job WHERE id = ?`, id).toArray()[0];
 		this.reads++;
 		if (!row) return;
-		this.sql.exec(`INSERT INTO outbox (job_id, snapshot) VALUES (?, ?)`, id, JSON.stringify(row));
+		// 試行履歴も同梱する, 別経路にすると冪等性をもう1つ作ることになる(ADR-0028)
+		this.sql.exec(`INSERT INTO outbox (job_id, snapshot) VALUES (?, ?)`, id, JSON.stringify({ ...row, attempts_log: this.attemptsOf(id) }));
+		this.writes++;
+	}
+
+	/** 新しい試行から順に返す, 打ち切りは古い方から */
+	attemptsOf(jobId: string): AttemptRow[] {
+		const rows = this.sql
+			.exec<AttemptRow>(`SELECT * FROM attempt WHERE job_id = ? ORDER BY attempt DESC LIMIT ?`, jobId, ATTEMPT_KEEP)
+			.toArray();
+		this.reads++;
+		return rows;
+	}
+
+	/**
+	 * 試行1回ぶんを記録する
+	 * 同じ試行番号で二重に報告が来ても内容を置き換えるだけにする, 重複配送で行が増えない
+	 */
+	recordAttempt(record: AttemptRow): void {
+		this.sql.exec(
+			`INSERT INTO attempt (job_id, attempt, state, started_at, finished_at, error)
+			 VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(job_id, attempt) DO UPDATE SET
+				state = excluded.state, started_at = excluded.started_at,
+				finished_at = excluded.finished_at, error = excluded.error`,
+			record.job_id,
+			record.attempt,
+			record.state,
+			record.started_at,
+			record.finished_at,
+			record.error === null ? null : record.error.slice(0, ERROR_MAX_CHARS),
+		);
 		this.writes++;
 	}
 
@@ -189,6 +229,17 @@ export class JobRepo {
 	 * doneMsは済んだジョブ, failedMsは人手で再開する余地のあるジョブ
 	 */
 	sweepTerminal(now: number, retention: Retention, limit: number): number {
+		// 先に履歴を落とす, ジョブ行を消してから引くと対象が引けなくなり孤児が残る
+		this.sql.exec(
+			`DELETE FROM attempt WHERE job_id IN (
+				SELECT id FROM job WHERE ${SWEEPABLE} LIMIT ?3
+			)`,
+			now - retention.doneMs,
+			now - retention.failedMs,
+			limit,
+		);
+		this.writes++;
+
 		const cursor = this.sql.exec(
 			`DELETE FROM job WHERE id IN (
 				SELECT id FROM job WHERE ${SWEEPABLE} LIMIT ?3
