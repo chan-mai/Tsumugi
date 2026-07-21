@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm install -g npm@12
+      - run: npm ci
+
+      # タグとpackage.jsonのversionがずれたまま公開すると取り消せない
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./packages/tsumugi/package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package version $pkg"
+            exit 1
+          fi
+          echo "publishing $pkg"
+
+      # CIと同じ検査, タグを打った時点で壊れていないことを確かめてから公開する
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run test:workers
+      - run: npm run build
+      - run: npm run check:pack -w tsumugi
+      - run: npm run check:size -w tsumugi
+
+      # Trusted Publishingで公開
+      # READMEとLICENSEはprepackがルートから複写
+      - name: Publish to npm
+        run: npm publish -w tsumugi --access public
+
+      - name: Create GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
