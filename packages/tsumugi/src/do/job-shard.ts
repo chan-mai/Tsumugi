@@ -133,7 +133,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#policyLoaded = false;
 
 	get repo(): JobRepo {
-		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage.sql);
+		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage);
 		return this.#repo;
 	}
 

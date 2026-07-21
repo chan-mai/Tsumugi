@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["@cloudflare/vitest-pool-workers/types"],
+    "types": ["@cloudflare/vitest-pool-workers/types", "node"],
     "paths": {
       "tsumugi": ["./src/entries/index.ts"],
       "tsumugi/performer": ["./src/entries/performer.ts"]
