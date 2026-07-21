@@ -53,12 +53,13 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@cloudflare/workers-types": "^5.20260714.1",
+    "@tsumugi/dashboard": "workspace:*",
     "publint": "^0.3.21",
-    "tsdown": "^0.22.12",
-    "@tsumugi/dashboard": "workspace:*"
+    "tsdown": "^0.22.12"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.12.31"
   }
 }
