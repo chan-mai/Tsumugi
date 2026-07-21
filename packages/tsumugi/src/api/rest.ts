@@ -239,7 +239,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.post('/api/jobs/:id/retry', async (c) => {
 		const id = c.req.param('id');
 		try {
-			// 変更は真実の源であるDOへ問い合わせる
+			// 変更は正となるDOへ問い合わせる
 			const result = await stubOf(c.env, id).retry(id);
 			if (result.ok) return c.json({ ok: true }, 200);
 			const { body, status } = refusal(result);
