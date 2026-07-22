@@ -165,7 +165,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	const checkSchema = cachedCheck();
 	app.use('/api/*', async (c, next) => {
 		const status = await checkSchema(c.env.TSUMUGI_DB);
-		if (!status.ok) return c.json({ error: migrationErrorMessage(status.missing) }, 503);
+		if (!status.ok) {
+			// 適用漏れは復旧コマンドを, 一時障害は適用済み環境に誤った手順を案内しない(#8)
+			const error = 'missing' in status ? migrationErrorMessage(status.missing) : 'database temporarily unavailable';
+			return c.json({ error }, 503);
+		}
 		await next();
 	});
 

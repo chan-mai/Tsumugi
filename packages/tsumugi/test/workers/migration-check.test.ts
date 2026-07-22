@@ -52,6 +52,13 @@ function withLedger(rows: { name: string }[] | 'missing'): D1Database {
 	});
 }
 
+/** 台帳の欠如ではない一時障害を起こすD1 */
+function withError(message: string): D1Database {
+	return proxyD1(() => {
+		throw new Error(message);
+	});
+}
+
 describe('マイグレーション適用漏れの検出', () => {
 	it('全て適用済みなら通る', async () => {
 		const status = await checkMigrations(withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
@@ -67,6 +74,62 @@ describe('マイグレーション適用漏れの検出', () => {
 		// 一度も適用していない状態, 例外をそのまま出すと原因が分からない
 		const status = await checkMigrations(withLedger('missing'));
 		expect(status).toEqual({ ok: false, missing: [...EXPECTED_MIGRATIONS] });
+	});
+
+	it('一時障害はunavailableとして扱い未適用と区別する(#8)', async () => {
+		// D1の一時障害を未適用と混同すると, 適用済みの環境に誤った復旧手順を案内する
+		const status = await checkMigrations(withError('D1_ERROR: Network connection lost'));
+		expect(status).toEqual({ ok: false, unavailable: true });
+	});
+
+	it('一時障害では適用漏れの復旧手順を案内しない(#8)', async () => {
+		// unavailableはTTLで使い回されるので, 共有appのキャッシュを汚さないよう専用のappを立てる
+		const isolated = defineTsumugi<RestEnv>({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
+		const res = await isolated.fetch!(
+			new Request('https://example.com/api/jobs', { headers: { authorization: `Bearer ${TOKEN}` } }),
+			{ ...env, TSUMUGI_DB: withError('D1_ERROR: Network connection lost') } as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		expect(res.status).toBe(503);
+
+		const body = await res.json<{ error: string }>();
+		expect(body.error).not.toContain('wrangler d1 migrations apply');
+		expect(body.error).toContain('temporarily unavailable');
+	});
+
+	it('一時障害の結果は短いTTLで使い回しD1を叩き直さない(#8)', async () => {
+		let calls = 0;
+		let clock = 1_000;
+		const failing = proxyD1(() => {
+			calls++;
+			throw new Error('D1_ERROR: down');
+		});
+		const check = cachedCheck(() => clock);
+
+		expect((await check(failing)).ok).toBe(false);
+		// TTL内なので叩き直さない, 障害中にクエリが最大になるのを防ぐ
+		expect((await check(failing)).ok).toBe(false);
+		expect(calls).toBe(1);
+
+		// TTLを過ぎたら再検査する
+		clock += 5_001;
+		await check(failing);
+		expect(calls).toBe(2);
+	});
+
+	it('一時障害から復帰すると次の検査で通る(#8)', async () => {
+		let down = true;
+		let clock = 1_000;
+		const flipping = proxyD1(() => {
+			if (down) throw new Error('D1_ERROR: down');
+			return ledgerOf(EXPECTED_MIGRATIONS.map((name) => ({ name })));
+		});
+		const check = cachedCheck(() => clock);
+
+		expect((await check(flipping)).ok).toBe(false);
+		down = false;
+		clock += 5_001;
+		expect((await check(flipping)).ok).toBe(true);
 	});
 
 	it('未適用ならAPIが503と実行すべきコマンドを返す', async () => {
