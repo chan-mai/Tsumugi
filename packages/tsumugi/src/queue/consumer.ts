@@ -102,6 +102,8 @@ async function handleOne<Env extends ConsumerEnv>(
 	try {
 		// 分割代入もtryに入れる, 本文がnull等で壊れていても例外がackを飛ばさない(ADR-0004)
 		const body = message.body;
+		// jobIdが無い/文字列でない本文はここで弾く, performer実行とreportの対象にしない
+		if (typeof body?.jobId !== 'string') throw new Error('dispatchメッセージが不正: jobIdが無い');
 		jobId = body.jobId;
 		const { binding, attempt, payload, timeoutMs, claimRequired } = body;
 
