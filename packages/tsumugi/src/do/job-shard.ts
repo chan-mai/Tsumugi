@@ -340,7 +340,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async #tick(): Promise<void> {
 		const now = this.clock.now();
 		this.#loadPolicy();
-		const jobs = this.repo.activeJobs(TICK_LIMIT);
+		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT);
 		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket });
 		this.#bucket = output.bucket;
 
@@ -389,7 +389,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const { deleted, retryAt } = this.#sweep(now);
 
 		// 上限まで読んだなら残りがある可能性が高いので即座に自分を起こし直す
-		const hasMore = jobs.length >= TICK_LIMIT || projected >= PROJECTION_LIMIT || deleted >= SWEEP_LIMIT;
+		// 投入候補はreadyCountで見る, 実行中で窓が埋まっても投入すべき候補が無ければ起き直さない
+		const hasMore = readyCount >= TICK_LIMIT || projected >= PROJECTION_LIMIT || deleted >= SWEEP_LIMIT;
 		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt].filter((v): v is number => v !== null);
 		const next = candidates.length > 0 ? Math.min(...candidates) : null;
 		if (next !== null) await this.ctx.storage.setAlarm(next);
