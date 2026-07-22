@@ -124,6 +124,33 @@ describe('ポリシーの永続化', () => {
 		// 増えるのはジョブのinsertとアウトボックス追記の2回だけ,ポリシーの再書き込みは起きない
 		expect(after - before).toBe(2);
 	});
+
+	it('実行時のconfigure()が次のenqueueの静的設定で上書きされない(#6)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('PAUSE#0', T0, queue);
+
+		// 実行時にconcurrency=0で止める, 現状で唯一のpause手段
+		await shard('PAUSE#0').configure({ policy: { concurrency: 0 } });
+		// 静的設定を同梱したenqueue, 従来はこれがpauseを解除していた
+		await shard('PAUSE#0').enqueueMany([{ binding: 'PAUSE', payload: {} }], { policy: { concurrency: 100 } });
+		await runDurableObjectAlarm(shard('PAUSE#0'));
+
+		// pauseが保持され1件も投入されない
+		expect(sent).toHaveLength(0);
+	});
+
+	it('configure()の後は実行時のconfigure()で解除できる(#6)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('PAUSE2#0', T0, queue);
+
+		await shard('PAUSE2#0').configure({ policy: { concurrency: 0 } });
+		await shard('PAUSE2#0').enqueueMany([{ binding: 'PAUSE2', payload: {} }], { policy: { concurrency: 100 } });
+		// 静的設定ではなく実行時のconfigure()なら解除できる
+		await shard('PAUSE2#0').configure({ policy: { concurrency: 100 } });
+		await runDurableObjectAlarm(shard('PAUSE2#0'));
+
+		expect(sent).toHaveLength(1);
+	});
 });
 
 describe('enqueueMany', () => {

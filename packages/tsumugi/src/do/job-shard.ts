@@ -160,15 +160,23 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	async configure(settings: ShardSettings): Promise<void> {
-		this.#applySettings(settings);
+		// configure()は実行時の意思, 静的設定より優先する印を付ける(#6)
+		this.#applySettings(settings, true);
 	}
 
-	/** 内容が変わっていなければ書き込まない, enqueueのたびに1回増えるのを避ける */
-	#applySettings(settings: ShardSettings): void {
+	/**
+	 * 設定を反映する, 内容が変わっていなければ書き込まない(enqueueのたびに1回増えるのを避ける)
+	 * pinnedはconfigure()由来か, enqueue同梱の静的設定か
+	 * 一度configure()されたら以降の静的設定は無視する, 実行時に絞った流量が次の投入で戻らないようにする(#6)
+	 * 静的設定へ戻すには再度configure()する
+	 */
+	#applySettings(settings: ShardSettings, pinned: boolean): void {
+		if (!pinned && this.repo.readSetting('settings_pinned') === '1') return;
 		const encoded = JSON.stringify(settings);
 		this.policy = { ...DEFAULT_POLICY, ...settings.policy };
 		this.retention = retentionOf(settings);
 		this.#policyLoaded = true;
+		if (pinned && this.repo.readSetting('settings_pinned') !== '1') this.repo.writeSetting('settings_pinned', '1');
 		if (this.repo.readSetting('settings') === encoded) return;
 		this.repo.writeSetting('settings', encoded);
 	}
@@ -186,7 +194,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]> {
 		const now = this.clock.now();
 		this.#loadPolicy();
-		if (settings) this.#applySettings(settings);
+		// enqueue同梱は静的設定, configure()でpinされていれば無視する(#6)
+		if (settings) this.#applySettings(settings, false);
 		const ids: string[] = [];
 
 		for (const input of inputs) {
