@@ -153,7 +153,7 @@ describe('cloudflareAccessミドルウェア', () => {
 		async perform(): Promise<void> {}
 	}
 
-	const handler = () => defineTsumugi<RestEnv>({ performers: { ACC: Noop }, auth: cloudflareAccess(options()) });
+	const handler = () => defineTsumugi({ performers: { ACC: Noop }, auth: cloudflareAccess(options()) });
 
 	const call = (headers: Record<string, string>) =>
 		handler().fetch!(

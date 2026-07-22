@@ -95,3 +95,40 @@ export interface JobQueue<M extends Performers> {
 	enqueue(...args: { [K in keyof M]: EnqueueArgs<M, K> }[keyof M]): Promise<string>;
 	enqueueMany(items: readonly EnqueueItem<M>[]): Promise<string[]>;
 }
+
+/**
+ * 登録簿から`Performers`を導く(ADR-0010)
+ * ctorはインスタンス型を, `remote()`の印は同梱した相手のperformer型を取り出す
+ * これで`config.performers`1箇所からbindingごとのpayloadと必須キーが決まる
+ */
+export type PerformersOf<R extends Record<string, unknown>> = {
+	[K in keyof R]: R[K] extends RemoteRef<infer P>
+		? P
+		: R[K] extends new (env: any) => infer I
+			? I extends Performer<any, any, any, any>
+				? I
+				: never
+			: never;
+};
+
+/** 登録簿のctorが受け取るEnv, `defineTsumugi`が明示の型引数なしでEnvを推論するのに使う */
+export type EnvOf<R extends Record<string, unknown>> = {
+	[K in keyof R]: R[K] extends new (env: infer E) => any ? E : never;
+}[keyof R];
+
+/** enqueueの追加フィールド,`EnqueueOptions`に無くDOへ渡すもの */
+type ExtraInputFields = {
+	/** uniqueKeyの予約を保持する期間,経過後は同じキーでも新規ジョブになる */
+	uniqueForMs?: number;
+	/** 分割している場合の投入先の決定に使う(ADR-0011) */
+	partitionKey?: string;
+};
+
+/**
+ * オブジェクト形の型付きenqueue入力(ADR-0010)
+ * bindingで判別し, payloadと必須キーをperformerの宣言から強制する
+ * 構造としては`EnqueueInput`の部分集合なのでランタイムはそのままDOへ渡せる
+ */
+export type TypedEnqueueInput<M extends Performers, K extends keyof M = keyof M> = {
+	[Key in K]: { binding: Key; payload: PayloadOf<M[Key]> } & EnqueueOptions<ReqOf<M[Key]>> & ExtraInputFields;
+}[K];

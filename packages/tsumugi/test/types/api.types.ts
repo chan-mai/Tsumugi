@@ -4,7 +4,8 @@
  * (実際に1つを正しいコードへ変えてTS2578が出ることを確認済み)
  */
 import { Performer } from '../../src/core/api.js';
-import type { JobContext, JobQueue } from '../../src/core/api.js';
+import type { JobContext } from '../../src/core/api.js';
+import { defineTsumugi } from '../../src/worker.js';
 
 class SendMail extends Performer<{ to: string; subject: string }> {
 	async perform(payload: { to: string; subject: string }, _ctx: JobContext) {
@@ -22,8 +23,11 @@ class SyncInventory extends Performer<{ sku: string }, void, { uniqueKey: true }
 	async perform(_payload: { sku: string }, _ctx: JobContext) {}
 }
 
-type M = { MAIL: SendMail; CHARGE: ChargeCard; SYNC: SyncInventory };
-declare const q: JobQueue<M>;
+// defineTsumugiが返す実体を検査対象にする, 実装の無い変数への型テストにしない(#5 / ADR-0010)
+// performersからMを推論するので, 明示の型引数は要らない
+const tsumugi = defineTsumugi({ performers: { MAIL: SendMail, CHARGE: ChargeCard, SYNC: SyncInventory } });
+declare const env: never;
+const q = tsumugi.jobs(env);
 
 // 実行はしない,型検査のみが目的
 export function typeChecks() {
@@ -81,4 +85,18 @@ export function typeChecks() {
 	const one: Promise<string> = q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' });
 	void many;
 	void one;
+
+	// オブジェクト形の型付きenqueue(config.performersから推論)
+	tsumugi.enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com', subject: 'hi' } });
+	// @ts-expect-error subjectが無い
+	tsumugi.enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com' } });
+	// concurrencyKey必須のperformerは渡し忘れがコンパイルエラー(ADR-0010)
+	tsumugi.enqueue(env, { binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 }, concurrencyKey: 'cust:c1' });
+	// @ts-expect-error concurrencyKeyが無い
+	tsumugi.enqueue(env, { binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 } });
+	// @ts-expect-error payloadの取り違え
+	tsumugi.enqueue(env, { binding: 'MAIL', payload: { customerId: 'c1', amountJpy: 1200 } });
+	tsumugi.enqueueMany(env, [{ binding: 'SYNC', payload: { sku: 'X-1' }, uniqueKey: 'sku:X-1' }]);
+	// @ts-expect-error uniqueKeyが無い
+	tsumugi.enqueueMany(env, [{ binding: 'SYNC', payload: { sku: 'X-1' } }]);
 }
