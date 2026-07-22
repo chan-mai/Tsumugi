@@ -168,10 +168,9 @@ describe('enqueueMany', () => {
 		await shard('SPLIT#0').enqueueMany(Array.from({ length: 150 }, () => ({ binding: 'SPLIT', payload: {} })));
 		await runDurableObjectAlarm(shard('SPLIT#0'));
 
-		// 分割前は1回で150件送りcaptureQueueがthrowする, 分割後は100件以下の複数バッチになる
+		// 分割前は1回で150件送りcaptureQueueがthrowする
+		// 100件単位で分割し, 過分割でないことも固定する
 		expect(sent).toHaveLength(150);
-		expect(batches.length).toBeGreaterThan(1);
-		expect(Math.max(...batches)).toBeLessThanOrEqual(100);
-		expect(batches.reduce((a, b) => a + b, 0)).toBe(150);
+		expect(batches).toEqual([100, 50]);
 	});
 });
