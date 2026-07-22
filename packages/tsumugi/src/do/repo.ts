@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lt, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { assertTransition } from '../core/transitions.js';
 import type { Backoff, DeliveryGuarantee, JobState, JobView, Retention } from '../core/types.js';
@@ -189,6 +189,46 @@ export class JobRepo {
 			.all();
 		this.reads++;
 		return rows.map((r) => toView(this.#toJobRow(r)));
+	}
+
+	/**
+	 * schedule()へ渡す窓, 役割ごとに分けて読む(ADR-0019 / ADR-0020, #4)
+	 *
+	 * 単一の作成順窓だと実行中や未到来のジョブが枠を占め, 後から入った実行可能ジョブが選考に入らない
+	 * 実行可能な候補を独立した窓で読むことで, 実行中がlimitを超えても投入候補が窓に残る
+	 * 実行可能ジョブ自体がlimitを超える滞留は解けない, 作成順の窓を跨ぐ分は次tick以降で拾う
+	 *
+	 * readyCountを返すのは有界判定のため, 満杯なら残りがある可能性が高く即座に起き直す
+	 */
+	scheduleWindow(now: number, limit: number): { jobs: JobView[]; readyCount: number } {
+		// 実行中(QUEUED/RUNNING): reaperの沈黙判定と在庫カウントに要る
+		const inFlight = this.db
+			.select()
+			.from(job)
+			.where(inArray(job.state, ['QUEUED', 'RUNNING']))
+			.orderBy(asc(job.createdAt), asc(job.id))
+			.limit(limit)
+			.all();
+		// 実行可能(SCHEDULED且つrun_after<=now): 投入候補, 実行中や未到来に窓を食われない
+		const ready = this.db
+			.select()
+			.from(job)
+			.where(and(eq(job.state, 'SCHEDULED'), lte(job.runAfter, now)))
+			.orderBy(asc(job.createdAt), asc(job.id))
+			.limit(limit)
+			.all();
+		// 未到来(run_after>now)の最も早い1件: futureRunAfterでalarmを張るため, 全件は要らない
+		const future = this.db
+			.select()
+			.from(job)
+			.where(and(eq(job.state, 'SCHEDULED'), gt(job.runAfter, now)))
+			.orderBy(asc(job.runAfter))
+			.limit(1)
+			.all();
+		this.reads += 3;
+		// 3つは状態/run_afterで互いに素なので重複しない
+		const jobs = [...inFlight, ...ready, ...future].map((r) => toView(this.#toJobRow(r)));
+		return { jobs, readyCount: ready.length };
 	}
 
 	countActive(): number {
