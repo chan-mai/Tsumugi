@@ -11,6 +11,13 @@ import { attempt, job, outbox, setting, uniqueKey } from './tables.js';
  */
 export const ERROR_MAX_CHARS = 2_000;
 
+/**
+ * performの戻り値の保存上限(#9)
+ * 戻り値はアウトボックスのスナップショットに乗り毎回の投影で運ばれるので, 無制限だとDOとD1を圧迫する
+ * 超える結果はR2/KV/D1へ自分で書く運用にし, ここではnullに落とす
+ */
+export const RESULT_MAX_CHARS = 8_192;
+
 /** 1ジョブあたりに残す試行の数, maxAttemptsを大きくしてもスナップショットが膨らまないようにする */
 export const ATTEMPT_KEEP = 20;
 
@@ -96,6 +103,7 @@ export class JobRepo {
 				updatedAt: newJob.createdAt,
 				dispatchedAt: null,
 				payload: JSON.stringify(newJob.payload),
+				result: null,
 				runId: null,
 				nodeId: null,
 			})
@@ -226,6 +234,7 @@ export class JobRepo {
 			updated_at: r.updatedAt,
 			dispatched_at: r.dispatchedAt,
 			payload: r.payload,
+			result: r.result,
 			run_id: r.runId,
 			node_id: r.nodeId,
 		};
@@ -240,7 +249,7 @@ export class JobRepo {
 		id: string,
 		from: readonly JobState[],
 		to: JobState,
-		patch: { now: number; dispatchedAt?: number | null; attempts?: number; runAfter?: number; countAttempt?: boolean },
+		patch: { now: number; dispatchedAt?: number | null; attempts?: number; runAfter?: number; countAttempt?: boolean; result?: string | null },
 	): boolean {
 		for (const state of from) assertTransition(state, to);
 
@@ -248,6 +257,8 @@ export class JobRepo {
 		if (patch.dispatchedAt !== undefined) set.dispatchedAt = patch.dispatchedAt;
 		if (patch.attempts !== undefined) set.attempts = patch.attempts;
 		if (patch.runAfter !== undefined) set.runAfter = patch.runAfter;
+		// 成功報告と同じ遷移で結果も入れる, 書き込みを増やさないため別UPDATEにしない(#9)
+		if (patch.result !== undefined) set.result = patch.result;
 		// 現在値を読まずに加算する,成功報告の経路で読み取りを増やさないため
 		if (patch.countAttempt) set.attempts = sql`${job.attempts} + 1`;
 

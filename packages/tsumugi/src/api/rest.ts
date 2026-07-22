@@ -278,6 +278,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			updated_at: found.updatedAt,
 			dispatched_at: found.dispatchedAt,
 			payload: found.payload,
+			// performの戻り値, 成功時のみ入り未完了はnull(#9), payloadと同じくJSON文字列のまま返す
+			result: found.result,
 		};
 		// 履歴は詳細でだけ返す, 一覧に載せると1画面で数百KBになり得る(ADR-0028)
 		// `attempts`は試行回数の数値なので別名にする, 潰すと画面の n/m が壊れる

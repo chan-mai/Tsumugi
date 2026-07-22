@@ -22,7 +22,14 @@ class Boom extends Performer<unknown, void, {}, ConsumerEnv> {
 	}
 }
 
-const registry = { HELLO: Hello, BOOM: Boom };
+/** 戻り値を返すperformer, resultの保存経路を見る(#9) */
+class Echo extends Performer<{ msg: string }, { echoed: string }, {}, ConsumerEnv> {
+	async perform(payload: { msg: string }): Promise<{ echoed: string }> {
+		return { echoed: payload.msg };
+	}
+}
+
+const registry = { HELLO: Hello, BOOM: Boom, ECHO: Echo };
 
 const consumerEnv: ConsumerEnv = env;
 
@@ -125,6 +132,30 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		expect(acked).toHaveLength(1);
 		// リトライ方針はDOが持つので,状態はFAILEDではなくSCHEDULEDに戻る
 		expect(await stateOf('BOOM', jobId)).toBe('SCHEDULED');
+	});
+
+	it('performの戻り値が保存されD1へ投影される(#9)', async () => {
+		const stub = shard('ECHO');
+		const { sent, queue } = captureQueue();
+
+		await runInDurableObject(stub, (instance) => {
+			(instance as any).clock = fixedClock(T0);
+			(instance as any).env.TSUMUGI_QUEUE = queue;
+		});
+
+		const jobId = await stub.enqueue({ binding: 'ECHO', payload: { msg: 'hi' } });
+		await runDurableObjectAlarm(stub);
+		await handleBatch(makeBatch(sent).batch, consumerEnv, registry);
+		expect(await stateOf('ECHO', jobId)).toBe('COMPLETED');
+
+		// DOのjob行に戻り値がJSON文字列で保存される
+		const row = await runInDurableObject(shard('ECHO'), (instance) => (instance as any).repo.find(jobId) as { result: string | null });
+		expect(row.result).toBe(JSON.stringify({ echoed: 'hi' }));
+
+		// 次のtickでCOMPLETEDのスナップショットがD1へ投影され戻り値も運ばれる
+		await runDurableObjectAlarm(stub);
+		const projected = await env.TSUMUGI_DB.prepare('SELECT result FROM job WHERE id = ?').bind(jobId).first<{ result: string | null }>();
+		expect(projected?.result).toBe(JSON.stringify({ echoed: 'hi' }));
 	});
 });
 

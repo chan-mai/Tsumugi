@@ -10,7 +10,7 @@
  * このバージョンが要求するマイグレーション
  * `migrations/`の実ファイルと一致していないと検査が無意味になるので, 単体テストで突き合わせる
  */
-export const EXPECTED_MIGRATIONS = ['0001_create_job_read_model.sql', '0002_add_attempt_log.sql'] as const;
+export const EXPECTED_MIGRATIONS = ['0001_create_job_read_model.sql', '0002_add_attempt_log.sql', '0003_add_result.sql'] as const;
 
 export type MigrationStatus = { ok: true } | { ok: false; missing: string[] };
 
