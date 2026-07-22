@@ -318,3 +318,34 @@ describe('nextAlarmAt', () => {
 		expect(out.nextAlarmAt).toBe(T0 + 2 * 10 ** 12);
 	});
 });
+
+describe('投入が止まった制約の報告(ADR-0009, #10)', () => {
+	it('枠が尽きるとcapacity', () => {
+		const out = schedule({ now: T0, jobs: [job({ id: 'a' }), job({ id: 'b' })], policy: policy({ concurrency: 1 }), bucket: unlimited });
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
+		expect(out.blocked).toEqual({ capacity: true, tokens: false, perKey: false });
+	});
+
+	it('トークンが足りないとtokens', () => {
+		const out = schedule({
+			now: T0,
+			jobs: [job({ id: 'a' })],
+			policy: policy({ rate: { tokens: 1, intervalMs: 1_000 } }),
+			bucket: { tokens: 0, refilledAt: T0 },
+		});
+		expect(ids(out.decisions, 'dispatch')).toEqual([]);
+		expect(out.blocked).toEqual({ capacity: false, tokens: true, perKey: false });
+	});
+
+	it('キー単位の上限で候補を飛ばすとperKey', () => {
+		const jobs = [job({ id: 'a', concurrencyKey: 'k' }), job({ id: 'b', concurrencyKey: 'k' })];
+		const out = schedule({ now: T0, jobs, policy: policy({ perKeyConcurrency: 1 }), bucket: unlimited });
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
+		expect(out.blocked).toEqual({ capacity: false, tokens: false, perKey: true });
+	});
+
+	it('自由に投入できるときは全てfalse', () => {
+		const out = schedule({ now: T0, jobs: [job({ id: 'a' })], policy: policy(), bucket: unlimited });
+		expect(out.blocked).toEqual({ capacity: false, tokens: false, perKey: false });
+	});
+});

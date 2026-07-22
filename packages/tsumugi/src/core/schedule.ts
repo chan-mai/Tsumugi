@@ -84,6 +84,7 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 	let slots = Math.max(0, policy.concurrency - inFlight);
 	let blockedByCapacity = false;
 	let blockedByTokens = false;
+	let blockedByKey = false;
 	let dispatchedSilence: number | null = null;
 
 	for (const { job } of ready) {
@@ -97,7 +98,10 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		}
 		const key = job.concurrencyKey;
 		// キー単位で埋まっているジョブは飛ばす, breakすると後続の別キーが巻き添えになる
-		if (key !== null && (keyInFlight.get(key) ?? 0) >= policy.perKeyConcurrency) continue;
+		if (key !== null && (keyInFlight.get(key) ?? 0) >= policy.perKeyConcurrency) {
+			blockedByKey = true;
+			continue;
+		}
 
 		decisions.push({ type: 'dispatch', id: job.id });
 		slots--;
@@ -120,9 +124,8 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		nextSilence,
 		dispatchedSilence,
 		blockedByTokens ? tokenReadyAt(bucket, policy, now) : null,
-		// 枠待ちは完了報告が次のtickを起こすのでここでは予約しない
-		blockedByCapacity ? null : null,
+		// 枠待ちは完了報告が次のtickを起こすのでここでは予約しない(capacityのalarmは張らない)
 	]);
 
-	return { decisions, bucket, nextAlarmAt };
+	return { decisions, bucket, nextAlarmAt, blocked: { capacity: blockedByCapacity, tokens: blockedByTokens, perKey: blockedByKey } };
 }

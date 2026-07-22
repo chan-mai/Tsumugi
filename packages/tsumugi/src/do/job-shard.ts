@@ -3,7 +3,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { formatJobId } from '../core/ids.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
-import type { Backoff, Bucket, DeliveryGuarantee, Policy, Retention } from '../core/types.js';
+import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, Policy, Retention } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
 import { project } from '../projection/projector.js';
@@ -131,6 +131,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
 	#policyLoaded = false;
+	/** 直近tickで投入が止まった制約, 診断で外へ出す(#10) */
+	#lastBlocked: BlockedBy = { capacity: false, tokens: false, perKey: false };
 
 	get repo(): JobRepo {
 		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage);
@@ -161,6 +163,15 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	async configure(settings: ShardSettings): Promise<void> {
 		this.#applySettings(settings);
+	}
+
+	/**
+	 * 運用診断(#10)
+	 * activeは稼働中ジョブのバックログの深さ, outboxは投影の滞留, blockedは直近tickで投入が止まった制約
+	 * どれを緩めればよいか外から判断できるようにする(ADR-0009)
+	 */
+	async diagnostics(): Promise<{ active: number; outbox: number; blocked: BlockedBy }> {
+		return { active: this.repo.countActive(), outbox: this.repo.countOutbox(), blocked: this.#lastBlocked };
 	}
 
 	/** 内容が変わっていなければ書き込まない, enqueueのたびに1回増えるのを避ける */
@@ -340,6 +351,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const jobs = this.repo.activeJobs(TICK_LIMIT);
 		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket });
 		this.#bucket = output.bucket;
+		// どの制約で投入が止まったかを診断で外へ出す(#10)
+		this.#lastBlocked = output.blocked;
 
 		const messages: MessageSendRequest<DispatchMessage>[] = [];
 		for (const decision of output.decisions) {
