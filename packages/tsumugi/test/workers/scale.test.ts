@@ -154,3 +154,27 @@ describe('enqueueMany', () => {
 		expect(alarm).toBe(T0);
 	});
 });
+
+describe('投入候補の窓(ADR-0019 / ADR-0020, #4)', () => {
+	it('稼働中がTICK_LIMITを埋めても後から入った実行可能ジョブが投入される', async () => {
+		const { sent, queue } = captureQueue();
+		await install('WIN#0', T0, queue);
+		// 枠は空けたまま作成順の窓を実行中で埋める
+		await shard('WIN#0').configure({ policy: { concurrency: 400, perKeyConcurrency: 400 } });
+
+		// 200件を投入してtickでQUEUEDにする(実行中の在庫)
+		await shard('WIN#0').enqueueMany(Array.from({ length: 200 }, () => ({ binding: 'WIN', payload: {} })));
+		await runDurableObjectAlarm(shard('WIN#0'));
+		expect(sent).toHaveLength(200);
+
+		// 実行中200件より後に実行可能ジョブを入れる, 作成順では201件目に落ちる
+		sent.length = 0;
+		await install('WIN#0', T0 + 1_000, queue);
+		const late = await shard('WIN#0').enqueue({ binding: 'WIN', payload: { late: true }, priority: 10 });
+		await runDurableObjectAlarm(shard('WIN#0'));
+
+		// 作成順の単一窓だと201件目は選考へ入らず投入されない
+		expect(sent.map((m) => m.jobId)).toContain(late);
+		expect(await stateOf('WIN#0', late)).toBe('QUEUED');
+	});
+});
