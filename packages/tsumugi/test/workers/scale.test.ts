@@ -6,12 +6,18 @@ const T0 = 2_000_000_000_000;
 
 function captureQueue() {
 	const sent: DispatchMessage[] = [];
+	const batches: number[] = [];
 	return {
 		sent,
+		batches,
 		queue: {
 			send: async (body: DispatchMessage) => void sent.push(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
-				for (const m of batch) sent.push(m.body);
+				const items = [...batch];
+				// プロデューサ側の100件上限, 超えると本番のsendBatchも失敗する
+				if (items.length > 100) throw new Error(`sendBatch上限100件を超過: ${items.length}`);
+				batches.push(items.length);
+				for (const m of items) sent.push(m.body);
 			},
 		},
 	};
@@ -152,5 +158,19 @@ describe('enqueueMany', () => {
 		expect(sent).toHaveLength(200);
 		const alarm = await runInDurableObject(shard('BOUND#0'), (_i, state) => state.storage.getAlarm());
 		expect(alarm).toBe(T0);
+	});
+
+	it('concurrencyが100を超えてもsendBatchは100件ずつに分割される', async () => {
+		const { sent, batches, queue } = captureQueue();
+		await install('SPLIT#0', T0, queue);
+		await shard('SPLIT#0').configure({ policy: { concurrency: 150, perKeyConcurrency: 150 } });
+
+		await shard('SPLIT#0').enqueueMany(Array.from({ length: 150 }, () => ({ binding: 'SPLIT', payload: {} })));
+		await runDurableObjectAlarm(shard('SPLIT#0'));
+
+		// 分割前は1回で150件送りcaptureQueueがthrowする
+		// 100件単位で分割し, 過分割でないことも固定する
+		expect(sent).toHaveLength(150);
+		expect(batches).toEqual([100, 50]);
 	});
 });
