@@ -82,7 +82,11 @@ export async function handleBatch<Env extends ConsumerEnv>(
 	env: Env,
 	performers: PerformerRegistry<Env>,
 ): Promise<void> {
-	await Promise.allSettled(batch.messages.map((message) => handleOne(message, env, performers)));
+	const results = await Promise.allSettled(batch.messages.map((message) => handleOne(message, env, performers)));
+	// handleOneは内部で捕捉しきる想定だが, 漏れた例外を握るとackされずQueuesがリトライに乗せる(ADR-0004)
+	for (const result of results) {
+		if (result.status === 'rejected') console.error('tsumugi: handleOne rejected', result.reason);
+	}
 }
 
 async function handleOne<Env extends ConsumerEnv>(
@@ -90,11 +94,17 @@ async function handleOne<Env extends ConsumerEnv>(
 	env: Env,
 	performers: PerformerRegistry<Env>,
 ): Promise<void> {
-	const { jobId, binding, attempt, payload, timeoutMs, claimRequired } = message.body;
+	// 報告先の特定にjobIdが要るのでtryの外で持つ, 本文が壊れていれば取れないままになる
+	let jobId: string | undefined;
 	let ok = false;
 	let failure: string | undefined;
 
 	try {
+		// 分割代入もtryに入れる, 本文がnull等で壊れていても例外がackを飛ばさない(ADR-0004)
+		const body = message.body;
+		jobId = body.jobId;
+		const { binding, attempt, payload, timeoutMs, claimRequired } = body;
+
 		if (claimRequired && !(await shardStub(env, jobId).claim(jobId))) {
 			// 重複配送で他方が既に実行権を取っている,二重実行を避けるため何もせず降りる(ADR-0007)
 			message.ack();
@@ -118,10 +128,14 @@ async function handleOne<Env extends ConsumerEnv>(
 	} catch (error) {
 		// 本文をDOへ渡す, 捨てるとダッシュボードから失敗の理由が永久に分からない(ADR-0028)
 		failure = describeError(error);
-		console.error(`tsumugi: perform failed (${jobId})`, error);
+		console.error(`tsumugi: perform failed (${jobId ?? 'unknown'})`, error);
 	}
 
 	message.ack();
+
+	// jobIdが取れないのは本文が壊れている場合, 報告先が無いのでackだけで終える
+	// DO側のジョブはQUEUEDのまま残り, timeout経過後にreaperが沈黙として回収する
+	if (jobId === undefined) return;
 
 	try {
 		await shardStub(env, jobId).report(jobId, failure === undefined ? { ok } : { ok, error: failure });
