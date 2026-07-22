@@ -97,6 +97,9 @@ const TICK_LIMIT = 200;
 /** 1回の投影で流すアウトボックスの上限, D1のバッチ上限とtickの時間を考えて抑える */
 const PROJECTION_LIMIT = 200;
 
+/** Cloudflare Queuesのプロデューサ側上限, 1回のsendBatchは100件まで, TICK_LIMITはこれを超えるので分割する */
+const SEND_BATCH_LIMIT = 100;
+
 /** 1 tickで落とす終端ジョブの上限, tickを有界に保つ */
 const SWEEP_LIMIT = 200;
 
@@ -377,7 +380,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			}
 		}
 
-		if (messages.length > 0) await this.env.TSUMUGI_QUEUE.sendBatch(messages);
+		// 100件上限で分割して送る, concurrency>100だと1 tickの投入がこれを超える(ADR-0009)
+		for (let i = 0; i < messages.length; i += SEND_BATCH_LIMIT) {
+			await this.env.TSUMUGI_QUEUE.sendBatch(messages.slice(i, i + SEND_BATCH_LIMIT));
+		}
 
 		const projected = await this.#project();
 		const { deleted, retryAt } = this.#sweep(now);
