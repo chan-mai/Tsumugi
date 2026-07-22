@@ -249,7 +249,14 @@ export class JobRepo {
 		id: string,
 		from: readonly JobState[],
 		to: JobState,
-		patch: { now: number; dispatchedAt?: number | null; attempts?: number; runAfter?: number; countAttempt?: boolean; result?: string | null },
+		patch: {
+			now: number;
+			dispatchedAt?: number | null;
+			attempts?: number;
+			runAfter?: number;
+			countAttempt?: boolean;
+			result?: string | null;
+		},
 	): boolean {
 		for (const state of from) assertTransition(state, to);
 
