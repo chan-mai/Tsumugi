@@ -174,7 +174,10 @@ describe('REST API', () => {
 		const res = await call(withAuth, 'GET', '/api/diagnostics', authorized);
 		expect(res.status).toBe(200);
 
-		const body = await res.json<{ shard: number; bindings: Record<string, { active: number; outbox: number; blocked: { capacity: boolean } }> }>();
+		const body = await res.json<{
+			shard: number;
+			bindings: Record<string, { active: number; outbox: number; blocked: { capacity: boolean } }>;
+		}>();
 		expect(body.shard).toBe(0);
 		// 登録済みbindingのshard 0の稼働中件数が引ける
 		expect(typeof body.bindings.REST?.active).toBe('number');

@@ -248,7 +248,10 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	app.get('/api/stats', async (c) => {
 		const db = drizzle(c.env.TSUMUGI_DB);
-		const rows = await db.select({ state: readModel.state, count: sql<number>`count(*)` }).from(readModel).groupBy(readModel.state);
+		const rows = await db
+			.select({ state: readModel.state, count: sql<number>`count(*)` })
+			.from(readModel)
+			.groupBy(readModel.state);
 		// 最古のSCHEDULEDの経過時間, バックログがどれだけ待たされているかの指標(#10)
 		// 読み取りモデル経由なので数秒遅れる, 傾向を掴む用途
 		const oldest = await db
