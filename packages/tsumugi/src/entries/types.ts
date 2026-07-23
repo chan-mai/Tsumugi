@@ -13,4 +13,15 @@ export type {
 	ScheduleOutput,
 } from '../core/types.js';
 export type { JobAddress } from '../core/ids.js';
-export type { BaseOptions, EnqueueItem, EnqueueOptions, JobContext, JobQueue, Performers, Requirements } from '../core/api.js';
+export type {
+	BaseOptions,
+	EnqueueItem,
+	EnqueueOptions,
+	EnvOf,
+	JobContext,
+	JobQueue,
+	Performers,
+	PerformersOf,
+	Requirements,
+	TypedEnqueueInput,
+} from '../core/api.js';

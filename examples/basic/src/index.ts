@@ -1,4 +1,4 @@
-import { bearerAuth, defineTsumugi, enqueue, remote } from 'tsumugi';
+import { bearerAuth, defineTsumugi, remote } from 'tsumugi';
 import { ui } from 'tsumugi/ui';
 import { Performer } from 'tsumugi/performer';
 
@@ -19,7 +19,8 @@ class Boom extends Performer<unknown, void, {}, Env> {
 // MAILはservice binding越しの別Worker,同一の登録簿に混在可(ADR-0026)
 const performers = { HELLO: Hello, BOOM: Boom, MAIL: remote('MAIL_SERVICE') };
 
-const tsumugi = defineTsumugi<Env>({
+// performersからbindingごとのpayload型とEnvを推論する, 明示の型引数は要らない(ADR-0010)
+const tsumugi = defineTsumugi({
 	performers,
 	// secretから引く,直書きするとリポジトリとバンドルの両方に残る
 	auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
@@ -33,11 +34,12 @@ export default {
 	async fetch(request, env, ctx) {
 		const { pathname } = new URL(request.url);
 		if (pathname === '/enqueue') {
-			const id = await enqueue(env, { binding: 'HELLO', payload: { name: 'world' } });
+			// bindingからpayloadの型が決まる, 取り違えはコンパイルエラー(ADR-0010)
+			const id = await tsumugi.enqueue(env, { binding: 'HELLO', payload: { name: 'world' } });
 			return Response.json({ id });
 		}
 		if (pathname === '/enqueue-mail') {
-			const id = await enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com', subject: 'hi' } });
+			const id = await tsumugi.enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com', subject: 'hi' } });
 			return Response.json({ id });
 		}
 		return tsumugi.fetch!(request, env, ctx);

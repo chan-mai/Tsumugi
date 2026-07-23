@@ -22,7 +22,20 @@ export type { ConsumerEnv, PerformerCtor, PerformerRegistry, RemotePerformerServ
 export { createClient } from '../client/enqueue.js';
 export type { ClientEnv, JobShardStub, TsumugiClient } from '../client/enqueue.js';
 export { Performer, remote, isRemoteRef } from '../core/api.js';
-export type { RemoteJobContext, RemoteRef } from '../core/api.js';
+export type {
+	BaseOptions,
+	EnqueueItem,
+	EnqueueOptions,
+	EnvOf,
+	JobContext,
+	JobQueue,
+	Performers,
+	PerformersOf,
+	RemoteJobContext,
+	RemoteRef,
+	Requirements,
+	TypedEnqueueInput,
+} from '../core/api.js';
 export { InvalidJobIdError, formatJobId, parseJobId, shardName, shardNameOf } from '../core/ids.js';
 export { hashToShard, resolveShard } from '../core/shard.js';
 export { InvalidTransitionError, assertTransition, canTransition, isActive, isTerminal } from '../core/transitions.js';

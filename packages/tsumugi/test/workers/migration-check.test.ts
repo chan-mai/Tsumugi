@@ -12,7 +12,7 @@ class Noop extends Performer<unknown, void, {}, RestEnv> {
 	async perform(): Promise<void> {}
 }
 
-const app = defineTsumugi<RestEnv>({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
+const app = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
 
 const call = (path: string, database: D1Database) =>
 	app.fetch!(
