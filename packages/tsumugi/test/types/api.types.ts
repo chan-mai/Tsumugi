@@ -100,3 +100,24 @@ export function typeChecks() {
 	// @ts-expect-error uniqueKeyが無い
 	tsumugi.enqueueMany(env, [{ binding: 'SYNC', payload: { sku: 'X-1' } }]);
 }
+
+// 異なるbindingを要求するperformerを複数登録すると, 環境は各envのintersectionになる(#5)
+// 全performerは同一のWorker環境で初期化されるので, どちらのbindingも満たす環境しか受け付けない
+type EnvA = { A_DB: string };
+type EnvB = { B_QUEUE: string };
+class NeedsA extends Performer<{ x: number }, void, {}, EnvA> {
+	async perform(_payload: { x: number }, _ctx: JobContext) {}
+}
+class NeedsB extends Performer<{ y: number }, void, {}, EnvB> {
+	async perform(_payload: { y: number }, _ctx: JobContext) {}
+}
+
+const both = defineTsumugi({ performers: { A: NeedsA, B: NeedsB } });
+declare const fullEnv: EnvA & EnvB;
+
+export function envIsIntersection() {
+	// 両方のbindingを満たす環境は通る
+	both.jobs(fullEnv);
+	// @ts-expect-error A_DBしか無い環境はB_QUEUEを満たさないので拒否される
+	both.jobs({ A_DB: 'x' } as EnvA);
+}

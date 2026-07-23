@@ -111,10 +111,17 @@ export type PerformersOf<R extends Record<string, unknown>> = {
 			: never;
 };
 
-/** 登録簿のctorが受け取るEnv, `defineTsumugi`が明示の型引数なしでEnvを推論するのに使う */
-export type EnvOf<R extends Record<string, unknown>> = {
-	[K in keyof R]: R[K] extends new (env: infer E) => any ? E : never;
-}[keyof R];
+/** unionをintersectionに畳む, 分配した関数引数の反変性を使う */
+type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (k: infer I) => void ? I : never;
+
+/**
+ * 登録簿のctorが受け取るEnv, `defineTsumugi`が明示の型引数なしでEnvを推論するのに使う(#5)
+ * 全performerは同一のWorker環境で初期化されるので, 各envのintersectionにする
+ * unionにすると1つのperformerのbindingしか満たさない環境も通ってしまう
+ */
+export type EnvOf<R extends Record<string, unknown>> = UnionToIntersection<
+	{ [K in keyof R]: R[K] extends new (env: infer E) => any ? E : never }[keyof R]
+>;
 
 /** enqueueの追加フィールド,`EnqueueOptions`に無くDOへ渡すもの */
 type ExtraInputFields = {
