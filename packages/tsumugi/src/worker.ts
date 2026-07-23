@@ -40,7 +40,7 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
  * `defineTsumugi`の戻り値(ADR-0010)
  * enqueueは`config.performers`から推論した`M`で型付けし, 必須キーの渡し忘れをコンパイルエラーにする
  */
-export type Tsumugi<Env, M extends Performers> = ExportedHandler<Env> & {
+export type Tsumugi<Env, M extends Performers = Performers> = ExportedHandler<Env> & {
 	/** envを束ねた型付きの投入口, `JobQueue<M>`を満たす */
 	jobs(env: Env): JobQueue<M>;
 	/** オブジェクト形の型付きenqueue, bindingでpayloadと必須キーが決まる */
