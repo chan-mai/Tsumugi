@@ -413,12 +413,20 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const rows = this.repo.outboxBatch(PROJECTION_LIMIT);
 		if (rows.length === 0) return 0;
 		await project(this.env.TSUMUGI_DB, rows);
-		// 明細と同じ材料から時系列を書く, sweepで明細が消えてもこちらは残る(ADR-0016)
-		writeMetrics(
-			this.env.TSUMUGI_METRICS,
-			rows.map((row) => JSON.parse(row.snapshot) as JobRow),
-		);
+		// 投影が成功したらカーソルを先に進める, 投影は冪等なので再処理は無害(#7)
 		this.repo.deleteOutboxThrough(rows[rows.length - 1]!.seq);
+		// メトリクスはカーソルの後, 非冪等なので冪等な投影と再試行単位を分ける(ADR-0016 / #7)
+		// カーソルより後なので同じ行を二度書かない, 反面この便の失敗ぶんは載らずat-most-onceになる
+		// 省略可能な機能なので失敗を捕捉し, ジョブ調停を含むtick全体を止めない
+		try {
+			// 明細と同じ材料から時系列を書く, sweepで明細が消えてもこちらは残る(ADR-0016)
+			writeMetrics(
+				this.env.TSUMUGI_METRICS,
+				rows.map((row) => JSON.parse(row.snapshot) as JobRow),
+			);
+		} catch (error) {
+			console.error('tsumugi: writeMetrics failed', error);
+		}
 		return rows.length;
 	}
 
