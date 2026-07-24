@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Performer } from '../../src/core/api.js';
 import { createTestContext, fixedClock, nextAttempt, runPerformer, schedule } from '../../src/entries/testing.js';
 
@@ -21,6 +21,13 @@ class Interruptible extends Performer<unknown, string, never, unknown> {
 		return new Promise((resolve) => {
 			ctx.signal.addEventListener('abort', () => resolve('aborted'), { once: true });
 		});
+	}
+}
+
+/** concurrencyKey必須のperformer, ハーネスが必須キー付きも受けられることの型テスト */
+class Charge extends Performer<{ customerId: string }, string, { concurrencyKey: true }, unknown> {
+	async perform(payload: { customerId: string }): Promise<string> {
+		return payload.customerId;
 	}
 }
 
@@ -55,6 +62,12 @@ describe('performerのハーネス', () => {
 	it('abort済みから始められる', async () => {
 		const ctx = createTestContext({ aborted: true });
 		await expect(runPerformer(new Interruptible(undefined), {}, ctx)).resolves.toEqual({ ok: true, value: 'aborted' });
+	});
+
+	it('必須キー付きperformerも渡せる', async () => {
+		// 第3型引数をnever固定すると必須キー付きを弾く,渡せること自体が型テスト
+		const result = await runPerformer(new Charge(undefined), { customerId: 'c1' });
+		expect(result).toEqual({ ok: true, value: 'c1' });
 	});
 });
 
@@ -101,11 +114,12 @@ describe('公開している純粋関数', () => {
 	});
 });
 
-describe('依存の遮断', () => {
-	it('testingがDOやHonoを引き込まない', async () => {
-		// サブパスを分ける意味はサイズだけでなく依存の遮断にもある
+describe('testingサブパスの公開API', () => {
+	it('ハーネスと純粋関数の入口を公開する', async () => {
+		// 依存遮断はsize-check.mjsがdist成果物で担保,ここは公開面を固定する
 		const loaded = await import('../../src/entries/testing.js');
-		expect(Object.keys(loaded)).toContain('runPerformer');
-		expect(vi.isMockFunction(loaded.schedule)).toBe(false);
+		expect(Object.keys(loaded)).toEqual(
+			expect.arrayContaining(['createTestContext', 'runPerformer', 'fixedClock', 'nextAttempt', 'schedule']),
+		);
 	});
 });

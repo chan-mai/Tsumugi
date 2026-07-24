@@ -1,4 +1,4 @@
-import type { JobContext, Performer } from '../core/api.js';
+import type { JobContext, Performer, Requirements } from '../core/api.js';
 
 /**
  * performerを試すための道具
@@ -45,8 +45,8 @@ export type PerformResult<Result> = { ok: true; value: Result } | { ok: false; e
  * performを呼び, 例外を投げずに結果として返す
  * 本番では例外がそのままリトライの判断になるため, 投げたか否かを同じ形で扱えるようにする
  */
-export async function runPerformer<Payload, Result, Env>(
-	performer: Performer<Payload, Result, never, Env>,
+export async function runPerformer<Payload, Result, Req extends Requirements, Env>(
+	performer: Performer<Payload, Result, Req, Env>,
 	payload: Payload,
 	ctx: JobContext = createTestContext(),
 ): Promise<PerformResult<Result>> {
