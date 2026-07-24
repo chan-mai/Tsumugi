@@ -84,7 +84,7 @@ describe('マイグレーション適用漏れの検出', () => {
 
 	it('一時障害では適用漏れの復旧手順を案内しない(#8)', async () => {
 		// unavailableはTTLで使い回されるので, 共有appのキャッシュを汚さないよう専用のappを立てる
-		const isolated = defineTsumugi<RestEnv>({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
+		const isolated = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
 		const res = await isolated.fetch!(
 			new Request('https://example.com/api/jobs', { headers: { authorization: `Bearer ${TOKEN}` } }),
 			{ ...env, TSUMUGI_DB: withError('D1_ERROR: Network connection lost') } as RestEnv,
