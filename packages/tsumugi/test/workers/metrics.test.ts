@@ -129,4 +129,36 @@ describe('tickからの書き出し', () => {
 		expect(remaining).toBeNull();
 		expect(points.length).toBeGreaterThan(0);
 	});
+
+	it('writeMetricsが失敗してもtickは止まらずカーソルが進む(#7)', async () => {
+		// writeDataPointが例外を投げる状況, メトリクスは省略可能なのでtickを止めてはいけない
+		const boom = {
+			writeDataPoint: () => {
+				throw new Error('AE不調');
+			},
+		} as unknown as AnalyticsEngineDataset;
+		const stub = shard('MET3#0');
+
+		await runInDurableObject(stub, (instance) => {
+			(instance as any).clock = { now: () => T0 };
+			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+			(instance as any).env.TSUMUGI_METRICS = boom;
+		});
+		const jobId = await stub.enqueue({ binding: 'MET3', payload: {} });
+		await runDurableObjectAlarm(stub);
+
+		await runInDurableObject(stub, (instance) => {
+			(instance as any).clock = { now: () => T0 + 3_000 };
+			(instance as any).env.TSUMUGI_METRICS = boom;
+		});
+		await stub.report(jobId, { ok: true });
+		await runDurableObjectAlarm(stub);
+
+		// 投影はメトリクスの失敗に巻き込まれずD1へ届く
+		const projected = await env.TSUMUGI_DB.prepare('SELECT state FROM job WHERE id = ?').bind(jobId).first<{ state: string }>();
+		expect(projected?.state).toBe('COMPLETED');
+		// カーソルが進みアウトボックスが残らない, 残ると次tickで同じメトリクスを二重書きする
+		const outbox = await runInDurableObject(stub, (instance) => (instance as any).repo.countOutbox() as number);
+		expect(outbox).toBe(0);
+	});
 });

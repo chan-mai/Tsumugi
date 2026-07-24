@@ -28,3 +28,6 @@
 - [ADR-0023](0023-single-npm-package-subpaths.md) — npmには`tsumugi`を1つだけ公開しサブパスで分ける
 - [ADR-0024](0024-ctx-exports-self-reference.md) — `ctx.exports`による自己参照を前提にする
 - [ADR-0025](0025-dashboard-inlined-html.md) — ダッシュボードは単一HTML文字列として`tsumugi/ui`から提供する
+- [ADR-0026](0026-remote-performers.md) — performerをservice binding越しに置けるようにする
+- [ADR-0027](0027-split-terminal-retention.md) — 終端ジョブの保持を役割で分ける
+- [ADR-0028](0028-attempt-log.md) — 試行ごとの記録を残す

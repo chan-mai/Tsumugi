@@ -13,8 +13,8 @@ class Noop extends Performer<unknown, void, {}, RestEnv> {
 	async perform(): Promise<void> {}
 }
 
-const withAuth = defineTsumugi<RestEnv>({ performers: { REST: Noop }, auth: bearerAuth(TOKEN) });
-const withoutAuth = defineTsumugi<RestEnv>({ performers: { REST: Noop } });
+const withAuth = defineTsumugi({ performers: { REST: Noop }, auth: bearerAuth(TOKEN) });
+const withoutAuth = defineTsumugi({ performers: { REST: Noop } });
 
 /** 認証未設定で塞がっていることを機械的に保証するため,ルートを列挙して総当たりする */
 const ROUTES: [method: string, path: string][] = [
@@ -27,7 +27,7 @@ const ROUTES: [method: string, path: string][] = [
 	['GET', '/api/unknown'],
 ];
 
-const call = (handler: typeof withAuth, method: string, path: string, headers: Record<string, string> = {}) =>
+const call = (handler: ExportedHandler<RestEnv>, method: string, path: string, headers: Record<string, string> = {}) =>
 	handler.fetch!(
 		new Request(`https://example.com${path}`, { method, headers }),
 		env as RestEnv,
@@ -84,7 +84,7 @@ describe('fail-closed認証(ADR-0013)', () => {
 });
 
 describe('secretからのトークン解決', () => {
-	const fromEnv = defineTsumugi<RestEnv>({
+	const fromEnv = defineTsumugi({
 		performers: { REST: Noop },
 		auth: bearerAuth((env: { TSUMUGI_TOKEN?: string }) => env.TSUMUGI_TOKEN),
 	});
@@ -257,7 +257,7 @@ describe('ジョブの投入', () => {
 
 describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 	// 一覧はD1から引くのでDOから消えても行は残る, 押す前と押した後の両方で分かる必要がある
-	const shortLived = defineTsumugi<RestEnv>({
+	const shortLived = defineTsumugi({
 		performers: { GONE: Noop },
 		auth: bearerAuth(TOKEN),
 		bindings: { GONE: { failedRetentionMs: 1 } },
@@ -274,7 +274,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 			.run();
 	}
 
-	const post = (handler: typeof withAuth, path: string) =>
+	const post = (handler: ExportedHandler<RestEnv>, path: string) =>
 		handler.fetch!(
 			new Request(`https://example.com${path}`, { method: 'POST', headers: authorized }),
 			env as RestEnv,
@@ -312,7 +312,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 	});
 
 	it('窓の内側の失敗ジョブはretryable=true', async () => {
-		const generous = defineTsumugi<RestEnv>({
+		const generous = defineTsumugi({
 			performers: { GONE: Noop },
 			auth: bearerAuth(TOKEN),
 			bindings: { GONE: { failedRetentionMs: 7 * 24 * 60 * 60 * 1000 } },
