@@ -63,11 +63,23 @@ export type ScheduleInput = {
 	bucket: Bucket;
 };
 
+/** 投入が止まった制約, ADR-0009の3軸のどれで詰まったか(#10) */
+export type BlockedBy = {
+	/** concurrency: 同時実行の枠が尽きた */
+	capacity: boolean;
+	/** rate: トークンが足りない */
+	tokens: boolean;
+	/** perKeyConcurrency: キー単位の上限で候補を飛ばした */
+	perKey: boolean;
+};
+
 export type ScheduleOutput = {
 	decisions: Decision[];
 	bucket: Bucket;
 	/** 次にスケジューラを起こす時刻,不要ならnull */
 	nextAlarmAt: number | null;
+	/** どの制約で投入が止まったか, どれを緩めればよいか外から判断できるようにする(#10) */
+	blocked: BlockedBy;
 };
 
 /**

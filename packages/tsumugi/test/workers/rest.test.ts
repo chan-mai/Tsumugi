@@ -161,6 +161,30 @@ describe('REST API', () => {
 		]);
 	});
 
+	it('statsが最古のSCHEDULEDの経過時間を返す(#10)', async () => {
+		await seedJob();
+		const res = await call(withAuth, 'GET', '/api/stats', authorized);
+		expect(res.status).toBe(200);
+		const body = await res.json<{ byState: Record<string, number>; oldestScheduledMs: number | null }>();
+		// SCHEDULEDが無ければnull, あれば経過時間の数値
+		expect('oldestScheduledMs' in body).toBe(true);
+	});
+
+	it('診断がバックログと投入制約をDOから返す(#10)', async () => {
+		await seedJob();
+		const res = await call(withAuth, 'GET', '/api/diagnostics', authorized);
+		expect(res.status).toBe(200);
+
+		const body = await res.json<{
+			shard: number;
+			bindings: Record<string, { active: number; outbox: number; blocked: { capacity: boolean } }>;
+		}>();
+		expect(body.shard).toBe(0);
+		// 登録済みbindingのshard 0の稼働中件数が引ける
+		expect(typeof body.bindings.REST?.active).toBe('number');
+		expect(typeof body.bindings.REST?.blocked?.capacity).toBe('boolean');
+	});
+
 	it('存在しないジョブは404', async () => {
 		const res = await call(withAuth, 'GET', '/api/jobs/REST%230:missing', authorized);
 		expect(res.status).toBe(404);

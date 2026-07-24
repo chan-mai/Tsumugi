@@ -159,6 +159,54 @@ describe('ポリシーの永続化', () => {
 	});
 });
 
+describe('運用診断(#10)', () => {
+	it('バックログの深さと投入が止まった制約を返す', async () => {
+		const { queue } = captureQueue();
+		await install('DIAG#0', T0, queue);
+		// 枠1に対して2件, 1件は枠待ちで止まる
+		await shard('DIAG#0').configure({ policy: { concurrency: 1, perKeyConcurrency: 1 } });
+		await shard('DIAG#0').enqueueMany([
+			{ binding: 'DIAG', payload: {} },
+			{ binding: 'DIAG', payload: {} },
+		]);
+		await runDurableObjectAlarm(shard('DIAG#0'));
+
+		const diag = await shard('DIAG#0').diagnostics();
+		// QUEUED1件+SCHEDULED1件, どちらも稼働中
+		expect(diag.active).toBe(2);
+		// 枠が尽きて投入が止まったことが外から分かる
+		expect(diag.blocked.capacity).toBe(true);
+	});
+
+	it('止まった制約をDOに永続化する', async () => {
+		const { queue } = captureQueue();
+		await install('DIAGP#0', T0, queue);
+		await shard('DIAGP#0').configure({ policy: { concurrency: 1, perKeyConcurrency: 1 } });
+		await shard('DIAGP#0').enqueueMany([
+			{ binding: 'DIAGP', payload: {} },
+			{ binding: 'DIAGP', payload: {} },
+		]);
+		await runDurableObjectAlarm(shard('DIAGP#0'));
+
+		const raw = await runInDurableObject(
+			shard('DIAGP#0'),
+			(instance) => (instance as any).repo.readSetting('last_blocked') as string | undefined,
+		);
+		expect(raw).toBeDefined();
+		expect(JSON.parse(raw as string)).toMatchObject({ capacity: true });
+	});
+
+	it('退避で消えても永続化したblockedをdiagnosticsが返す', async () => {
+		// tick前のshardはblockedがfalse既定,退避後の再ロードを模して直接書く
+		await runInDurableObject(shard('DIAGR#0'), (instance) =>
+			(instance as any).repo.writeSetting('last_blocked', JSON.stringify({ capacity: true, tokens: false, perKey: false })),
+		);
+
+		const diag = await shard('DIAGR#0').diagnostics();
+		expect(diag.blocked.capacity).toBe(true);
+	});
+});
+
 describe('enqueueMany', () => {
 	it('1回のRPCで大量に投入でき, IDの並びが入力に対応する', async () => {
 		const { queue } = captureQueue();

@@ -3,7 +3,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { formatJobId } from '../core/ids.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
-import type { Backoff, Bucket, DeliveryGuarantee, Policy, Retention } from '../core/types.js';
+import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, Policy, Retention } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
 import { project } from '../projection/projector.js';
@@ -151,6 +151,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
 	#policyLoaded = false;
+	/** 直近tickで投入が止まった制約, 診断で外へ出す(#10) */
+	#lastBlocked: BlockedBy = { capacity: false, tokens: false, perKey: false };
+	#blockedLoaded = false;
 
 	get repo(): JobRepo {
 		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage);
@@ -182,6 +185,33 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async configure(settings: ShardSettings): Promise<void> {
 		// configure()は実行時の意思, 静的設定より優先する印を付ける(#6)
 		this.#applySettings(settings, true);
+	}
+
+	/**
+	 * 運用診断(#10)
+	 * activeは稼働中ジョブのバックログの深さ, outboxは投影の滞留, blockedは直近tickで投入が止まった制約
+	 * どれを緩めればよいか外から判断できるようにする(ADR-0009)
+	 */
+	async diagnostics(): Promise<{ active: number; outbox: number; blocked: BlockedBy }> {
+		this.#loadBlocked();
+		return { active: this.repo.countActive(), outbox: this.repo.countOutbox(), blocked: this.#lastBlocked };
+	}
+
+	/** 永続化した直近blockedを一度だけ読み戻す,無ければfalse既定のまま(#10) */
+	#loadBlocked(): void {
+		if (this.#blockedLoaded) return;
+		const raw = this.repo.readSetting('last_blocked');
+		if (raw) this.#lastBlocked = JSON.parse(raw) as BlockedBy;
+		this.#blockedLoaded = true;
+	}
+
+	/** blockedを保存する,変化した時だけ書いて毎tickの書き込みを避ける(#10) */
+	#persistBlocked(blocked: BlockedBy): void {
+		this.#loadBlocked();
+		const encoded = JSON.stringify(blocked);
+		if (JSON.stringify(this.#lastBlocked) === encoded) return;
+		this.#lastBlocked = blocked;
+		this.repo.writeSetting('last_blocked', encoded);
 	}
 
 	/**
@@ -374,6 +404,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT);
 		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket });
 		this.#bucket = output.bucket;
+		// どの制約で投入が止まったかを診断で外へ出す,DO退避後も残す(#10)
+		this.#persistBlocked(output.blocked);
 
 		const messages: MessageSendRequest<DispatchMessage>[] = [];
 		for (const decision of output.decisions) {

@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
 import { job as readModel } from '../projection/tables.js';
-import { InvalidJobIdError, shardNameOf } from '../core/ids.js';
+import { InvalidJobIdError, shardName, shardNameOf } from '../core/ids.js';
 import type { TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 import type { Ui } from '../ui/serve.js';
@@ -251,11 +251,34 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	});
 
 	app.get('/api/stats', async (c) => {
-		const rows = await drizzle(c.env.TSUMUGI_DB)
+		const db = drizzle(c.env.TSUMUGI_DB);
+		const rows = await db
 			.select({ state: readModel.state, count: sql<number>`count(*)` })
 			.from(readModel)
 			.groupBy(readModel.state);
-		return c.json({ byState: Object.fromEntries(rows.map((r) => [r.state, r.count])) });
+		// 最古のSCHEDULEDの経過時間, バックログがどれだけ待たされているかの指標(#10)
+		// 読み取りモデル経由なので数秒遅れる, 傾向を掴む用途
+		const oldest = await db
+			.select({ createdAt: sql<number | null>`min(${readModel.createdAt})` })
+			.from(readModel)
+			.where(eq(readModel.state, 'SCHEDULED'));
+		const oldestCreatedAt = oldest[0]?.createdAt ?? null;
+		return c.json({
+			byState: Object.fromEntries(rows.map((r) => [r.state, r.count])),
+			oldestScheduledMs: oldestCreatedAt === null ? null : Math.max(0, Date.now() - oldestCreatedAt),
+		});
+	});
+
+	// 運用診断, DOに直接問い合わせてバックログ/投影滞留/投入が止まった制約を返す(#10)
+	// 既定はshards=1なのでshard 0を代表として引く, 分割時はshard 0のみになる(ADR-0011)
+	app.get('/api/diagnostics', async (c) => {
+		const perBinding = await Promise.all(
+			bindings.map(async (binding) => {
+				const stub = c.env.JOB_SHARD.get(c.env.JOB_SHARD.idFromName(shardName(binding, 0)));
+				return [binding, await stub.diagnostics()] as const;
+			}),
+		);
+		return c.json({ shard: 0, bindings: Object.fromEntries(perBinding) });
 	});
 
 	app.get('/api/jobs/:id', async (c) => {
