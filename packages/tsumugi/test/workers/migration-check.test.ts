@@ -67,7 +67,7 @@ describe('マイグレーション適用漏れの検出', () => {
 
 	it('欠けていれば名前を返す', async () => {
 		const status = await checkMigrations(withLedger([{ name: '0001_create_job_read_model.sql' }]));
-		expect(status).toEqual({ ok: false, missing: ['0002_add_attempt_log.sql'] });
+		expect(status).toEqual({ ok: false, missing: ['0002_add_attempt_log.sql', '0003_add_result.sql'] });
 	});
 
 	it('台帳自体が無ければ全件未適用として扱う', async () => {

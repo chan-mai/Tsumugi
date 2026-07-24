@@ -33,6 +33,8 @@ function toValues(snapshot: JobSnapshot, seq: number): typeof job.$inferInsert {
 		updatedAt: snapshot.updated_at,
 		dispatchedAt: snapshot.dispatched_at,
 		payload: snapshot.payload,
+		// 古いスナップショットにはresultが無いのでnullに寄せる(#9)
+		result: snapshot.result ?? null,
 		runId: snapshot.run_id,
 		nodeId: snapshot.node_id,
 		// 履歴が無いジョブでnullを入れる, 空配列にすると「取れなかった」と区別できない

@@ -36,7 +36,7 @@ describe('投影のUPSERTが更新する列', () => {
 
 	it('変わり得る列は更新する', () => {
 		const set = setClauseOf();
-		for (const column of ['"seq"', '"state"', '"attempts"', '"updated_at"', '"payload"', '"attempts_log"']) {
+		for (const column of ['"seq"', '"state"', '"attempts"', '"updated_at"', '"payload"', '"result"', '"attempts_log"']) {
 			expect(set.includes(`${column} = `), `${column}が更新対象から漏れている`).toBe(true);
 		}
 	});

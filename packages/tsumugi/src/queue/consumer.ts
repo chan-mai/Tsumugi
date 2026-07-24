@@ -98,6 +98,7 @@ async function handleOne<Env extends ConsumerEnv>(
 	let jobId: string | undefined;
 	let ok = false;
 	let failure: string | undefined;
+	let result: unknown;
 
 	try {
 		// 分割代入もtryに入れる, 本文がnull等で壊れていても例外がackを飛ばさない(ADR-0004)
@@ -122,9 +123,10 @@ async function handleOne<Env extends ConsumerEnv>(
 			// 設定漏れの即時失敗,握り潰すと黙って失敗し続ける
 			if (typeof service?.perform !== 'function') throw new Error(`service bindingが未設定: ${entry.binding}`);
 			// signalは非対応,中断の依頼はリモートに届かない(ADR-0026)
-			await withTimeout(jobId, timeoutMs, () => Promise.resolve(service.perform(payload, base)));
+			result = await withTimeout(jobId, timeoutMs, () => Promise.resolve(service.perform(payload, base)));
 		} else {
-			await withTimeout(jobId, timeoutMs, (signal) => Promise.resolve(new entry(env).perform(payload, { ...base, signal })));
+			// performの戻り値を拾ってDOへ渡す, 保存はDO側で行う(#9)
+			result = await withTimeout(jobId, timeoutMs, (signal) => Promise.resolve(new entry(env).perform(payload, { ...base, signal })));
 		}
 		ok = true;
 	} catch (error) {
@@ -140,7 +142,9 @@ async function handleOne<Env extends ConsumerEnv>(
 	if (jobId === undefined) return;
 
 	try {
-		await shardStub(env, jobId).report(jobId, failure === undefined ? { ok } : { ok, error: failure });
+		// exactOptionalPropertyTypesのためerror未定義は省いて渡す
+		const outcome = ok ? { ok: true, result } : failure === undefined ? { ok: false } : { ok: false, error: failure };
+		await shardStub(env, jobId).report(jobId, outcome);
 	} catch (error) {
 		// 報告が失われるとジョブはQUEUEDのまま残る, reaperが沈黙として回収する
 		console.error(`tsumugi: report failed (${jobId})`, error);

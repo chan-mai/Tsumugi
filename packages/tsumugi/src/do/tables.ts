@@ -25,6 +25,8 @@ export const job = sqliteTable(
 		updatedAt: integer('updated_at').notNull(),
 		dispatchedAt: integer('dispatched_at'),
 		payload: text('payload').notNull(),
+		// performの戻り値, 成功時にJSON文字列で入る(#9)
+		result: text('result'),
 		// v2のDAG用の予約席(ADR-0015),後からスキーマを書き換えずに済むよう最初から置く
 		runId: text('run_id'),
 		nodeId: text('node_id'),

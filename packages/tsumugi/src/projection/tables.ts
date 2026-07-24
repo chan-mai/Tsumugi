@@ -25,6 +25,8 @@ export const job = sqliteTable(
 		updatedAt: integer('updated_at').notNull(),
 		dispatchedAt: integer('dispatched_at'),
 		payload: text('payload').notNull(),
+		// performの戻り値, DOのjob.resultをそのまま投影する(#9)
+		result: text('result'),
 		runId: text('run_id'),
 		nodeId: text('node_id'),
 		attemptsLog: text('attempts_log'),

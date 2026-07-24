@@ -153,6 +153,7 @@ describe('REST API', () => {
 			'max_attempts',
 			'payload',
 			'priority',
+			'result',
 			'retryable',
 			'state',
 			'unique_key',

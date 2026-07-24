@@ -22,6 +22,8 @@ export const SCHEMA = [
 		updated_at INTEGER NOT NULL,
 		dispatched_at INTEGER,
 		payload TEXT NOT NULL,
+		-- performの戻り値, 成功時にJSON文字列で入る(#9), 上限超過や非直列化はnull
+		result TEXT,
 		-- v2のDAG用の予約席(ADR-0015),後からスキーマを書き換えずに済むよう最初から置く
 		run_id TEXT,
 		node_id TEXT
@@ -65,6 +67,17 @@ export const SCHEMA = [
 
 export function applySchema(sql: SqlStorage): void {
 	for (const statement of SCHEMA) sql.exec(statement);
+	// CREATE TABLE IF NOT EXISTSは既存テーブルを変更しない, resultを後から足したので既存DOへ補う(#9)
+	ensureColumn(sql, 'job', 'result', 'TEXT');
+}
+
+/** 既存の表に列が無ければ足す, 冪等にするため先に有無を確かめる */
+function ensureColumn(sql: SqlStorage, table: string, column: string, type: string): void {
+	const exists = sql
+		.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
+		.toArray()
+		.some((row) => row.name === column);
+	if (!exists) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 /** 試行1回ぶんの記録 */
@@ -95,6 +108,7 @@ export type JobRow = {
 	updated_at: number;
 	dispatched_at: number | null;
 	payload: string;
+	result: string | null;
 	run_id: string | null;
 	node_id: string | null;
 };

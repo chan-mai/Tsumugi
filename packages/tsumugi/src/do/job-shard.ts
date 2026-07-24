@@ -7,8 +7,25 @@ import type { Backoff, Bucket, DeliveryGuarantee, Policy, Retention } from '../c
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
 import { project } from '../projection/projector.js';
-import { JobRepo } from './repo.js';
+import { JobRepo, RESULT_MAX_CHARS } from './repo.js';
 import type { JobRow } from './schema.js';
+
+/**
+ * performの戻り値を保存用のJSON文字列にする(#9)
+ * 戻り値なし/非直列化/上限超過はnullに落とす, 大きい結果はperformerがR2等へ書く運用
+ */
+function serializeResult(value: unknown): string | null {
+	if (value === undefined) return null;
+	let text: string | undefined;
+	try {
+		text = JSON.stringify(value);
+	} catch {
+		// 循環参照など直列化できないものは保存しない
+		return null;
+	}
+	if (text === undefined || text.length > RESULT_MAX_CHARS) return null;
+	return text;
+}
 
 /** Queuesに載せるメッセージ,ペイロードはここに同梱してconsumerがDOを引かずに済むようにする */
 export type DispatchMessage = {
@@ -240,7 +257,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 失敗ならバックオフを計算してSCHEDULEDへ戻す,試行回数を使い切っていればFAILED
 	 * リトライ方針をここが持つのでQueuesの`max_retries`に縛られない(ADR-0004)
 	 */
-	async report(jobId: string, result: { ok: boolean; error?: string }): Promise<void> {
+	async report(jobId: string, outcome: { ok: boolean; error?: string; result?: unknown }): Promise<void> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
 		// 報告を受け付けられる状態かをここで見る
@@ -250,21 +267,26 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const attempts = row.attempts + 1;
 		// 1回目で成功したジョブの履歴はジョブ行から導出できるので書かない
 		// 導出できないのは失敗の理由と試行ごとの時刻だけ, 常時書くと1ジョブあたりの書き込みが1回増える
-		const worthRecording = !result.ok || attempts > 1;
+		const worthRecording = !outcome.ok || attempts > 1;
 		// 遷移でdispatched_atが消えるので開始時刻は先に確保する
 		if (worthRecording)
 			this.#recordAttempt(
 				jobId,
 				attempts,
-				result.ok ? 'COMPLETED' : 'FAILED',
+				outcome.ok ? 'COMPLETED' : 'FAILED',
 				row.dispatched_at,
 				now,
-				result.ok ? null : (result.error ?? null),
+				outcome.ok ? null : (outcome.error ?? null),
 			);
 
-		if (result.ok) {
+		if (outcome.ok) {
 			// 1回実行して成功したならattemptsは1,失敗時だけ数えると完了ジョブが0回に見える
-			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'COMPLETED', { now, countAttempt: true });
+			// 結果は同じ遷移のsetに相乗りさせる, 別UPDATEにすると書き込みが1増える(#9)
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'COMPLETED', {
+				now,
+				countAttempt: true,
+				result: serializeResult(outcome.result),
+			});
 			await this.#armAlarm(now);
 			return;
 		}
