@@ -1,4 +1,3 @@
-import { effectivePriority } from '../../src/core/schedule.js';
 import type { ScheduleInput } from '../../src/core/types.js';
 
 /**
@@ -28,7 +27,7 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 
 	const ready = jobs
 		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now)
-		.map((j) => ({ job: j, ep: effectivePriority(j, now, policy.agingIntervalMs) }))
+		.map((j) => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 
 	let slots = Math.max(0, policy.concurrency - inFlight.length);
@@ -48,6 +47,15 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 		if (key !== null) keyInFlight.set(key, (keyInFlight.get(key) ?? 0) + 1);
 	}
 	return dispatched;
+}
+
+/**
+ * 優先度の底上げを実装を参照せず再計算する
+ * 有効時はpriorityへfloor(max(0,now-createdAt)/agingIntervalMs)を加算,無効/0/負はpriorityのまま
+ */
+function agedPriority(priority: number, createdAt: number, now: number, agingIntervalMs: number | null): number {
+	if (agingIntervalMs === null || agingIntervalMs <= 0) return priority;
+	return priority + Math.floor(Math.max(0, now - createdAt) / agingIntervalMs);
 }
 
 /** レート有効時の補充後トークン, スケジューラのrefillと同じ式 */
