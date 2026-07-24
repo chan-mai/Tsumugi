@@ -10,6 +10,7 @@ const BUDGETS = {
 	'dist/index.js': 100 * 1024,
 	'dist/performer.js': 16 * 1024,
 	'dist/client.js': 16 * 1024,
+	'dist/testing.js': 16 * 1024,
 };
 
 /**
@@ -19,6 +20,7 @@ const BUDGETS = {
 const FORBIDDEN = {
 	'dist/client.js': [/extends DurableObject/, /CREATE TABLE/],
 	'dist/performer.js': [/extends DurableObject/, /CREATE TABLE/],
+	'dist/testing.js': [/extends DurableObject/, /CREATE TABLE/, /hono/],
 };
 
 /** 印の実在確認,常に当たらないパターンは検査の形骸化 */
@@ -38,6 +40,7 @@ const ALLOWED_EXTERNALS = {
 	'dist/index.js': ['@paralleldrive/cuid2', 'drizzle-orm', 'hono'],
 	'dist/performer.js': [],
 	'dist/client.js': [],
+	'dist/testing.js': [],
 };
 
 /** import文に残る外部依存をパッケージ名の集合で返す, workerdの組み込みは利用者のバンドルに載らないので除く */
