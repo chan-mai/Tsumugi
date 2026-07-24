@@ -136,6 +136,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#policyLoaded = false;
 	/** 直近tickで投入が止まった制約, 診断で外へ出す(#10) */
 	#lastBlocked: BlockedBy = { capacity: false, tokens: false, perKey: false };
+	#blockedLoaded = false;
 
 	get repo(): JobRepo {
 		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage);
@@ -175,7 +176,25 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * どれを緩めればよいか外から判断できるようにする(ADR-0009)
 	 */
 	async diagnostics(): Promise<{ active: number; outbox: number; blocked: BlockedBy }> {
+		this.#loadBlocked();
 		return { active: this.repo.countActive(), outbox: this.repo.countOutbox(), blocked: this.#lastBlocked };
+	}
+
+	/** 永続化した直近blockedを一度だけ読み戻す,無ければfalse既定のまま(#10) */
+	#loadBlocked(): void {
+		if (this.#blockedLoaded) return;
+		const raw = this.repo.readSetting('last_blocked');
+		if (raw) this.#lastBlocked = JSON.parse(raw) as BlockedBy;
+		this.#blockedLoaded = true;
+	}
+
+	/** blockedを保存する,変化した時だけ書いて毎tickの書き込みを避ける(#10) */
+	#persistBlocked(blocked: BlockedBy): void {
+		this.#loadBlocked();
+		const encoded = JSON.stringify(blocked);
+		if (JSON.stringify(this.#lastBlocked) === encoded) return;
+		this.#lastBlocked = blocked;
+		this.repo.writeSetting('last_blocked', encoded);
 	}
 
 	/**
@@ -363,8 +382,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT);
 		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket });
 		this.#bucket = output.bucket;
-		// どの制約で投入が止まったかを診断で外へ出す(#10)
-		this.#lastBlocked = output.blocked;
+		// どの制約で投入が止まったかを診断で外へ出す,DO退避後も残す(#10)
+		this.#persistBlocked(output.blocked);
 
 		const messages: MessageSendRequest<DispatchMessage>[] = [];
 		for (const decision of output.decisions) {

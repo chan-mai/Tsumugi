@@ -177,6 +177,34 @@ describe('運用診断(#10)', () => {
 		// 枠が尽きて投入が止まったことが外から分かる
 		expect(diag.blocked.capacity).toBe(true);
 	});
+
+	it('止まった制約をDOに永続化する', async () => {
+		const { queue } = captureQueue();
+		await install('DIAGP#0', T0, queue);
+		await shard('DIAGP#0').configure({ policy: { concurrency: 1, perKeyConcurrency: 1 } });
+		await shard('DIAGP#0').enqueueMany([
+			{ binding: 'DIAGP', payload: {} },
+			{ binding: 'DIAGP', payload: {} },
+		]);
+		await runDurableObjectAlarm(shard('DIAGP#0'));
+
+		const raw = await runInDurableObject(
+			shard('DIAGP#0'),
+			(instance) => (instance as any).repo.readSetting('last_blocked') as string | undefined,
+		);
+		expect(raw).toBeDefined();
+		expect(JSON.parse(raw as string)).toMatchObject({ capacity: true });
+	});
+
+	it('退避で消えても永続化したblockedをdiagnosticsが返す', async () => {
+		// tick前のshardはblockedがfalse既定,退避後の再ロードを模して直接書く
+		await runInDurableObject(shard('DIAGR#0'), (instance) =>
+			(instance as any).repo.writeSetting('last_blocked', JSON.stringify({ capacity: true, tokens: false, perKey: false })),
+		);
+
+		const diag = await shard('DIAGR#0').diagnostics();
+		expect(diag.blocked.capacity).toBe(true);
+	});
 });
 
 describe('enqueueMany', () => {
