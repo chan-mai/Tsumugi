@@ -13,7 +13,7 @@ class Noop extends Performer<unknown, void, {}, RestEnv> {
 }
 
 const handler = (options: { auth?: boolean; basePath?: string } = {}) =>
-	defineTsumugi<RestEnv>({
+	defineTsumugi({
 		performers: { UI: Noop },
 		...(options.auth === false ? {} : { auth: bearerAuth(TOKEN) }),
 		ui: ui(options.basePath === undefined ? {} : { basePath: options.basePath }),
@@ -83,7 +83,7 @@ describe('ダッシュボードの配信(ADR-0025)', () => {
 	});
 
 	it('tokenCookieを注入する', async () => {
-		const h = defineTsumugi<RestEnv>({
+		const h = defineTsumugi({
 			performers: { UI: Noop },
 			auth: bearerAuth(TOKEN),
 			ui: ui({ tokenCookie: 'tsumugi_token' }),

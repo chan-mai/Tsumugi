@@ -6,12 +6,18 @@ const T0 = 2_000_000_000_000;
 
 function captureQueue() {
 	const sent: DispatchMessage[] = [];
+	const batches: number[] = [];
 	return {
 		sent,
+		batches,
 		queue: {
 			send: async (body: DispatchMessage) => void sent.push(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
-				for (const m of batch) sent.push(m.body);
+				const items = [...batch];
+				// プロデューサ側の100件上限, 超えると本番のsendBatchも失敗する
+				if (items.length > 100) throw new Error(`sendBatch上限100件を超過: ${items.length}`);
+				batches.push(items.length);
+				for (const m of items) sent.push(m.body);
 			},
 		},
 	};
@@ -124,6 +130,33 @@ describe('ポリシーの永続化', () => {
 		// 増えるのはジョブのinsertとアウトボックス追記の2回だけ,ポリシーの再書き込みは起きない
 		expect(after - before).toBe(2);
 	});
+
+	it('実行時のconfigure()が次のenqueueの静的設定で上書きされない(#6)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('PAUSE#0', T0, queue);
+
+		// 実行時にconcurrency=0で止める, 現状で唯一のpause手段
+		await shard('PAUSE#0').configure({ policy: { concurrency: 0 } });
+		// 静的設定を同梱したenqueue, 従来はこれがpauseを解除していた
+		await shard('PAUSE#0').enqueueMany([{ binding: 'PAUSE', payload: {} }], { policy: { concurrency: 100 } });
+		await runDurableObjectAlarm(shard('PAUSE#0'));
+
+		// pauseが保持され1件も投入されない
+		expect(sent).toHaveLength(0);
+	});
+
+	it('configure()の後は実行時のconfigure()で解除できる(#6)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('PAUSE2#0', T0, queue);
+
+		await shard('PAUSE2#0').configure({ policy: { concurrency: 0 } });
+		await shard('PAUSE2#0').enqueueMany([{ binding: 'PAUSE2', payload: {} }], { policy: { concurrency: 100 } });
+		// 静的設定ではなく実行時のconfigure()なら解除できる
+		await shard('PAUSE2#0').configure({ policy: { concurrency: 100 } });
+		await runDurableObjectAlarm(shard('PAUSE2#0'));
+
+		expect(sent).toHaveLength(1);
+	});
 });
 
 describe('enqueueMany', () => {
@@ -152,5 +185,43 @@ describe('enqueueMany', () => {
 		expect(sent).toHaveLength(200);
 		const alarm = await runInDurableObject(shard('BOUND#0'), (_i, state) => state.storage.getAlarm());
 		expect(alarm).toBe(T0);
+	});
+
+	it('concurrencyが100を超えてもsendBatchは100件ずつに分割される', async () => {
+		const { sent, batches, queue } = captureQueue();
+		await install('SPLIT#0', T0, queue);
+		await shard('SPLIT#0').configure({ policy: { concurrency: 150, perKeyConcurrency: 150 } });
+
+		await shard('SPLIT#0').enqueueMany(Array.from({ length: 150 }, () => ({ binding: 'SPLIT', payload: {} })));
+		await runDurableObjectAlarm(shard('SPLIT#0'));
+
+		// 分割前は1回で150件送りcaptureQueueがthrowする
+		// 100件単位で分割し, 過分割でないことも固定する
+		expect(sent).toHaveLength(150);
+		expect(batches).toEqual([100, 50]);
+	});
+});
+
+describe('投入候補の窓(ADR-0019 / ADR-0020, #4)', () => {
+	it('稼働中がTICK_LIMITを埋めても後から入った実行可能ジョブが投入される', async () => {
+		const { sent, queue } = captureQueue();
+		await install('WIN#0', T0, queue);
+		// 枠は空けたまま作成順の窓を実行中で埋める
+		await shard('WIN#0').configure({ policy: { concurrency: 400, perKeyConcurrency: 400 } });
+
+		// 200件を投入してtickでQUEUEDにする(実行中の在庫)
+		await shard('WIN#0').enqueueMany(Array.from({ length: 200 }, () => ({ binding: 'WIN', payload: {} })));
+		await runDurableObjectAlarm(shard('WIN#0'));
+		expect(sent).toHaveLength(200);
+
+		// 実行中200件より後に実行可能ジョブを入れる, 作成順では201件目に落ちる
+		sent.length = 0;
+		await install('WIN#0', T0 + 1_000, queue);
+		const late = await shard('WIN#0').enqueue({ binding: 'WIN', payload: { late: true }, priority: 10 });
+		await runDurableObjectAlarm(shard('WIN#0'));
+
+		// 作成順の単一窓だと201件目は選考へ入らず投入されない
+		expect(sent.map((m) => m.jobId)).toContain(late);
+		expect(await stateOf('WIN#0', late)).toBe('QUEUED');
 	});
 });

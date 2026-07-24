@@ -97,6 +97,9 @@ const TICK_LIMIT = 200;
 /** 1回の投影で流すアウトボックスの上限, D1のバッチ上限とtickの時間を考えて抑える */
 const PROJECTION_LIMIT = 200;
 
+/** Cloudflare Queuesのプロデューサ側上限, 1回のsendBatchは100件まで, TICK_LIMITはこれを超えるので分割する */
+const SEND_BATCH_LIMIT = 100;
+
 /** 1 tickで落とす終端ジョブの上限, tickを有界に保つ */
 const SWEEP_LIMIT = 200;
 
@@ -160,15 +163,23 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	async configure(settings: ShardSettings): Promise<void> {
-		this.#applySettings(settings);
+		// configure()は実行時の意思, 静的設定より優先する印を付ける(#6)
+		this.#applySettings(settings, true);
 	}
 
-	/** 内容が変わっていなければ書き込まない, enqueueのたびに1回増えるのを避ける */
-	#applySettings(settings: ShardSettings): void {
+	/**
+	 * 設定を反映する, 内容が変わっていなければ書き込まない(enqueueのたびに1回増えるのを避ける)
+	 * pinnedはconfigure()由来か, enqueue同梱の静的設定か
+	 * 一度configure()されたら以降の静的設定は無視する, 実行時に絞った流量が次の投入で戻らないようにする(#6)
+	 * 静的設定へ戻すには再度configure()する
+	 */
+	#applySettings(settings: ShardSettings, pinned: boolean): void {
+		if (!pinned && this.repo.readSetting('settings_pinned') === '1') return;
 		const encoded = JSON.stringify(settings);
 		this.policy = { ...DEFAULT_POLICY, ...settings.policy };
 		this.retention = retentionOf(settings);
 		this.#policyLoaded = true;
+		if (pinned && this.repo.readSetting('settings_pinned') !== '1') this.repo.writeSetting('settings_pinned', '1');
 		if (this.repo.readSetting('settings') === encoded) return;
 		this.repo.writeSetting('settings', encoded);
 	}
@@ -186,7 +197,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]> {
 		const now = this.clock.now();
 		this.#loadPolicy();
-		if (settings) this.#applySettings(settings);
+		// enqueue同梱は静的設定, configure()でpinされていれば無視する(#6)
+		if (settings) this.#applySettings(settings, false);
 		const ids: string[] = [];
 
 		for (const input of inputs) {
@@ -337,7 +349,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async #tick(): Promise<void> {
 		const now = this.clock.now();
 		this.#loadPolicy();
-		const jobs = this.repo.activeJobs(TICK_LIMIT);
+		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT);
 		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket });
 		this.#bucket = output.bucket;
 
@@ -377,13 +389,17 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			}
 		}
 
-		if (messages.length > 0) await this.env.TSUMUGI_QUEUE.sendBatch(messages);
+		// 100件上限で分割して送る, concurrency>100だと1 tickの投入がこれを超える(ADR-0009)
+		for (let i = 0; i < messages.length; i += SEND_BATCH_LIMIT) {
+			await this.env.TSUMUGI_QUEUE.sendBatch(messages.slice(i, i + SEND_BATCH_LIMIT));
+		}
 
 		const projected = await this.#project();
 		const { deleted, retryAt } = this.#sweep(now);
 
 		// 上限まで読んだなら残りがある可能性が高いので即座に自分を起こし直す
-		const hasMore = jobs.length >= TICK_LIMIT || projected >= PROJECTION_LIMIT || deleted >= SWEEP_LIMIT;
+		// 投入候補はreadyCountで見る, 実行中で窓が埋まっても投入すべき候補が無ければ起き直さない
+		const hasMore = readyCount >= TICK_LIMIT || projected >= PROJECTION_LIMIT || deleted >= SWEEP_LIMIT;
 		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt].filter((v): v is number => v !== null);
 		const next = candidates.length > 0 ? Math.min(...candidates) : null;
 		if (next !== null) await this.ctx.storage.setAlarm(next);
@@ -397,12 +413,20 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const rows = this.repo.outboxBatch(PROJECTION_LIMIT);
 		if (rows.length === 0) return 0;
 		await project(this.env.TSUMUGI_DB, rows);
-		// 明細と同じ材料から時系列を書く, sweepで明細が消えてもこちらは残る(ADR-0016)
-		writeMetrics(
-			this.env.TSUMUGI_METRICS,
-			rows.map((row) => JSON.parse(row.snapshot) as JobRow),
-		);
+		// 投影が成功したらカーソルを先に進める, 投影は冪等なので再処理は無害(#7)
 		this.repo.deleteOutboxThrough(rows[rows.length - 1]!.seq);
+		// メトリクスはカーソルの後, 非冪等なので冪等な投影と再試行単位を分ける(ADR-0016 / #7)
+		// カーソルより後なので同じ行を二度書かない, 反面この便の失敗ぶんは載らずat-most-onceになる
+		// 省略可能な機能なので失敗を捕捉し, ジョブ調停を含むtick全体を止めない
+		try {
+			// 明細と同じ材料から時系列を書く, sweepで明細が消えてもこちらは残る(ADR-0016)
+			writeMetrics(
+				this.env.TSUMUGI_METRICS,
+				rows.map((row) => JSON.parse(row.snapshot) as JobRow),
+			);
+		} catch (error) {
+			console.error('tsumugi: writeMetrics failed', error);
+		}
 		return rows.length;
 	}
 
