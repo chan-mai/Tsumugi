@@ -26,7 +26,7 @@ export type JobView = {
 	/** QUEUEDへの遷移時刻, SCHEDULEDならnull */
 	dispatchedAt: number | null;
 	guarantee: DeliveryGuarantee;
-	/** 実行のタイムアウト, reaperの沈黙判定の基準 */
+	/** 実行のタイムアウト, reaperの無応答判定の基準 */
 	timeoutMs: number;
 };
 
@@ -40,7 +40,7 @@ export type Policy = {
 	rate: RateLimit | null;
 	/** nullでエージング無効, ADR-0020の既定は有効 */
 	agingIntervalMs: number | null;
-	/** timeoutMs経過後さらにこの時間沈黙したら回収 */
+	/** timeoutMs経過後さらにこの時間応答が無ければ回収 */
 	reaperGraceMs: number;
 };
 
@@ -48,11 +48,11 @@ export type Bucket = { tokens: number; refilledAt: number };
 
 export type Decision =
 	| { type: 'dispatch'; id: string }
-	/** 沈黙したat-least-onceジョブの再投入, SCHEDULEDへ戻す */
+	/** 無応答のat-least-onceジョブの再投入, SCHEDULEDへ戻す */
 	| { type: 'reap'; id: string; attempts: number }
-	/** 沈黙したat-most-onceジョブ,再投入せずSTALLEDへ */
+	/** 無応答のat-most-onceジョブ, 再投入せずSTALLEDへ */
 	| { type: 'stall'; id: string }
-	/** 沈黙かつ試行回数の枯渇, FAILEDへ */
+	/** 無応答かつ試行回数の枯渇, FAILEDへ */
 	| { type: 'fail'; id: string; reason: 'exhausted' };
 
 export type ScheduleInput = {
@@ -65,7 +65,7 @@ export type ScheduleInput = {
 
 /** 投入が止まった制約, ADR-0009の3軸のどれで詰まったか(#10) */
 export type BlockedBy = {
-	/** concurrency: 同時実行の枠が尽きた */
+	/** concurrency: 同時実行の上限に達した */
 	capacity: boolean;
 	/** rate: トークンが足りない */
 	tokens: boolean;
@@ -89,6 +89,6 @@ export type ScheduleOutput = {
 export type Retention = {
 	/** COMPLETED / CANCELLED */
 	doneMs: number;
-	/** FAILED / STALLED, 手動リトライの窓 */
+	/** FAILED / STALLED, 手動リトライを受け付ける期間 */
 	failedMs: number;
 };

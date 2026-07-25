@@ -66,8 +66,10 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('欠けていれば名前を返す', async () => {
-		const status = await checkMigrations(withLedger([{ name: '0001_create_job_read_model.sql' }]));
-		expect(status).toEqual({ ok: false, missing: ['0002_add_attempt_log.sql', '0003_add_result.sql'] });
+		// 期待値は定義から導く, マイグレーションを足すたびにここを書き換えないため
+		const [first, ...rest] = EXPECTED_MIGRATIONS;
+		const status = await checkMigrations(withLedger([{ name: first }]));
+		expect(status).toEqual({ ok: false, missing: rest });
 	});
 
 	it('台帳自体が無ければ全件未適用として扱う', async () => {
@@ -83,7 +85,7 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('一時障害では適用漏れの復旧手順を案内しない(#8)', async () => {
-		// unavailableはTTLで使い回されるので, 共有appのキャッシュを汚さないよう専用のappを立てる
+		// unavailableはTTLで使い回されるので, 共有appのキャッシュに影響しないよう専用のappを用意する
 		const isolated = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
 		const res = await isolated.fetch!(
 			new Request('https://example.com/api/jobs', { headers: { authorization: `Bearer ${TOKEN}` } }),
@@ -97,7 +99,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		expect(body.error).toContain('temporarily unavailable');
 	});
 
-	it('一時障害の結果は短いTTLで使い回しD1を叩き直さない(#8)', async () => {
+	it('一時障害の結果は短いTTLで使い回しD1へ再問い合わせしない(#8)', async () => {
 		let calls = 0;
 		let clock = 1_000;
 		const failing = proxyD1(() => {
@@ -107,7 +109,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		const check = cachedCheck(() => clock);
 
 		expect((await check(failing)).ok).toBe(false);
-		// TTL内なので叩き直さない, 障害中にクエリが最大になるのを防ぐ
+		// TTL内なので再問い合わせしない, 障害中にクエリが増え続けるのを防ぐ
 		expect((await check(failing)).ok).toBe(false);
 		expect(calls).toBe(1);
 
@@ -152,7 +154,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		expect(res.status).toBe(200);
 	});
 
-	it('通った結果は使い回してD1を叩き直さない', async () => {
+	it('通った結果は使い回してD1へ再問い合わせしない', async () => {
 		let calls = 0;
 		const counting = proxyD1(() => {
 			calls++;
@@ -175,7 +177,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		const check = cachedCheck();
 		expect((await check(flipping)).ok).toBe(false);
 		applied = true;
-		// 失敗を握り続けると,適用してもWorkerを再デプロイするまで復帰しない
+		// 失敗を保持し続けると, 適用してもWorkerを再デプロイするまで復帰しない
 		expect((await check(flipping)).ok).toBe(true);
 	});
 });

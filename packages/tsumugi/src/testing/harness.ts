@@ -1,4 +1,5 @@
 import type { JobContext, Performer, Requirements } from '../core/api.js';
+import type { SpawnRequest } from '../core/run.js';
 
 /**
  * performerを試すための道具
@@ -10,6 +11,8 @@ import type { JobContext, Performer, Requirements } from '../core/api.js';
 export type TestContext = JobContext & {
 	/** `signal`をabortする, timeoutに協調するperformerを試す時に使う */
 	abort(reason?: unknown): void;
+	/** performが要求した子, 要求の順に入る(ADR-0032) */
+	spawns: SpawnRequest[];
 };
 
 export type TestContextOptions = {
@@ -28,6 +31,8 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 	const jobId = options.jobId ?? 'TEST#0:testjob000000000000000000';
 	const controller = new AbortController();
 	if (options.aborted) controller.abort();
+	// 本番と同じく溜めるだけ, 実際の投入はDO側で起きる(ADR-0031)
+	const spawns: SpawnRequest[] = [];
 
 	return {
 		jobId,
@@ -36,6 +41,10 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 		idempotencyKey: options.idempotencyKey ?? jobId,
 		signal: controller.signal,
 		abort: (reason) => controller.abort(reason),
+		spawns,
+		spawn: (id, binding, payload, options) => {
+			spawns.push({ id, binding, payload, ...(options ? { options } : {}) });
+		},
 	};
 }
 

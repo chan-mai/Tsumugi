@@ -1,7 +1,7 @@
 /**
  * マイグレーションの適用漏れを検出する
  *
- * 利用者は`wrangler d1 migrations apply`を自分で走らせる
+ * 利用者が`wrangler d1 migrations apply`を実行する
  * 更新時に忘れるとデプロイは通り, 実行時に`no such column`で落ちる
  * D1側のエラーがそのまま出ても原因が設定漏れだと分からないので, 先に検出して理由を返す
  */
@@ -10,7 +10,12 @@
  * このバージョンが要求するマイグレーション
  * `migrations/`の実ファイルと一致していないと検査が無意味になるので, 単体テストで突き合わせる
  */
-export const EXPECTED_MIGRATIONS = ['0001_create_job_read_model.sql', '0002_add_attempt_log.sql', '0003_add_result.sql'] as const;
+export const EXPECTED_MIGRATIONS = [
+	'0001_create_job_read_model.sql',
+	'0002_add_attempt_log.sql',
+	'0003_add_result.sql',
+	'0004_create_run_read_model.sql',
+] as const;
 
 /**
  * 検査結果
@@ -19,7 +24,7 @@ export const EXPECTED_MIGRATIONS = ['0001_create_job_read_model.sql', '0002_add_
  */
 export type MigrationStatus = { ok: true } | { ok: false; missing: string[] } | { ok: false; unavailable: true };
 
-/** 一時障害の結果を使い回す時間, 障害中に毎リクエストD1を叩き直さないための短いTTL(#8) */
+/** 一時障害の結果を使い回す時間, 障害中に毎リクエストD1へ再問い合わせしないための短いTTL(#8) */
 const UNAVAILABLE_TTL_MS = 5_000;
 
 /** `d1_migrations`表が存在しないエラーか, これだけを「一度も適用していない」に落とす(#8) */
@@ -65,11 +70,11 @@ export function migrationErrorMessage(missing: readonly string[]): string {
 
 /**
  * 検査結果をisolate単位で使い回す
- * 毎リクエストD1を叩かない, 一度通ればそのisolateが生きている間は変わらない
+ * 毎リクエストD1へ問い合わせない, 一度通ればそのisolateが存続する間は変わらない
  *
  * 成功は永続でキャッシュする, 一度通れば適用済みは変わらない
  * 適用漏れはキャッシュしない, 適用後にWorkerを再デプロイせず自力で復帰させる
- * 一時障害は短いTTLでキャッシュする, 障害中にD1へのクエリが最大になるのを防ぐ(#8)
+ * 一時障害は短いTTLでキャッシュする, 障害中にD1へのクエリが増え続けるのを防ぐ(#8)
  */
 export function cachedCheck(now: () => number = () => Date.now()): (db: D1Database) => Promise<MigrationStatus> {
 	let settled: MigrationStatus | undefined;

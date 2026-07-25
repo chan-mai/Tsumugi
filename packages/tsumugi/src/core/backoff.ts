@@ -24,7 +24,7 @@ export function nextAttempt(args: {
 			? backoff.delayMs
 			: Math.min(backoff.baseMs * Math.pow(backoff.factor, Math.max(0, attempts - 1)), backoff.maxMs);
 
-	// equal jitter (半分固定+半分乱数), full jitterと違い遅延が0に潰れない
+	// equal jitter (半分固定+半分乱数), full jitterと違い遅延が0にならない
 	const delayMs = backoff.jitter ? Math.round(base / 2 + rand * (base / 2)) : Math.round(base);
 
 	return { kind: 'retry', runAfter: now + delayMs, delayMs };

@@ -45,7 +45,7 @@ export const SCHEMA = [
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	)`,
-	// 試行ごとの記録(ADR-0028), 失敗の事後調査に要る
+	// 試行ごとの記録(ADR-0028), 失敗の事後調査に必要
 	// ジョブ行は最新の状態しか持たず,何回目がいつ何で落ちたかは残らない
 	`CREATE TABLE IF NOT EXISTS attempt (
 		job_id TEXT NOT NULL,
@@ -55,6 +55,13 @@ export const SCHEMA = [
 		finished_at INTEGER NOT NULL,
 		error TEXT,
 		PRIMARY KEY (job_id, attempt)
+	)`,
+	// Run DOへの通知待ち(ADR-0031), 送信が成功するまで消さないので落としても次のtickで追いつく
+	// D1への投影とは宛先もまとめ方も違うので別の表にする, 相乗りさせると片方の失敗がもう片方を止める
+	`CREATE TABLE IF NOT EXISTS run_notify (
+		seq INTEGER PRIMARY KEY AUTOINCREMENT,
+		run_id TEXT NOT NULL,
+		event TEXT NOT NULL
 	)`,
 	// D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
 	// D1書き込みが成功するまで削除しないので,失敗してもカーソルが進まず次回で追いつく
@@ -69,6 +76,7 @@ export function applySchema(sql: SqlStorage): void {
 	for (const statement of SCHEMA) sql.exec(statement);
 	// CREATE TABLE IF NOT EXISTSは既存テーブルを変更しない, resultを後から足したので既存DOへ補う(#9)
 	ensureColumn(sql, 'job', 'result', 'TEXT');
+	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
 }
 
 /** 既存の表に列が無ければ足す, 冪等にするため先に有無を確かめる */

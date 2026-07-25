@@ -3,8 +3,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
 import { job as readModel } from '../projection/tables.js';
-import { InvalidJobIdError, shardName, shardNameOf } from '../core/ids.js';
-import type { TsumugiJobShard } from '../do/job-shard.js';
+import { run as runModel, runNode } from '../projection/run-tables.js';
+import { InvalidJobIdError, InvalidRunIdError, parseRunId, shardName, shardNameOf } from '../core/ids.js';
+import type { MutationResult, TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 import type { Ui } from '../ui/serve.js';
 import type { AuthMiddleware } from './auth.js';
@@ -24,9 +25,14 @@ export type RestOptions<Env extends RestEnv> = {
 	enqueue?: (env: Env, input: CreateJobInput) => Promise<string>;
 	/**
 	 * bindingごとの失敗ジョブの保持期間
-	 * 一覧に`retryable`を載せるために要る, 押すまで分からないボタンを出さないため(ADR-0027)
+	 * 一覧に`retryable`を含めるために必要, 実行可否を事前に判定するため(ADR-0027)
 	 */
 	failedRetentionMs?: (binding: string) => number;
+	/** 登録済みflowの名前,開始先の検証と選択肢に使う */
+	flows?: readonly string[];
+	start?: (env: Env, flow: string, input: unknown, id?: string) => Promise<string>;
+	/** 取り消しと再開はDOへ直接送る, 読み取りモデルは正の根拠に使えない(ADR-0015) */
+	runFor?: (env: Env, runId: string) => { cancel(): Promise<MutationResult>; retry(): Promise<MutationResult> };
 };
 
 export type CreateJobInput = {
@@ -70,6 +76,24 @@ export function validateCreateJob(body: unknown, bindings: readonly string[]): {
 	if (typeof raw.priority === 'number') input.priority = raw.priority;
 	if (typeof raw.concurrencyKey === 'string' && raw.concurrencyKey) input.concurrencyKey = raw.concurrencyKey;
 	if (typeof raw.uniqueKey === 'string' && raw.uniqueKey) input.uniqueKey = raw.uniqueKey;
+	return { input };
+}
+
+export type StartRunInput = { flow: string; input: unknown; id?: string };
+
+/** 開始内容の検証,通らなければ理由を返す */
+export function validateStartRun(body: unknown, flows: readonly string[]): { input: StartRunInput } | { error: string } {
+	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
+	const raw = body as Record<string, unknown>;
+
+	if (typeof raw.flow !== 'string' || raw.flow.length === 0) return { error: 'flow is required' };
+	// 未登録のflowを許すと開始はできるが必ず失敗する,入口で弾く
+	if (flows.length > 0 && !flows.includes(raw.flow)) return { error: `unknown flow: ${raw.flow}` };
+	if (!('input' in raw)) return { error: 'input is required' };
+	if (raw.id !== undefined && typeof raw.id !== 'string') return { error: 'id must be a string' };
+
+	const input: StartRunInput = { flow: raw.flow, input: raw.input };
+	if (typeof raw.id === 'string' && raw.id) input.id = raw.id;
 	return { input };
 }
 
@@ -141,7 +165,7 @@ export function resolveSort(sort: string | null, order: string | null): { column
  * 稼働中も投影済みなのでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings = [], enqueue, failedRetentionMs } = options;
+	const { dashboard, bindings = [], enqueue, failedRetentionMs, flows = [], start, runFor } = options;
 
 	/**
 	 * 一覧の1行にretryの可否を載せる
@@ -157,7 +181,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	};
 	const app = new Hono<{ Bindings: Env }>();
 	// 認証はAPIにのみ掛ける
-	// HTMLの殻はデータを含まず,未認証で返すことでSPAがトークン入力を出せる(ADR-0013)
+	// HTML自体はデータを含まず, 未認証で返すことでSPAがトークン入力欄を表示できる(ADR-0013)
 	app.use('/api/*', auth);
 
 	// マイグレーションの適用漏れをここで止める
@@ -309,7 +333,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			result: found.result,
 		};
 		// 履歴は詳細でだけ返す, 一覧に載せると1画面で数百KBになり得る(ADR-0028)
-		// `attempts`は試行回数の数値なので別名にする, 潰すと画面の n/m が壊れる
+		// `attempts`は試行回数の数値なので別名にする, 上書きすると画面の n/m が壊れる
 		return c.json({ job: { ...withRetryable(job, Date.now()), attempts_log: attemptsOf(job, parseAttempts(found.attemptsLog)) } });
 	});
 
@@ -352,6 +376,138 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' }, 400);
 			throw error;
 		}
+	});
+
+	/**
+	 * runの一覧(ADR-0029)
+	 * Run DOはrunごとに独立しているので, 横断的な一覧は読み取りモデルからしか引けない
+	 */
+	app.get('/api/runs', async (c) => {
+		const url = new URL(c.req.url);
+		const state = url.searchParams.get('state');
+		const flow = url.searchParams.get('flow');
+		const limit = Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, LIST_LIMIT_MAX);
+		const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
+
+		const d = drizzle(c.env.TSUMUGI_DB);
+		const filters = [state ? eq(runModel.state, state) : undefined, flow ? eq(runModel.flow, flow) : undefined].filter(
+			(f) => f !== undefined,
+		);
+		const clause = filters.length > 0 ? and(...filters) : undefined;
+
+		const [page, total] = await d.batch([
+			d
+				.select({
+					id: runModel.id,
+					flow: runModel.flow,
+					state: runModel.state,
+					node_total: runModel.nodeTotal,
+					node_done: runModel.nodeDone,
+					node_failed: runModel.nodeFailed,
+					created_at: runModel.createdAt,
+					updated_at: runModel.updatedAt,
+				})
+				.from(runModel)
+				.where(clause)
+				.orderBy(sqlDesc(runModel.updatedAt), sqlDesc(runModel.id))
+				.limit(limit)
+				.offset(offset),
+			d
+				.select({ total: sql<number>`count(*)` })
+				.from(runModel)
+				.where(clause),
+		]);
+
+		return c.json({ runs: page, total: total[0]?.total ?? 0 });
+	});
+
+	/** 開始先の選択肢, 一度も動いていないflowも選べるよう登録簿から返す */
+	app.get('/api/flows', (c) => c.json({ flows: [...flows].sort() }));
+
+	app.post('/api/runs', async (c) => {
+		if (!start) return c.json({ error: 'run creation is not available' }, 501);
+
+		let body: unknown;
+		try {
+			body = await c.req.json();
+		} catch {
+			return c.json({ error: 'body must be valid JSON' }, 400);
+		}
+
+		const parsed = validateStartRun(body, flows);
+		if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+
+		const id = await start(c.env, parsed.input.flow, parsed.input.input, parsed.input.id);
+		return c.json({ id }, 201);
+	});
+
+	// グラフは1回のクエリで返す, 段組みの描画に全ノードが必要
+	app.get('/api/runs/:id', async (c) => {
+		const id = c.req.param('id');
+		const d = drizzle(c.env.TSUMUGI_DB);
+		const [runs, nodes] = await d.batch([
+			d.select().from(runModel).where(eq(runModel.id, id)).limit(1),
+			d.select().from(runNode).where(eq(runNode.runId, id)).orderBy(asc(runNode.position)),
+		]);
+
+		const found = runs[0];
+		if (!found) return c.json({ error: 'not found' }, 404);
+		return c.json({
+			run: {
+				id: found.id,
+				flow: found.flow,
+				state: found.state,
+				input: found.input,
+				node_total: found.nodeTotal,
+				node_done: found.nodeDone,
+				node_failed: found.nodeFailed,
+				created_at: found.createdAt,
+				updated_at: found.updatedAt,
+				// 終端でなければ再開できない, 押す前に可否を出す(ADR-0034)
+				retryable: found.state === 'FAILED',
+			},
+			nodes: nodes.map((node) => ({
+				id: node.nodeId,
+				binding: node.binding,
+				state: node.state,
+				container: node.container === 1,
+				parent: node.parent,
+				origin: node.origin,
+				after: JSON.parse(node.after) as string[],
+				job_id: node.jobId,
+				result: node.result,
+				error: node.error,
+				position: node.position,
+				created_at: node.createdAt,
+				updated_at: node.updatedAt,
+			})),
+		});
+	});
+
+	/** 取り消しと再開は正となるRun DOへ送る */
+	const runMutation = (action: 'cancel' | 'retry') => async (c: { env: Env; req: { param(name: string): string } }) => {
+		const id = c.req.param('id');
+		if (!runFor) return { body: { error: 'run control is not available' }, status: 501 } as const;
+		try {
+			parseRunId(id);
+			const stub = runFor(c.env, id);
+			const result = action === 'cancel' ? await stub.cancel() : await stub.retry();
+			if (result.ok) return { body: { ok: true }, status: 200 } as const;
+			return refusal(result);
+		} catch (error) {
+			if (error instanceof InvalidRunIdError) return { body: { error: 'invalid run id' }, status: 400 } as const;
+			throw error;
+		}
+	};
+
+	app.post('/api/runs/:id/cancel', async (c) => {
+		const { body, status } = await runMutation('cancel')(c);
+		return c.json(body, status);
+	});
+
+	app.post('/api/runs/:id/retry', async (c) => {
+		const { body, status } = await runMutation('retry')(c);
+		return c.json(body, status);
 	});
 
 	// APIに該当しないGETはSPAへ渡す,クライアント側でルーティングする

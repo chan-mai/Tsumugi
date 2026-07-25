@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from 'hono';
 /**
  * 認証はfail-closed(ADR-0013)
  *
- * 設定されるまでREST APIもダッシュボードも生えない
+ * 設定されるまでREST APIもダッシュボードも無効
  * 設定漏れが「動かない」として現れる方が静かな公開より安全
  */
 export type AuthMiddleware = MiddlewareHandler;
@@ -24,7 +24,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 export type BearerOptions = {
 	/**
 	 * 同じトークンをこの名前のcookieからも受け取る
-	 * ブラウザは初回のHTML取得時にAuthorizationヘッダを付けられないため,ダッシュボードを開くにはこれが要る
+	 * ブラウザは初回のHTML取得時にAuthorizationヘッダを付けられないため,ダッシュボードを開くにはこの設定が必要
 	 * cookieで受ける以上CSRFの対象になるので,発行側でSameSite=Strictを付けること
 	 */
 	cookie?: string;
@@ -46,7 +46,7 @@ export type TokenResolver = (env: any) => string | undefined;
  * シークレット1つで始められる最短の経路
  *
  * 関数を渡すとリクエストごとに`env`から引く
- * Cloudflareのsecretは`env`経由でしか読めず,直書きを避けるにはこの形が要る
+ * Cloudflareのsecretは`env`経由でしか読めず,直接記述を避けるにはこの形式が必要
  * 解決できなければ通さない,設定漏れを素通りにしない(ADR-0013)
  */
 export function bearerAuth(token: string | TokenResolver, options: BearerOptions = {}): AuthMiddleware {

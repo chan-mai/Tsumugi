@@ -3,7 +3,9 @@ import { createId } from '@paralleldrive/cuid2';
 import { formatJobId } from '../core/ids.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
+import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, Policy, Retention } from '../core/types.js';
+import type { RunStub } from './run.js';
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
 import { project } from '../projection/projector.js';
@@ -43,6 +45,8 @@ export type ShardEnv = {
 	TSUMUGI_DB: D1Database;
 	/** 任意,未設定ならメトリクスを書かない */
 	TSUMUGI_METRICS?: AnalyticsEngineDataset;
+	/** 任意, flowsを使う場合のみ必要な完了通知の宛先(ADR-0031) */
+	RUN?: DurableObjectNamespace<RunStub>;
 };
 
 /**
@@ -58,7 +62,7 @@ export type ShardSettings = {
 	sweepAfterMs?: number;
 	/**
 	 * 失敗ジョブ(FAILED / STALLED)をDOに残す時間, 既定7日
-	 * 手動リトライの窓そのもの, 短くすると一覧に見えるのに再開できないジョブが出る(ADR-0027)
+	 * 手動リトライを受け付ける期間, 短くすると一覧に見えるのに再開できないジョブが出る(ADR-0027)
 	 */
 	failedRetentionMs?: number;
 };
@@ -79,6 +83,14 @@ export type EnqueueInput = {
 	uniqueForMs?: number;
 	/** 分割している場合の投入先の決定に使う(ADR-0011) */
 	partitionKey?: string;
+	/**
+	 * ジョブIDの指定
+	 * Run DOがノードを投入する時に使う, 同じIDの再投入を既存で受け止めることで二重投入を防ぐ(ADR-0029)
+	 */
+	id?: string;
+	/** 完了をどのrunのどのノードとして知らせるか(ADR-0031) */
+	runId?: string;
+	nodeId?: string;
 };
 
 export const DEFAULT_POLICY: Policy = {
@@ -113,6 +125,9 @@ const TICK_LIMIT = 200;
 
 /** 1回の投影で流すアウトボックスの上限, D1のバッチ上限とtickの時間を考えて抑える */
 const PROJECTION_LIMIT = 200;
+
+/** 1回のtickでRun DOへ送る通知の上限(ADR-0031) */
+const NOTIFY_LIMIT = 200;
 
 /** Cloudflare Queuesのプロデューサ側上限, 1回のsendBatchは100件まで, TICK_LIMITはこれを超えるので分割する */
 const SEND_BATCH_LIMIT = 100;
@@ -249,7 +264,13 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const ids: string[] = [];
 
 		for (const input of inputs) {
-			const id = formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createId() });
+			const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createId() });
+
+			// IDを指定した再投入は既に在るものを答えにする, Run DOの再送で同じノードのジョブが増えないようにする
+			if (input.id !== undefined && this.repo.find(id)) {
+				ids.push(id);
+				continue;
+			}
 
 			if (input.uniqueKey !== undefined) {
 				const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
@@ -274,6 +295,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				runAfter: input.runAt ?? now + (input.delayMs ?? 0),
 				createdAt: now,
 				payload: input.payload,
+				runId: input.runId ?? null,
+				nodeId: input.nodeId ?? null,
 			});
 			ids.push(id);
 		}
@@ -287,12 +310,19 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 失敗ならバックオフを計算してSCHEDULEDへ戻す,試行回数を使い切っていればFAILED
 	 * リトライ方針をここが持つのでQueuesの`max_retries`に縛られない(ADR-0004)
 	 */
-	async report(jobId: string, outcome: { ok: boolean; error?: string; result?: unknown }): Promise<void> {
+	async report(jobId: string, outcome: { ok: boolean; error?: string; result?: unknown; spawns?: readonly SpawnRequest[] }): Promise<void> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
 		// 報告を受け付けられる状態かをここで見る
 		// compareAndSetに任せると記録が遷移の後になり,アウトボックスに履歴が載らない(ADR-0028)
 		if (!row || (row.state !== 'QUEUED' && row.state !== 'RUNNING')) return;
+
+		const serialized = outcome.ok ? serializeResult(outcome.result) : null;
+		// runのノードでは戻り値が後段のpayloadの材料になる, 保存できないまま成功にすると気付かないままnullが下流へ渡る(ADR-0035)
+		if (outcome.ok && row.run_id !== null && outcome.result !== undefined && serialized === null) {
+			await this.report(jobId, { ok: false, error: `結果を保存できない(上限${RESULT_MAX_CHARS}文字または直列化不能)` });
+			return;
+		}
 
 		const attempts = row.attempts + 1;
 		// 1回目で成功したジョブの履歴はジョブ行から導出できるので書かない
@@ -315,7 +345,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'COMPLETED', {
 				now,
 				countAttempt: true,
-				result: serializeResult(outcome.result),
+				result: serialized,
+				// 失敗した試行のspawnは運ばない, 再実行でもう一度要求される(ADR-0032)
+				...(outcome.spawns ? { spawns: outcome.spawns } : {}),
 			});
 			await this.#armAlarm(now);
 			return;
@@ -331,7 +363,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		});
 
 		if (next.kind === 'exhausted') {
-			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'FAILED', { now, attempts });
+			// 理由はRun DOへ運ぶ, ノードの表示から辿れないと失敗の原因がジョブ側にしか残らない(ADR-0031)
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'FAILED', { now, attempts, error: outcome.error ?? null });
 			await this.#armAlarm(now);
 			return;
 		}
@@ -374,7 +407,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	/**
 	 * 実行前のジョブの取り消し
-	 * QUEUED以降はconsumerが既に実行を始めているかもしれず,取り消せたと嘘をつかない(ADR-0012)
+	 * QUEUED以降はconsumerが既に実行を始めているかもしれず,取り消せていない場合に成功を返さない(ADR-0012)
 	 */
 	async cancel(jobId: string): Promise<MutationResult> {
 		const now = this.clock.now();
@@ -392,7 +425,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			await this.#tick();
 		} catch (error) {
 			// alarm()がthrowするとworkerdは2秒起点の指数バックオフで最大6回しかリトライしない
-			// 握って必ず次のalarmを張り直し,一時的な失敗で調停が止まらないようにする
+			// 捕捉して必ず次のalarmを設定し直し, 一時的な失敗で調停が止まらないようにする
 			console.error('tsumugi: tick failed', error);
 			await this.ctx.storage.setAlarm(this.clock.now() + 5_000);
 		}
@@ -449,11 +482,12 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		}
 
 		const projected = await this.#project();
+		const notified = await this.#notifyRuns();
 		const { deleted, retryAt } = this.#sweep(now);
 
 		// 上限まで読んだなら残りがある可能性が高いので即座に自分を起こし直す
-		// 投入候補はreadyCountで見る, 実行中で窓が埋まっても投入すべき候補が無ければ起き直さない
-		const hasMore = readyCount >= TICK_LIMIT || projected >= PROJECTION_LIMIT || deleted >= SWEEP_LIMIT;
+		// 投入候補はreadyCountで見る, 実行中のジョブで範囲が埋まっても投入すべき候補が無ければ再実行しない
+		const hasMore = readyCount >= TICK_LIMIT || projected >= PROJECTION_LIMIT || deleted >= SWEEP_LIMIT || notified >= NOTIFY_LIMIT;
 		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt].filter((v): v is number => v !== null);
 		const next = candidates.length > 0 ? Math.min(...candidates) : null;
 		if (next !== null) await this.ctx.storage.setAlarm(next);
@@ -485,6 +519,36 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
+	 * 溜まった通知をRun DOへ送る(ADR-0031)
+	 *
+	 * 宛先ごとにまとめて送り,送信が成功してから消す
+	 * 失敗すればカーソルは進まず次のtickで再送する, Run DO側は同じ便を二度受けても結果が変わらない
+	 */
+	async #notifyRuns(): Promise<number> {
+		const rows = this.repo.notifyBatch(NOTIFY_LIMIT);
+		if (rows.length === 0) return 0;
+
+		const namespace = this.env.RUN;
+		if (!namespace) {
+			// flowsを使うのにbindingが無い設定漏れ, 消さずに残して設定後に届くようにする(ADR-0013)
+			console.error('tsumugi: RUN binding が未設定のため完了通知を送れない');
+			return 0;
+		}
+
+		const groups = new Map<string, NodeEvent[]>();
+		for (const row of rows) {
+			const events = groups.get(row.run_id);
+			const event = JSON.parse(row.event) as NodeEvent;
+			if (events) events.push(event);
+			else groups.set(row.run_id, [event]);
+		}
+
+		await Promise.all([...groups].map(([runId, events]) => namespace.get(namespace.idFromName(runId)).notify(events)));
+		this.repo.deleteNotifyThrough(rows[rows.length - 1]!.seq);
+		return rows.length;
+	}
+
+	/**
 	 * 溜まったものを落とす
 	 * 投影済みの終端ジョブと期限切れの重複排除キーを対象にする
 	 */
@@ -494,9 +558,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		if (state.uniqueKeys) this.repo.sweepExpiredUniqueKeys(now);
 		const deleted = state.jobs ? this.repo.sweepTerminal(now, this.retention, SWEEP_LIMIT) : 0;
 
-		// 次に対象が出る時刻まで寝る
+		// 次に対象が出る時刻まで待機する
 		// 稼働中が無くなるとalarmが張られず,掃除する機会が永久に来ない
-		// 一定間隔で起き直すと失敗ジョブだけが残る状態で何もしない書き込みが積まれる
+		// 一定間隔で起動すると失敗ジョブだけが残る状態で何もしない書き込みが積まれる
 		const next = deleted > 0 ? this.repo.sweepState(now, this.retention).nextDueAt : state.nextDueAt;
 		return { deleted, retryAt: next === null ? null : Math.max(next, now + 1_000) };
 	}
