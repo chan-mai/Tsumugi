@@ -1,5 +1,6 @@
 // ダッシュボードをJSに焼き込む以上(ADR-0025),無警戒ではバンドルが膨らむ
 // 中身が空のM0時点から検査を入れておく,実装後に初めて測ると太った後で削る羽目になる
+import { externalsIn } from './externals.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -27,8 +28,6 @@ const FORBIDDEN = {
 const CANARY = { 'dist/index.js': [/extends DurableObject/, /CREATE TABLE/] };
 
 const IMPORT = /(?:from|import)\s*["'](\.[^"']+)["']/g;
-// 動的importも拾う, 見逃すと依存を足しても検出しない
-const BARE_IMPORT = /(?:from|import)\s*\(?\s*["']([^."'][^"']*)["']/g;
 
 /**
  * entryごとに載ってよい外部依存
@@ -43,16 +42,10 @@ const ALLOWED_EXTERNALS = {
 	'dist/testing.js': [],
 };
 
-/** import文に残る外部依存をパッケージ名の集合で返す, workerdの組み込みは利用者のバンドルに載らないので除く */
+/** entryの読み込み先すべてから外部依存を集める */
 function externalsOf(files) {
 	const found = new Set();
-	for (const path of files) {
-		for (const [, spec] of readFileSync(path, 'utf8').matchAll(BARE_IMPORT)) {
-			if (spec.startsWith('cloudflare:') || spec.startsWith('node:')) continue;
-			const parts = spec.split('/');
-			found.add(spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]);
-		}
-	}
+	for (const path of files) for (const spec of externalsIn(readFileSync(path, 'utf8'))) found.add(spec);
 	return [...found].sort();
 }
 

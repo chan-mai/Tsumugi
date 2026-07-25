@@ -1,6 +1,8 @@
 @layer base, theme, utilities;
 
 @import 'kiso.css' layer(base);
+/* theme-default.cssは組み込みノードの見た目なので読まない, 色は下で@themeへ寄せる */
+@import '@vue-flow/core/dist/style.css' layer(base);
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 
@@ -21,5 +23,29 @@
 	body {
 		background-color: var(--color-background);
 		color: var(--color-foreground);
+	}
+
+	.vue-flow__edge-path {
+		stroke: var(--color-border);
+		stroke-width: 1.5;
+	}
+
+	.vue-flow__arrowhead * {
+		stroke: var(--color-border);
+		fill: var(--color-border);
+	}
+
+	/* 接続はさせない, 端に置いた点がドラッグを吸わないよう当たり判定も外す */
+	.vue-flow__handle {
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.vue-flow__node {
+		cursor: grab;
+	}
+
+	.vue-flow__node.dragging {
+		cursor: grabbing;
 	}
 }
