@@ -5,6 +5,10 @@ export { nextAttempt } from '../core/backoff.js';
 export type { NextAttempt } from '../core/backoff.js';
 export { ACTIVE_STATES, TERMINAL_STATES, TRANSITIONS, canTransition, isActive, isTerminal } from '../core/transitions.js';
 
+// runの進行判断も同じく純粋関数, flowの検証に使う
+export { advance, isNodeTerminal } from '../core/run.js';
+export type { AdvanceInput, AdvanceOutput, NodeView, RunDecision } from '../core/run.js';
+
 // performerを直接呼ぶためのハーネス
 export { createTestContext, runPerformer } from '../testing/harness.js';
 export type { PerformResult, TestContext, TestContextOptions } from '../testing/harness.js';

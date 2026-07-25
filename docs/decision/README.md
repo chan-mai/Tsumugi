@@ -20,7 +20,7 @@
 - [ADR-0015](0015-run-do-for-dag-v2.md) — DAGはRun DOとして分離しv2で実装する
 - [ADR-0016](0016-metrics-in-analytics-engine.md) — 明細はD1,時系列はAnalytics Engineに置く
 - [ADR-0017](0017-cli-deferred.md) — 専用CLIを作る方針だがv0.1では後回しにする
-- [ADR-0018](0018-pure-scheduler-function.md) — 判断ロジックを純粋関数に分離しDOを薄い殻にする
+- [ADR-0018](0018-pure-scheduler-function.md) — 判断ロジックを純粋関数に分離しDOを薄い層にする
 - [ADR-0019](0019-numeric-priority.md) — 数値優先度をv1から持つ
 - [ADR-0020](0020-aging-enabled-by-default.md) — エージングを既定で有効にする
 - [ADR-0021](0021-unique-key-returns-existing-id.md) — uniqueKeyの衝突時は既存のジョブIDを返す
@@ -31,3 +31,10 @@
 - [ADR-0026](0026-remote-performers.md) — performerをservice binding越しに置けるようにする
 - [ADR-0027](0027-split-terminal-retention.md) — 終端ジョブの保持を役割で分ける
 - [ADR-0028](0028-attempt-log.md) — 試行ごとの記録を残す
+- [ADR-0029](0029-run-do-per-run.md) — Run DOをrun 1件につき1つ作成する
+- [ADR-0030](0030-flow-in-code-shape-pinned.md) — flow定義はコードに置き構造だけをrunに固定する
+- [ADR-0031](0031-notify-via-outbox.md) — ジョブ完了はアウトボックスで通知し進行はalarmで行う
+- [ADR-0032](0032-children-inside-parent.md) — 実行時に追加したノードは親ノードの配下に置く
+- [ADR-0033](0033-no-unique-key-in-node.md) — runのノードでuniqueKeyを受け付けない
+- [ADR-0034](0034-resume-from-failed-node.md) — 失敗したrunは失敗したノードから再開する
+- [ADR-0035](0035-bounded-run-data.md) — runを跨ぐデータと規模に上限を設ける

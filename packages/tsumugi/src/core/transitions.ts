@@ -3,7 +3,7 @@ import type { ActiveState, JobState } from './types.js';
 /**
  * 状態機械の遷移表(ADR-0012)
  * 重複配送や競合で終端状態のジョブが再び動き出すのを弾く
- * cancelをSCHEDULEDからのみ許すのは意図的, QUEUED以降は実行済みかもしれず「取り消せた」と嘘をつきたくない
+ * cancelをSCHEDULEDからのみ許すのは意図的, QUEUED以降は実行済みかもしれず取り消せていない場合に成功を返さない
  */
 export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
 	// dispatch / cancel
@@ -16,7 +16,7 @@ export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
 	// ダッシュボードからの手動リトライ
 	FAILED: ['SCHEDULED'],
 	CANCELLED: [],
-	// 沈黙して回収できなかったジョブ,人手で判断して再投入
+	// 無応答で回収できなかったジョブ, 人手で判断して再投入
 	STALLED: ['SCHEDULED'],
 } as const;
 

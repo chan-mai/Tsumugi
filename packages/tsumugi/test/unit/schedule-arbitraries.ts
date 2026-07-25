@@ -39,7 +39,7 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 		dispatchedAt: fc.constant(null),
 	});
 
-	// QUEUED / RUNNINGはdispatchedAtを持つ, 沈黙判定の境界をまたぐよう幅を取る
+	// QUEUED / RUNNINGはdispatchedAtを持つ, 無応答判定の境界をまたぐよう幅を取る
 	const inFlight = fc.record({
 		...common,
 		state: fc.constantFrom('QUEUED' as const, 'RUNNING' as const),

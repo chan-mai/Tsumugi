@@ -36,7 +36,7 @@ describe('resolveShard (ADR-0011)', () => {
 	});
 
 	it('分割しているのにpartitionKeyが無ければ拒否する', () => {
-		// 黙って0番に落とすとキー単位の制御も重複排除も静かに破れる
+		// エラーにせず0番へ割り当てると, キー単位の制御も重複排除も気付かないまま無効になる
 		expect(() => resolveShard('MAIL', 4, undefined)).toThrow(InvalidJobIdError);
 	});
 

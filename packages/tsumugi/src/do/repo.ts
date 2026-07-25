@@ -1,9 +1,10 @@
 import { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { assertTransition } from '../core/transitions.js';
+import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type { Backoff, DeliveryGuarantee, JobState, JobView, Retention } from '../core/types.js';
 import { applySchema, type AttemptRow, type JobRow } from './schema.js';
-import { attempt, job, outbox, setting, uniqueKey } from './tables.js';
+import { attempt, job, outbox, runNotify, setting, uniqueKey } from './tables.js';
 
 /**
  * 1試行あたりのエラー本文の上限
@@ -36,7 +37,13 @@ export type NewJob = {
 	runAfter: number;
 	createdAt: number;
 	payload: unknown;
+	/** DAGのノードとして投入された場合の宛先(ADR-0015) */
+	runId?: string | null;
+	nodeId?: string | null;
 };
+
+/** 終端に達した時にRun DOへ知らせる状態(ADR-0031) */
+const NOTIFIABLE: readonly JobState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 
 const toView = (row: JobRow): JobView => ({
 	id: row.id,
@@ -54,7 +61,7 @@ const toView = (row: JobRow): JobView => ({
 
 /**
  * 掃除の対象条件
- * 削除と判定で同じ式を使う, 片方だけ直すと消える条件と起きる条件がずれる
+ * 削除と判定で同じ式を使う, 片方だけ直すと削除の条件とalarmを設定する条件がずれる
  */
 const sweepable = (now: number, retention: Retention) =>
 	or(
@@ -70,7 +77,7 @@ const sweepable = (now: number, retention: Retention) =>
  */
 export class JobRepo {
 	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
-	/** 畳み込んだ読み取りなど, クエリビルダで表現できないものに使う */
+	/** 集計を含む読み取りなど, クエリビルダで表現できないものに使う */
 	readonly sql: SqlStorage;
 	/** 書き込みを行うクエリの回数, 1ジョブあたりの予算をテストで固定するために測る */
 	writes = 0;
@@ -104,8 +111,8 @@ export class JobRepo {
 				dispatchedAt: null,
 				payload: JSON.stringify(newJob.payload),
 				result: null,
-				runId: null,
-				nodeId: null,
+				runId: newJob.runId ?? null,
+				nodeId: newJob.nodeId ?? null,
 			})
 			.run();
 		this.writes++;
@@ -200,16 +207,16 @@ export class JobRepo {
 	}
 
 	/**
-	 * schedule()へ渡す窓, 役割ごとに分けて読む(ADR-0019 / ADR-0020, #4)
+	 * schedule()へ渡す読み取り範囲, 役割ごとに分けて読む(ADR-0019 / ADR-0020, #4)
 	 *
-	 * 単一の作成順窓だと実行中や未到来のジョブが枠を占め, 後から入った実行可能ジョブが選考に入らない
-	 * 実行可能な候補を独立した窓で読むことで, 実行中がlimitを超えても投入候補が窓に残る
-	 * 実行可能ジョブ自体がlimitを超える滞留は解けない, 作成順の窓を跨ぐ分は次tick以降で拾う
+	 * 作成順の単一の読み取り範囲では実行中と未到来のジョブが範囲を占有し, 後から入った実行可能ジョブが選考に入らない
+	 * 実行可能な候補を独立した範囲で読むことで, 実行中がlimitを超えても投入候補が範囲に残る
+	 * 実行可能ジョブ自体がlimitを超える滞留は解けない, 作成順の範囲を超えた分は次tick以降で処理する
 	 *
-	 * readyCountを返すのは有界判定のため, 満杯なら残りがある可能性が高く即座に起き直す
+	 * readyCountを返すのは有界判定のため, 満杯なら残りがある可能性が高く即座に再実行する
 	 */
 	scheduleWindow(now: number, limit: number): { jobs: JobView[]; readyCount: number } {
-		// 実行中(QUEUED/RUNNING): reaperの沈黙判定と在庫カウントに要る
+		// 実行中(QUEUED/RUNNING): reaperの無応答判定と実行中件数の集計に必要
 		const inFlight = this.db
 			.select()
 			.from(job)
@@ -217,7 +224,7 @@ export class JobRepo {
 			.orderBy(asc(job.createdAt), asc(job.id))
 			.limit(limit)
 			.all();
-		// 実行可能(SCHEDULED且つrun_after<=now): 投入候補, 実行中や未到来に窓を食われない
+		// 実行可能(SCHEDULED且つrun_after<=now): 投入候補, 実行中と未到来のジョブに範囲を占有されない
 		const ready = this.db
 			.select()
 			.from(job)
@@ -296,6 +303,10 @@ export class JobRepo {
 			runAfter?: number;
 			countAttempt?: boolean;
 			result?: string | null;
+			/** ジョブ行には残さずRun DOへの通知にだけ載せる失敗の理由(ADR-0031) */
+			error?: string | null;
+			/** performの中で要求された子(ADR-0032) */
+			spawns?: readonly SpawnRequest[];
 		},
 	): boolean {
 		for (const state of from) assertTransition(state, to);
@@ -310,16 +321,58 @@ export class JobRepo {
 		if (patch.countAttempt) set.attempts = sql`${job.attempts} + 1`;
 
 		// 更新できた行を受け取って成否を判定する, drizzleのrunは影響行数を返さない
+		// 宛先も同じreturningで受ける, 遷移のたびに読み直さずに通知の要否が分かる(ADR-0031)
 		const updated = this.db
 			.update(job)
 			.set(set)
 			.where(and(eq(job.id, id), inArray(job.state, [...from])))
-			.returning({ id: job.id })
+			.returning({ id: job.id, runId: job.runId, nodeId: job.nodeId })
 			.all();
 		this.writes++;
-		if (updated.length === 0) return false;
+		const row = updated[0];
+		if (!row) return false;
 		this.#appendOutbox(id);
+		// 終端の捕捉を1箇所に集約する, 遷移の呼び出し側ごとに積むと必ずどこかで漏れる
+		if (row.runId !== null && row.nodeId !== null && NOTIFIABLE.includes(to)) {
+			this.appendNotify(row.runId, {
+				nodeId: row.nodeId,
+				jobId: id,
+				state: to as NodeEvent['state'],
+				result: patch.result ?? null,
+				error: patch.error ?? null,
+				...(patch.spawns && patch.spawns.length > 0 ? { spawns: patch.spawns } : {}),
+			});
+		}
 		return true;
+	}
+
+	appendNotify(runId: string, event: NodeEvent): void {
+		this.db
+			.insert(runNotify)
+			.values({ runId, event: JSON.stringify(event) })
+			.run();
+		this.writes++;
+	}
+
+	notifyBatch(limit: number): { seq: number; run_id: string; event: string }[] {
+		const rows = this.db.select().from(runNotify).orderBy(asc(runNotify.seq)).limit(limit).all();
+		this.reads++;
+		return rows.map((row) => ({ seq: row.seq, run_id: row.runId, event: row.event }));
+	}
+
+	/** 送信が成功してから呼ぶ,失敗時はカーソルを進めない */
+	deleteNotifyThrough(seq: number): void {
+		this.db.delete(runNotify).where(lte(runNotify.seq, seq)).run();
+		this.writes++;
+	}
+
+	countNotify(): number {
+		const row = this.db
+			.select({ c: sql<number>`count(*)` })
+			.from(runNotify)
+			.get();
+		this.reads++;
+		return row?.c ?? 0;
 	}
 
 	payloadOf(row: JobRow): unknown {
@@ -359,7 +412,7 @@ export class JobRepo {
 	 * nextDueAtを返すのは無駄な起床を避けるため
 	 * 失敗ジョブだけが残る状態で短い間隔のalarmを張り続けると,何もしない書き込みが延々と積まれる
 	 *
-	 * 3つの集計を1文に畳んでいるためクエリビルダでは表現できず, 生SQLのまま残す
+	 * 3つの集計を1文にまとめているためクエリビルダでは表現できず, 生SQLのまま残す
 	 */
 	sweepState(now: number, retention: Retention): { jobs: boolean; uniqueKeys: boolean; nextDueAt: number | null } {
 		const row = this.sql

@@ -62,7 +62,7 @@ describe('遷移表(ADR-0012)', () => {
 		}
 	});
 
-	it('cancelはSCHEDULEDからのみ, QUEUED以降は実行済みかもしれないので嘘をつかない', () => {
+	it('cancelはSCHEDULEDからのみ, QUEUED以降は実行済みかもしれないので成功を返さない', () => {
 		expect(canTransition('SCHEDULED', 'CANCELLED')).toBe(true);
 		expect(canTransition('QUEUED', 'CANCELLED')).toBe(false);
 		expect(canTransition('RUNNING', 'CANCELLED')).toBe(false);

@@ -34,7 +34,7 @@ export type BindingConfig = {
 	sweepAfterMs?: number;
 	/**
 	 * 失敗ジョブ(FAILED / STALLED)をDOに残す時間,既定7日
-	 * 手動リトライの窓そのもの, D1の保持と揃えてある(ADR-0027)
+	 * 手動リトライを受け付ける期間, D1の保持と揃えてある(ADR-0027)
 	 */
 	failedRetentionMs?: number;
 };
@@ -55,7 +55,7 @@ function settingsOf(config: BindingConfig | undefined): ShardSettings | undefine
 }
 
 /**
- * 投入専用の口
+ * 投入専用のクライアント
  * ジョブ管理Worker本体と別Workerからのenqueueで同一経路
  */
 export function createClient<Env extends ClientEnv>(bindings: Record<string, BindingConfig> = {}): TsumugiClient<Env> {

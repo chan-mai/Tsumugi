@@ -4,13 +4,13 @@ import type { ScheduleInput } from '../../src/core/types.js';
  * schedule()のdispatch決定を独立に再計算する参照モデル
  *
  * property testが実装のロジックをそのまま写すと, 実装がずれても検査が同じだけずれて相殺する
- * このモデルは仕様の言葉(枠 / トークン / キー上限 / 優先度)だけで書き, 実装を参照しない
+ * このモデルは仕様の用語(同時実行数 / トークン / キー上限 / 優先度)だけで書き, 実装を参照しない
  * reaperとnextAlarmAtは扱わない, dispatchの正しさに絞る
  */
 export function expectedDispatchIds(input: ScheduleInput): string[] {
 	const { now, jobs, policy } = input;
 
-	// 回収されるジョブ(沈黙したQUEUED/RUNNING)は枠から外れる
+	// 回収されるジョブ(無応答のQUEUED/RUNNING)は同時実行数から外れる
 	const reaped = new Set(
 		jobs
 			.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && j.dispatchedAt !== null)

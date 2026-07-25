@@ -6,7 +6,7 @@ export function effectivePriority(job: JobView, now: number, agingIntervalMs: nu
 	return job.priority + Math.floor(Math.max(0, now - job.createdAt) / agingIntervalMs);
 }
 
-/** 沈黙とみなす判定の期限 */
+/** 無応答とみなす判定の期限 */
 function silenceDeadline(job: JobView, policy: Policy): number | null {
 	if (job.dispatchedAt === null) return null;
 	return job.dispatchedAt + job.timeoutMs + policy.reaperGraceMs;
@@ -36,17 +36,17 @@ const minOf = (values: readonly (number | null)[]): number | null =>
  * 時刻を引数で受けるのでalarm発火やreaper境界を時間操作なしでテスト可能
  *
  * 回収したジョブ自身は同じtickで再投入せずnextAlarmAtをnowにして次のtickへ送る(回収と投入の混在は推論が難しい)
- * ただし空いた枠は他のジョブが同じtickで使える,固着したジョブに枠を占有させ続ける方が害が大きいため
+ * ただし空いた分は他のジョブが同じtickで使える, 応答しないジョブに上限を占有させ続ける方が害が大きいため
  *
- * 前提:回収は「沈黙したので諦めた」であってゾンビが走っている可能性は残る
- * 枠を空ける以上ゾンビの存在下で同時実行上限は厳密でなくなるが,死と遅延は原理的に区別できず回避不能
+ * 前提:回収は無応答による打ち切りであり, 実行が継続している可能性は残る
+ * 空きを作る以上, 実行が継続している場合の同時実行上限は厳密でなくなるが, 停止と遅延は原理的に区別できず回避できない
  */
 export function schedule(input: ScheduleInput): ScheduleOutput {
 	const { now, jobs, policy } = input;
 	const decisions: Decision[] = [];
 	let bucket = refill(input.bucket, policy, now);
 
-	// 1. reaper:投入したまま沈黙しているジョブの回収
+	// 1. reaper:投入後に応答が無いジョブの回収
 	const reaped = new Set<string>();
 	for (const job of jobs) {
 		if (job.state !== 'QUEUED' && job.state !== 'RUNNING') continue;
@@ -64,7 +64,7 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		}
 	}
 
-	// 2.実行中の在庫を数える,回収した分は枠を空ける
+	// 2.実行中の件数を数える, 回収した分は空きとして扱う
 	const keyInFlight = new Map<string, number>();
 	let inFlight = 0;
 	for (const job of jobs) {
@@ -80,7 +80,7 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		.map((j) => ({ job: j, ep: effectivePriority(j, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 
-	// 4.枠・トークン・キー単位上限を見ながら貪欲に投入
+	// 4.同時実行数・トークン・キー単位上限を見ながら貪欲に投入
 	let slots = Math.max(0, policy.concurrency - inFlight);
 	let blockedByCapacity = false;
 	let blockedByTokens = false;
@@ -107,13 +107,13 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		slots--;
 		bucket = { tokens: bucket.tokens - 1, refilledAt: bucket.refilledAt };
 		if (key !== null) keyInFlight.set(key, (keyInFlight.get(key) ?? 0) + 1);
-		// 今まさに投入したジョブの沈黙判定時刻,入力のスナップショットではまだSCHEDULEDなので個別に数える
-		// これを忘れると投入後にDOを起こす予定が立たず,沈黙したジョブが永久に回収されない
+		// 今投入したジョブの無応答判定時刻,入力のスナップショットではまだSCHEDULEDなので個別に数える
+		// これを忘れると投入後にDOを起動する予定が立たず,応答が無いジョブが永久に回収されない
 		const deadline = now + job.timeoutMs + policy.reaperGraceMs;
 		if (dispatchedSilence === null || deadline < dispatchedSilence) dispatchedSilence = deadline;
 	}
 
-	// 5.次に起きるべき時刻
+	// 5.次に起動すべき時刻
 	const futureRunAfter = minOf(jobs.filter((j) => j.state === 'SCHEDULED' && j.runAfter > now).map((j) => j.runAfter));
 	const nextSilence = minOf(
 		jobs.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id)).map((j) => silenceDeadline(j, policy)),
@@ -124,7 +124,7 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		nextSilence,
 		dispatchedSilence,
 		blockedByTokens ? tokenReadyAt(bucket, policy, now) : null,
-		// 枠待ちは完了報告が次のtickを起こすのでここでは予約しない(capacityのalarmは張らない)
+		// 上限待ちは完了報告が次のtickを起動するのでここでは予約しない(capacityのalarmは張らない)
 	]);
 
 	return { decisions, bucket, nextAlarmAt, blocked: { capacity: blockedByCapacity, tokens: blockedByTokens, perKey: blockedByKey } };

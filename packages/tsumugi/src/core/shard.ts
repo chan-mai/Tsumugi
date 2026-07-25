@@ -18,8 +18,8 @@ export function hashToShard(partitionKey: string, shards: number): number {
 
 /**
  * 投入先のshardを決める
- * 分割している場合にpartitionKeyが無いと,キー単位の制御も重複排除も静かに破れる
- * 黙って0番に落とさず明示的に拒否する(ADR-0011)
+ * 分割している場合にpartitionKeyが無いと, キー単位の制御も重複排除も気付かないまま無効になる
+ * エラーにせず0番へ割り当てることはせず, 明示的に拒否する(ADR-0011)
  */
 export function resolveShard(binding: string, shards: number, partitionKey: string | undefined): number {
 	if (shards <= 1) return 0;

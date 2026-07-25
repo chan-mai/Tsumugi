@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ page: number; pageSize: number; total: number }>();
+const props = withDefaults(defineProps<{ page: number; pageSize: number; total: number; unit?: string }>(), { unit: 'jobs' });
 const emit = defineEmits<{ 'update:page': [value: number]; 'update:pageSize': [value: number] }>();
 
 const pageCount = () => Math.max(1, Math.ceil(props.total / props.pageSize));
@@ -8,7 +8,7 @@ const go = (value: number) => emit('update:page', Math.min(Math.max(value, 0), p
 
 <template>
 	<div class="flex flex-wrap items-center justify-between gap-3 px-2">
-		<p class="text-sm text-muted-foreground">{{ total }} jobs</p>
+		<p class="text-sm text-muted-foreground">{{ total }} {{ unit }}</p>
 
 		<div class="flex flex-wrap items-center gap-3 sm:gap-6">
 			<div class="flex items-center gap-2">

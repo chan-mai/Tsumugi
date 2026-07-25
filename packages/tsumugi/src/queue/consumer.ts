@@ -1,5 +1,6 @@
 import { isRemoteRef, type Performer, type RemoteJobContext, type RemoteRef } from '../core/api.js';
 import { shardNameOf } from '../core/ids.js';
+import type { SpawnRequest } from '../core/run.js';
 import type { DispatchMessage, TsumugiJobShard } from '../do/job-shard.js';
 
 export type PerformerCtor<Env> = new (env: Env) => Performer<any, any, any, Env>;
@@ -10,7 +11,7 @@ export type RemotePerformerService = {
 };
 
 /**
- * binding名からperformerを引く登録簿,コード側の宣言が型推論の源も兼ねる
+ * binding名からperformerを引く対応, コード側の宣言が型推論の源も兼ねる
  * `remote('SERVICE')`を置くとservice binding越しの呼び出しになる(ADR-0026)
  */
 export type PerformerRegistry<Env> = Record<string, PerformerCtor<Env> | RemoteRef>;
@@ -37,7 +38,7 @@ export function shardStub<Env extends ConsumerEnv>(env: Env, jobId: string): Dur
  * timeoutで待つのをやめる
  *
  * performerの実行自体は止められない,ランタイムの制約で回避不能
- * `signal`は協調的な中断の依頼,応じないperformerは走り続ける
+ * `signal`は協調的な中断の要求, 応じないperformerは実行を継続する
  */
 function withTimeout<T>(jobId: string, timeoutMs: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
 	const controller = new AbortController();
@@ -83,7 +84,7 @@ export async function handleBatch<Env extends ConsumerEnv>(
 	performers: PerformerRegistry<Env>,
 ): Promise<void> {
 	const results = await Promise.allSettled(batch.messages.map((message) => handleOne(message, env, performers)));
-	// handleOneは内部で捕捉しきる想定だが, 漏れた例外を握るとackされずQueuesがリトライに乗せる(ADR-0004)
+	// handleOneは内部で捕捉しきる想定だが, 漏れた例外を再送出するとackされずQueuesのリトライに乗る(ADR-0004)
 	for (const result of results) {
 		if (result.status === 'rejected') console.error('tsumugi: handleOne rejected', result.reason);
 	}
@@ -94,11 +95,13 @@ async function handleOne<Env extends ConsumerEnv>(
 	env: Env,
 	performers: PerformerRegistry<Env>,
 ): Promise<void> {
-	// 報告先の特定にjobIdが要るのでtryの外で持つ, 本文が壊れていれば取れないままになる
+	// 報告先の特定にjobIdが必要なのでtryの外で保持する, 本文が壊れていれば取れないままになる
 	let jobId: string | undefined;
 	let ok = false;
 	let failure: string | undefined;
 	let result: unknown;
+	// performの中で要求された子, 完了報告に同梱して運ぶ(ADR-0031)
+	const spawns: SpawnRequest[] = [];
 
 	try {
 		// 分割代入もtryに入れる, 本文がnull等で壊れていても例外がackを飛ばさない(ADR-0004)
@@ -120,13 +123,19 @@ async function handleOne<Env extends ConsumerEnv>(
 
 		if (isRemoteRef(entry)) {
 			const service = (env as Record<string, unknown>)[entry.binding] as RemotePerformerService | undefined;
-			// 設定漏れの即時失敗,握り潰すと黙って失敗し続ける
+			// 設定漏れは即時失敗にする, 捕捉して無視すると検知できないまま失敗が続く
 			if (typeof service?.perform !== 'function') throw new Error(`service bindingが未設定: ${entry.binding}`);
-			// signalは非対応,中断の依頼はリモートに届かない(ADR-0026)
+			// signalもspawnも非対応, 呼び出し中だけ有効なものはリモートへ渡さない(ADR-0026)
 			result = await withTimeout(jobId, timeoutMs, () => Promise.resolve(service.perform(payload, base)));
 		} else {
+			// 要求は溜めるだけ, 送るのは完了報告と同じ便(ADR-0031)
+			const spawn = (id: string, target: string, childPayload: unknown, options?: SpawnRequest['options']) => {
+				spawns.push({ id, binding: target, payload: childPayload, ...(options ? { options } : {}) });
+			};
 			// performの戻り値を拾ってDOへ渡す, 保存はDO側で行う(#9)
-			result = await withTimeout(jobId, timeoutMs, (signal) => Promise.resolve(new entry(env).perform(payload, { ...base, signal })));
+			result = await withTimeout(jobId, timeoutMs, (signal) =>
+				Promise.resolve(new entry(env).perform(payload, { ...base, signal, spawn })),
+			);
 		}
 		ok = true;
 	} catch (error) {
@@ -138,15 +147,20 @@ async function handleOne<Env extends ConsumerEnv>(
 	message.ack();
 
 	// jobIdが取れないのは本文が壊れている場合, 報告先が無いのでackだけで終える
-	// DO側のジョブはQUEUEDのまま残り, timeout経過後にreaperが沈黙として回収する
+	// DO側のジョブはQUEUEDのまま残り, timeout経過後にreaperが無応答として回収する
 	if (jobId === undefined) return;
 
 	try {
 		// exactOptionalPropertyTypesのためerror未定義は省いて渡す
-		const outcome = ok ? { ok: true, result } : failure === undefined ? { ok: false } : { ok: false, error: failure };
+		// 失敗した試行のspawnは載せない, 再実行でもう一度要求される(ADR-0032)
+		const outcome = ok
+			? { ok: true, result, ...(spawns.length > 0 ? { spawns } : {}) }
+			: failure === undefined
+				? { ok: false }
+				: { ok: false, error: failure };
 		await shardStub(env, jobId).report(jobId, outcome);
 	} catch (error) {
-		// 報告が失われるとジョブはQUEUEDのまま残る, reaperが沈黙として回収する
+		// 報告が失われるとジョブはQUEUEDのまま残る, reaperが無応答として回収する
 		console.error(`tsumugi: report failed (${jobId})`, error);
 	}
 }

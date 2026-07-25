@@ -75,3 +75,41 @@ export function shardNameOf(jobId: string): string {
 	const { binding, shard } = parseJobId(jobId);
 	return `${binding}#${shard}`;
 }
+
+/**
+ * runIDのアドレッシング(ADR-0029)
+ * 形式は`<flow>:<localId>`, そのままDOの名前になるのでIDからRun DOをO(1)で引ける
+ */
+export type RunAddress = { flow: string; localId: string };
+
+/** flow名は`flows`のキーで区切り文字を含めない, ノードIDと同じ文字種に揃える */
+const FLOW_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+export class InvalidRunIdError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'InvalidRunIdError';
+	}
+}
+
+export function assertValidFlow(flow: string): void {
+	if (!FLOW_PATTERN.test(flow)) {
+		throw new InvalidRunIdError(`flow名が不正: ${JSON.stringify(flow)} (英数字とハイフンとアンダースコアのみ)`);
+	}
+}
+
+export function formatRunId({ flow, localId }: RunAddress): string {
+	if (!FLOW_PATTERN.test(flow)) throw new InvalidRunIdError(`flow名が不正: ${JSON.stringify(flow)} (英数字とハイフンとアンダースコアのみ)`);
+	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidRunIdError(`localIdが不正: ${JSON.stringify(localId)}`);
+	return `${flow}:${localId}`;
+}
+
+export function parseRunId(runId: string): RunAddress {
+	const colon = runId.indexOf(':');
+	if (colon < 0) throw new InvalidRunIdError(`:がない: ${JSON.stringify(runId)}`);
+	const flow = runId.slice(0, colon);
+	const localId = runId.slice(colon + 1);
+	if (!FLOW_PATTERN.test(flow)) throw new InvalidRunIdError(`flow名が不正: ${JSON.stringify(flow)}`);
+	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidRunIdError(`localIdが不正: ${JSON.stringify(localId)}`);
+	return { flow, localId };
+}

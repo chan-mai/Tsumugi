@@ -11,12 +11,12 @@ const id = await enqueue(env, {
 });
 ```
 
-返値はジョブのIDです
-`defineTsumugi`が返すオブジェクトにも同じ`enqueue`が用意されているので、`tsumugi.enqueue(env, input)`でも構いません
+戻り値はジョブIDです
+`defineTsumugi`が返すオブジェクトにも同じ`enqueue`があるため、`tsumugi.enqueue(env, input)`でも同じ結果になります
 
 ## enqueueMany
 
-複数件をまとめて入れるときは`enqueueMany`を使います
+複数件をまとめて投入する場合は`enqueueMany`を使用します
 
 ```ts
 const ids = await enqueueMany(env, [
@@ -25,8 +25,7 @@ const ids = await enqueueMany(env, [
 ]);
 ```
 
-宛先のDurable Objectごとに集約して1回のRPCにまとめるので、件数が増えても往復は増えません
-`enqueue`を逐次で回すと実測78件/秒あたりでDurable Objectの1,000 req/sソフト上限に律速されます
+件数が増えても往復の回数は増えません。`enqueue`を逐次で呼び出すと件数に比例して遅くなります
 
 戻り値は入力と同じ並び順です
 
@@ -34,10 +33,10 @@ const ids = await enqueueMany(env, [
 
 | 名前             | 既定                                        | 内容                                 |
 | ---------------- | ------------------------------------------- | ------------------------------------ |
-| `priority`       | `0`                                         | 数値優先度、大きいほど先に出る       |
+| `priority`       | `0`                                         | 数値優先度、大きいほど先に投入する   |
 | `maxAttempts`    | `3`                                         | 試行回数の上限                       |
 | `backoff`        | 指数、1秒起点、係数2、上限1時間、ジッタあり | リトライ間隔                         |
-| `timeoutMs`      | `60000`                                     | 待機を打ち切るまでの時間             |
+| `timeoutMs`      | `60000`                                     | 結果を待つ時間の上限                 |
 | `delayMs`        | なし                                        | 実行開始を遅らせる                   |
 | `runAt`          | なし                                        | 絶対時刻での予約、`delayMs`とは排他  |
 | `guarantee`      | `at-least-once`                             | 実行保証                             |
@@ -56,11 +55,11 @@ await enqueue(env, { binding: 'MAIL', payload, delayMs: 60 * 60 * 1000 });
 await enqueue(env, { binding: 'MAIL', payload, runAt: Date.parse('2026-08-01T09:00:00+09:00') });
 ```
 
-待機はDurable Objectのalarmが管理するので、Queuesの遅延配送の12時間上限には縛られません
+12時間より先の予約も指定可能です
 
 ## 重複排除
 
-`uniqueKey`を渡すと、同じキーのジョブが既にあるときは新規作成せず既存のジョブIDが返ります
+`uniqueKey`を指定すると、同じキーのジョブが既に存在する場合は新規作成せず、既存のジョブIDを返します
 
 ```ts
 const id = await enqueue(env, {
@@ -70,19 +69,15 @@ const id = await enqueue(env, {
 });
 ```
 
-衝突は異常ではなく正常系として扱います。例外は投げません
-呼び出し側が毎回try/catchを書かずに済み、HTTPリクエストのリトライやWebhookの重複配送で二重登録されなくなります
+衝突は異常ではなく正常系として扱い、例外は発生しません
+HTTPリクエストのリトライやWebhookの重複配送で二重登録されません
 
-予約は`uniqueForMs`が過ぎると消えるので、それ以降は同じキーでも新しいジョブになります
-
-重複排除の判定はDurable Object内のテーブルで行います
-KVには条件付き書き込みの公開APIがなく、「無ければ入れる」を不可分に実行できないためです
-Durable Objectはシングルスレッドなので、検査と挿入が追加の仕組みなしで不可分になります
+予約は`uniqueForMs`の経過後に削除され、それ以降は同じキーでも新しいジョブになります
 
 ## 直列化
 
-`concurrencyKey`が同じジョブは、`perKeyConcurrency`の上限まで同時に走ります
-既定は1なので、同じキーのジョブは1件ずつ順に実行されます
+`concurrencyKey`が同じジョブは、`perKeyConcurrency`の上限まで同時に実行されます
+既定は1であり、同じキーのジョブは1件ずつ順に実行されます
 
 ```ts
 await enqueue(env, {
@@ -92,8 +87,8 @@ await enqueue(env, {
 });
 ```
 
-これが正しく効くのはshard数が1のときです
-2以上にした場合はshardもそのキーで決めないと保証がエラーにならないまま無効になるので、[shard](/guide/execution#shard)を読んでください
+この保証が成立するのはshard数が1の場合です
+2以上に設定した場合、shardを同じキーで決定しない限り、エラーにならないまま保証が無効になります。[shard](/guide/execution#shard)を参照してください
 
 ## ジョブID
 
@@ -103,13 +98,9 @@ await enqueue(env, {
 
 例: `MAIL#0:xxxxxxxxxxxxxxxxxxxxxxxx`
 
-どのDurable Objectが保持しているかをIDに含めてあるので、IDからDurable Objectのstubを直接取得できます
-グローバルな索引は不要です
+shard数を後から変えると既存のIDが指す先が変わります。古いshardは残してください
 
-その代わり、shard数を後から変えると既存IDの引き先が変わります
-古いshardは残す必要があります
-
-## 別Workerから入れる
+## 別Workerからの投入
 
 投入だけを行うWorkerからは`tsumugi/client`を使います
-Durable Object実装をバンドルせずに済みます。詳しくは[別Workerからの投入](/guide/client)を参照してください
+詳しくは[別Workerからの投入](/guide/client)を参照してください

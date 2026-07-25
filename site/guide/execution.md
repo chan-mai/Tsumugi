@@ -14,10 +14,9 @@
 | `CANCELLED` | 取り消された                                    |
 | `STALLED`   | 応答が無く回収できず、手動での判断を待っている  |
 
-投入済み未開始と実行中を1つにまとめると、performerが動作していないのか遅いだけなのかを区別できません
-固着の診断ができなくなるので、`QUEUED`を分けています
+`QUEUED`と`RUNNING`は別の状態です。performerが未開始か実行中かの判別が可能です
 
-逆に初回待ちとリトライ待ちは分けていません。`attempts`を見れば区別できるためです
+初回待ちとリトライ待ちはどちらも`SCHEDULED`です。判別には`attempts`を使います
 
 ### 遷移
 
@@ -33,15 +32,15 @@ STALLED   → SCHEDULED
 
 `FAILED`と`STALLED`から`SCHEDULED`へ戻る遷移は、ダッシュボードやREST APIからの手動リトライです
 
-取り消せるのは`SCHEDULED`のときだけです
-`QUEUED`以降は既に実行されている可能性があるため、取り消し成功を返さない仕様にしています
+取り消しが可能なのは`SCHEDULED`の場合のみです
+`QUEUED`以降は既に実行されている可能性があるため、取り消しの要求を受け付けません
 
 ## リトライ
 
-試行回数もバックオフもDurable Objectが管理します
-Queuesのretry機構は使わず、consumerは結果を報告したあと必ず即ackします
+試行回数とバックオフは`maxAttempts`と`backoff`で決まります
 
-Queuesのretryに乗せると`maxAttempts`がwrangler.jsoncの`max_retries`に縛られ、製品仕様がインフラ設定に依存してしまうためです
+wrangler.jsoncの`max_retries`は別の層の設定で、Queuesがメッセージを再配送する回数です
+consumerは結果を報告したあと常にackするため通常は作用しませんが、配送そのものが失敗した場合の再配送回数を決めます
 
 ### バックオフ
 
@@ -51,7 +50,7 @@ Queuesのretryに乗せると`maxAttempts`がwrangler.jsoncの`max_retries`に�
 { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 3_600_000, jitter: true }
 ```
 
-固定間隔も指定できます
+固定間隔の指定も可能です
 
 ```ts
 await enqueue(env, {
@@ -61,7 +60,7 @@ await enqueue(env, {
 });
 ```
 
-`jitter`を有効にすると、同時に失敗した大量のジョブが同じタイミングで再試行するのを避けられます
+`jitter`を有効にすると、同時に失敗した多数のジョブの再試行が同じ時刻に集中しません
 
 ## 流量制御
 
@@ -92,27 +91,21 @@ const tsumugi = defineTsumugi<Env>({
 
 3軸を全て有効にした場合のスループット低下は実測で約17%です
 
-キー単位の同時実行制御は、状態を1箇所で管理する設計でなければ実装できません
-Durable Objectを置いていることによる利点がここに現れます
-
 ## エージング
 
-優先度キューは、高優先のジョブが流入し続ける限り低優先が永久に実行されません
-ダッシュボードでは`SCHEDULED`のままとしか見えないので、原因の特定も遅れます
+高優先度のジョブが継続して投入される限り、低優先度のジョブは実行されません
+これを避けるため、待ち時間に応じて実効優先度を上げます
 
-そこで待ち時間に応じて実効優先度を上げます
-
-```
+```text
 effectivePriority = priority + floor(waited / agingIntervalMs)
 ```
 
 既定は有効で、間隔は60秒です
-厳密な優先順序が必要な場合は`agingIntervalMs`を`null`にすると無効化できます
+厳密な優先順序が必要な場合は`agingIntervalMs`に`null`を指定します
 
 ## 実行保証
 
-分散システムである以上、at-least-onceとat-most-onceは両立できません
-どちらになるかは、完了報告が失われたときにreaperが再投入するかどうかで決まります
+ジョブごとに選択します。違いは、完了の報告が届かなかったときの挙動です
 
 | 保証                  | 応答が無いときの挙動                            |
 | --------------------- | ----------------------------------------------- |
@@ -127,29 +120,21 @@ await enqueue(env, {
 });
 ```
 
-### claim
-
-Cloudflare Queues自体がat-least-onceなので、reaperの再投入を止めただけではat-most-onceになりません
-
-そこでat-most-onceのジョブだけ、実行前にDurable Objectへclaimを取得しに行きます
-同じジョブの2回目は拒否されるので、重複配送されても二重には実行されません
-
-往復が増えるコストを払うのは保証を指定したジョブだけです。既定のat-least-onceでは増えません
+`at-most-once`を指定したジョブは、同じジョブが二度実行されることがありません
+その代わり1回あたりの往復が1つ増えます。既定の`at-least-once`では増えません
 
 ## タイムアウトと回収
 
-`timeoutMs`を過ぎるとconsumerは待機を打ち切り、`signal`をabortします
-performerの実行そのものは停止できません。ランタイムの制約で回避できません
+`timeoutMs`を過ぎると待機を打ち切ります
+ローカルのperformerには`signal`のabortが届きますが、リモートのperformerには`signal`がないため打ち切りは伝わりません
+どちらの場合もperformerの実行そのものは停止しません
 
-さらに`reaperGraceMs`(既定30秒)だけ応答が無い状態が続いたジョブは、Durable Objectのreaperが回収します
+さらに`reaperGraceMs`(既定30秒)だけ応答が無い状態が続いたジョブは回収されます
 試行回数が残っていれば保証に従って再投入か`STALLED`、使い切っていれば`FAILED`になります
 
 ## shard {#shard}
 
 shard数の既定は1です
-
-キー単位の制御は、shardもそのキーで決めないとエラーにならないまま無効になります
-1から2に増やした時点で流量制御が壊れるため、分割は明示的なオプトインにしています
 
 ```ts
 bindings: {
@@ -160,25 +145,22 @@ bindings: {
 2以上にすると`partitionKey`の指定が必須になります
 `concurrencyKey`や`uniqueKey`の保証はpartition内に限定されます
 
-- shardが1: binding内でキーは常に大域的に有効
+- shardが1: binding内でキーは常に有効
 - shardが2以上: `partitionKey`で決まったshardの中でのみ有効
 
-既定を安全側に倒し、性能のために保証を弱める場合は明示的な指定を求める設計です
-大半のbindingはshardという概念を意識せずに済みます
+`concurrencyKey`や`uniqueKey`を使う場合は、`partitionKey`にも同じキーを指定してください
+指定しないとエラーにならないまま保証が無効になります
 
 ## 保持期間
 
-終端したジョブがDurable Objectに残る時間は、用途が異なるので2つに分けてあります
+リトライを受け付ける期間は`failedRetentionMs`で決まります
 
 | 対象                      | 設定                | 既定 |
 | ------------------------- | ------------------- | ---- |
 | `COMPLETED` / `CANCELLED` | `sweepAfterMs`      | 5分  |
 | `FAILED` / `STALLED`      | `failedRetentionMs` | 7日  |
 
-完了したジョブの明細はD1へ投影済みなので、Durable Objectに残す必要がありません
-一方で`FAILED`と`STALLED`は手動リトライの対象なので、リトライを受け付ける期間がそのまま保持期間になります
-
-D1側の保持は`retention`で指定し、cronトリガーの`scheduled`でcleanupします
+一覧そのものの保持は`retention`で指定し、cronトリガーの`scheduled`で削除します
 
 ```ts
 const tsumugi = defineTsumugi<Env>({
@@ -187,4 +169,5 @@ const tsumugi = defineTsumugi<Env>({
 });
 ```
 
-D1の一覧に表示されているジョブはリトライできる、という状態を保つため、両者の期間は揃えてあります
+既定では両者の期間が揃っているため、一覧に表示されているジョブはリトライが可能です
+片方だけ変えると、一覧に表示されていてもリトライを受け付けないジョブが出ます

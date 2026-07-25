@@ -12,7 +12,33 @@ export type {
 	ScheduleInput,
 	ScheduleOutput,
 } from '../core/types.js';
-export type { JobAddress } from '../core/ids.js';
+export type { JobAddress, RunAddress } from '../core/ids.js';
+export type {
+	AdvanceInput,
+	AdvanceOutput,
+	NodeEvent,
+	NodeOrigin,
+	NodeState,
+	NodeView,
+	RunDecision,
+	RunState,
+	SpawnRequest,
+} from '../core/run.js';
+export type {
+	AnyFlow,
+	FanOutOptions,
+	FanOutSummary,
+	Flow,
+	FlowBuilder,
+	FlowNode,
+	Flows,
+	FlowShape,
+	FlowShapeNode,
+	InputOf,
+	NodeJobOptions,
+	NodeOptions,
+	NodeRef,
+} from '../core/flow.js';
 export type {
 	BaseOptions,
 	EnqueueItem,

@@ -13,7 +13,7 @@ export abstract class RemotePerformer<
 	Req extends Requirements = {},
 	Env = unknown,
 > extends WorkerEntrypoint<Env> {
-	/** 型のためだけの幻影プロパティ,実体なし */
+	/** 型のためだけのプロパティ, 実体なし */
 	declare protected readonly __requirements?: Req;
 	abstract perform(payload: Payload, ctx: RemoteJobContext): Result | Promise<Result>;
 }

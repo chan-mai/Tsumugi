@@ -312,7 +312,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 		expect(jobs.find((j) => j.id === 'GONE#0:old')?.retryable).toBe(false);
 	});
 
-	it('窓の内側の失敗ジョブはretryable=true', async () => {
+	it('保持期間内の失敗ジョブはretryable=true', async () => {
 		const generous = defineTsumugi({
 			performers: { GONE: Noop },
 			auth: bearerAuth(TOKEN),
@@ -416,7 +416,7 @@ describe('試行履歴(ADR-0028)', () => {
 		expect(job.attempts_log[0]?.error).toContain('boom');
 	});
 
-	it('試行回数の数値を潰さない', async () => {
+	it('試行回数の数値を上書きしない', async () => {
 		// 履歴を`attempts`という名前で返すと画面の n/m が壊れる
 		const jobId = await runFailing('LOG2#0', 'LOG2', 1);
 		const { job } = await detail(jobId);

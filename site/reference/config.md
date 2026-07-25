@@ -5,6 +5,8 @@
 ```ts
 const tsumugi = defineTsumugi<Env>({
   performers,
+  flows,
+  runs,
   bindings,
   auth,
   ui,
@@ -12,15 +14,28 @@ const tsumugi = defineTsumugi<Env>({
 });
 ```
 
-| 名前         | 必須 | 内容                                                 |
-| ------------ | ---- | ---------------------------------------------------- |
-| `performers` | ○    | binding名とperformerの対応。`remote()`も混ぜられる   |
-| `bindings`   |      | binding単位の分割数、流量制御、保持期間              |
-| `auth`       |      | 認証ミドルウェア。未設定ならAPIもUIも生えない        |
-| `ui`         |      | `tsumugi/ui`の`ui()`。渡さなければバンドルに載らない |
-| `retention`  |      | D1の読み取りモデルの保持設定                         |
+| 名前         | 必須 | 内容                                                          |
+| ------------ | ---- | ------------------------------------------------------------- |
+| `performers` | ○    | binding名とperformerの対応。`remote()`との混在も可能          |
+| `flows`      |      | Flow名と定義の対応。指定すると`RUN`のbindingが必要            |
+| `runs`       |      | Runの上限と保持期間の設定                                     |
+| `bindings`   |      | binding単位の分割数、流量制御、保持期間                       |
+| `auth`       |      | 認証ミドルウェア。未設定の場合はAPIもダッシュボードも無効     |
+| `ui`         |      | `tsumugi/ui`の`ui()`。未指定の場合はバンドルに含まれない      |
+| `retention`  |      | 一覧の保持設定                                                |
 
-戻り値は`fetch`と`queue`と`scheduled`を持つハンドラで、`enqueue`と`enqueueMany`と`shardFor`も生えています
+戻り値は`fetch`と`queue`と`scheduled`を持つハンドラで、`enqueue`と`enqueueMany`と`shardFor`も提供します
+`flows`を指定した場合は`start`と`runFor`、wranglerに登録するクラスの`runClass`も提供します
+
+## RunSettings
+
+`runs`に指定する値です
+
+| 名前                | 既定    | 内容                                                        |
+| ------------------- | ------- | ----------------------------------------------------------- |
+| `maxNodes`          | `10000` | 1つのRunに含められるノード数の上限。超過するとRunが失敗する |
+| `sweepAfterMs`      | 5分     | 終了したRunを保持する時間                                   |
+| `failedRetentionMs` | 7日     | 失敗したRunを保持する時間。再開の対象となる期間             |
 
 ## BindingConfig
 
@@ -41,18 +56,18 @@ const tsumugi = defineTsumugi<Env>({
 | `perKeyConcurrency` | `1`     | `concurrencyKey`単位の上限。キーがnullのジョブには適用しない |
 | `rate`              | `null`  | `{ tokens, intervalMs }`のトークンバケット                   |
 | `agingIntervalMs`   | `60000` | この間隔だけ待つごとに実効優先度が1上がる。`null`で無効      |
-| `reaperGraceMs`     | `30000` | `timeoutMs`の経過後さらにこの時間沈黙したら回収する          |
+| `reaperGraceMs`     | `30000` | `timeoutMs`の経過後さらにこの時間応答が無ければ回収する      |
 
 ## EnqueueInput
 
 | 名前             | 既定            | 内容                                |
 | ---------------- | --------------- | ----------------------------------- |
 | `binding`        |                 | 投入先のbinding名                   |
-| `payload`        |                 | performerに渡る値                   |
-| `priority`       | `0`             | 数値優先度。大きいほど先に出る      |
+| `payload`        |                 | performerへ渡す値                   |
+| `priority`       | `0`             | 数値優先度。大きいほど先に投入する  |
 | `maxAttempts`    | `3`             | 試行回数の上限                      |
 | `backoff`        | 指数            | `fixed`か`exponential`              |
-| `timeoutMs`      | `60000`         | 待つのをやめるまでの時間            |
+| `timeoutMs`      | `60000`         | 結果を待つ時間の上限                |
 | `delayMs`        |                 | 実行開始の遅延                      |
 | `runAt`          |                 | 絶対時刻での予約。`delayMs`とは排他 |
 | `guarantee`      | `at-least-once` | `at-least-once`か`at-most-once`     |
@@ -71,14 +86,15 @@ const tsumugi = defineTsumugi<Env>({
 
 名前は固定です
 
-| binding           | 種類             | 用途                 |
-| ----------------- | ---------------- | -------------------- |
-| `JOB_SHARD`       | Durable Object   | スケジューラ兼調停役 |
-| `TSUMUGI_DB`      | D1               | 読み取りモデル       |
-| `TSUMUGI_QUEUE`   | Queues           | performerへの配送    |
-| `TSUMUGI_METRICS` | Analytics Engine | 時系列メトリクス     |
+| binding           | 種類             | 用途                            |
+| ----------------- | ---------------- | ------------------------------- |
+| `JOB_SHARD`       | Durable Object   | スケジューラ兼調停役            |
+| `RUN`             | Durable Object   | Runの実行。`flows`を使う場合    |
+| `TSUMUGI_DB`      | D1               | 読み取りモデル                  |
+| `TSUMUGI_QUEUE`   | Queues           | performerへの配送               |
+| `TSUMUGI_METRICS` | Analytics Engine | 時系列メトリクス                |
 
-投入だけを行うWorkerに要るのは`JOB_SHARD`だけです
+投入のみを行うWorkerに必要なbindingは`JOB_SHARD`だけです
 
 ## サブパス
 
@@ -91,5 +107,5 @@ const tsumugi = defineTsumugi<Env>({
 | `tsumugi/types`     | 型のみ。ランタイムコードを含まない                               |
 | `tsumugi/testing`   | `schedule` `nextAttempt`など純粋関数                             |
 
-公開しているnpmパッケージは`tsumugi`ひとつです
-performerだけのWorkerがDurable Object実装をバンドルせずに済むよう、サブパスで分けています
+公開しているnpmパッケージは`tsumugi`のみです
+performerだけを持つWorkerがDurable Objectの実装をバンドルしないよう、サブパスで分割しています

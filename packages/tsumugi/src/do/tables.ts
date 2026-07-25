@@ -60,7 +60,7 @@ export const setting = sqliteTable('setting', {
 });
 
 /**
- * 試行ごとの記録(ADR-0028), 失敗の事後調査に要る
+ * 試行ごとの記録(ADR-0028), 失敗の事後調査に必要
  * ジョブ行は最新の状態しか持たず,何回目がいつ何で落ちたかは残らない
  */
 export const attempt = sqliteTable(
@@ -80,6 +80,20 @@ export const attempt = sqliteTable(
  * D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
  * D1書き込みが成功するまで削除しないので,失敗してもカーソルが進まず次回で追いつく
  */
+/**
+ * Run DOへの通知待ち(ADR-0031)
+ * D1への投影とは宛先もまとめ方も違うので別の表にする
+ */
+export const runNotify = sqliteTable(
+	'run_notify',
+	{
+		seq: integer('seq').primaryKey({ autoIncrement: true }),
+		runId: text('run_id').notNull(),
+		event: text('event').notNull(),
+	},
+	(t) => [index('run_notify_run').on(t.runId)],
+);
+
 export const outbox = sqliteTable('outbox', {
 	seq: integer('seq').primaryKey({ autoIncrement: true }),
 	jobId: text('job_id').notNull(),

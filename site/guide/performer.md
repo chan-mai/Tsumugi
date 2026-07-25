@@ -1,8 +1,8 @@
 # Performer
 
-ジョブの中身は`Performer`を継承したクラスとして書きます
+ジョブの処理内容は`Performer`を継承したクラスとして記述します
 
-## 基本の形
+## 基本形
 
 ```ts
 import { Performer, type JobContext } from 'tsumugi/performer';
@@ -20,12 +20,12 @@ class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env>
 
 型引数は順に、ペイロード、戻り値、必須キーの宣言、`Env`です
 
-bindingは`WorkerEntrypoint`と同じくコンストラクタで受け取るので、`this.env`から参照できます
+bindingは`WorkerEntrypoint`と同様にコンストラクタで受け取るため、`this.env`から参照可能です
 
-## 登録簿
+## performers
 
-binding名とperformerの対応は`defineTsumugi`の`performers`に書きます
-ここ1箇所に書けば、wranglerのservice bindingも型引数の手書きも不要です
+binding名とperformerの対応は`defineTsumugi`の`performers`に記述します
+この1箇所に記述すれば、wranglerのservice bindingの追加も型引数の明示も不要です
 
 ```ts
 const tsumugi = defineTsumugi<Env>({
@@ -36,24 +36,27 @@ const tsumugi = defineTsumugi<Env>({
 
 ## 実行文脈
 
-`perform`の第2引数に`JobContext`が渡ります
+`perform`の第2引数に`JobContext`が渡されます
 
-| フィールド       | 内容                                        |
-| ---------------- | ------------------------------------------- |
-| `jobId`          | `<binding>#<shard>:<localId>`の形のジョブID |
-| `attempt`        | 1始まりの試行回数                           |
-| `idempotencyKey` | ジョブ単位で安定する値、再実行でも同じ      |
-| `signal`         | タイムアウト時にabortされる`AbortSignal`    |
+| フィールド       | 内容                                                 |
+| ---------------- | ---------------------------------------------------- |
+| `jobId`          | `<binding>#<shard>:<localId>`形式のジョブID          |
+| `attempt`        | 1始まりの試行回数                                    |
+| `idempotencyKey` | ジョブ単位で一定の値、再実行でも同じ値               |
+| `signal`         | タイムアウト時にabortされる`AbortSignal`             |
+| `spawn`          | Flowのノードとして実行中に子ノードを追加する関数     |
 
-at-least-onceでは同じジョブが2回実行され得るので、外部への副作用は`idempotencyKey`で冪等にしておきます
+at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください
 
-`signal`は協調的な中断の要求にすぎません
-応じないperformerは実行を継続するので、中断させたい処理には自分で渡す必要があります
+`signal`は協調的な中断の要求です
+中断に応じないperformerは実行を継続するため、中断させる処理には`signal`を渡す必要があります
 
-## 失敗の伝えかた
+`spawn`の使用方法は[Flow](/guide/flow)を参照してください
 
-`throw`すれば失敗として扱われ、Durable Objectがリトライの要否を決めます
-戻り値を返せば成功です
+## 失敗の通知
+
+例外をthrowすると失敗として扱われ、試行回数が残っていればリトライされます
+戻り値を返した場合は成功です
 
 ```ts
 class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, void, { concurrencyKey: true }, Env> {
@@ -64,32 +67,30 @@ class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, vo
 }
 ```
 
-投げた例外のメッセージは試行履歴に残り、ダッシュボードの詳細画面で確認できます
-本文は2,000字で打ち切られ、1ジョブあたり20件まで保持されます
+発生した例外のメッセージは試行履歴に保存され、ダッシュボードの詳細画面に表示されます
+本文は2,000文字で打ち切られ、1ジョブあたり20件まで保持されます
 
 ## キーを必須にする
 
-第3型引数に`{ concurrencyKey: true }`や`{ uniqueKey: true }`を書くと、そのperformerへの投入時にキーの指定が必須になります
+第3型引数に`{ concurrencyKey: true }`または`{ uniqueKey: true }`を指定すると、そのperformerへの投入時にキーの指定が必須になります
 
 ```ts
 class ChargeCard extends Performer<Payload, void, { concurrencyKey: true }, Env> {}
 ```
 
-キーの導出をperformer側の関数に任せない理由は、Durable Objectとperformerが別isolateだからです
-Durable Objectの中でユーザーの関数は実行できないので、呼び出し側が文字列として渡します
-Durable Objectは不透明なキーとして扱うだけなので、追加のRPCもレイテンシも発生しません
+キーは投入時に文字列として渡します。performer側の関数で導出する形は取りません
 
 ::: warning 現状の制約
-この必須化が働くのは`JobQueue<M>`型を経由して呼び出す場合だけです
+この必須化が適用されるのは`JobQueue<M>`型を経由して呼び出す場合のみです
 `enqueue(env, input)`と`createClient()`が受け取るのは`EnqueueInput`で、`binding`は`string`、`payload`は`unknown`のため、キーの渡し忘れも型エラーになりません
 
 `JobQueue<M>`は型定義としてexportされていますが、この型を返すランタイムAPIは現時点でありません
-型による強制を効かせるには、利用側で`JobQueue<M>`に適合するラッパーを自分で用意する必要があります
+型による強制を適用するには、利用側で`JobQueue<M>`に適合するラッパーを用意する必要があります
 :::
 
-## 別Workerに置く
+## 別Workerへの配置
 
-performerはservice binding越しの別Workerにも置けます
+performerはservice binding越しに別のWorkerへの配置が可能です
 その場合は`RemotePerformer`を継承します
 
 ```ts
@@ -102,7 +103,7 @@ export class SendMail extends RemotePerformer<{ to: string; subject: string }, v
   }
 }
 
-// WorkerEntrypointの名前付きexportに加えてdefaultも要る
+// WorkerEntrypointの名前付きexportに加えてdefaultも必要
 export default {
   async fetch(): Promise<Response> {
     return new Response('performer only', { status: 404 });
@@ -110,7 +111,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-呼び出し側の登録簿には、クラスの代わりに`remote()`を置きます
+呼び出し側の`performers`には、クラスの代わりに`remote()`を指定します
 
 ```ts
 import { remote } from 'tsumugi';
@@ -126,18 +127,19 @@ wrangler.jsoncではentrypointにクラス名を指定します
 ],
 ```
 
-ローカルのperformerとリモートのperformerは同じ登録簿に混在できます
+ローカルのperformerとリモートのperformerは同じ`performers`に混在可能です
 
 ### リモートでの制約
 
-RPCの引数は`AbortSignal`に対応していないので、`RemoteJobContext`には`signal`がありません
-タイムアウトは呼び出し側が待機を打ち切るだけで、リモート側の処理は継続します
-
+RPCの引数は`AbortSignal`に対応していないため、`RemoteJobContext`には`signal`がありません
+タイムアウト時は呼び出し側が待機を打ち切るだけで、リモート側の処理は継続します
 中断が必要な処理はローカルに配置してください
 
-## テストする
+`spawn`も渡されません
 
-`tsumugi/testing`はDurable ObjectもQueuesも起動せずにperformerを呼びます
+## テスト
+
+`tsumugi/testing`はDurable ObjectとQueuesを起動せずにperformerを呼び出します
 
 ```ts
 import { createTestContext, runPerformer } from 'tsumugi/testing';
@@ -148,8 +150,7 @@ if (result.ok) console.log(result.value);
 else console.error(result.error);
 ```
 
-`runPerformer`は例外を投げずに結果として返します
-本番では例外がそのままリトライの判断になるため、投げたかどうかを同じ形で扱えます
+`runPerformer`は例外を再送出せず、成功と失敗を同じ形式で返します
 
 ### 実行文脈を差し替える
 
@@ -158,7 +159,7 @@ const ctx = createTestContext({ attempt: 3 });
 await runPerformer(new SendWelcome(env), payload, ctx);
 ```
 
-`signal`は実物の`AbortController`から取るので、中断に協調するperformerも試せます
+`signal`は実際の`AbortController`から取得するため、中断に対応するperformerの検証も可能です
 
 ```ts
 const ctx = createTestContext();
@@ -170,19 +171,19 @@ await running;
 
 ### スケジューラとバックオフ
 
-判断ロジックは時刻も乱数も引数で受け取る純粋関数なので、fake timersなしで検証できます
+時刻と乱数は引数で渡すため、fake timersは不要です
 
 ```ts
 import { fixedClock, nextAttempt, schedule } from 'tsumugi/testing';
 
-// 3回目の再試行がいつになるか
+// 3回目の再試行の時刻
 nextAttempt({ attempts: 3, maxAttempts: 5, backoff, now: Date.now() });
 
-// このポリシーで何件動くか
+// このポリシーで投入される件数
 schedule({ now, jobs, policy, bucket });
 ```
 
-### Durable Objectを絡めたテスト
+### Durable Objectを経由するテスト
 
-DOやQueuesの往復まで確かめる場合は`@cloudflare/vitest-pool-workers`が要ります
-`tsumugi/testing`はその領域を扱いません
+Durable ObjectとQueuesを経由した動作を検証する場合は`@cloudflare/vitest-pool-workers`が必要です
+`tsumugi/testing`はこの範囲を扱いません

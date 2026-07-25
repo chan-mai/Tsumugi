@@ -1,9 +1,10 @@
+import type { SpawnRequest } from './run.js';
 import type { Backoff, DeliveryGuarantee } from './types.js';
 
 /** performerがキーの指定を必須と宣言するための印, ADR-0010 (ランタイムDSLではなく型で強制) */
 export type Requirements = { concurrencyKey?: true; uniqueKey?: true };
 
-/** performに渡す実行文脈,冪等化とタイムアウト追従に要る情報を揃える */
+/** performに渡す実行文脈, 冪等化とタイムアウト追従に必要な情報を揃える */
 export type JobContext = {
 	jobId: string;
 	/** 1始まり, at-least-onceで再実行され得るため冪等化の判断材料 */
@@ -12,10 +13,16 @@ export type JobContext = {
 	idempotencyKey: string;
 	/** timeout時にabort,performerへ協調的な中断を依頼する */
 	signal: AbortSignal;
+	/**
+	 * 実行中のノードの下に子ノードを追加する(ADR-0032)
+	 * 要求はperformの完了報告に同梱して送るため, 失敗した試行の要求は破棄される
+	 * 静的定義と異なり型検査は適用されない
+	 */
+	spawn(id: string, binding: string, payload: unknown, options?: SpawnRequest['options']): void;
 };
 
 export abstract class Performer<Payload = unknown, Result = unknown, Req extends Requirements = {}, Env = unknown> {
-	/** 型のためだけの幻影プロパティ,実体なし */
+	/** 型のためだけのプロパティ, 実体なし */
 	declare protected readonly __requirements?: Req;
 	/** Cloudflareのバインディング, WorkerEntrypointと同じくコンストラクタで受け取る */
 	constructor(protected readonly env: Env) {}
@@ -28,18 +35,19 @@ export type Performers = Record<string, Performer<any, any, any, any>>;
  * 別Workerのperformerに渡す実行文脈
  * RPCの引数にAbortSignal非対応のため`signal`なし
  * タイムアウトは呼び出し側の待機打ち切りのみ,リモートへは非伝播
+ * `spawn`も渡さない, 呼び出し中だけ有効な参照を跨がせないため(ADR-0026)
  */
-export type RemoteJobContext = Omit<JobContext, 'signal'>;
+export type RemoteJobContext = Omit<JobContext, 'signal' | 'spawn'>;
 
 /**
  * service binding越しのperformerを指す印
- * 登録簿にクラスの代わりに置くとconsumerがRPCで呼ぶ(ADR-0026)
+ * `performers`にクラスの代わりに置くとconsumerがRPCで呼ぶ(ADR-0026)
  */
 export type RemoteRef<P extends Performer<any, any, any, any> = Performer<any, any, any, any>> = {
 	readonly kind: 'remote';
 	/** wrangler設定のservice binding名 */
 	readonly binding: string;
-	/** 型のためだけの幻影プロパティ,実体なし */
+	/** 型のためだけのプロパティ, 実体なし */
 	readonly __performer?: P;
 };
 
@@ -52,8 +60,10 @@ export function isRemoteRef(value: unknown): value is RemoteRef {
 	return typeof value === 'object' && value !== null && (value as RemoteRef).kind === 'remote';
 }
 
-type PayloadOf<P> = P extends Performer<infer T, any, any, any> ? T : never;
-type ReqOf<P> = P extends Performer<any, any, infer R, any> ? R : {};
+export type PayloadOf<P> = P extends Performer<infer T, any, any, any> ? T : never;
+export type ReqOf<P> = P extends Performer<any, any, infer R, any> ? R : {};
+/** performの戻り値, DAGのノードでは後段のpayloadの材料になる */
+export type ResultOf<P> = P extends Performer<any, infer R, any, any> ? Awaited<R> : never;
 
 /** 必須の印が1つでも立っているか */
 type HasRequired<R extends Requirements> = true extends R[keyof R] ? true : false;
@@ -97,7 +107,7 @@ export interface JobQueue<M extends Performers> {
 }
 
 /**
- * 登録簿から`Performers`を導く(ADR-0010)
+ * `performers`から`Performers`を導く(ADR-0010)
  * ctorはインスタンス型を, `remote()`の印は同梱した相手のperformer型を取り出す
  * これで`config.performers`1箇所からbindingごとのpayloadと必須キーが決まる
  */
@@ -111,11 +121,11 @@ export type PerformersOf<R extends Record<string, unknown>> = {
 			: never;
 };
 
-/** unionをintersectionに畳む, 分配した関数引数の反変性を使う */
+/** unionをintersectionへ変換する, 分配した関数引数の反変性を使う */
 type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (k: infer I) => void ? I : never;
 
 /**
- * 登録簿のctorが受け取るEnv, `defineTsumugi`が明示の型引数なしでEnvを推論するのに使う(#5)
+ * `performers`のctorが受け取るEnv, `defineTsumugi`が明示の型引数なしでEnvを推論するのに使う(#5)
  * 全performerは同一のWorker環境で初期化されるので, 各envのintersectionにする
  * unionにすると1つのperformerのbindingしか満たさない環境も通ってしまう
  */

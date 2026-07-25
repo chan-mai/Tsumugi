@@ -2,7 +2,7 @@ import { RemotePerformer, type RemoteJobContext } from 'tsumugi/performer';
 
 /**
  * ジョブ管理Workerとは別Workerのperformer
- * 呼び出し側はservice bindingとして参照,登録簿には`remote('MAIL_SERVICE')`(ADR-0026)
+ * 呼び出し側はservice bindingとして参照,`performers`には`remote('MAIL_SERVICE')`(ADR-0026)
  */
 export class SendMail extends RemotePerformer<{ to: string; subject: string }, void, {}, Env> {
 	async perform(payload: { to: string; subject: string }, ctx: RemoteJobContext): Promise<void> {

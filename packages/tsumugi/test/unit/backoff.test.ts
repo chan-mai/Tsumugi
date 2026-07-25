@@ -41,7 +41,7 @@ describe('nextAttempt', () => {
 		expect(hi.kind === 'retry' && hi.delayMs).toBe(10_000);
 	});
 
-	it('ジッタありでも遅延がゼロに潰れない', () => {
+	it('ジッタありでも遅延がゼロにならない', () => {
 		const backoff: Backoff = { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 60_000, jitter: true };
 		for (const rand of [0, 0.1, 0.5, 0.9, 0.999]) {
 			const r = nextAttempt({ attempts: 1, maxAttempts: 5, backoff, now: T0, rand });

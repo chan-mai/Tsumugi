@@ -60,8 +60,11 @@ Tsumugiが使うbindingは4つです
 ```
 
 ::: info
-`max_retries`はTsumugiの試行回数とは無関係です。consumerは結果をDurable Objectへ報告したあと必ず即ackするので、Queues側のretryは配送そのものが失敗したときにしか効きません
+`max_retries`はTsumugiの試行回数とは無関係です。試行回数は`maxAttempts`で指定します
 :::
+
+Flowを使う場合はbindingが1つ増えます。単発のジョブのみを扱う構成では不要です
+詳細は[Flow](/guide/flow)を参照してください
 
 ## 読み取りモデルの作成
 
@@ -72,9 +75,14 @@ pnpm wrangler d1 migrations apply my-jobs --local
 pnpm wrangler d1 migrations apply my-jobs --remote
 ```
 
+::: warning
+Tsumugiを更新した場合も同じコマンドが必要です。マイグレーションはバージョンによって追加されます
+未適用のマイグレーションがある場合、REST APIとダッシュボードは503を返し、未適用のファイル名を応答本文に含めます
+:::
+
 ## Worker
 
-performerを定義して、`defineTsumugi`に登録簿として渡します
+performerを定義して、`defineTsumugi`の`performers`に渡します
 
 ```ts
 import { bearerAuth, defineTsumugi, enqueue } from 'tsumugi';
@@ -93,7 +101,7 @@ const tsumugi = defineTsumugi<Env>({
   ui: ui({ tokenCookie: 'tsumugi_token' }),
 });
 
-// Durable Objectクラスの再エクスポートが要る
+// Durable Objectクラスの再エクスポートが必要
 export { TsumugiJobShard } from 'tsumugi';
 
 export default {
@@ -121,19 +129,10 @@ export default {
 pnpm wrangler secret put TSUMUGI_TOKEN
 ```
 
-ローカルで動かすときは`.dev.vars`に書きます
+## 動作確認
 
-```
-TSUMUGI_TOKEN=ローカル用のトークン
-```
-
-## 起動
-
-```bash
-pnpm wrangler dev
-```
-
-`/enqueue`にアクセスするとジョブIDが返ります。`/`を開くとダッシュボードが表示されるので、トークンを入力すると一覧を確認できます
+`/enqueue`にアクセスするとジョブIDが返ります
+`/`を開くとダッシュボードが表示されます。トークンを入力すると一覧が表示されます
 
 ## 次に読むもの
 
