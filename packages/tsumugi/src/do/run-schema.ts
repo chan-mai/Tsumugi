@@ -36,6 +36,8 @@ export const RUN_SCHEMA = [
 	)`,
 	`CREATE INDEX IF NOT EXISTS node_parent ON node (parent)`,
 	`CREATE INDEX IF NOT EXISTS node_state ON node (state)`,
+	// 進行判断は毎tickで並び順に全件読む, 先頭列がseqの索引が要る
+	`CREATE INDEX IF NOT EXISTS node_seq ON node (seq, id)`,
 	`CREATE TABLE IF NOT EXISTS run_outbox (
 		seq INTEGER PRIMARY KEY AUTOINCREMENT,
 		kind TEXT NOT NULL,

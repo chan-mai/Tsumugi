@@ -1,5 +1,5 @@
 import { createId } from '@paralleldrive/cuid2';
-import { formatRunId, shardName } from './core/ids.js';
+import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
 import { createClient, type BindingConfig, type ClientEnv } from './client/enqueue.js';
 import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
@@ -110,6 +110,8 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 	// 公開の型はperformersから推論する, 実行時はEnvを問わないので内部でだけ緩める
 	const performers = config.performers as unknown as PerformerRegistry<Env>;
 	const flows: Flows = config.flows ?? {};
+	// flow名はrunIdの一部になる, 起動時に弾かないと開始まで誤りに気付けない(ADR-0029)
+	for (const flow of Object.keys(flows)) assertValidFlow(flow);
 
 	/** 設定漏れは開始時にエラーにする, エラーにしないとノードが永久に実行されない(ADR-0013) */
 	const runFor = (env: Env, runId: string): DurableObjectStub<RunControl> => {
@@ -133,8 +135,13 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 				// 一覧のretryable判定に使う, UI側が押す前に可否を出せるようにする(ADR-0027)
 				failedRetentionMs: (binding) => config.bindings?.[binding]?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 				flows: Object.keys(flows),
-				start: (env, flow, input, id) => start(env, flow, input, id === undefined ? {} : { id }),
-				runFor,
+				// flowが1つも無い構成では渡さない, 渡すとRESTが501の代わりに500で落ちる
+				...(Object.keys(flows).length > 0
+					? {
+							start: (env: Env, flow: string, input: unknown, id?: string) => start(env, flow, input, id === undefined ? {} : { id }),
+							runFor,
+						}
+					: {}),
 			})
 		: null;
 

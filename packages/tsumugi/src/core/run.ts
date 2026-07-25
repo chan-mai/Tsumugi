@@ -127,6 +127,13 @@ export function advance({ nodes, cancelling }: AdvanceInput): AdvanceOutput {
 
 	const decisions: RunDecision[] = [];
 	for (const node of nodes) {
+		// fan-outノードはジョブを実行しない, 子孫が全て終端に達した時点で自身を終端へ進める
+		// 取り消し中も集約する, 止めると子孫が終わってもRUNNINGのまま残りrunが決着しない
+		if (node.container && node.state === 'RUNNING' && (children.get(node.id) ?? []).every(settled)) {
+			decisions.push({ type: 'aggregate', id: node.id });
+			continue;
+		}
+
 		if (cancelling) {
 			// QUEUED以降は取り消せていない場合に成功を返さない(ADR-0012), 送っても断られるので出さない
 			if (node.state === 'PENDING' || node.state === 'SCHEDULED') decisions.push({ type: 'cancel', id: node.id });
@@ -134,18 +141,13 @@ export function advance({ nodes, cancelling }: AdvanceInput): AdvanceOutput {
 		}
 
 		if (node.state === 'PENDING') {
-			// 消えた依存は待っても解決しない, 止まり続けるより打ち切る(ADR-0030)
 			const deps = node.after.map((id) => byId.get(id));
-			if (!deps.every((dep) => dep !== undefined && settled(dep))) continue;
-			const ready = deps.every((dep) => dep !== undefined && succeeded(dep));
+			// 消えた依存は待っても解決しないので, 決着を待たずに打ち切る(ADR-0030)
+			const missing = deps.some((dep) => dep === undefined);
+			if (!missing && !deps.every((dep) => dep !== undefined && settled(dep))) continue;
+			const ready = !missing && deps.every((dep) => dep !== undefined && succeeded(dep));
 			if (!ready) decisions.push({ type: 'skip', id: node.id });
 			else decisions.push({ type: node.container ? 'expand' : 'start', id: node.id });
-			continue;
-		}
-
-		// fan-outノードはジョブを実行しない, 子孫が全て終端に達した時点で自身を終端へ進める
-		if (node.container && node.state === 'RUNNING' && (children.get(node.id) ?? []).every(settled)) {
-			decisions.push({ type: 'aggregate', id: node.id });
 		}
 	}
 

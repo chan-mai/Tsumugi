@@ -97,6 +97,25 @@ export function validateStartRun(body: unknown, flows: readonly string[]): { inp
 	return { input };
 }
 
+/** 一覧のページング, 上限の変更漏れを避けるため両方の一覧で共有する */
+export function parsePaging(url: URL): { limit: number; offset: number } {
+	return {
+		limit: Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, LIST_LIMIT_MAX),
+		offset: Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0),
+	};
+}
+
+/** 依存のノードID, 壊れた行で詳細画面ごと落とさない */
+export function parseAfter(raw: unknown): string[] {
+	if (typeof raw !== 'string' || raw.length === 0) return [];
+	try {
+		const parsed = JSON.parse(raw) as string[];
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
 /** 試行履歴, 壊れていても詳細画面ごと落とさない */
 export function parseAttempts(raw: unknown): AttemptRecord[] {
 	if (typeof raw !== 'string' || raw.length === 0) return [];
@@ -201,8 +220,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const url = new URL(c.req.url);
 		const state = url.searchParams.get('state');
 		const binding = url.searchParams.get('binding');
-		const limit = Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, LIST_LIMIT_MAX);
-		const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
+		const { limit, offset } = parsePaging(url);
 		const { column, desc } = resolveSort(url.searchParams.get('sort'), url.searchParams.get('order'));
 
 		const d = drizzle(c.env.TSUMUGI_DB);
@@ -341,10 +359,10 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	 * 断られた理由をHTTPの意味に写す
 	 * goneは410, 資源が在ったが失われた状態を指す, 状態違いの409とは利用者の打つ手が違う
 	 */
-	function refusal(result: { ok: false; reason: 'invalid-state' | 'gone' }) {
+	function refusal(result: { ok: false; reason: 'invalid-state' | 'gone' }, subject: 'job' | 'run' = 'job') {
 		return result.reason === 'gone'
 			? ({
-					body: { ok: false, error: 'job is no longer available: removed from the coordinator after the retention period' },
+					body: { ok: false, error: `${subject} is no longer available: removed from the coordinator after the retention period` },
 					status: 410,
 				} as const)
 			: ({ body: { ok: false, error: 'not allowed in the current state' }, status: 409 } as const);
@@ -386,8 +404,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const url = new URL(c.req.url);
 		const state = url.searchParams.get('state');
 		const flow = url.searchParams.get('flow');
-		const limit = Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, LIST_LIMIT_MAX);
-		const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
+		const { limit, offset } = parsePaging(url);
 
 		const d = drizzle(c.env.TSUMUGI_DB);
 		const filters = [state ? eq(runModel.state, state) : undefined, flow ? eq(runModel.flow, flow) : undefined].filter(
@@ -473,7 +490,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				container: node.container === 1,
 				parent: node.parent,
 				origin: node.origin,
-				after: JSON.parse(node.after) as string[],
+				after: parseAfter(node.after),
 				job_id: node.jobId,
 				result: node.result,
 				error: node.error,
@@ -484,16 +501,18 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		});
 	});
 
-	/** 取り消しと再開は正となるRun DOへ送る */
-	const runMutation = (action: 'cancel' | 'retry') => async (c: { env: Env; req: { param(name: string): string } }) => {
-		const id = c.req.param('id');
+	/**
+	 * 取り消しと再開は正となるRun DOへ送る
+	 * Honoの文脈型に依存しないよう, 必要な値だけを引数で受ける
+	 */
+	const runMutation = async (action: 'cancel' | 'retry', env: Env, id: string) => {
 		if (!runFor) return { body: { error: 'run control is not available' }, status: 501 } as const;
 		try {
 			parseRunId(id);
-			const stub = runFor(c.env, id);
+			const stub = runFor(env, id);
 			const result = action === 'cancel' ? await stub.cancel() : await stub.retry();
 			if (result.ok) return { body: { ok: true }, status: 200 } as const;
-			return refusal(result);
+			return refusal(result, 'run');
 		} catch (error) {
 			if (error instanceof InvalidRunIdError) return { body: { error: 'invalid run id' }, status: 400 } as const;
 			throw error;
@@ -501,12 +520,12 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	};
 
 	app.post('/api/runs/:id/cancel', async (c) => {
-		const { body, status } = await runMutation('cancel')(c);
+		const { body, status } = await runMutation('cancel', c.env, c.req.param('id'));
 		return c.json(body, status);
 	});
 
 	app.post('/api/runs/:id/retry', async (c) => {
-		const { body, status } = await runMutation('retry')(c);
+		const { body, status } = await runMutation('retry', c.env, c.req.param('id'));
 		return c.json(body, status);
 	});
 

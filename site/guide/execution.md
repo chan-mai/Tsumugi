@@ -37,7 +37,10 @@ STALLED   → SCHEDULED
 
 ## リトライ
 
-試行回数もバックオフも`maxAttempts`と`backoff`で決まります。wrangler.jsoncの`max_retries`とは無関係です
+試行回数とバックオフは`maxAttempts`と`backoff`で決まります
+
+wrangler.jsoncの`max_retries`は別の層の設定で、Queuesがメッセージを再配送する回数です
+consumerは結果を報告したあと常にackするため通常は作用しませんが、配送そのものが失敗した場合の再配送回数を決めます
 
 ### バックオフ
 
@@ -93,7 +96,7 @@ const tsumugi = defineTsumugi<Env>({
 高優先度のジョブが継続して投入される限り、低優先度のジョブは実行されません
 これを避けるため、待ち時間に応じて実効優先度を上げます
 
-```
+```text
 effectivePriority = priority + floor(waited / agingIntervalMs)
 ```
 
@@ -122,8 +125,9 @@ await enqueue(env, {
 
 ## タイムアウトと回収
 
-`timeoutMs`を過ぎると待機を打ち切り、`signal`をabortします
-performerの実行そのものは停止しません
+`timeoutMs`を過ぎると待機を打ち切ります
+ローカルのperformerには`signal`のabortが届きますが、リモートのperformerには`signal`がないため打ち切りは伝わりません
+どちらの場合もperformerの実行そのものは停止しません
 
 さらに`reaperGraceMs`(既定30秒)だけ応答が無い状態が続いたジョブは回収されます
 試行回数が残っていれば保証に従って再投入か`STALLED`、使い切っていれば`FAILED`になります

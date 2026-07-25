@@ -290,8 +290,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			this.repo.appendNodeOutbox(runRow.id, [...touched]);
 
 			const projected = await this.#project();
-			const swept = this.#sweep(now);
-			if (swept) return;
+			if (await this.#sweep(now)) return;
 
 			// 打ち切った決定と投影の残りがあるうちは休まない
 			// 投影待ちも見る, tickのawait中に入った通知は投影されないまま残る
@@ -466,11 +465,16 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		}
 
 		#failRun(runId: string, reason: string, now: number): void {
+			const failed: string[] = [];
 			for (const view of this.repo.views()) {
-				if (view.state === 'PENDING') this.repo.updateNode(view.id, { state: 'FAILED', error: reason }, now);
+				if (view.state !== 'PENDING') continue;
+				this.repo.updateNode(view.id, { state: 'FAILED', error: reason }, now);
+				failed.push(view.id);
 			}
 			this.repo.setRunState(runId, 'FAILED', now);
 			this.repo.appendRunOutbox();
+			// ノードも運ぶ, 積まないと読み取りモデルのノードがPENDINGのまま残る
+			this.repo.appendNodeOutbox(runId, failed);
 		}
 
 		/** アウトボックスをD1へ流す(ADR-0008) */
@@ -486,14 +490,15 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		 * 終端に達したrunを保持期間の経過後に削除する(ADR-0034)
 		 * 投影が残っているうちは消さない, 消すと読み取りモデルが途中の状態で固まる
 		 */
-		#sweep(now: number): boolean {
+		async #sweep(now: number): Promise<boolean> {
 			const row = this.repo.findRun();
 			if (!row || row.state === 'RUNNING') return false;
 			if (this.repo.countOutbox() > 0) return false;
 			const keepFor = row.state === 'FAILED' ? retention.failedMs : retention.doneMs;
 			if (row.updated_at + keepFor > now) return false;
 			// SQLiteごと落とす, run 1件につき1インスタンスなので残す行が無い(ADR-0029)
-			void this.ctx.storage.deleteAll();
+			// 完了を待つ, 待たずに返すと削除の失敗が捨てられる
+			await this.ctx.storage.deleteAll();
 			return true;
 		}
 

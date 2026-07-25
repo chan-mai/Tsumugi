@@ -24,7 +24,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 export type BearerOptions = {
 	/**
 	 * 同じトークンをこの名前のcookieからも受け取る
-	 * ブラウザは初回のHTML取得時にAuthorizationヘッダを付けられないため,ダッシュボードを開くにはこの設定が必要
+	 * HTMLは未認証でも返るので表示自体には要らない, ブラウザからAPIへAuthorizationを付けられない場合に要る
 	 * cookieで受ける以上CSRFの対象になるので,発行側でSameSite=Strictを付けること
 	 */
 	cookie?: string;

@@ -49,6 +49,9 @@ async function act(kind: 'retry' | 'cancel') {
 		// 投影は数秒遅れるので即時には変わらないが,反映され次第この再読込で追いつく
 		await load(props.runId);
 		emit('changed');
+	} catch (e) {
+		// 捕まえないと何も起きなかったように見える
+		message.value = e instanceof Error ? e.message : String(e);
 	} finally {
 		busy.value = false;
 	}

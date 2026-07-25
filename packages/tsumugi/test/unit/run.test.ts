@@ -130,6 +130,28 @@ describe('runの進行判断', () => {
 			{ type: 'cancel', id: 'b' },
 		]);
 	});
+
+	it('取り消し中もfan-outノードを集約する', () => {
+		// 集約しないと子孫が終わってもRUNNINGのまま残り, runがCANCELLEDに決着しない
+		const nodes = [
+			node({ id: 'each', state: 'RUNNING', container: true }),
+			node({ id: 'each:0', state: 'COMPLETED', parent: 'each', origin: 'fanOut' }),
+		];
+		const output = advance({ nodes, cancelling: true });
+		expect(output.decisions).toEqual([{ type: 'aggregate', id: 'each' }]);
+		expect(output.state).toBe('RUNNING');
+	});
+
+	it('依存が消えていれば待たずに打ち切る(ADR-0030)', () => {
+		// 定義から消えたノードは決着しないので, 待つと永久にRUNNINGのまま残る
+		const nodes = [node({ id: 'b', state: 'PENDING', after: ['gone'] })];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b' }]);
+	});
+
+	it('依存の一部が消えていても残りの決着を待たない', () => {
+		const nodes = [node({ id: 'a', state: 'RUNNING' }), node({ id: 'b', state: 'PENDING', after: ['a', 'gone'] })];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b' }]);
+	});
 });
 
 describe('runの状態', () => {

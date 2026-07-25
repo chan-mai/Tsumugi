@@ -26,14 +26,17 @@ export type {
 } from '../core/run.js';
 export type {
 	AnyFlow,
+	FanOutOptions,
 	FanOutSummary,
 	Flow,
 	FlowBuilder,
 	FlowNode,
 	Flows,
 	FlowShape,
+	FlowShapeNode,
 	InputOf,
 	NodeJobOptions,
+	NodeOptions,
 	NodeRef,
 } from '../core/flow.js';
 export type {

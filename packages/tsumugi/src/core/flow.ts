@@ -130,7 +130,8 @@ export function shapeOf(flow: AnyFlow): FlowShape {
 		id: node.id,
 		binding: node.binding,
 		container: node.container,
-		after: Object.values(node.after),
+		// 同じ依存先を複数の受け取り口で受けた場合に重複するので畳む, 依存の数を数える側がずれる
+		after: [...new Set(Object.values(node.after))],
 	}));
 }
 

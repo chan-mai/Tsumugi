@@ -109,16 +109,6 @@ async function settle(runId: string, performers: Record<string, any> = registry,
 	}
 }
 
-/**
- * 予定されたalarmが無くなるまで発火させる
- * alarmは即時に張られるのでランタイムも自然に発火させる, 枯らしておかないとtickが重なる
- */
-async function drainAlarms(stub: DurableObjectStub<TsumugiRunInstance>, limit = 10): Promise<void> {
-	for (let i = 0; i < limit; i++) {
-		if (!(await runDurableObjectAlarm(stub))) return;
-	}
-}
-
 const jobIdOf = (runId: string, nodeId: string) =>
 	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.job_id as string | null);
 
@@ -126,6 +116,22 @@ const nodesOf = (runId: string) =>
 	runInDurableObject(runStub(runId), (instance) =>
 		((instance as any).repo.views() as { id: string; state: string }[]).map((node) => [node.id, node.state] as const),
 	);
+
+/**
+ * ノードの状態が変わらなくなるまでtickを回す
+ * 掃除のalarmは終端後も張られ続けるので, alarmの枯渇では収束を判定できない
+ * 収束させてから読むことで, 自然発火したtickと重なって値がずれるのを防ぐ
+ */
+async function settleRun(runId: string, rounds = 8): Promise<void> {
+	let previous = '';
+	for (let i = 0; i < rounds; i++) {
+		const current = JSON.stringify(await nodesOf(runId));
+		if (current === previous) return;
+		previous = current;
+		await runDurableObjectAlarm(runStub(runId));
+	}
+	throw new Error(`${rounds}回のtickでノードの状態が収束しない`);
+}
 
 const stateOf = (runId: string) =>
 	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun()?.state as string | undefined);
@@ -190,14 +196,14 @@ describe('縦串: runの開始から完了まで', () => {
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'ng' } });
 
 		// 先頭ノードを投入まで進めてから, 失敗の通知だけを手で届ける
-		await drainAlarms(stub);
+		await settleRun(runId);
 		// 投入されたメッセージは配送しない, 実行されると完了報告が返る
 		sent.length = 0;
 		const jobId = await jobIdOf(runId, 'list');
 		// 通知はジョブIDで宛先を照合するので, 確定していなければ検査自体が成り立たない
 		if (jobId === null) throw new Error('先頭ノードにジョブIDが入っていない');
 		await stub.notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: '意図的な失敗' }]);
-		await drainAlarms(stub);
+		await settleRun(runId);
 
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
 		expect(await stateOf(runId)).toBe('FAILED');
@@ -216,7 +222,7 @@ describe('縦串: runの開始から完了まで', () => {
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'ca' } });
 
 		expect(await stub.cancel()).toEqual({ ok: true });
-		await drainAlarms(stub);
+		await settleRun(runId);
 
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'CANCELLED', greet: 'CANCELLED', report: 'CANCELLED' });
 		expect(await stateOf(runId)).toBe('CANCELLED');

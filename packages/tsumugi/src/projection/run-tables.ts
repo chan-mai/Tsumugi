@@ -21,7 +21,13 @@ export const run = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 	},
-	(t) => [index('run_state').on(t.state, t.updatedAt), index('run_flow').on(t.flow, t.updatedAt), index('run_created').on(t.createdAt)],
+	(t) => [
+		index('run_state').on(t.state, t.updatedAt),
+		index('run_flow').on(t.flow, t.updatedAt),
+		index('run_created').on(t.createdAt),
+		// 既定の一覧はフィルタ無しでupdated_atの降順, 先頭列がupdated_atの索引が要る
+		index('run_updated').on(t.updatedAt, t.id),
+	],
 );
 
 export const runNode = sqliteTable(

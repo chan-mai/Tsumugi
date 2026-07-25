@@ -46,7 +46,12 @@ export const node = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 	},
-	(t) => [index('node_parent').on(t.parent), index('node_state').on(t.state)],
+	(t) => [
+		index('node_parent').on(t.parent),
+		index('node_state').on(t.state),
+		// 進行判断は毎tickで並び順に全件読む, 先頭列がseqの索引が要る
+		index('node_seq').on(t.seq, t.id),
+	],
 );
 
 /**

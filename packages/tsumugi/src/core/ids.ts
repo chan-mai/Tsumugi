@@ -92,6 +92,12 @@ export class InvalidRunIdError extends Error {
 	}
 }
 
+export function assertValidFlow(flow: string): void {
+	if (!FLOW_PATTERN.test(flow)) {
+		throw new InvalidRunIdError(`flow名が不正: ${JSON.stringify(flow)} (英数字とハイフンとアンダースコアのみ)`);
+	}
+}
+
 export function formatRunId({ flow, localId }: RunAddress): string {
 	if (!FLOW_PATTERN.test(flow)) throw new InvalidRunIdError(`flow名が不正: ${JSON.stringify(flow)} (英数字とハイフンとアンダースコアのみ)`);
 	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidRunIdError(`localIdが不正: ${JSON.stringify(localId)}`);

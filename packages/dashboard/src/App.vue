@@ -45,8 +45,10 @@ const selectedRun = ref<string | null>(null);
 const startingRun = ref(false);
 
 async function load() {
+	// 切替前に発行した応答で共有の状態を上書きしないよう, 開始時のタブを覚えておく
+	const requested = tab.value;
 	try {
-		if (tab.value === 'runs') {
+		if (requested === 'runs') {
 			const [list, available] = await Promise.all([
 				listRuns({
 					state: state.value || undefined,
@@ -56,6 +58,7 @@ async function load() {
 				}),
 				getFlows(),
 			]);
+			if (tab.value !== requested) return;
 			runs.value = list.runs;
 			total.value = list.total;
 			flows.value = available.flows;
@@ -77,6 +80,7 @@ async function load() {
 			getBindings(),
 			getFlows(),
 		]);
+		if (tab.value !== requested) return;
 		jobs.value = list.jobs;
 		total.value = list.total;
 		byState.value = stats.byState;
@@ -85,6 +89,7 @@ async function load() {
 		error.value = null;
 		unauthorized.value = false;
 	} catch (e) {
+		if (tab.value !== requested) return;
 		if (isUnauthorized(e)) {
 			// HTML自体は未認証でも返るので, ここで初めて認証の要否が分かる
 			unauthorized.value = true;

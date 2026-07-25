@@ -79,6 +79,8 @@ const id = await enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com' 
 
 - Workers Paidプラン, SQLite版のDurable ObjectsとQueuesの両方が要求します
 - `compatibility_date`は2025-11-17以降, `ctx.exports`を使うためです
+- D1データベース, 読み取りモデルの置き場でマイグレーションの適用が必要です
+- Analytics Engineは任意, 時系列メトリクスを書く場合だけ設定します
 
 ## 着想
 

@@ -17,7 +17,8 @@ export type { OutboxRow } from '../projection/projector.js';
 export type { BindingConfig, RunControl, RunNamespaceEnv, Tsumugi, TsumugiConfig } from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
 export type { DispatchMessage, EnqueueInput, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
-export { createRunClass, DEFAULT_MAX_NODES } from '../do/run.js';
+// createRunClassは公開しない, `defineTsumugi().runClass`を迂回すると設定が二重管理になる
+export { DEFAULT_MAX_NODES } from '../do/run.js';
 export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } from '../do/run.js';
 export { systemClock, fixedClock } from '../do/clock.js';
 export type { Clock } from '../do/clock.js';
@@ -40,8 +41,8 @@ export type {
 	Requirements,
 	TypedEnqueueInput,
 } from '../core/api.js';
-export { createFlow, InvalidFlowError, assertNodeId, shapeOf } from '../core/flow.js';
-export { advance, isNodeTerminal } from '../core/run.js';
+// assertNodeIdとadvanceは内部の判定, 検証に使うものは`tsumugi/testing`から出す
+export { createFlow, InvalidFlowError, shapeOf } from '../core/flow.js';
 export {
 	InvalidJobIdError,
 	InvalidRunIdError,

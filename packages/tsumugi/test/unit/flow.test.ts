@@ -63,6 +63,31 @@ describe('flowの組み立て', () => {
 		expect(() => flow<void>(() => {})).toThrow(InvalidFlowError);
 	});
 
+	it('別のflowのノードへの依存を弾く', () => {
+		const other = flow<void>((f) => {
+			f.node('outside', 'FETCH', { input: () => ({ since: 0 }) });
+		});
+		const foreign = { id: other.nodes[0]!.id } as never;
+
+		expect(() =>
+			flow<void>((f) => {
+				f.node('work', 'WORK', { after: { dep: foreign }, input: () => ({ id: 'x' }) });
+			}),
+		).toThrow(InvalidFlowError);
+	});
+
+	it('同じ依存先を複数の受け取り口で受けても形は重複しない', () => {
+		const built = flow<void>((f) => {
+			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
+			f.node('work', 'WORK', {
+				after: { first: fetched, second: fetched },
+				input: (_i, d) => ({ id: `${d.first.items.length}${d.second.items.length}` }),
+			});
+		});
+
+		expect(shapeOf(built)[1]?.after).toEqual(['fetch']);
+	});
+
 	it('fan-outノードは展開の材料を持つ', () => {
 		const built = flow<void>((f) => {
 			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });

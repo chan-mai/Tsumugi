@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS run (
 CREATE INDEX IF NOT EXISTS run_state ON run (state, updated_at);
 CREATE INDEX IF NOT EXISTS run_flow ON run (flow, updated_at);
 CREATE INDEX IF NOT EXISTS run_created ON run (created_at);
+CREATE INDEX IF NOT EXISTS run_updated ON run (updated_at, id);
 
 CREATE TABLE IF NOT EXISTS run_node (
   run_id TEXT NOT NULL,
