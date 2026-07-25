@@ -12,13 +12,14 @@ import type { RunNode } from '../../api';
 /** カードの幅, 現行のw-64と同じ */
 const NODE_W = 256;
 /** IDとbindingの行 + 状態と進捗の行 */
-const HEAD_H = 68;
+const HEAD_H = 44;
 /** 2行で切るerror */
-const ERROR_H = 32;
+const ERROR_H = 40;
 /** Jobボタン */
-const ACTION_H = 26;
+const ACTION_H = 24;
 /** 省略した子の内訳 */
 const SUMMARY_H = 24;
+/** カードの内側余白, p-3と同じ */
 const PAD = 12;
 const CHILD_W = 132;
 const CHILD_H = 26;
@@ -60,7 +61,18 @@ export type LayoutNode = {
 	extent?: 'parent';
 };
 
-export type LayoutEdge = { id: string; source: string; target: string };
+export type Point = { x: number; y: number };
+
+export type LayoutEdge = {
+	id: string;
+	source: string;
+	target: string;
+	type: 'routed';
+	data: {
+		/** 水平と垂直だけで組んだ経路, 端点は箱の縁 */
+		route: Point[];
+	};
+};
 
 export type RunLayout = { nodes: LayoutNode[]; edges: LayoutEdge[] };
 
@@ -101,7 +113,7 @@ function summarize(children: readonly RunNode[], hidden: number): string | null 
 }
 
 /** 箱の寸法と子の相対座標を決める */
-function pack(node: RunNode, childrenOf: (id: string) => RunNode[], depth: number): Packed {
+function pack(node: RunNode, childrenOf: (id: string) => RunNode[], depth: number, measured: number | undefined): Packed {
 	const children = childrenOf(node.id);
 	const done = children.filter((child) => child.state === 'COMPLETED').length;
 	const progress = node.container && children.length > 0 ? `${done} / ${children.length}` : null;
@@ -114,13 +126,15 @@ function pack(node: RunNode, childrenOf: (id: string) => RunNode[], depth: numbe
 	const hidden = children.length - shown.length;
 	const summary = summarize(children, hidden);
 
-	const head = HEAD_H + (node.error ? ERROR_H : 0) + (node.job_id ? ACTION_H : 0) + (summary ? SUMMARY_H : 0);
+	// 実寸が届くまでは見積もりで置く, 文字の折り返しは実際に描くまで分からない
+	const content = measured ?? HEAD_H + (node.error ? ERROR_H : 0) + (node.job_id ? ACTION_H : 0) + (summary ? SUMMARY_H : 0);
+	const head = PAD + content + PAD;
 	if (shown.length === 0) return { node, width: NODE_W, height: head, data: { node, progress, summary }, children: [] };
 
 	const cols = colsFor(shown.length);
 	const rows = Math.ceil(shown.length / cols);
 	const width = Math.max(NODE_W, cols * CHILD_W + (cols - 1) * CHILD_GAP + 2 * PAD);
-	const height = head + PAD + rows * CHILD_H + (rows - 1) * CHILD_GAP + PAD;
+	const height = head + rows * CHILD_H + (rows - 1) * CHILD_GAP + PAD;
 
 	return {
 		node,
@@ -130,14 +144,87 @@ function pack(node: RunNode, childrenOf: (id: string) => RunNode[], depth: numbe
 		children: shown.map((child, index) => ({
 			node: child,
 			x: PAD + (index % cols) * (CHILD_W + CHILD_GAP),
-			y: head + PAD + Math.floor(index / cols) * (CHILD_H + CHILD_GAP),
+			y: head + Math.floor(index / cols) * (CHILD_H + CHILD_GAP),
 			nested: childrenOf(child.id).length,
 		})),
 	};
 }
 
-/** RunのノードからVue Flowのnodesとedgesを作る */
-export function runLayout(nodes: readonly RunNode[]): RunLayout {
+type Box = { x: number; y: number; w: number; h: number; center: number };
+
+/** 列と列の間の空き, 縦に走る区間はここに置く */
+type Gutter = { left: number; right: number };
+
+/**
+ * 直交の経路を組む
+ *
+ * 縦に走るのは列の間だけに限り, 同じ空きを使う辺は等間隔に振り分ける
+ * 横に走る高さはdagreが空けた値を使う, ランクを跨ぐ辺が箱に当たらない
+ */
+function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Box>, lanes: ReadonlyMap<string, Point[]>): LayoutEdge[] {
+	const centers = [...new Set([...boxes.values()].map((box) => box.center))].sort((a, b) => a - b);
+	const rankOf = new Map([...boxes].map(([id, box]) => [id, centers.indexOf(box.center)]));
+
+	// 列ごとの外周から, 間の空きを出す
+	const gutters: Gutter[] = [];
+	for (let i = 0; i + 1 < centers.length; i++) {
+		const left = Math.max(...[...boxes.values()].filter((box) => box.center === centers[i]).map((box) => box.x + box.w));
+		const right = Math.min(...[...boxes.values()].filter((box) => box.center === centers[i + 1]).map((box) => box.x));
+		gutters.push({ left, right });
+	}
+
+	const anchors = new Map(
+		pairs.map(([from, to]) => {
+			const source = boxes.get(from)!;
+			const target = boxes.get(to)!;
+			return [
+				`${from}->${to}`,
+				{ start: { x: source.x + source.w, y: source.y + HANDLE_TOP }, end: { x: target.x, y: target.y + HANDLE_TOP } },
+			];
+		}),
+	);
+
+	// 空きごとに通る辺を集める, 同じ空きに複数入ると縦の区間が重なる
+	const crossing = gutters.map(() => [] as string[]);
+	for (const [from, to] of pairs) {
+		const id = `${from}->${to}`;
+		for (let i = rankOf.get(from)!; i < rankOf.get(to)!; i++) crossing[i]!.push(id);
+	}
+	for (const ids of crossing) ids.sort((a, b) => anchors.get(a)!.start.y - anchors.get(b)!.start.y || a.localeCompare(b));
+
+	/** 空きの中での縦の走り位置, 通る本数で等分する */
+	const channel = (index: number, id: string): number => {
+		const gutter = gutters[index]!;
+		const ids = crossing[index]!;
+		return gutter.left + ((gutter.right - gutter.left) * (ids.indexOf(id) + 1)) / (ids.length + 1);
+	};
+
+	return pairs.map(([from, to]) => {
+		const id = `${from}->${to}`;
+		const { start, end } = anchors.get(id)!;
+		const first = rankOf.get(from)!;
+		const last = rankOf.get(to)!;
+		const points: Point[] = [start];
+		let y = start.y;
+
+		for (let i = first; i < last; i++) {
+			const x = channel(i, id);
+			// 次に横切る列の高さ, 手前の列を出たらdagreが空けた高さへ移る
+			const next = i + 1 < last ? (lanes.get(id)?.[i - first]?.y ?? end.y) : end.y;
+			points.push({ x, y }, { x, y: next });
+			y = next;
+		}
+
+		points.push(end);
+		return { id, source: from, target: to, type: 'routed' as const, data: { route: points } };
+	});
+}
+
+/**
+ * RunのノードからVue Flowのnodesとedgesを作る
+ * `measured`はカードの中身の実寸, 描画側から届いた時点で見積もりを置き換える
+ */
+export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<string, number>): RunLayout {
 	if (nodes.length === 0) return { nodes: [], edges: [] };
 
 	const byParent = new Map<string, RunNode[]>();
@@ -150,7 +237,7 @@ export function runLayout(nodes: readonly RunNode[]): RunLayout {
 	const childrenOf = (id: string) => byParent.get(id) ?? [];
 
 	const roots = nodes.filter((node) => node.parent === null);
-	const packed = roots.map((node) => pack(node, childrenOf, 0));
+	const packed = roots.map((node) => pack(node, childrenOf, 0, measured?.get(node.id)));
 	const known = new Set(roots.map((node) => node.id));
 
 	const graph = new Graph({ directed: true, compound: false, multigraph: false });
@@ -160,17 +247,36 @@ export function runLayout(nodes: readonly RunNode[]): RunLayout {
 
 	for (const item of packed) graph.setNode(item.node.id, { width: item.width, height: item.height });
 
-	const edges: LayoutEdge[] = [];
+	const pairs: [string, string][] = [];
 	for (const node of roots) {
 		for (const from of node.after) {
 			// 消えた依存や子を指す依存は辺にしない
 			if (!known.has(from)) continue;
 			graph.setEdge(from, node.id);
-			edges.push({ id: `${from}->${node.id}`, source: from, target: node.id });
+			pairs.push([from, node.id]);
 		}
 	}
 
 	layout(graph);
+
+	const boxes = new Map<string, Box>(
+		packed.map((item) => {
+			const placed = graph.node(item.node.id);
+			return [
+				item.node.id,
+				{ x: placed.x - item.width / 2, y: placed.y - item.height / 2, w: item.width, h: item.height, center: placed.x },
+			];
+		}),
+	);
+
+	const edges = route(
+		pairs,
+		boxes,
+		// dagreがランクごとに空けた高さ, 箱を避けて横切れる
+		new Map(
+			pairs.map(([from, to]) => [`${from}->${to}`, (graph.edge(from, to)?.points ?? []).slice(1, -1).map((p) => ({ x: p.x, y: p.y }))]),
+		),
+	);
 
 	const laid: LayoutNode[] = [];
 	for (const item of packed) {

@@ -50,10 +50,69 @@ describe('Runのグラフの配置', () => {
 	it('afterの数だけ辺が出る', () => {
 		const result = runLayout([node({ id: 'a' }), node({ id: 'b' }), node({ id: 'c', after: ['a', 'b'] })]);
 
-		expect(result.edges).toEqual([
+		expect(result.edges.map(({ id, source, target }) => ({ id, source, target }))).toEqual([
 			{ id: 'a->c', source: 'a', target: 'c' },
 			{ id: 'b->c', source: 'b', target: 'c' },
 		]);
+	});
+
+	it('経路は水平と垂直だけで組む', () => {
+		const result = runLayout([node({ id: 'a' }), node({ id: 'b', after: ['a'] }), node({ id: 'c', after: ['a', 'b'] })]);
+
+		for (const edge of result.edges) {
+			const route = edge.data.route;
+			expect(route.length).toBeGreaterThanOrEqual(2);
+			for (let i = 1; i < route.length; i++) {
+				const previous = route[i - 1]!;
+				const current = route[i]!;
+				// 斜めの区間を作らない
+				expect(previous.x === current.x || previous.y === current.y).toBe(true);
+			}
+		}
+	});
+
+	it('経路の端は箱の縁に付く', () => {
+		const result = runLayout([node({ id: 'a' }), node({ id: 'b', after: ['a'] })]);
+
+		const edge = result.edges[0]!;
+		const a = taskOf(result, 'a')!;
+		const b = taskOf(result, 'b')!;
+		const start = edge.data.route[0]!;
+		const end = edge.data.route[edge.data.route.length - 1]!;
+		expect(start.x).toBe(a.position.x + Number.parseFloat(a.style.width));
+		expect(end.x).toBe(b.position.x);
+	});
+
+	it('同じ空きを通る辺は縦の走り位置を分ける', () => {
+		const result = runLayout([node({ id: 'a' }), node({ id: 'b' }), node({ id: 'c', after: ['a'] }), node({ id: 'd', after: ['b'] })]);
+
+		const xs = result.edges.map((edge) => edge.data.route[1]!.x);
+		expect(new Set(xs).size).toBe(xs.length);
+	});
+
+	it('列を跨ぐ辺は箱の外を通る', () => {
+		const result = runLayout([node({ id: 'a' }), node({ id: 'b', after: ['a'] }), node({ id: 'c', after: ['a', 'b'] })]);
+
+		const boxes = result.nodes
+			.filter((n) => n.type === 'task')
+			.map((n) => ({
+				l: n.position.x,
+				r: n.position.x + Number.parseFloat(n.style.width),
+				t: n.position.y,
+				b: n.position.y + Number.parseFloat(n.style.height),
+			}));
+
+		// a->cはbの列を越すので, bに当たらないことを経路の全区間で見る
+		const route = result.edges.find((edge) => edge.id === 'a->c')!.data.route;
+		for (let i = 1; i < route.length; i++) {
+			const from = route[i - 1]!;
+			const to = route[i]!;
+			for (let step = 0; step <= 20; step++) {
+				const x = from.x + ((to.x - from.x) * step) / 20;
+				const y = from.y + ((to.y - from.y) * step) / 20;
+				expect(boxes.some((box) => x > box.l + 1 && x < box.r - 1 && y > box.t + 1 && y < box.b - 1)).toBe(false);
+			}
+		}
 	});
 
 	it('居ない依存は辺にしない', () => {
