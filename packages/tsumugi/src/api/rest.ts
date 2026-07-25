@@ -421,7 +421,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		return c.json({ runs: page, total: total[0]?.total ?? 0 });
 	});
 
-	/** 開始先の選択肢, 一度も動いていないflowも選べるよう登録簿から返す */
+	/** 開始先の選択肢, 一度も実行されていないflowも選べるよう`flows`から返す */
 	app.get('/api/flows', (c) => c.json({ flows: [...flows].sort() }));
 
 	app.post('/api/runs', async (c) => {

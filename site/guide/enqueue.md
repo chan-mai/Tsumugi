@@ -25,8 +25,7 @@ const ids = await enqueueMany(env, [
 ]);
 ```
 
-宛先のDurable Objectごとに集約して1回のRPCにまとめるため、件数が増えてもRPCの回数は増えません
-`enqueue`を逐次で呼び出す場合、実測で78件/秒付近でDurable Objectの1,000 req/sソフト上限に到達します
+件数が増えても往復の回数は増えません。`enqueue`を逐次で呼び出すと件数に比例して遅くなります
 
 戻り値は入力と同じ並び順です
 
@@ -56,7 +55,7 @@ await enqueue(env, { binding: 'MAIL', payload, delayMs: 60 * 60 * 1000 });
 await enqueue(env, { binding: 'MAIL', payload, runAt: Date.parse('2026-08-01T09:00:00+09:00') });
 ```
 
-待機はDurable Objectのalarmが管理するため、Queuesの遅延配送の12時間上限は適用されません
+12時間より先の予約も指定可能です
 
 ## 重複排除
 
@@ -71,13 +70,9 @@ const id = await enqueue(env, {
 ```
 
 衝突は異常ではなく正常系として扱い、例外は発生しません
-呼び出し側でtry/catchが不要になり、HTTPリクエストのリトライやWebhookの重複配送で二重登録されなくなります
+HTTPリクエストのリトライやWebhookの重複配送で二重登録されません
 
 予約は`uniqueForMs`の経過後に削除され、それ以降は同じキーでも新しいジョブになります
-
-重複排除の判定はDurable Object内のテーブルで行います
-KVには条件付き書き込みの公開APIがなく、「無ければ入れる」を不可分に実行できないためです
-Durable Objectはシングルスレッドなので、検査と挿入が追加の仕組みなしで不可分になります
 
 ## 直列化
 
@@ -103,13 +98,9 @@ await enqueue(env, {
 
 例: `MAIL#0:xxxxxxxxxxxxxxxxxxxxxxxx`
 
-どのDurable Objectが保持しているかをIDに含めてあるので、IDからDurable Objectのstubを直接取得できます
-グローバルな索引は不要です
+shard数を後から変えると既存のIDが指す先が変わります。古いshardは残してください
 
-その代わり、shard数を後から変えると既存IDの引き先が変わります
-古いshardは残す必要があります
-
-## 別Workerから入れる
+## 別Workerからの投入
 
 投入だけを行うWorkerからは`tsumugi/client`を使います
-Durable Object実装をバンドルせずに済みます。詳しくは[別Workerからの投入](/guide/client)を参照してください
+詳しくは[別Workerからの投入](/guide/client)を参照してください

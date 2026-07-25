@@ -54,8 +54,7 @@ const jobs = createClient<Env>({
 });
 ```
 
-`policy`と保持期間もここで指定できます
-これらは投入時の設定としてDurable Objectへ送られるため、本体と同じ値を指定してください
+`policy`と保持期間もここで指定します。本体と同じ値を指定してください
 
 ## API
 
@@ -65,8 +64,8 @@ const jobs = createClient<Env>({
 | `enqueueMany(env, inputs)`              | 複数件を宛先のDurable Objectごとにまとめて投入する  |
 | `shardFor(env, binding, partitionKey?)` | 対象のDurable Objectのstubを直接取得する           |
 
-`enqueueMany`は宛先ごとに集約するため、件数が増えてもRPCの回数は増えません
-`enqueue`を逐次で呼び出す場合、78件/秒付近でDurable Objectのソフト上限に到達します
+`enqueueMany`は宛先ごとに集約するため、件数が増えても往復の回数は増えません
+`enqueue`を逐次で呼び出すと件数に比例して遅くなります
 
 ## REST APIからの投入
 

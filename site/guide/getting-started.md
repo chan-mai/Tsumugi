@@ -60,11 +60,11 @@ Tsumugiが使うbindingは4つです
 ```
 
 ::: info
-`max_retries`はTsumugiの試行回数とは無関係です。consumerは結果をDurable Objectへ報告したあと必ず即ackするので、Queues側のretryは配送そのものが失敗した場合にのみ動作します
+`max_retries`はTsumugiの試行回数とは無関係です。試行回数は`maxAttempts`で指定します
 :::
 
-DAGを使う場合はDurable Objectが1種類増えます
-単発のジョブのみを扱う構成では不要です。詳細は[DAG(flowとrun)](/guide/flow)を参照してください
+Flowを使う場合はbindingが1つ増えます。単発のジョブのみを扱う構成では不要です
+詳細は[Flow](/guide/flow)を参照してください
 
 ## 読み取りモデルの作成
 
@@ -82,7 +82,7 @@ Tsumugiを更新した場合も同じコマンドが必要です。マイグレ�
 
 ## Worker
 
-performerを定義して、`defineTsumugi`に登録簿として渡します
+performerを定義して、`defineTsumugi`の`performers`に渡します
 
 ```ts
 import { bearerAuth, defineTsumugi, enqueue } from 'tsumugi';
@@ -129,19 +129,10 @@ export default {
 pnpm wrangler secret put TSUMUGI_TOKEN
 ```
 
-ローカルで動かすときは`.dev.vars`に書きます
+## 動作確認
 
-```
-TSUMUGI_TOKEN=ローカル用のトークン
-```
-
-## 起動
-
-```bash
-pnpm wrangler dev
-```
-
-`/enqueue`にアクセスするとジョブIDが返ります。`/`を開くとダッシュボードが表示されるので、トークンを入力すると一覧を確認できます
+`/enqueue`にアクセスするとジョブIDが返ります
+`/`を開くとダッシュボードが表示されます。トークンを入力すると一覧が表示されます
 
 ## 次に読むもの
 

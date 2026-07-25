@@ -11,6 +11,8 @@ export default defineConfig({
 	cleanUrls: true,
 	lastUpdated: true,
 	head: [['meta', { name: 'theme-color', content: '#f7a1b2' }]],
+	// 単改行をそのまま改行として出す, 1文1行で書いた原稿が連結されないようにする
+	markdown: { breaks: true },
 	themeConfig: {
 		nav: [
 			{ text: 'ガイド', link: '/guide/overview' },
@@ -25,7 +27,7 @@ export default defineConfig({
 					{ text: 'Performer', link: '/guide/performer' },
 					{ text: 'ジョブの投入', link: '/guide/enqueue' },
 					{ text: '実行の制御', link: '/guide/execution' },
-					{ text: 'DAG(flowとrun)', link: '/guide/flow' },
+					{ text: 'Flow', link: '/guide/flow' },
 					{ text: 'ダッシュボードと認証', link: '/guide/dashboard' },
 					{ text: '別Workerからの投入', link: '/guide/client' },
 				],

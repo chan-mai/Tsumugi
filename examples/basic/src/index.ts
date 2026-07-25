@@ -35,7 +35,7 @@ class Report extends Performer<{ total: number; failed: number }, void, {}, Env>
 }
 
 // binding名とperformerの対応はここ1箇所だけ
-// MAILはservice binding越しの別Worker,同一の登録簿に混在可(ADR-0026)
+// MAILはservice binding越しの別Worker,同一の`performers`に混在可(ADR-0026)
 const performers = { HELLO: Hello, BOOM: Boom, LIST: ListNames, GREET: Greet, REPORT: Report, MAIL: remote('MAIL_SERVICE') };
 
 // flowの定義口をperformersから作る, bindingもpayloadもここから型が決まる(ADR-0030)

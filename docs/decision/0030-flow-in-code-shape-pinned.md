@@ -7,7 +7,7 @@
 
 ## 決定
 
-flow定義は`defineTsumugi`の登録簿に置き, Run DOクラスは`defineTsumugi`の戻り値からエクスポートする
+flow定義は`defineTsumugi`の`flows`に置き, Run DOクラスは`defineTsumugi`の戻り値からエクスポートする
 run開始時にノードIDと依存関係のみをRun DOへ保存し,変換関数はその都度コードから参照する
 
 ## 帰結

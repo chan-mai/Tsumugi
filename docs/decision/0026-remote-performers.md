@@ -2,7 +2,7 @@
 
 ## 状況
 
-登録簿はperformerのクラスを直接持っており,performerは必ずジョブ管理Workerと同一のWorkerに同居する必要があった
+`performers`はperformerのクラスを直接持っており,performerは必ずジョブ管理Workerと同一のWorkerに同居する必要があった
 
 同居の強制により次が成立しない
 
@@ -12,7 +12,7 @@
 
 ## 決定
 
-登録簿の値にクラスの代わりに`remote('SERVICE_BINDING')`を置けるようにする
+`performers`の値にクラスの代わりに`remote('SERVICE_BINDING')`を置けるようにする
 
 consumerは印を見てコンストラクタ呼び出しとRPC呼び出しを切り替える
 リモート側は`RemotePerformer`(`WorkerEntrypoint`の派生)を継承して`perform`を実装する

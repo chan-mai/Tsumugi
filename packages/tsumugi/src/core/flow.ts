@@ -113,12 +113,12 @@ export type Flow<Input = unknown> = {
 	readonly __input?: Input;
 };
 
-/** 任意のflowを受ける型,登録簿の要素として使う */
+/** 任意のflowを受ける型, `flows`の要素として使う */
 export type AnyFlow = Flow<any>;
 
 export type Flows = Record<string, AnyFlow>;
 
-/** flowの入力の型,`start`の引数を登録簿から決める */
+/** flowの入力の型, `start`の引数を`flows`から決める */
 export type InputOf<F> = F extends Flow<infer I> ? I : never;
 
 /** Run DOへ保存するグラフの形(ADR-0030),関数は含まない */
@@ -154,10 +154,10 @@ const jobOptionsOf = (options: NodeJobOptions): NodeJobOptions => ({
 });
 
 /**
- * performerの登録簿からflowの定義口を作る
+ * `performers`からflowを定義する関数を作る
  *
  * `performers`は型を運ぶためだけの引数で実行時には読まない
- * これを通すことでbinding名もpayloadも必須キーも登録簿1箇所から決まる(ADR-0010)
+ * これを通すことでbinding名もpayloadも必須キーも`performers`1箇所から決まる(ADR-0010)
  */
 export function createFlow<const R extends Record<string, unknown>>(_performers: R) {
 	return function flow<Input>(build: (f: FlowBuilder<PerformersOf<R>, Input>) => void): Flow<Input> {

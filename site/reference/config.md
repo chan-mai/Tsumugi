@@ -16,16 +16,16 @@ const tsumugi = defineTsumugi<Env>({
 
 | 名前         | 必須 | 内容                                                          |
 | ------------ | ---- | ------------------------------------------------------------- |
-| `performers` | ○    | binding名とperformerの対応。`remote()`も混在できる            |
-| `flows`      |      | flow名とグラフ定義の対応。指定するとRun DOのbindingが必要     |
-| `runs`       |      | runの上限と保持期間の設定                                     |
+| `performers` | ○    | binding名とperformerの対応。`remote()`との混在も可能          |
+| `flows`      |      | Flow名と定義の対応。指定すると`RUN`のbindingが必要            |
+| `runs`       |      | Runの上限と保持期間の設定                                     |
 | `bindings`   |      | binding単位の分割数、流量制御、保持期間                       |
 | `auth`       |      | 認証ミドルウェア。未設定の場合はAPIもダッシュボードも無効     |
 | `ui`         |      | `tsumugi/ui`の`ui()`。未指定の場合はバンドルに含まれない      |
-| `retention`  |      | D1の読み取りモデルの保持設定                                  |
+| `retention`  |      | 一覧の保持設定                                                |
 
 戻り値は`fetch`と`queue`と`scheduled`を持つハンドラで、`enqueue`と`enqueueMany`と`shardFor`も提供します
-`flows`を指定した場合は`start`と`runFor`、Run DOのクラスである`runClass`も提供します
+`flows`を指定した場合は`start`と`runFor`、wranglerに登録するクラスの`runClass`も提供します
 
 ## RunSettings
 
@@ -33,9 +33,9 @@ const tsumugi = defineTsumugi<Env>({
 
 | 名前                | 既定    | 内容                                                        |
 | ------------------- | ------- | ----------------------------------------------------------- |
-| `maxNodes`          | `10000` | 1つのrunに含められるノード数の上限。超過するとrunが失敗する |
-| `sweepAfterMs`      | 5分     | 終了したrunをRun DOに保持する時間                           |
-| `failedRetentionMs` | 7日     | 失敗したrunをRun DOに保持する時間。再開できる期間           |
+| `maxNodes`          | `10000` | 1つのRunに含められるノード数の上限。超過するとRunが失敗する |
+| `sweepAfterMs`      | 5分     | 終了したRunを保持する時間                                   |
+| `failedRetentionMs` | 7日     | 失敗したRunを保持する時間。再開の対象となる期間             |
 
 ## BindingConfig
 
@@ -89,7 +89,7 @@ const tsumugi = defineTsumugi<Env>({
 | binding           | 種類             | 用途                            |
 | ----------------- | ---------------- | ------------------------------- |
 | `JOB_SHARD`       | Durable Object   | スケジューラ兼調停役            |
-| `RUN`             | Durable Object   | runの調停役。`flows`を使う場合  |
+| `RUN`             | Durable Object   | Runの実行。`flows`を使う場合    |
 | `TSUMUGI_DB`      | D1               | 読み取りモデル                  |
 | `TSUMUGI_QUEUE`   | Queues           | performerへの配送               |
 | `TSUMUGI_METRICS` | Analytics Engine | 時系列メトリクス                |

@@ -82,7 +82,7 @@ export function shardNameOf(jobId: string): string {
  */
 export type RunAddress = { flow: string; localId: string };
 
-/** flow名は登録簿のキーで区切り文字を含めない, ノードIDと同じ文字種に揃える */
+/** flow名は`flows`のキーで区切り文字を含めない, ノードIDと同じ文字種に揃える */
 const FLOW_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export class InvalidRunIdError extends Error {

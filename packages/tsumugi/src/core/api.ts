@@ -41,7 +41,7 @@ export type RemoteJobContext = Omit<JobContext, 'signal' | 'spawn'>;
 
 /**
  * service binding越しのperformerを指す印
- * 登録簿にクラスの代わりに置くとconsumerがRPCで呼ぶ(ADR-0026)
+ * `performers`にクラスの代わりに置くとconsumerがRPCで呼ぶ(ADR-0026)
  */
 export type RemoteRef<P extends Performer<any, any, any, any> = Performer<any, any, any, any>> = {
 	readonly kind: 'remote';
@@ -107,7 +107,7 @@ export interface JobQueue<M extends Performers> {
 }
 
 /**
- * 登録簿から`Performers`を導く(ADR-0010)
+ * `performers`から`Performers`を導く(ADR-0010)
  * ctorはインスタンス型を, `remote()`の印は同梱した相手のperformer型を取り出す
  * これで`config.performers`1箇所からbindingごとのpayloadと必須キーが決まる
  */
@@ -125,7 +125,7 @@ export type PerformersOf<R extends Record<string, unknown>> = {
 type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (k: infer I) => void ? I : never;
 
 /**
- * 登録簿のctorが受け取るEnv, `defineTsumugi`が明示の型引数なしでEnvを推論するのに使う(#5)
+ * `performers`のctorが受け取るEnv, `defineTsumugi`が明示の型引数なしでEnvを推論するのに使う(#5)
  * 全performerは同一のWorker環境で初期化されるので, 各envのintersectionにする
  * unionにすると1つのperformerのbindingしか満たさない環境も通ってしまう
  */

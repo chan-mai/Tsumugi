@@ -11,7 +11,7 @@ export type RemotePerformerService = {
 };
 
 /**
- * binding名からperformerを引く登録簿,コード側の宣言が型推論の源も兼ねる
+ * binding名からperformerを引く対応, コード側の宣言が型推論の源も兼ねる
  * `remote('SERVICE')`を置くとservice binding越しの呼び出しになる(ADR-0026)
  */
 export type PerformerRegistry<Env> = Record<string, PerformerCtor<Env> | RemoteRef>;

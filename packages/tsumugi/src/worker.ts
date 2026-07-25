@@ -33,7 +33,7 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	/**
 	 * binding名とperformerの対応
 	 * ここ1箇所に書けばwranglerのservice bindingも型引数の手書きも要らない
-	 * この登録簿からenqueueのpayloadと必須キーの型が決まる(ADR-0010)
+	 * `performers`からenqueueのpayloadと必須キーの型が決まる(ADR-0010)
 	 */
 	performers: PerformerRegistry<Env>;
 	/**
@@ -100,7 +100,7 @@ export async function enqueueMany<Env extends ConsumerEnv>(env: Env, inputs: rea
 
 /**
  * `M`と`Env`は`config.performers`から推論する(ADR-0010)
- * 明示の型引数は要らず, 登録簿1箇所からenqueueのpayloadと必須キーの型が決まる
+ * 明示の型引数は不要で, `performers`1箇所からenqueueのpayloadと必須キーの型が決まる
  */
 export function defineTsumugi<const R extends PerformerRegistry<any>, const F extends Flows = {}>(
 	config: { performers: R; flows?: F } & Omit<TsumugiConfig<any>, 'performers' | 'flows'>,

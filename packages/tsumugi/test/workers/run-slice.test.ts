@@ -10,7 +10,7 @@ import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
  * 縦串: runの開始からノードの完了まで
  *
  * flowの定義はexamples/basicが持つ(GREETINGS), Run DOはそこから引く(ADR-0030)
- * performerはconsumerへ渡す登録簿で差し替える, 実行結果をテストから覗くため
+ * performerはconsumerへ渡す`performers`で差し替える, 実行結果をテストから確認するため
  */
 
 const performed: { binding: string; payload: unknown }[] = [];
@@ -135,7 +135,7 @@ describe('縦串: runの開始から完了まで', () => {
 		performed.length = 0;
 		const runId = 'GREETINGS:slice1';
 		const stub = runStub(runId);
-		// 投入先を先に差し替える, 実キューへ出るとconsumerが自動で走り登録簿を差し替えた意味が無くなる
+		// 投入先を先に差し替える, 実キューへ出るとconsumerが自動で実行し, 差し替えたperformerが使われない
 		await installQueues();
 
 		const started = await stub.start({ flow: 'GREETINGS', input: { prefix: 'hello' } });
