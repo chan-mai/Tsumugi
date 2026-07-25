@@ -1,8 +1,25 @@
-import { asc, eq, inArray, lte, sql } from 'drizzle-orm';
+import { asc, eq, getTableColumns, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
 import { applyRunSchema, type NodeRow, type RunRow } from './run-schema.js';
 import { node, run, runOutbox } from './run-tables.js';
+
+/** 1文に渡せるバインド変数の上限, 101個目でSQLITE_ERRORになる */
+const BIND_LIMIT = 100;
+
+const NODE_COLUMNS = Object.keys(getTableColumns(node)).length;
+const OUTBOX_COLUMNS = Object.keys(getTableColumns(runOutbox)).length;
+
+/**
+ * バインド変数の上限に収まる件数へ分ける
+ * fan-outの展開は件数が実行時に決まるので, 1文にまとめると上限を超える
+ */
+function chunk<T>(items: readonly T[], perItem: number): T[][] {
+	const size = Math.max(1, Math.floor(BIND_LIMIT / perItem));
+	const parts: T[][] = [];
+	for (let i = 0; i < items.length; i += size) parts.push(items.slice(i, i + size));
+	return parts;
+}
 
 export type NewNode = {
 	id: string;
@@ -108,7 +125,12 @@ export class RunRepo {
 	}
 
 	insertNodes(nodes: readonly NewNode[], now: number): void {
-		if (nodes.length === 0) return;
+		for (const part of chunk(nodes, NODE_COLUMNS)) {
+			this.#insertNodeChunk(part, now);
+		}
+	}
+
+	#insertNodeChunk(nodes: readonly NewNode[], now: number): void {
 		this.db
 			.insert(node)
 			.values(
@@ -169,13 +191,16 @@ export class RunRepo {
 
 	/** 写像関数へ渡す材料, 依存しているノードのぶんだけ引く */
 	resultsOf(ids: readonly string[]): Map<string, unknown> {
-		if (ids.length === 0) return new Map();
-		const rows = this.db
-			.select({ id: node.id, result: node.result })
-			.from(node)
-			.where(inArray(node.id, [...ids]))
-			.all();
-		return new Map(rows.map((row) => [row.id, row.result === null ? undefined : (JSON.parse(row.result) as unknown)]));
+		const results = new Map<string, unknown>();
+		for (const part of chunk(ids, 1)) {
+			const rows = this.db
+				.select({ id: node.id, result: node.result })
+				.from(node)
+				.where(inArray(node.id, [...part]))
+				.all();
+			for (const row of rows) results.set(row.id, row.result === null ? undefined : (JSON.parse(row.result) as unknown));
+		}
+		return results;
 	}
 
 	updateNode(id: string, patch: NodePatch, now: number): void {
@@ -268,7 +293,13 @@ export class RunRepo {
 	}
 
 	appendNodeOutbox(runId: string, ids: readonly string[]): void {
-		if (ids.length === 0) return;
+		// 追記側の列数で分ければ, 引く側のIDも上限に収まる
+		for (const part of chunk(ids, OUTBOX_COLUMNS)) {
+			this.#appendNodeOutboxChunk(runId, part);
+		}
+	}
+
+	#appendNodeOutboxChunk(runId: string, ids: readonly string[]): void {
 		const rows = this.db
 			.select()
 			.from(node)
