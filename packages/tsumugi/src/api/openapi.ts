@@ -230,10 +230,17 @@ export function openapiDocument(): OpenApiDocument {
 			get: {
 				operationId: 'listJobs',
 				summary: 'List jobs',
-				description: 'Reads the D1 read model, which lags behind the coordinator by a few seconds.',
+				description:
+					'Reads the D1 read model, which lags behind the coordinator by a few seconds. ' +
+					'Filters combine with AND. Key filters match exactly; prefix and substring matching are not supported.',
 				parameters: [
 					queryParam('state', { type: 'string' }, 'Filter by job state'),
 					queryParam('binding', { type: 'string' }, 'Filter by performer binding name'),
+					queryParam('id', { type: 'string' }, 'Exact job id'),
+					queryParam('unique_key', { type: 'string' }, 'Exact uniqueKey'),
+					queryParam('concurrency_key', { type: 'string' }, 'Exact concurrencyKey'),
+					queryParam('created_from', { type: 'integer' }, 'Lower bound of created_at, inclusive'),
+					queryParam('created_to', { type: 'integer' }, 'Upper bound of created_at, inclusive'),
 					queryParam(
 						'sort',
 						{ type: 'string', enum: [...SORTABLE_COLUMNS], default: 'updated_at' },

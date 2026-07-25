@@ -1,4 +1,4 @@
-import { and, asc, desc as sqlDesc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc as sqlDesc, eq, gte, lte, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
@@ -119,6 +119,39 @@ export function parsePaging(url: URL): { limit: number; offset: number } {
 	};
 }
 
+export type JobFilters = {
+	id?: string;
+	uniqueKey?: string;
+	concurrencyKey?: string;
+	/** created_atの下限と上限, いずれも両端を含む */
+	createdFrom?: number;
+	createdTo?: number;
+};
+
+/**
+ * 一覧の絞り込み条件
+ * 数値にならない指定は無視する, 400にすると入力の途中で画面が止まる
+ * 一致は完全一致のみ, 部分一致は索引が効かず件数が増えると全表走査になる
+ */
+export function parseJobFilters(url: URL): JobFilters {
+	const text = (name: string) => url.searchParams.get(name) || undefined;
+	const time = (name: string) => {
+		const raw = url.searchParams.get(name);
+		// 空文字は指定なしとして扱う, Number('')は0になり期間の上限が1970年になる
+		if (raw === null || raw === '') return undefined;
+		const value = Number(raw);
+		return Number.isFinite(value) ? value : undefined;
+	};
+
+	return {
+		...(text('id') ? { id: text('id') as string } : {}),
+		...(text('unique_key') ? { uniqueKey: text('unique_key') as string } : {}),
+		...(text('concurrency_key') ? { concurrencyKey: text('concurrency_key') as string } : {}),
+		...(time('created_from') !== undefined ? { createdFrom: time('created_from') as number } : {}),
+		...(time('created_to') !== undefined ? { createdTo: time('created_to') as number } : {}),
+	};
+}
+
 /** 依存のノードID, 壊れた行で詳細画面ごと落とさない */
 export function parseAfter(raw: unknown): string[] {
 	if (typeof raw !== 'string' || raw.length === 0) return [];
@@ -235,11 +268,18 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const binding = url.searchParams.get('binding');
 		const { limit, offset } = parsePaging(url);
 		const { column, desc } = resolveSort(url.searchParams.get('sort'), url.searchParams.get('order'));
+		const { id, uniqueKey, concurrencyKey, createdFrom, createdTo } = parseJobFilters(url);
 
 		const d = drizzle(c.env.TSUMUGI_DB);
-		const filters = [state ? eq(readModel.state, state) : undefined, binding ? eq(readModel.binding, binding) : undefined].filter(
-			(f) => f !== undefined,
-		);
+		const filters = [
+			state ? eq(readModel.state, state) : undefined,
+			binding ? eq(readModel.binding, binding) : undefined,
+			id ? eq(readModel.id, id) : undefined,
+			uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
+			concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
+			createdFrom !== undefined ? gte(readModel.createdAt, createdFrom) : undefined,
+			createdTo !== undefined ? lte(readModel.createdAt, createdTo) : undefined,
+		].filter((f) => f !== undefined);
 		const clause = filters.length > 0 ? and(...filters) : undefined;
 		const sortBy = SORT_COLUMNS[column];
 

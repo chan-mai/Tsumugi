@@ -81,7 +81,19 @@ async function mutate(path: string): Promise<MutationOutcome> {
 	};
 }
 
-export type ListParams = { state?: string; binding?: string; sort?: string; order?: 'asc' | 'desc'; limit: number; offset: number };
+export type ListParams = {
+	state?: string;
+	binding?: string;
+	sort?: string;
+	order?: 'asc' | 'desc';
+	id?: string;
+	unique_key?: string;
+	concurrency_key?: string;
+	created_from?: number;
+	created_to?: number;
+	limit: number;
+	offset: number;
+};
 
 export const listJobs = (params: ListParams) => {
 	const query = new URLSearchParams();
@@ -89,6 +101,11 @@ export const listJobs = (params: ListParams) => {
 	if (params.binding) query.set('binding', params.binding);
 	if (params.sort) query.set('sort', params.sort);
 	if (params.order) query.set('order', params.order);
+	if (params.id) query.set('id', params.id);
+	if (params.unique_key) query.set('unique_key', params.unique_key);
+	if (params.concurrency_key) query.set('concurrency_key', params.concurrency_key);
+	if (params.created_from !== undefined) query.set('created_from', String(params.created_from));
+	if (params.created_to !== undefined) query.set('created_to', String(params.created_to));
 	query.set('limit', String(params.limit));
 	query.set('offset', String(params.offset));
 	return call<{ jobs: Job[]; total: number }>(`/api/jobs?${query}`);

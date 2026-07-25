@@ -492,3 +492,51 @@ describe('試行履歴(ADR-0028)', () => {
 		expect(row).not.toHaveProperty('attempts_log');
 	});
 });
+
+describe('一覧の絞り込み', () => {
+	const authorized = { authorization: `Bearer ${TOKEN}` };
+
+	/** 読み取りモデルへ直接入れる, DOを経由せず条件だけを試す */
+	async function seed(row: { id: string; uniqueKey?: string; concurrencyKey?: string; createdAt: number }) {
+		await env.TSUMUGI_DB.prepare(
+			`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, unique_key, concurrency_key, guarantee, created_at, updated_at, payload)
+			 VALUES (?, 1, 'FILTER', 'COMPLETED', 0, 1, 3, ?, ?, 'at-least-once', ?, ?, '{}')`,
+		)
+			.bind(row.id, row.uniqueKey ?? null, row.concurrencyKey ?? null, row.createdAt, row.createdAt)
+			.run();
+	}
+
+	const idsOf = async (query: string) => {
+		const res = await call(withAuth, 'GET', `/api/jobs?binding=FILTER&${query}`, authorized);
+		const { jobs } = await res.json<{ jobs: { id: string }[] }>();
+		return jobs.map((job) => job.id).sort();
+	};
+
+	it('ID, キー, 期間で絞り込める', async () => {
+		await seed({ id: 'FILTER#0:one', uniqueKey: 'u-one', concurrencyKey: 'group-a', createdAt: 1_000 });
+		await seed({ id: 'FILTER#0:two', uniqueKey: 'u-two', concurrencyKey: 'group-a', createdAt: 2_000 });
+		await seed({ id: 'FILTER#0:three', uniqueKey: 'u-three', concurrencyKey: 'group-b', createdAt: 3_000 });
+
+		expect(await idsOf('id=FILTER%230%3Aone')).toEqual(['FILTER#0:one']);
+		expect(await idsOf('unique_key=u-two')).toEqual(['FILTER#0:two']);
+		expect(await idsOf('concurrency_key=group-a')).toEqual(['FILTER#0:one', 'FILTER#0:two']);
+		// 範囲は両端を含む
+		expect(await idsOf('created_from=2000&created_to=3000')).toEqual(['FILTER#0:three', 'FILTER#0:two']);
+	});
+
+	it('条件を重ねると積になる', async () => {
+		await seed({ id: 'FILTER#0:one', uniqueKey: 'u-one', concurrencyKey: 'group-a', createdAt: 1_000 });
+		await seed({ id: 'FILTER#0:two', uniqueKey: 'u-two', concurrencyKey: 'group-a', createdAt: 2_000 });
+
+		expect(await idsOf('concurrency_key=group-a&created_from=2000')).toEqual(['FILTER#0:two']);
+	});
+
+	it('一致しない条件は0件で総数も0', async () => {
+		await seed({ id: 'FILTER#0:one', uniqueKey: 'u-one', createdAt: 1_000 });
+
+		const res = await call(withAuth, 'GET', '/api/jobs?binding=FILTER&unique_key=missing', authorized);
+		const { jobs, total } = await res.json<{ jobs: unknown[]; total: number }>();
+		expect(jobs).toEqual([]);
+		expect(total).toBe(0);
+	});
+});
