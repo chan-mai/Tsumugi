@@ -277,8 +277,9 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			if (swept) return;
 
 			// 打ち切った決定と投影の残りがあるうちは休まない
-			const hasMore = deferred > 0 || projected >= PROJECTION_LIMIT || settled.decisions.length > 0;
-			if (hasMore) await this.ctx.storage.setAlarm(now);
+			// 投影待ちも見る, tickのawait中に入った通知は投影されないまま残る
+			const hasMore = deferred > 0 || projected >= PROJECTION_LIMIT || settled.decisions.length > 0 || this.repo.countOutbox() > 0;
+			if (hasMore) await this.#armAlarm(now);
 			else await this.#armSweep(now);
 		}
 
@@ -484,7 +485,8 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			const row = this.repo.findRun();
 			if (!row || row.state === 'RUNNING') return;
 			const keepFor = row.state === 'FAILED' ? retention.failedMs : retention.doneMs;
-			await this.ctx.storage.setAlarm(Math.max(row.updated_at + keepFor, now + 1_000));
+			// tickの実行中に張られたalarmを後ろへずらさない, ずらすと割り込んだ通知の処理が保持期間まで待たされる
+			await this.#armAlarm(Math.max(row.updated_at + keepFor, now + 1_000));
 		}
 
 		/** 予定より早い時刻にalarmが張られている場合は上書きしない */

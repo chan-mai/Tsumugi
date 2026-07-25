@@ -487,10 +487,19 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 		// 上限まで読んだなら残りがある可能性が高いので即座に自分を起こし直す
 		// 投入候補はreadyCountで見る, 実行中のジョブで範囲が埋まっても投入すべき候補が無ければ再実行しない
-		const hasMore = readyCount >= TICK_LIMIT || projected >= PROJECTION_LIMIT || deleted >= SWEEP_LIMIT || notified >= NOTIFY_LIMIT;
+		// 投影待ちの残りも見る, tickのawait中に入った報告やclaimは投影されないまま残る
+		const hasMore =
+			readyCount >= TICK_LIMIT ||
+			projected >= PROJECTION_LIMIT ||
+			deleted >= SWEEP_LIMIT ||
+			notified >= NOTIFY_LIMIT ||
+			this.repo.countOutbox() > 0;
 		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt].filter((v): v is number => v !== null);
 		const next = candidates.length > 0 ? Math.min(...candidates) : null;
-		if (next !== null) await this.ctx.storage.setAlarm(next);
+		// tickの実行中に張られたalarmを後ろへずらさない
+		// alarmはハンドラの開始時に消えるので, ここに在るものは割り込んだ処理が要求した予定
+		// setAlarmで上書きすると投影が保持期間の経過まで待たされる
+		if (next !== null) await this.#armAlarm(next);
 	}
 
 	/**
