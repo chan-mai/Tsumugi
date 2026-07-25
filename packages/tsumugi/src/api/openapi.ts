@@ -162,6 +162,44 @@ const SCHEMAS: Record<string, unknown> = {
 			'updated_at',
 		],
 	},
+	BulkRequest: {
+		type: 'object',
+		description: 'Either ids, or the filter fields. When ids is present the filter fields are ignored.',
+		properties: {
+			ids: { type: 'array', items: string(), minItems: 1, maxItems: 200, description: 'Job ids to process' },
+			binding: string('Filter by performer binding name'),
+			state: string('Only a state the operation accepts'),
+			unique_key: string('Exact uniqueKey'),
+			concurrency_key: string('Exact concurrencyKey'),
+			created_from: integer('Lower bound of created_at, inclusive'),
+			created_to: integer('Upper bound of created_at, inclusive'),
+			limit: { ...integer('Jobs to process in one request'), minimum: 1, maximum: 200, default: 200 },
+		},
+	},
+	BulkResult: {
+		type: 'object',
+		properties: {
+			ok: { type: 'array', items: string(), description: 'Job ids the coordinator accepted' },
+			failed: {
+				type: 'array',
+				description: 'Jobs the coordinator refused, with the reason',
+				items: {
+					type: 'object',
+					properties: {
+						id: string(),
+						reason: {
+							type: 'string',
+							enum: ['invalid-state', 'gone', 'invalid-id'],
+							description: 'invalid-state matches 409, gone matches 410, invalid-id is a malformed job id',
+						},
+					},
+					required: ['id', 'reason'],
+				},
+			},
+			remaining: integer('Estimated matches left after the limit. Always 0 when ids was given.'),
+		},
+		required: ['ok', 'failed', 'remaining'],
+	},
 	StartRunRequest: {
 		type: 'object',
 		properties: {
@@ -303,6 +341,34 @@ export function openapiDocument(): OpenApiDocument {
 				description: 'Accepted for SCHEDULED jobs only. From QUEUED onwards execution may already have begun.',
 				parameters: [idParam('id', 'Job id')],
 				responses: { ...RESPONSES.mutation, ...badJobId, ...RESPONSES.unauthorized, ...RESPONSES.unavailable },
+			},
+		},
+		'/api/jobs/bulk-retry': {
+			post: {
+				operationId: 'bulkRetryJobs',
+				summary: 'Retry several failed jobs',
+				description: 'Accepts FAILED and STALLED jobs. Jobs in any other state are reported in failed.',
+				requestBody: { required: true, ...json(ref('BulkRequest')) },
+				responses: {
+					200: { description: 'Processed, including partial refusals', ...json(ref('BulkResult')) },
+					...badBody,
+					...RESPONSES.unauthorized,
+					...RESPONSES.unavailable,
+				},
+			},
+		},
+		'/api/jobs/bulk-cancel': {
+			post: {
+				operationId: 'bulkCancelJobs',
+				summary: 'Cancel several jobs that have not started',
+				description: 'Accepts SCHEDULED jobs. Jobs in any other state are reported in failed.',
+				requestBody: { required: true, ...json(ref('BulkRequest')) },
+				responses: {
+					200: { description: 'Processed, including partial refusals', ...json(ref('BulkResult')) },
+					...badBody,
+					...RESPONSES.unauthorized,
+					...RESPONSES.unavailable,
+				},
 			},
 		},
 		'/api/bindings': {

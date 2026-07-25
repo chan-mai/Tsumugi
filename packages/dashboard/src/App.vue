@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import BulkActions from './components/BulkActions.vue';
+import CheckBox from './components/CheckBox.vue';
 import FilterMenu from './components/FilterMenu.vue';
 import JobDetailModal from './components/JobDetailModal.vue';
 import NewJobModal from './components/NewJobModal.vue';
@@ -28,6 +30,7 @@ const pageSize = ref(20);
 const sort = ref('updated_at');
 const desc = ref(true);
 const selected = ref<string | null>(null);
+const picked = ref<string[]>([]);
 const creating = ref(false);
 const message = ref<string | null>(null);
 const error = ref<string | null>(null);
@@ -111,6 +114,22 @@ function switchTab(next: 'jobs' | 'runs') {
 }
 
 const progressOf = (run: Run) => `${run.node_done} / ${run.node_total}`;
+
+/** 一覧に残っている行だけを選択として扱う、再読込で消えた行は落とす */
+const selectedIds = computed(() => picked.value.filter((id) => jobs.value.some((job) => job.id === id)));
+const allPicked = computed(() => jobs.value.length > 0 && jobs.value.every((job) => picked.value.includes(job.id)));
+
+function clearSelection() {
+	picked.value = [];
+}
+
+function togglePick(id: string) {
+	picked.value = picked.value.includes(id) ? picked.value.filter((value) => value !== id) : [...picked.value, id];
+}
+
+function toggleAll() {
+	picked.value = allPicked.value ? [] : jobs.value.map((job) => job.id);
+}
 
 function restartTimer() {
 	if (timer) clearInterval(timer);
@@ -240,6 +259,15 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				<div class="flex items-center gap-2">
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
+					<BulkActions
+						v-if="selectedIds.length > 0"
+						:ids="selectedIds"
+						@changed="
+							clearSelection();
+							load();
+						"
+						@message="message = $event"
+					/>
 					<ViewMenu v-if="tab === 'jobs'" :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
 					<button
 						type="button"
@@ -307,6 +335,16 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				<table class="w-full caption-bottom text-sm">
 					<thead class="[&_tr]:border-b [&_tr]:border-border">
 						<tr>
+							<th class="h-12 w-10 pl-4">
+								<button
+									type="button"
+									class="flex size-6 items-center justify-center rounded-sm border-none hover:bg-accent"
+									aria-label="Select all rows"
+									@click="toggleAll"
+								>
+									<CheckBox :checked="allPicked" />
+								</button>
+							</th>
 							<th :class="HEAD">
 								<SortHeader label="Binding" column="binding" :sort="sort" :desc="desc" @sort="sortBy" />
 							</th>
@@ -333,6 +371,16 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 							class="cursor-pointer border-b border-border transition-colors hover:bg-muted"
 							@click="selected = job.id"
 						>
+							<td class="pl-4 align-middle" @click.stop>
+								<button
+									type="button"
+									class="flex size-6 items-center justify-center rounded-sm border-none hover:bg-accent"
+									:aria-label="`Select ${job.id}`"
+									@click="togglePick(job.id)"
+								>
+									<CheckBox :checked="picked.includes(job.id)" />
+								</button>
+							</td>
 							<td class="p-4 align-middle">
 								{{ job.binding }}
 								<!-- ID列を隠す幅では行の識別ができなくなるので,ここに含めて表示する -->
@@ -350,7 +398,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 							</td>
 						</tr>
 						<tr v-if="jobs.length === 0">
-							<td colspan="8" class="h-24 text-center text-muted-foreground">No results.</td>
+							<td colspan="9" class="h-24 text-center text-muted-foreground">No results.</td>
 						</tr>
 					</tbody>
 				</table>

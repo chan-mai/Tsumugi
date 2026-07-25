@@ -23,6 +23,8 @@ const ROUTES: [method: string, path: string][] = [
 	['GET', '/api/jobs/REST%230:abc'],
 	['POST', '/api/jobs/REST%230:abc/retry'],
 	['POST', '/api/jobs/REST%230:abc/cancel'],
+	['POST', '/api/jobs/bulk-retry'],
+	['POST', '/api/jobs/bulk-cancel'],
 	['GET', '/'],
 	['GET', '/api/unknown'],
 ];
@@ -490,5 +492,102 @@ describe('試行履歴(ADR-0028)', () => {
 		const row = jobs.find((j) => j.id === jobId);
 		expect(row).toBeDefined();
 		expect(row).not.toHaveProperty('attempts_log');
+	});
+});
+
+describe('一括リトライと一括取り消し', () => {
+	const authorized = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+
+	const post = (action: 'retry' | 'cancel', body: unknown) =>
+		withAuth.fetch!(
+			new Request(`https://example.com/api/jobs/bulk-${action}`, { method: 'POST', headers: authorized, body: JSON.stringify(body) }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+
+	/** 実際にFAILEDのジョブを作る、DO側の状態判定まで通す */
+	async function failedJob(): Promise<string> {
+		const stub = shard('REST#0');
+		await runInDurableObject(stub, (instance) => {
+			(instance as any).clock = { now: () => T0 };
+			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+		});
+		const jobId = await stub.enqueue({ binding: 'REST', payload: {}, maxAttempts: 1 });
+		await runDurableObjectAlarm(stub);
+		await stub.report(jobId, { ok: false, error: '意図的な失敗' });
+		await runDurableObjectAlarm(stub);
+		return jobId;
+	}
+
+	const stateOf = async (jobId: string) => {
+		const res = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`, { authorization: `Bearer ${TOKEN}` });
+		const { job } = await res.json<{ job: { state: string } }>();
+		return job.state;
+	};
+
+	it('選択したIDをまとめてリトライする', async () => {
+		const jobId = await failedJob();
+		expect(await stateOf(jobId)).toBe('FAILED');
+
+		const res = await post('retry', { ids: [jobId] });
+		expect(res.status).toBe(200);
+		const body = await res.json<{ ok: string[]; remaining: number }>();
+		expect(body.ok).toEqual([jobId]);
+		expect(body.remaining).toBe(0);
+
+		await runDurableObjectAlarm(shard('REST#0'));
+		expect(await stateOf(jobId)).not.toBe('FAILED');
+	});
+
+	it('条件に一致するジョブをまとめてリトライする', async () => {
+		const jobId = await failedJob();
+		expect(await stateOf(jobId)).toBe('FAILED');
+
+		const res = await post('retry', { binding: 'REST' });
+		expect(res.status).toBe(200);
+		const body = await res.json<{ ok: string[]; failed: unknown[]; remaining: number }>();
+		expect(body.ok).toContain(jobId);
+		expect(body.remaining).toBe(0);
+
+		await runDurableObjectAlarm(shard('REST#0'));
+		expect(await stateOf(jobId)).not.toBe('FAILED');
+	});
+
+	it('上限を超えた分を残り件数として返す', async () => {
+		await failedJob();
+		await failedJob();
+
+		const res = await post('retry', { binding: 'REST', limit: 1 });
+		const body = await res.json<{ ok: string[]; remaining: number }>();
+		expect(body.ok).toHaveLength(1);
+		expect(body.remaining).toBeGreaterThanOrEqual(1);
+	});
+
+	it('DOに無いジョブは理由付きで断る', async () => {
+		// 読み取りモデルにだけ残っている行、全体を失敗にはしない
+		await env.TSUMUGI_DB.prepare(
+			`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, created_at, updated_at, payload)
+			 VALUES ('BULKGONE#0:x', 1, 'BULKGONE', 'FAILED', 0, 3, 3, 'at-least-once', 1, 1, '{}')`,
+		).run();
+
+		const res = await post('retry', { binding: 'BULKGONE' });
+		expect(res.status).toBe(200);
+		const body = await res.json<{ ok: string[]; failed: { id: string; reason: string }[] }>();
+		expect(body.ok).toEqual([]);
+		expect(body.failed).toEqual([{ id: 'BULKGONE#0:x', reason: 'gone' }]);
+	});
+
+	it('操作が受け付けない状態の指定は400', async () => {
+		const res = await post('retry', { state: 'RUNNING' });
+		expect(res.status).toBe(400);
+	});
+
+	it('壊れたJSONは400', async () => {
+		const res = await withAuth.fetch!(
+			new Request('https://example.com/api/jobs/bulk-retry', { method: 'POST', headers: authorized, body: '{' }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		expect(res.status).toBe(400);
 	});
 });
