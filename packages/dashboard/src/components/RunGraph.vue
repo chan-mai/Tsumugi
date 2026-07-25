@@ -130,7 +130,7 @@ watch(
 					<button
 						v-if="node.job_id"
 						type="button"
-						class="mt-2 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+						class="mt-2 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground border-none"
 						@click="emit('select', node.job_id)"
 					>
 						Job
