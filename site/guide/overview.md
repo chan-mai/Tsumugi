@@ -1,6 +1,6 @@
 # 概要
 
-TsumugiはCloudflareスタックの上で安定してジョブを捌くためのライブラリです
+TsumugiはCloudflareスタック向けに設計されたジョブ管理システムです
 
 ## 何を解決するか
 
