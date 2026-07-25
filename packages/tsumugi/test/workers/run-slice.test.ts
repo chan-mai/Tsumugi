@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { Performer } from '../../src/core/api.js';
 import type { JobContext } from '../../src/core/api.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { TsumugiRunInstance } from '../../src/do/run.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
 /**
@@ -51,7 +52,9 @@ const BINDINGS = ['LIST', 'GREET', 'REPORT'] as const;
 const consumerEnv: ConsumerEnv = env;
 
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
-const runStub = (runId: string) => (env as { RUN: DurableObjectNamespace<any> }).RUN.get((env as any).RUN.idFromName(runId));
+// `any`のまま持つと型の展開が深くなりTS2589に触れる, 公開している面で受ける
+const runNamespace = env.RUN as unknown as DurableObjectNamespace<TsumugiRunInstance>;
+const runStub = (runId: string) => runNamespace.get(runNamespace.idFromName(runId));
 
 /** DOが送ったメッセージを溜めてconsumerへ手で渡す, Queuesの配送自体はここでの関心ではない */
 const sent: DispatchMessage[] = [];
@@ -165,7 +168,8 @@ describe('縦串: runの開始から完了まで', () => {
 		// 先頭ノードを投入まで進めてから, 失敗の通知だけを手で届ける
 		await runDurableObjectAlarm(stub);
 		const jobId = await jobIdOf(runId, 'list');
-		expect(jobId).not.toBeNull();
+		// 通知はジョブIDで宛先を照合するので, 確定していなければ検査自体が成り立たない
+		if (jobId === null) throw new Error('先頭ノードにジョブIDが入っていない');
 		await stub.notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: '意図的な失敗' }]);
 		await runDurableObjectAlarm(stub);
 
