@@ -456,6 +456,7 @@ export function openapiDocument(): OpenApiDocument {
 						...json({ type: 'object', properties: { flows: { type: 'array', items: string() } }, required: ['flows'] }),
 					},
 					...RESPONSES.unauthorized,
+					...RESPONSES.unavailable,
 				},
 			},
 		},
@@ -483,10 +484,18 @@ export function openapiDocument(): OpenApiDocument {
 		paths,
 		components: {
 			schemas: SCHEMAS,
+			// 認証は差し替え可能なので, 同梱の`bearerAuth`が受け付ける2つを並べる
 			securitySchemes: {
-				bearerAuth: { type: 'http', scheme: 'bearer', description: 'Required unless the deployment authenticates another way.' },
+				bearerAuth: { type: 'http', scheme: 'bearer', description: 'Authorization header.' },
+				cookieAuth: {
+					type: 'apiKey',
+					in: 'cookie',
+					name: 'tsumugi_token',
+					description: 'Same token in a cookie. The cookie name is configured per deployment.',
+				},
 			},
 		},
-		security: [{ bearerAuth: [] }],
+		// いずれか一方を満たせばよい, 別の認証を組んだ配備ではどちらも当てはまらない
+		security: [{ bearerAuth: [] }, { cookieAuth: [] }],
 	};
 }

@@ -15,14 +15,19 @@ import type {
 	AttemptRecord,
 	BindingsResponse,
 	CreateJobRequest,
+	CreateJobResponse,
 	DiagnosticsResponse,
+	ErrorResponse,
 	FlowsResponse,
 	JobDetail,
+	JobDetailResponse,
 	JobListResponse,
 	JobSummary,
+	MutationResponse,
 	RunDetailResponse,
 	RunListResponse,
 	StartRunRequest,
+	StartRunResponse,
 	StatsResponse,
 } from './types.js';
 
@@ -285,20 +290,20 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	});
 
 	app.post('/api/jobs', async (c) => {
-		if (!enqueue) return c.json({ error: 'job creation is not available' }, 501);
+		if (!enqueue) return c.json({ error: 'job creation is not available' } satisfies ErrorResponse, 501);
 
 		let body: unknown;
 		try {
 			body = await c.req.json();
 		} catch {
-			return c.json({ error: 'body must be valid JSON' }, 400);
+			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
 		}
 
 		const parsed = validateCreateJob(body, bindings);
-		if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
 		const id = await enqueue(c.env, parsed.input);
-		return c.json({ id }, 201);
+		return c.json({ id } satisfies CreateJobResponse, 201);
 	});
 
 	app.get('/api/stats', async (c) => {
@@ -341,7 +346,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			.where(eq(readModel.id, c.req.param('id')))
 			.limit(1);
 		const found = rows[0];
-		if (!found) return c.json({ error: 'not found' }, 404);
+		if (!found) return c.json({ error: 'not found' } satisfies ErrorResponse, 404);
 
 		// 返す列を明示する, 展開すると投影の内部列(seq)やcamelCaseの重複まで出る
 		const job: Omit<JobDetail, 'retryable' | 'attempts_log'> = {
@@ -364,7 +369,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		// 履歴は詳細でだけ返す, 一覧に載せると1画面で数百KBになり得る(ADR-0028)
 		// `attempts`は試行回数の数値なので別名にする, 上書きすると画面の n/m が壊れる
 		const detail: JobDetail = { ...withRetryable(job, Date.now()), attempts_log: attemptsOf(job, parseAttempts(found.attemptsLog)) };
-		return c.json({ job: detail });
+		return c.json({ job: detail } satisfies JobDetailResponse);
 	});
 
 	/**
@@ -385,11 +390,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		try {
 			// 変更は正となるDOへ問い合わせる
 			const result = await stubOf(c.env, id).retry(id);
-			if (result.ok) return c.json({ ok: true }, 200);
+			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
 			const { body, status } = refusal(result);
 			return c.json(body, status);
 		} catch (error) {
-			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' }, 400);
+			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
 			throw error;
 		}
 	});
@@ -399,11 +404,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		try {
 			// SCHEDULED以外は取り消し不可(ADR-0012)
 			const result = await stubOf(c.env, id).cancel(id);
-			if (result.ok) return c.json({ ok: true }, 200);
+			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
 			const { body, status } = refusal(result);
 			return c.json(body, status);
 		} catch (error) {
-			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' }, 400);
+			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
 			throw error;
 		}
 	});
@@ -455,20 +460,20 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.get('/api/flows', (c) => c.json({ flows: [...flows].sort() } satisfies FlowsResponse));
 
 	app.post('/api/runs', async (c) => {
-		if (!start) return c.json({ error: 'run creation is not available' }, 501);
+		if (!start) return c.json({ error: 'run creation is not available' } satisfies ErrorResponse, 501);
 
 		let body: unknown;
 		try {
 			body = await c.req.json();
 		} catch {
-			return c.json({ error: 'body must be valid JSON' }, 400);
+			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
 		}
 
 		const parsed = validateStartRun(body, flows);
-		if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
 		const id = await start(c.env, parsed.input.flow, parsed.input.input, parsed.input.id);
-		return c.json({ id }, 201);
+		return c.json({ id } satisfies StartRunResponse, 201);
 	});
 
 	// グラフは1回のクエリで返す, 段組みの描画に全ノードが必要
@@ -481,7 +486,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		]);
 
 		const found = runs[0];
-		if (!found) return c.json({ error: 'not found' }, 404);
+		if (!found) return c.json({ error: 'not found' } satisfies ErrorResponse, 404);
 		const body: RunDetailResponse = {
 			run: {
 				id: found.id,
@@ -520,15 +525,15 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	 * Honoの文脈型に依存しないよう, 必要な値だけを引数で受ける
 	 */
 	const runMutation = async (action: 'cancel' | 'retry', env: Env, id: string) => {
-		if (!runFor) return { body: { error: 'run control is not available' }, status: 501 } as const;
+		if (!runFor) return { body: { error: 'run control is not available' } satisfies ErrorResponse, status: 501 } as const;
 		try {
 			parseRunId(id);
 			const stub = runFor(env, id);
 			const result = action === 'cancel' ? await stub.cancel() : await stub.retry();
-			if (result.ok) return { body: { ok: true }, status: 200 } as const;
+			if (result.ok) return { body: { ok: true } satisfies MutationResponse, status: 200 } as const;
 			return refusal(result, 'run');
 		} catch (error) {
-			if (error instanceof InvalidRunIdError) return { body: { error: 'invalid run id' }, status: 400 } as const;
+			if (error instanceof InvalidRunIdError) return { body: { error: 'invalid run id' } satisfies ErrorResponse, status: 400 } as const;
 			throw error;
 		}
 	};

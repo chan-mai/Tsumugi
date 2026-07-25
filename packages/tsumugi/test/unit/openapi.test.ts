@@ -50,6 +50,19 @@ describe('OpenAPI定義', () => {
 		expect(documentedRoutes()).toEqual(registeredRoutes());
 	});
 
+	it('D1を読む経路が全て503を載せている', () => {
+		// マイグレーション未適用とD1障害はcheckSchemaが返す, 記載漏れは生成物に現れない
+		const missing = Object.entries(openapiDocument().paths)
+			.filter(([path]) => path !== '/api/openapi.json')
+			.flatMap(([path, operations]) =>
+				Object.entries(operations)
+					.filter(([, operation]) => !('503' in (operation as { responses: Record<string, unknown> }).responses))
+					.map(([method]) => `${method.toUpperCase()} ${path}`),
+			);
+
+		expect(missing).toEqual([]);
+	});
+
 	it('参照した名前が全てcomponentsに在る', () => {
 		// $refの綴り違いは生成時に初めて落ちる, ここで拾う
 		const document = openapiDocument();
