@@ -81,15 +81,24 @@ function makeBatch(bodies: DispatchMessage[]) {
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;
 }
 
+/**
+ * Job DOの投入先を差し替える
+ * 実キューへ出すとconsumerが自動で走り, 完了通知が割り込んで手で作った状況が壊れる
+ */
+async function installQueues(): Promise<void> {
+	for (const binding of BINDINGS) {
+		await runInDurableObject(shard(binding), (instance) => {
+			(instance as any).env.TSUMUGI_QUEUE = queue;
+		});
+	}
+}
+
 /** Job DOとRun DOのalarmを交互に発火させ, 進みが止まるまで回す */
 async function settle(runId: string, performers: Record<string, any> = registry, rounds = 14): Promise<void> {
 	for (let i = 0; i < rounds; i++) {
+		await installQueues();
 		for (const binding of BINDINGS) {
-			const stub = shard(binding);
-			await runInDurableObject(stub, (instance) => {
-				(instance as any).env.TSUMUGI_QUEUE = queue;
-			});
-			await runDurableObjectAlarm(stub);
+			await runDurableObjectAlarm(shard(binding));
 		}
 		if (sent.length > 0) {
 			const batch = makeBatch([...sent]);
@@ -97,6 +106,16 @@ async function settle(runId: string, performers: Record<string, any> = registry,
 			await handleBatch(batch, consumerEnv, performers);
 		}
 		await runDurableObjectAlarm(runStub(runId));
+	}
+}
+
+/**
+ * 予定されたalarmが無くなるまで発火させる
+ * alarmは即時に張られるのでランタイムも自然に発火させる, 枯らしておかないとtickが重なる
+ */
+async function drainAlarms(stub: DurableObjectStub<TsumugiRunInstance>, limit = 10): Promise<void> {
+	for (let i = 0; i < limit; i++) {
+		if (!(await runDurableObjectAlarm(stub))) return;
 	}
 }
 
@@ -116,6 +135,8 @@ describe('縦串: runの開始から完了まで', () => {
 		performed.length = 0;
 		const runId = 'GREETINGS:slice1';
 		const stub = runStub(runId);
+		// 投入先を先に差し替える, 実キューへ出るとconsumerが自動で走り登録簿を差し替えた意味が無くなる
+		await installQueues();
 
 		const started = await stub.start({ flow: 'GREETINGS', input: { prefix: 'hello' } });
 		expect(started).toEqual({ id: runId, created: true });
@@ -148,6 +169,7 @@ describe('縦串: runの開始から完了まで', () => {
 	it('performの中で足した子を親が待つ(ADR-0032)', async () => {
 		performed.length = 0;
 		const runId = 'GREETINGS:spawn1';
+		await installQueues();
 		await runStub(runId).start({ flow: 'GREETINGS', input: { prefix: 'sp' } });
 		await settle(runId, spawningRegistry);
 
@@ -163,15 +185,19 @@ describe('縦串: runの開始から完了まで', () => {
 	it('ノードの失敗で下流が打ち切られrunがFAILEDになる', async () => {
 		const runId = 'GREETINGS:fail1';
 		const stub = runStub(runId);
+		// 実際の完了通知が割り込むと失敗の検査にならないので, 投入先を先に差し替える
+		await installQueues();
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'ng' } });
 
 		// 先頭ノードを投入まで進めてから, 失敗の通知だけを手で届ける
-		await runDurableObjectAlarm(stub);
+		await drainAlarms(stub);
+		// 投入されたメッセージは配送しない, 実行されると完了報告が返る
+		sent.length = 0;
 		const jobId = await jobIdOf(runId, 'list');
 		// 通知はジョブIDで宛先を照合するので, 確定していなければ検査自体が成り立たない
 		if (jobId === null) throw new Error('先頭ノードにジョブIDが入っていない');
 		await stub.notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: '意図的な失敗' }]);
-		await runDurableObjectAlarm(stub);
+		await drainAlarms(stub);
 
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
 		expect(await stateOf(runId)).toBe('FAILED');
@@ -186,10 +212,11 @@ describe('縦串: runの開始から完了まで', () => {
 	it('取り消しは未起動を止めて終端を待つ', async () => {
 		const runId = 'GREETINGS:cancel1';
 		const stub = runStub(runId);
+		await installQueues();
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'ca' } });
 
 		expect(await stub.cancel()).toEqual({ ok: true });
-		await runDurableObjectAlarm(stub);
+		await drainAlarms(stub);
 
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'CANCELLED', greet: 'CANCELLED', report: 'CANCELLED' });
 		expect(await stateOf(runId)).toBe('CANCELLED');
@@ -199,6 +226,7 @@ describe('縦串: runの開始から完了まで', () => {
 
 	it('runとノードがD1へ投影される(ADR-0008)', async () => {
 		const runId = 'GREETINGS:slice2';
+		await installQueues();
 		await runStub(runId).start({ flow: 'GREETINGS', input: { prefix: 'proj' } });
 		await settle(runId);
 

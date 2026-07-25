@@ -64,6 +64,12 @@ describe('tick中に張られたalarm', () => {
 	});
 
 	it('Run DOは掃除の予定で上書きしない', async () => {
+		const { queue } = captureQueue();
+		// 実キューへ出すとconsumerが走り, 完了通知がalarmを張って検査が揺らぐ
+		await runInDurableObject(shard('LIST#0'), (instance) => {
+			(internals(instance) as unknown as { env: { TSUMUGI_QUEUE: unknown } }).env.TSUMUGI_QUEUE = queue;
+		});
+
 		const stub = runStub('GREETINGS:clobber1');
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'cl' } });
 		// 取り消して終端へ進める, 掃除の予定が保持期間の後ろに立つ

@@ -95,6 +95,8 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		clock: Clock = systemClock;
 
 		#repo: RunRepo | undefined;
+		/** tickが実行中か, 重なりを1本に絞るために持つ */
+		#ticking = false;
 
 		get repo(): RunRepo {
 			if (!this.#repo) this.#repo = new RunRepo(this.ctx.storage);
@@ -210,6 +212,21 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		}
 
 		async #tick(): Promise<void> {
+			// 重なって走ると同じノードに別のジョブIDを予約し得る, Job DOと違い状態の条件付き更新で守られていない
+			// 手前で降りて予定だけ張り直す, 走っている方が終わってから改めて進める
+			if (this.#ticking) {
+				await this.#armAlarm(this.clock.now());
+				return;
+			}
+			this.#ticking = true;
+			try {
+				await this.#advanceOnce();
+			} finally {
+				this.#ticking = false;
+			}
+		}
+
+		async #advanceOnce(): Promise<void> {
 			const now = this.clock.now();
 			const runRow = this.repo.findRun();
 			if (!runRow) return;
