@@ -25,6 +25,7 @@ export default defineConfig({
 					{ text: 'Performer', link: '/guide/performer' },
 					{ text: 'ジョブの投入', link: '/guide/enqueue' },
 					{ text: '実行の制御', link: '/guide/execution' },
+					{ text: 'DAG(flowとrun)', link: '/guide/flow' },
 					{ text: 'ダッシュボードと認証', link: '/guide/dashboard' },
 					{ text: '別Workerからの投入', link: '/guide/client' },
 				],
