@@ -13,6 +13,7 @@ const props = defineProps<{ nodes: RunNode[] }>();
 const emit = defineEmits<{ (event: 'select', jobId: string): void }>();
 
 const container = ref<HTMLElement | null>(null);
+const canvas = ref<SVGSVGElement | null>(null);
 const cards = new Map<string, HTMLElement>();
 const paths = ref<string[]>([]);
 
@@ -61,11 +62,17 @@ function setCard(id: string, element: unknown): void {
 	else cards.delete(id);
 }
 
-/** カードの実寸から線を引き直す, 位置決めをブラウザに任せているので測るしかない */
+/**
+ * カードの実寸から線を引き直す, 位置決めをブラウザに任せているので測るしかない
+ * 実寸にはモーダルの開閉アニメーションのscaleが乗るので, SVGの座標系へ戻してから使う
+ */
 function draw(): void {
 	const root = container.value;
-	if (!root) return;
-	const base = root.getBoundingClientRect();
+	const base = canvas.value?.getBoundingClientRect();
+	if (!root || !base) return;
+	// 縮小中の値をそのまま置くと線が縮み, 端がカードから離れる
+	const scale = root.clientWidth > 0 ? base.width / root.clientWidth : 1;
+	const at = (x: number, y: number) => [(x - base.left) / scale, (y - base.top) / scale] as const;
 	const next: string[] = [];
 	for (const node of roots.value) {
 		for (const from of node.after) {
@@ -74,10 +81,8 @@ function draw(): void {
 			if (!source || !target) continue;
 			const a = source.getBoundingClientRect();
 			const b = target.getBoundingClientRect();
-			const x1 = a.right - base.left;
-			const y1 = a.top + a.height / 2 - base.top;
-			const x2 = b.left - base.left;
-			const y2 = b.top + b.height / 2 - base.top;
+			const [x1, y1] = at(a.right, a.top + a.height / 2);
+			const [x2, y2] = at(b.left, b.top + b.height / 2);
 			const mid = x1 + (x2 - x1) / 2;
 			next.push(`M${x1} ${y1} C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`);
 		}
@@ -107,7 +112,7 @@ watch(
 	<div class="overflow-x-auto">
 		<div ref="container" class="relative flex w-max items-start gap-10 p-2">
 			<!-- 線はカードの下に敷き,操作を邪魔しない -->
-			<svg class="pointer-events-none absolute inset-0 size-full overflow-visible" aria-hidden="true">
+			<svg ref="canvas" class="pointer-events-none absolute inset-0 size-full overflow-visible" aria-hidden="true">
 				<path v-for="(d, index) in paths" :key="index" :d="d" fill="none" stroke="currentColor" stroke-width="1.5" class="text-border" />
 			</svg>
 
