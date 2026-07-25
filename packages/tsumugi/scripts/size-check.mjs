@@ -27,8 +27,17 @@ const FORBIDDEN = {
 const CANARY = { 'dist/index.js': [/extends DurableObject/, /CREATE TABLE/] };
 
 const IMPORT = /(?:from|import)\s*["'](\.[^"']+)["']/g;
-// 動的importも拾う, 見逃すと依存を足しても検出しない
-const BARE_IMPORT = /(?:from|import)\s*\(?\s*["']([^."'][^"']*)["']/g;
+
+/**
+ * import文に現れる外部依存の指定
+ * dist/ui.jsはダッシュボードのHTMLを文字列で持つので, 文中の`import '...'`をimport文と読み違えない
+ * 副作用importは行頭に限り, 動的importは括弧を必須にして区別する
+ */
+const BARE_IMPORTS = [
+	/\bfrom\s*["']([^."'][^"']*)["']/g,
+	/\bimport\s*\(\s*["']([^."'][^"']*)["']/g,
+	/(?:^|[\n;}])\s*import\s*["']([^."'][^"']*)["']/g,
+];
 
 /**
  * entryごとに載ってよい外部依存
@@ -47,10 +56,13 @@ const ALLOWED_EXTERNALS = {
 function externalsOf(files) {
 	const found = new Set();
 	for (const path of files) {
-		for (const [, spec] of readFileSync(path, 'utf8').matchAll(BARE_IMPORT)) {
-			if (spec.startsWith('cloudflare:') || spec.startsWith('node:')) continue;
-			const parts = spec.split('/');
-			found.add(spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]);
+		const source = readFileSync(path, 'utf8');
+		for (const pattern of BARE_IMPORTS) {
+			for (const [, spec] of source.matchAll(pattern)) {
+				if (spec.startsWith('cloudflare:') || spec.startsWith('node:')) continue;
+				const parts = spec.split('/');
+				found.add(spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]);
+			}
 		}
 	}
 	return [...found].sort();
