@@ -26,6 +26,38 @@ export type Attempt = {
 	error: string | null;
 };
 
+export type Run = {
+	id: string;
+	flow: string;
+	state: string;
+	input?: string;
+	node_total: number;
+	node_done: number;
+	node_failed: number;
+	created_at: number;
+	updated_at: number;
+	/** 失敗したrunだけ再開できる(ADR-0034) */
+	retryable?: boolean;
+};
+
+export type RunNode = {
+	id: string;
+	binding: string;
+	state: string;
+	/** fan-outノード, ジョブを実行せず子ノードのみを持つ */
+	container: boolean;
+	parent: string | null;
+	origin: string;
+	after: string[];
+	job_id: string | null;
+	/** fan-outノードの集計値のみが入る(ADR-0035) */
+	result: string | null;
+	error: string | null;
+	position: number;
+	created_at: number;
+	updated_at: number;
+};
+
 declare global {
 	interface Window {
 		__TSUMUGI__?: { base: string; tokenCookie: string | null };
@@ -123,6 +155,37 @@ export const createJob = async (input: CreateJobInput) => {
 	if (res.status === 401) throw new UnauthorizedError();
 	const body = (await res.json()) as { id?: string; error?: string };
 	// 検証に落ちた理由はサーバが返すので,そのまま見せる
+	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	return { id: body.id as string };
+};
+
+export type ListRunParams = { state?: string; flow?: string; limit: number; offset: number };
+
+export const listRuns = (params: ListRunParams) => {
+	const query = new URLSearchParams();
+	if (params.state) query.set('state', params.state);
+	if (params.flow) query.set('flow', params.flow);
+	query.set('limit', String(params.limit));
+	query.set('offset', String(params.offset));
+	return call<{ runs: Run[]; total: number }>(`/api/runs?${query}`);
+};
+
+export const getFlows = () => call<{ flows: string[] }>('/api/flows');
+export const getRun = (id: string) => call<{ run: Run; nodes: RunNode[] }>(`/api/runs/${encodeURIComponent(id)}`);
+export const retryRun = (id: string) => mutate(`/api/runs/${encodeURIComponent(id)}/retry`);
+export const cancelRun = (id: string) => mutate(`/api/runs/${encodeURIComponent(id)}/cancel`);
+
+export type StartRunInput = { flow: string; input: unknown; id?: string };
+
+export const startRun = async (input: StartRunInput) => {
+	const res = await fetch(`${base()}/api/runs`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(input),
+	});
+	if (res.status === 401) throw new UnauthorizedError();
+	const body = (await res.json()) as { id?: string; error?: string };
 	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
 	return { id: body.id as string };
 };

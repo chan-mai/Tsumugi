@@ -3,15 +3,19 @@ import { onMounted, onUnmounted, ref, watch } from 'vue';
 import FilterMenu from './components/FilterMenu.vue';
 import JobDetailModal from './components/JobDetailModal.vue';
 import NewJobModal from './components/NewJobModal.vue';
+import NewRunModal from './components/NewRunModal.vue';
 import Pagination from './components/Pagination.vue';
 import RowActions from './components/RowActions.vue';
+import RunDetailModal from './components/RunDetailModal.vue';
 import SortHeader from './components/SortHeader.vue';
 import StatusCell from './components/StatusCell.vue';
 import TokenPrompt from './components/TokenPrompt.vue';
 import ViewMenu from './components/ViewMenu.vue';
-import { getBindings, getStats, isUnauthorized, listJobs, tokenCookie, type Job } from './api';
+import { getBindings, getFlows, getStats, isUnauthorized, listJobs, listRuns, tokenCookie, type Job, type Run } from './api';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
+/** runが取る4つ(ADR-0029) */
+const RUN_STATES = ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
 const jobs = ref<Job[]>([]);
 const total = ref(0);
@@ -32,9 +36,35 @@ const autoRefresh = ref(true);
 const canPromptToken = tokenCookie() !== null;
 let timer: ReturnType<typeof setInterval> | undefined;
 
+/** flowsを設定していない利用者にはrunの画面自体を出さない */
+const tab = ref<'jobs' | 'runs'>('jobs');
+const flows = ref<string[]>([]);
+const runs = ref<Run[]>([]);
+const runFlow = ref('');
+const selectedRun = ref<string | null>(null);
+const startingRun = ref(false);
+
 async function load() {
 	try {
-		const [list, stats, available] = await Promise.all([
+		if (tab.value === 'runs') {
+			const [list, available] = await Promise.all([
+				listRuns({
+					state: state.value || undefined,
+					flow: runFlow.value || undefined,
+					limit: pageSize.value,
+					offset: page.value * pageSize.value,
+				}),
+				getFlows(),
+			]);
+			runs.value = list.runs;
+			total.value = list.total;
+			flows.value = available.flows;
+			error.value = null;
+			unauthorized.value = false;
+			return;
+		}
+
+		const [list, stats, available, definedFlows] = await Promise.all([
 			listJobs({
 				state: state.value || undefined,
 				binding: binding.value || undefined,
@@ -45,16 +75,18 @@ async function load() {
 			}),
 			getStats(),
 			getBindings(),
+			getFlows(),
 		]);
 		jobs.value = list.jobs;
 		total.value = list.total;
 		byState.value = stats.byState;
 		bindings.value = available.bindings;
+		flows.value = definedFlows.flows;
 		error.value = null;
 		unauthorized.value = false;
 	} catch (e) {
 		if (isUnauthorized(e)) {
-			// HTMLの殻は未認証でも返るので,ここで初めて認証の要否が分かる
+			// HTML自体は未認証でも返るので, ここで初めて認証の要否が分かる
 			unauthorized.value = true;
 			return;
 		}
@@ -62,13 +94,26 @@ async function load() {
 	}
 }
 
+/** 一覧が入れ替わるので絞り込みと頁は持ち越さない */
+function switchTab(next: 'jobs' | 'runs') {
+	if (tab.value === next) return;
+	tab.value = next;
+	state.value = '';
+	binding.value = '';
+	runFlow.value = '';
+	page.value = 0;
+	load();
+}
+
+const progressOf = (run: Run) => `${run.node_done} / ${run.node_total}`;
+
 function restartTimer() {
 	if (timer) clearInterval(timer);
 	// 投影は数秒遅れる読み取りモデルなので短い間隔にしても意味がない
 	if (autoRefresh.value) timer = setInterval(load, 3_000);
 }
 
-watch([state, binding, pageSize, sort, desc], () => {
+watch([state, binding, runFlow, pageSize, sort, desc], () => {
 	page.value = 0;
 	load();
 });
@@ -106,7 +151,7 @@ const COLUMN = {
 };
 const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
 
-/** Viewで切り替え可能な列, BindingとStatusは行の識別に要るため固定 */
+/** Viewで切り替え可能な列, BindingとStatusは行の識別に必要なため固定 */
 const TOGGLEABLE = [
 	{ key: 'id', label: 'ID' },
 	{ key: 'startedAt', label: 'Started at' },
@@ -119,7 +164,7 @@ const VIEW_KEY = 'tsumugi:columns';
 function loadVisible(): Record<string, boolean> {
 	const all = Object.fromEntries(TOGGLEABLE.map((c) => [c.key, true]));
 	try {
-		// 壊れた値では既定へ復帰,画面が出ない方が損
+		// 壊れた値では既定へ復帰, 画面が表示されない状態を避ける
 		return { ...all, ...(JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as Record<string, boolean>) };
 	} catch {
 		return all;
@@ -150,22 +195,37 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 	</div>
 
 	<div v-else class="p-4 sm:p-8">
-		<header class="mb-6">
+		<header class="mb-6 flex flex-wrap items-center gap-4">
 			<h1 class="text-xl font-bold">Tsumugi</h1>
+			<!-- flowsが1つも無い構成ではrunの画面を出さない -->
+			<nav v-if="flows.length > 0" class="flex items-center gap-1 text-sm">
+				<button
+					v-for="option in ['jobs', 'runs'] as const"
+					:key="option"
+					type="button"
+					class="h-8 rounded-card border-none px-3 capitalize"
+					:class="tab === option ? 'bg-accent font-medium' : 'text-muted-foreground hover:bg-accent'"
+					@click="switchTab(option)"
+				>
+					{{ option }}
+				</button>
+			</nav>
 		</header>
 
 		<div class="space-y-4">
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<div class="flex flex-wrap items-center gap-2">
-					<FilterMenu title="Binding" :options="bindings" :selected="binding" @select="binding = $event" />
-					<FilterMenu title="Status" :options="STATES" :selected="state" @select="state = $event" />
+					<FilterMenu v-if="tab === 'jobs'" title="Binding" :options="bindings" :selected="binding" @select="binding = $event" />
+					<FilterMenu v-else title="Flow" :options="flows" :selected="runFlow" @select="runFlow = $event" />
+					<FilterMenu title="Status" :options="tab === 'jobs' ? STATES : RUN_STATES" :selected="state" @select="state = $event" />
 					<button
-						v-if="state || binding"
+						v-if="state || binding || runFlow"
 						type="button"
 						class="h-8 rounded-card border-none px-2 text-sm text-muted-foreground hover:bg-accent"
 						@click="
 							state = '';
 							binding = '';
+							runFlow = '';
 						"
 					>
 						Reset
@@ -175,7 +235,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				<div class="flex items-center gap-2">
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
-					<ViewMenu :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
+					<ViewMenu v-if="tab === 'jobs'" :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
 					<button
 						type="button"
 						class="flex h-8 items-center gap-2 rounded-card border border-border bg-background px-3 text-sm hover:bg-accent"
@@ -190,17 +250,55 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<button
 						type="button"
 						class="flex h-8 items-center gap-1.5 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
-						@click="creating = true"
+						@click="tab === 'jobs' ? (creating = true) : (startingRun = true)"
 					>
 						<svg viewBox="0 0 16 16" class="size-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
 							<path d="M8 3.5v9M3.5 8h9" />
 						</svg>
-						Job
+						{{ tab === 'jobs' ? 'Job' : 'Run' }}
 					</button>
 				</div>
 			</div>
 
-			<div class="relative w-full overflow-x-auto rounded-card border border-border">
+			<div v-if="tab === 'runs'" class="relative w-full overflow-x-auto rounded-card border border-border">
+				<table class="w-full caption-bottom text-sm">
+					<thead class="[&_tr]:border-b [&_tr]:border-border">
+						<tr>
+							<th :class="HEAD">Flow</th>
+							<th :class="[HEAD, columnClass('id')]">ID</th>
+							<th :class="HEAD">Status</th>
+							<th :class="HEAD">Nodes</th>
+							<th :class="[HEAD, columnClass('updatedAt')]">Updated at</th>
+						</tr>
+					</thead>
+					<tbody class="[&_tr:last-child]:border-0">
+						<tr
+							v-for="run in runs"
+							:key="run.id"
+							class="cursor-pointer border-b border-border transition-colors hover:bg-muted"
+							@click="selectedRun = run.id"
+						>
+							<td class="p-4 align-middle">
+								{{ run.flow }}
+								<!-- ID列を隠す幅では行の識別ができなくなるので,ここに含めて表示する -->
+								<span class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ run.id }}</span>
+							</td>
+							<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ run.id }}</td>
+							<td class="p-4 align-middle"><StatusCell :state="run.state" /></td>
+							<td class="p-4 align-middle tabular-nums">
+								{{ progressOf(run) }}
+								<span v-if="run.node_failed > 0" class="text-destructive">({{ run.node_failed }})</span>
+							</td>
+							<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('updatedAt')">{{ at(run.updated_at) }}</td>
+						</tr>
+						<tr v-if="runs.length === 0">
+							<td colspan="5" class="h-24 text-center text-muted-foreground">No results.</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div v-else class="relative w-full overflow-x-auto rounded-card border border-border">
 				<table class="w-full caption-bottom text-sm">
 					<thead class="[&_tr]:border-b [&_tr]:border-border">
 						<tr>
@@ -232,7 +330,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 						>
 							<td class="p-4 align-middle">
 								{{ job.binding }}
-								<!-- ID列を隠す幅では行の識別ができなくなるので,ここに畳んで出す -->
+								<!-- ID列を隠す幅では行の識別ができなくなるので,ここに含めて表示する -->
 								<span v-if="visible.id" class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ job.id }}</span>
 							</td>
 							<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ job.id }}</td>
@@ -253,7 +351,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				</table>
 			</div>
 
-			<Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" />
+			<Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" :unit="tab" />
 		</div>
 
 		<JobDetailModal :job-id="selected" @close="selected = null" @changed="load" />
@@ -263,6 +361,24 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 			@close="creating = false"
 			@created="
 				message = 'Job created';
+				load();
+			"
+		/>
+		<RunDetailModal
+			:run-id="selectedRun"
+			@close="selectedRun = null"
+			@changed="load"
+			@job="
+				selectedRun = null;
+				selected = $event;
+			"
+		/>
+		<NewRunModal
+			:open="startingRun"
+			:flows="flows"
+			@close="startingRun = false"
+			@created="
+				message = 'Run started';
 				load();
 			"
 		/>

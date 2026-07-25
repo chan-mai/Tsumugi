@@ -12,6 +12,9 @@ const STATES: Record<string, { label: string; color: string; mark: string; pulse
 	FAILED: { label: 'Failed', color: 'text-red-500', mark: 'M5.5 5.5l5 5M10.5 5.5l-5 5' },
 	CANCELLED: { label: 'Cancelled', color: 'text-gray-500', mark: 'M5 8h6' },
 	STALLED: { label: 'Stalled', color: 'text-purple-500', mark: 'M8 4.6v4M8 10.8v.6' },
+	// DAGのノードだけが取る2つ(ADR-0032)
+	PENDING: { label: 'Pending', color: 'text-muted-foreground', mark: '' },
+	SKIPPED: { label: 'Skipped', color: 'text-gray-500', mark: 'M5.5 10.5l5-5' },
 };
 
 const view = computed(() => STATES[props.state] ?? { label: props.state, color: 'text-muted-foreground', mark: '' });
