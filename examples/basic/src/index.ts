@@ -1,6 +1,6 @@
 import { bearerAuth, createFlow, defineTsumugi, remote } from 'tsumugi';
 import { ui } from 'tsumugi/ui';
-import { Performer } from 'tsumugi/performer';
+import { Performer, type JobContext } from 'tsumugi/performer';
 
 class Hello extends Performer<{ name: string }, void, {}, Env> {
 	async perform(payload: { name: string }): Promise<void> {
@@ -12,6 +12,16 @@ class Hello extends Performer<{ name: string }, void, {}, Env> {
 class Boom extends Performer<unknown, void, {}, Env> {
 	async perform(): Promise<void> {
 		throw new Error('意図的な失敗');
+	}
+}
+
+/** 進捗を報告しながら進む長いジョブ */
+class Slow extends Performer<{ steps: number }, void, {}, Env> {
+	async perform(payload: { steps: number }, ctx: JobContext): Promise<void> {
+		for (let step = 0; step < payload.steps; step++) {
+			await new Promise((resolve) => setTimeout(resolve, 1_000));
+			await ctx.heartbeat((step + 1) / payload.steps);
+		}
 	}
 }
 
@@ -36,7 +46,7 @@ class Report extends Performer<{ total: number; failed: number }, void, {}, Env>
 
 // binding名とperformerの対応はここ1箇所だけ
 // MAILはservice binding越しの別Worker,同一の`performers`に混在可(ADR-0026)
-const performers = { HELLO: Hello, BOOM: Boom, LIST: ListNames, GREET: Greet, REPORT: Report, MAIL: remote('MAIL_SERVICE') };
+const performers = { HELLO: Hello, BOOM: Boom, SLOW: Slow, LIST: ListNames, GREET: Greet, REPORT: Report, MAIL: remote('MAIL_SERVICE') };
 
 // flowの定義口をperformersから作る, bindingもpayloadもここから型が決まる(ADR-0030)
 const flow = createFlow(performers);

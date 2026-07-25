@@ -22,6 +22,7 @@ const job = (over: Partial<JobView> & { id: string }): JobView => ({
 	runAfter: T0,
 	createdAt: T0,
 	dispatchedAt: null,
+	heartbeatAt: null,
 	guarantee: 'at-least-once',
 	timeoutMs: 60_000,
 	...over,
@@ -225,6 +226,29 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 			bucket: unlimited,
 		});
 		expect(out.decisions).toContainEqual({ type: 'reap', id: 'a', attempts: 2 });
+	});
+
+	it('生存報告があれば期限が延びる', () => {
+		// 所要時間が入力で変わるジョブに合わせてtimeoutMsを伸ばさずに済む
+		const jobs = [dispatched({ id: 'a', heartbeatAt: T0 + 60_000 })];
+
+		expect(schedule({ now: T0 + 120_000, jobs, policy: policy(), bucket: unlimited }).decisions).toEqual([]);
+		expect(schedule({ now: T0 + 150_000, jobs, policy: policy(), bucket: unlimited }).decisions).toContainEqual({
+			type: 'reap',
+			id: 'a',
+			attempts: 1,
+		});
+	});
+
+	it('投入より前の生存報告では期限を縮めない', () => {
+		// 再投入で報告が消えなかった場合でも, 判定が早まってはならない
+		const out = schedule({
+			now: T0 + 90_000 - 1,
+			jobs: [dispatched({ id: 'a', heartbeatAt: T0 - 60_000 })],
+			policy: policy(),
+			bucket: unlimited,
+		});
+		expect(out.decisions).toEqual([]);
 	});
 
 	it('at-most-onceは再投入せずSTALLEDにする', () => {

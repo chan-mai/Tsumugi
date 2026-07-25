@@ -32,6 +32,8 @@ function toValues(snapshot: JobSnapshot, seq: number): typeof job.$inferInsert {
 		createdAt: snapshot.created_at,
 		updatedAt: snapshot.updated_at,
 		dispatchedAt: snapshot.dispatched_at,
+		// 古いスナップショットにはprogressが無いのでnullに揃える
+		progress: snapshot.progress ?? null,
 		payload: snapshot.payload,
 		// 古いスナップショットにはresultが無いのでnullに揃える(#9)
 		result: snapshot.result ?? null,

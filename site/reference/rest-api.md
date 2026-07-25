@@ -61,6 +61,7 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
     "state": "FAILED",
     "payload": "{\"to\":\"a@example.com\"}",
     "attempts": 3,
+    "progress": null,
     "retryable": true,
     "attempts_log": [
       {

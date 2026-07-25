@@ -20,6 +20,35 @@ export type ConsumerEnv = {
 	JOB_SHARD: DurableObjectNamespace<TsumugiJobShard>;
 };
 
+/**
+ * 生存報告をDOへ送る最短の間隔
+ * performerが短い周期で実行してもDOへの書き込みはこの間隔に収まる
+ */
+export const HEARTBEAT_MIN_INTERVAL_MS = 5_000;
+
+/**
+ * 間引き付きの生存報告を作る
+ * 直前の送信からの経過が下限に満たない要求は送信せずに捨てる
+ * 送信の失敗は捨てる, 報告が届かなくてもreaperが回収するだけで実行自体は続く
+ */
+export function createHeartbeat(
+	send: (progress?: number) => Promise<unknown>,
+	now: () => number,
+	minIntervalMs = HEARTBEAT_MIN_INTERVAL_MS,
+): (progress?: number) => Promise<void> {
+	let lastAt = Number.NEGATIVE_INFINITY;
+	return async (progress) => {
+		const at = now();
+		if (at - lastAt < minIntervalMs) return;
+		lastAt = at;
+		try {
+			await send(progress);
+		} catch (error) {
+			console.error('tsumugi: heartbeat failed', error);
+		}
+	};
+}
+
 export class TsumugiTimeoutError extends Error {
 	constructor(
 		readonly jobId: string,
@@ -119,22 +148,28 @@ async function handleOne<Env extends ConsumerEnv>(
 
 		const entry = performers[binding];
 		if (!entry) throw new Error(`performerが未登録: ${binding}`);
-		const base = { jobId, attempt, idempotencyKey: jobId };
+		const id = jobId;
+		const base = { jobId: id, attempt, idempotencyKey: id };
 
 		if (isRemoteRef(entry)) {
 			const service = (env as Record<string, unknown>)[entry.binding] as RemotePerformerService | undefined;
 			// 設定漏れは即時失敗にする, 捕捉して無視すると検知できないまま失敗が続く
 			if (typeof service?.perform !== 'function') throw new Error(`service bindingが未設定: ${entry.binding}`);
-			// signalもspawnも非対応, 呼び出し中だけ有効なものはリモートへ渡さない(ADR-0026)
+			// signalもspawnもheartbeatも非対応, 呼び出し中だけ有効なものはリモートへ渡さない(ADR-0026)
 			result = await withTimeout(jobId, timeoutMs, () => Promise.resolve(service.perform(payload, base)));
 		} else {
 			// 要求は溜めるだけ, 送るのは完了報告と同じ便(ADR-0031)
-			const spawn = (id: string, target: string, childPayload: unknown, options?: SpawnRequest['options']) => {
-				spawns.push({ id, binding: target, payload: childPayload, ...(options ? { options } : {}) });
+			const spawn = (childId: string, target: string, childPayload: unknown, options?: SpawnRequest['options']) => {
+				spawns.push({ id: childId, binding: target, payload: childPayload, ...(options ? { options } : {}) });
 			};
+			const stub = shardStub(env, id);
+			const heartbeat = createHeartbeat(
+				(progress) => stub.heartbeat(id, progress),
+				() => Date.now(),
+			);
 			// performの戻り値を拾ってDOへ渡す, 保存はDO側で行う(#9)
 			result = await withTimeout(jobId, timeoutMs, (signal) =>
-				Promise.resolve(new entry(env).perform(payload, { ...base, signal, spawn })),
+				Promise.resolve(new entry(env).perform(payload, { ...base, signal, spawn, heartbeat })),
 			);
 		}
 		ok = true;

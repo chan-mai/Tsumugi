@@ -25,6 +25,8 @@ export type JobView = {
 	createdAt: number;
 	/** QUEUEDへの遷移時刻, SCHEDULEDならnull */
 	dispatchedAt: number | null;
+	/** performerからの最後の生存報告, 一度も無ければnull */
+	heartbeatAt: number | null;
 	guarantee: DeliveryGuarantee;
 	/** 実行のタイムアウト, reaperの無応答判定の基準 */
 	timeoutMs: number;

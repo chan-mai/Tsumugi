@@ -362,6 +362,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			created_at: found.createdAt,
 			updated_at: found.updatedAt,
 			dispatched_at: found.dispatchedAt,
+			progress: found.progress,
 			payload: found.payload,
 			// performの戻り値, 成功時のみ入り未完了はnull(#9), payloadと同じくJSON文字列のまま返す
 			result: found.result,

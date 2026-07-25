@@ -35,6 +35,8 @@ export type JobDetail = JobSummary & {
 	concurrency_key: string | null;
 	unique_key: string | null;
 	guarantee: string;
+	/** 実行中のジョブが報告した進捗, 0以上1以下で報告が無ければnull */
+	progress: number | null;
 	payload: string;
 	/** performの戻り値, 成功時のみ入る(#9) */
 	result: string | null;

@@ -14,6 +14,13 @@ export type JobContext = {
 	/** timeout時にabort,performerへ協調的な中断を依頼する */
 	signal: AbortSignal;
 	/**
+	 * 実行中であることをDOへ報告する
+	 * 報告のあいだはreaperの無応答判定が延び、timeoutMsを最長の所要時間に合わせずに済む
+	 * `progress`は0以上1以下, 範囲外と非数は捨てる
+	 * 実行間隔には下限があり、下限に満たない要求は送信せずに捨てる
+	 */
+	heartbeat(progress?: number): Promise<void>;
+	/**
 	 * 実行中のノードの下に子ノードを追加する(ADR-0032)
 	 * 要求はperformの完了報告に同梱して送るため, 失敗した試行の要求は破棄される
 	 * 静的定義と異なり型検査は適用されない
@@ -35,9 +42,9 @@ export type Performers = Record<string, Performer<any, any, any, any>>;
  * 別Workerのperformerに渡す実行文脈
  * RPCの引数にAbortSignal非対応のため`signal`なし
  * タイムアウトは呼び出し側の待機打ち切りのみ,リモートへは非伝播
- * `spawn`も渡さない, 呼び出し中だけ有効な参照を跨がせないため(ADR-0026)
+ * `spawn`と`heartbeat`も渡さない, 呼び出し中だけ有効な参照を跨がせないため(ADR-0026)
  */
-export type RemoteJobContext = Omit<JobContext, 'signal' | 'spawn'>;
+export type RemoteJobContext = Omit<JobContext, 'signal' | 'spawn' | 'heartbeat'>;
 
 /**
  * service binding越しのperformerを指す印

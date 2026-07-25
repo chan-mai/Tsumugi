@@ -37,6 +37,7 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 		state: fc.constant('SCHEDULED' as const),
 		runAfter: fc.integer({ min: NOW - 10_000, max: NOW + 10_000 }),
 		dispatchedAt: fc.constant(null),
+		heartbeatAt: fc.constant(null),
 	});
 
 	// QUEUED / RUNNINGはdispatchedAtを持つ, 無応答判定の境界をまたぐよう幅を取る
@@ -45,6 +46,7 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 		state: fc.constantFrom('QUEUED' as const, 'RUNNING' as const),
 		runAfter: fc.integer({ min: NOW - 10_000, max: NOW + 10_000 }),
 		dispatchedAt: fc.integer({ min: NOW - 600_000, max: NOW }),
+		heartbeatAt: fc.constant(null),
 	});
 
 	return fc.oneof(scheduled, inFlight);

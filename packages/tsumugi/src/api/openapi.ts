@@ -96,11 +96,17 @@ const SCHEMAS: Record<string, unknown> = {
 			concurrency_key: nullable('string'),
 			unique_key: nullable('string'),
 			guarantee: { type: 'string', enum: ['at-least-once', 'at-most-once'] },
+			progress: {
+				...nullable('number'),
+				minimum: 0,
+				maximum: 1,
+				description: 'Progress reported by the performer while running. Null until it reports.',
+			},
 			payload: string('JSON-encoded string'),
 			result: { ...nullable('string'), description: 'JSON-encoded return value of perform. Present only on success.' },
 			attempts_log: { type: 'array', items: ref('AttemptRecord'), description: 'Newest attempt first' },
 		},
-		required: [...JOB_SUMMARY_REQUIRED, 'concurrency_key', 'unique_key', 'guarantee', 'payload', 'result', 'attempts_log'],
+		required: [...JOB_SUMMARY_REQUIRED, 'concurrency_key', 'unique_key', 'guarantee', 'progress', 'payload', 'result', 'attempts_log'],
 	},
 	CreateJobRequest: {
 		type: 'object',

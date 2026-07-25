@@ -103,6 +103,7 @@ describe('公開している純粋関数', () => {
 					runAfter: 0,
 					createdAt: 0,
 					dispatchedAt: null,
+					heartbeatAt: null,
 					guarantee: 'at-least-once',
 					timeoutMs: 1_000,
 				},

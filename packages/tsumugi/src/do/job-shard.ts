@@ -379,6 +379,22 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
+	 * 実行中のperformerからの生存報告
+	 *
+	 * reaperの無応答判定の起点をここに移す, 所要時間が入力で変わるジョブでtimeoutMsを最長に合わせずに済む
+	 * 進捗を画面へ出すため投影にも積む, 報告の間隔はconsumer側で間引く
+	 */
+	async heartbeat(jobId: string, progress?: number): Promise<boolean> {
+		const now = this.clock.now();
+		// 範囲外は捨てる, 保存すると画面の進捗が100%を超える
+		const clamped = typeof progress === 'number' && Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : null;
+		if (!this.repo.heartbeat(jobId, now, clamped)) return false;
+		// 投影のためにalarmを設定する, 次のreaper期限まで投影されないと進捗が数分遅れる
+		await this.#armAlarm(now);
+		return true;
+	}
+
+	/**
 	 * at-most-onceのジョブの実行権
 	 * Queues自体がat-least-onceなので重複配送が来る,単一SQLのrowsWritten判定で勝者を1本に絞る(ADR-0007)
 	 */

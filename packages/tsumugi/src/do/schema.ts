@@ -21,6 +21,10 @@ export const SCHEMA = [
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL,
 		dispatched_at INTEGER,
+		-- performerからの最後の生存報告, reaperの無応答判定の起点
+		heartbeat_at INTEGER,
+		-- 実行中の進捗, 0以上1以下
+		progress REAL,
 		payload TEXT NOT NULL,
 		-- performの戻り値, 成功時にJSON文字列で入る(#9), 上限超過や非直列化はnull
 		result TEXT,
@@ -74,8 +78,10 @@ export const SCHEMA = [
 
 export function applySchema(sql: SqlStorage): void {
 	for (const statement of SCHEMA) sql.exec(statement);
-	// CREATE TABLE IF NOT EXISTSは既存テーブルを変更しない, resultを後から足したので既存DOへ補う(#9)
+	// CREATE TABLE IF NOT EXISTSは既存テーブルを変更しない, 後から足した列を既存DOへ補う(#9)
 	ensureColumn(sql, 'job', 'result', 'TEXT');
+	ensureColumn(sql, 'job', 'heartbeat_at', 'INTEGER');
+	ensureColumn(sql, 'job', 'progress', 'REAL');
 	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
 }
 
@@ -115,6 +121,8 @@ export type JobRow = {
 	created_at: number;
 	updated_at: number;
 	dispatched_at: number | null;
+	heartbeat_at: number | null;
+	progress: number | null;
 	payload: string;
 	result: string | null;
 	run_id: string | null;

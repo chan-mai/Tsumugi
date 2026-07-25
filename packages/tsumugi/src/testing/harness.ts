@@ -13,6 +13,8 @@ export type TestContext = JobContext & {
 	abort(reason?: unknown): void;
 	/** performが要求した子, 要求の順に入る(ADR-0032) */
 	spawns: SpawnRequest[];
+	/** `heartbeat`へ渡された進捗, 実行の順に入り省略時はundefined */
+	heartbeats: (number | undefined)[];
 };
 
 export type TestContextOptions = {
@@ -33,6 +35,8 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 	if (options.aborted) controller.abort();
 	// 本番と同じく溜めるだけ, 実際の投入はDO側で起きる(ADR-0031)
 	const spawns: SpawnRequest[] = [];
+	// 本番はDOへ送信するが, ここでは実行の記録だけを残す
+	const heartbeats: (number | undefined)[] = [];
 
 	return {
 		jobId,
@@ -42,6 +46,10 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 		signal: controller.signal,
 		abort: (reason) => controller.abort(reason),
 		spawns,
+		heartbeats,
+		heartbeat: async (progress) => {
+			heartbeats.push(progress);
+		},
 		spawn: (id, binding, payload, options) => {
 			spawns.push({ id, binding, payload, ...(options ? { options } : {}) });
 		},

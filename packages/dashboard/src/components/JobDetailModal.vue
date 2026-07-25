@@ -113,6 +113,16 @@ const pretty = (payload: string | undefined) => {
 								<dd>{{ job.binding }}</dd>
 								<dt class="text-muted-foreground">Attempts</dt>
 								<dd class="tabular-nums">{{ job.attempts }} / {{ job.max_attempts }}</dd>
+								<!-- 報告するperformerでのみ埋まる -->
+								<template v-if="job.progress !== null && job.progress !== undefined">
+									<dt class="text-muted-foreground">Progress</dt>
+									<dd class="flex items-center gap-2">
+										<span class="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+											<span class="block h-full rounded-full bg-primary" :style="{ width: `${Math.round(job.progress * 100)}%` }" />
+										</span>
+										<span class="tabular-nums">{{ Math.round(job.progress * 100) }}%</span>
+									</dd>
+								</template>
 								<dt class="text-muted-foreground">Guarantee</dt>
 								<dd>{{ job.guarantee ?? '-' }}</dd>
 								<dt class="text-muted-foreground">Priority</dt>
