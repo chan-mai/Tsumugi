@@ -1,62 +1,21 @@
-export type Job = {
-	id: string;
-	binding: string;
-	state: string;
-	priority: number;
-	attempts: number;
-	max_attempts: number;
-	created_at: number;
-	updated_at: number;
-	dispatched_at: number | null;
-	payload?: string;
-	unique_key?: string | null;
-	concurrency_key?: string | null;
-	guarantee?: string;
-	/** サーバが保持期間から出す近似, 最終的な可否はretryの応答が決める */
-	retryable?: boolean;
-	/** 詳細でのみ返る試行履歴, 新しい順 */
-	attempts_log?: Attempt[];
-};
+// 応答の型はtsumugi側が持つ, 二重に書くとREST APIの変更に画面が追随できない
+// 型のみの取り込みなのでビルド時には消える
+import type {
+	AttemptRecord,
+	CreateJobRequest,
+	JobDetail,
+	JobSummary,
+	RunDetail,
+	RunNodeView,
+	RunSummary,
+	StartRunRequest,
+} from '../../tsumugi/src/api/types.js';
 
-export type Attempt = {
-	attempt: number;
-	state: string;
-	started_at: number | null;
-	finished_at: number;
-	error: string | null;
-};
-
-export type Run = {
-	id: string;
-	flow: string;
-	state: string;
-	input?: string;
-	node_total: number;
-	node_done: number;
-	node_failed: number;
-	created_at: number;
-	updated_at: number;
-	/** 失敗したrunだけ再開できる(ADR-0034) */
-	retryable?: boolean;
-};
-
-export type RunNode = {
-	id: string;
-	binding: string;
-	state: string;
-	/** fan-outノード, ジョブを実行せず子ノードのみを持つ */
-	container: boolean;
-	parent: string | null;
-	origin: string;
-	after: string[];
-	job_id: string | null;
-	/** fan-outノードの集計値のみが入る(ADR-0035) */
-	result: string | null;
-	error: string | null;
-	position: number;
-	created_at: number;
-	updated_at: number;
-};
+/** 一覧と詳細を同じ型で扱う, 詳細でだけ返る列は任意にする */
+export type Job = JobSummary & Partial<JobDetail>;
+export type Attempt = AttemptRecord;
+export type Run = RunSummary & Partial<RunDetail>;
+export type RunNode = RunNodeView;
 
 declare global {
 	interface Window {
@@ -135,15 +94,7 @@ export const listJobs = (params: ListParams) => {
 	return call<{ jobs: Job[]; total: number }>(`/api/jobs?${query}`);
 };
 
-export type CreateJobInput = {
-	binding: string;
-	payload: unknown;
-	maxAttempts?: number;
-	delayMs?: number;
-	priority?: number;
-	uniqueKey?: string;
-	concurrencyKey?: string;
-};
+export type CreateJobInput = CreateJobRequest;
 
 export const createJob = async (input: CreateJobInput) => {
 	const res = await fetch(`${base()}/api/jobs`, {
@@ -175,7 +126,7 @@ export const getRun = (id: string) => call<{ run: Run; nodes: RunNode[] }>(`/api
 export const retryRun = (id: string) => mutate(`/api/runs/${encodeURIComponent(id)}/retry`);
 export const cancelRun = (id: string) => mutate(`/api/runs/${encodeURIComponent(id)}/cancel`);
 
-export type StartRunInput = { flow: string; input: unknown; id?: string };
+export type StartRunInput = StartRunRequest;
 
 export const startRun = async (input: StartRunInput) => {
 	const res = await fetch(`${base()}/api/runs`, {
