@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunNode } from '../../src/api';
-import { MAX_CHIPS, runLayout, type ChildData, type TaskData } from '../../src/components/graph/runLayout';
+import { HANDLE_TOP, MAX_CHIPS, runLayout, type ChildData, type TaskData } from '../../src/components/graph/runLayout';
 
 /**
  * グラフの配置
@@ -71,7 +71,7 @@ describe('Runのグラフの配置', () => {
 		}
 	});
 
-	it('経路の端は箱の縁に付く', () => {
+	it('経路の端は箱の縁の頭の行に付く', () => {
 		const result = runLayout([node({ id: 'a' }), node({ id: 'b', after: ['a'] })]);
 
 		const edge = result.edges[0]!;
@@ -80,7 +80,29 @@ describe('Runのグラフの配置', () => {
 		const start = edge.data.route[0]!;
 		const end = edge.data.route[edge.data.route.length - 1]!;
 		expect(start.x).toBe(a.position.x + Number.parseFloat(a.style.width));
+		expect(start.y).toBe(a.position.y + HANDLE_TOP);
 		expect(end.x).toBe(b.position.x);
+		expect(end.y).toBe(b.position.y + HANDLE_TOP);
+	});
+
+	it('実寸を渡すと見積もりより優先する', () => {
+		const nodes = [node({ id: 'a' })];
+		const estimated = Number.parseFloat(taskOf(runLayout(nodes), 'a')!.style.height);
+		const measured = Number.parseFloat(taskOf(runLayout(nodes, new Map([['a', 200]])), 'a')!.style.height);
+
+		expect(measured).toBeGreaterThan(estimated);
+		// 上下の内側余白のぶんだけ中身より高い
+		expect(measured).toBe(200 + 24);
+	});
+
+	it('同じ依存を重ねて書いても辺は1本になる', () => {
+		const result = runLayout([node({ id: 'a' }), node({ id: 'b', after: ['a', 'a'] })]);
+		expect(result.edges.map((edge) => edge.id)).toEqual(['a->b']);
+	});
+
+	it('自分への依存は辺にしない', () => {
+		const result = runLayout([node({ id: 'a', after: ['a'] })]);
+		expect(result.edges).toEqual([]);
 	});
 
 	it('同じ空きを通る辺は縦の走り位置を分ける', () => {
@@ -161,7 +183,7 @@ describe('Runのグラフの配置', () => {
 		}
 	});
 
-	it('入れ子は上限の深さで打ち切り件数だけ残す', () => {
+	it('孫は描かず件数だけ残す', () => {
 		const result = runLayout([
 			node({ id: 'each', container: true }),
 			child('each', 0),

@@ -29,9 +29,6 @@ const MAX_COLS = 4;
 /** 個別に描く子の上限, 超えた分は内訳へ畳む */
 export const MAX_CHIPS = 24;
 
-/** 入れ子を描く深さ, spawnは子からも起きるので際限がない(ADR-0032) */
-const MAX_DEPTH = 2;
-
 /** 辺が刺さる高さ, 子で箱が伸びても頭の行に合わせる */
 export const HANDLE_TOP = 34;
 
@@ -113,16 +110,13 @@ function summarize(children: readonly RunNode[], hidden: number): string | null 
 }
 
 /** 箱の寸法と子の相対座標を決める */
-function pack(node: RunNode, childrenOf: (id: string) => RunNode[], depth: number, measured: number | undefined): Packed {
+function pack(node: RunNode, childrenOf: (id: string) => RunNode[], measured: number | undefined): Packed {
 	const children = childrenOf(node.id);
 	const done = children.filter((child) => child.state === 'COMPLETED').length;
 	const progress = node.container && children.length > 0 ? `${done} / ${children.length}` : null;
 
-	// 深さの上限に達したら中身は描かない, 件数だけ親のラベルに残す
-	const shown =
-		depth >= MAX_DEPTH
-			? []
-			: [...children].sort((a, b) => attentionOf(a.state) - attentionOf(b.state) || a.position - b.position).slice(0, MAX_CHIPS);
+	// 孫は描かず, 子のチップに件数だけ出す(ADR-0032)
+	const shown = [...children].sort((a, b) => attentionOf(a.state) - attentionOf(b.state) || a.position - b.position).slice(0, MAX_CHIPS);
 	const hidden = children.length - shown.length;
 	const summary = summarize(children, hidden);
 
@@ -150,7 +144,10 @@ function pack(node: RunNode, childrenOf: (id: string) => RunNode[], depth: numbe
 	};
 }
 
-type Box = { x: number; y: number; w: number; h: number; center: number };
+type Box = { x: number; y: number; w: number; h: number; rank: number };
+
+/** 空きが潰れている場合に確保する幅, 箱が重なる配置でも縦の区間を置ける */
+const MIN_GUTTER = 24;
 
 /** 列と列の間の空き, 縦に走る区間はここに置く */
 type Gutter = { left: number; right: number };
@@ -162,15 +159,17 @@ type Gutter = { left: number; right: number };
  * 横に走る高さはdagreが空けた値を使う, ランクを跨ぐ辺が箱に当たらない
  */
 function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Box>, lanes: ReadonlyMap<string, Point[]>): LayoutEdge[] {
-	const centers = [...new Set([...boxes.values()].map((box) => box.center))].sort((a, b) => a - b);
-	const rankOf = new Map([...boxes].map(([id, box]) => [id, centers.indexOf(box.center)]));
+	// dagreのrankは飛び番なので, 並べ直して列の番号にする
+	const ranks = [...new Set([...boxes.values()].map((box) => box.rank))].sort((a, b) => a - b);
+	const rankOf = new Map([...boxes].map(([id, box]) => [id, ranks.indexOf(box.rank)]));
 
 	// 列ごとの外周から, 間の空きを出す
 	const gutters: Gutter[] = [];
-	for (let i = 0; i + 1 < centers.length; i++) {
-		const left = Math.max(...[...boxes.values()].filter((box) => box.center === centers[i]).map((box) => box.x + box.w));
-		const right = Math.min(...[...boxes.values()].filter((box) => box.center === centers[i + 1]).map((box) => box.x));
-		gutters.push({ left, right });
+	for (let i = 0; i + 1 < ranks.length; i++) {
+		const left = Math.max(...[...boxes.values()].filter((box) => box.rank === ranks[i]).map((box) => box.x + box.w));
+		const right = Math.min(...[...boxes.values()].filter((box) => box.rank === ranks[i + 1]).map((box) => box.x));
+		// 箱が食い違って空きが潰れた場合も, 縦に走る幅だけは確保する
+		gutters.push(right - left >= MIN_GUTTER ? { left, right } : { left, right: left + MIN_GUTTER });
 	}
 
 	const anchors = new Map(
@@ -215,6 +214,12 @@ function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Bo
 			y = next;
 		}
 
+		// 同じ列や後ろ向きを指す辺は空きを通らない, 縦の区間を1つ挟んで斜めを作らない
+		if (last <= first) {
+			const x = end.x > start.x ? (start.x + end.x) / 2 : start.x + MIN_GUTTER;
+			points.push({ x, y: start.y }, { x, y: end.y });
+		}
+
 		points.push(end);
 		return { id, source: from, target: to, type: 'routed' as const, data: { route: points } };
 	});
@@ -237,7 +242,7 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 	const childrenOf = (id: string) => byParent.get(id) ?? [];
 
 	const roots = nodes.filter((node) => node.parent === null);
-	const packed = roots.map((node) => pack(node, childrenOf, 0, measured?.get(node.id)));
+	const packed = roots.map((node) => pack(node, childrenOf, measured?.get(node.id)));
 	const known = new Set(roots.map((node) => node.id));
 
 	const graph = new Graph({ directed: true, compound: false, multigraph: false });
@@ -248,10 +253,12 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 	for (const item of packed) graph.setNode(item.node.id, { width: item.width, height: item.height });
 
 	const pairs: [string, string][] = [];
+	const seen = new Set<string>();
 	for (const node of roots) {
 		for (const from of node.after) {
-			// 消えた依存や子を指す依存は辺にしない
-			if (!known.has(from)) continue;
+			// 消えた依存や子を指す依存は辺にしない, 自分への依存と重複も落とす
+			if (!known.has(from) || from === node.id || seen.has(`${from}->${node.id}`)) continue;
+			seen.add(`${from}->${node.id}`);
 			graph.setEdge(from, node.id);
 			pairs.push([from, node.id]);
 		}
@@ -264,7 +271,7 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 			const placed = graph.node(item.node.id);
 			return [
 				item.node.id,
-				{ x: placed.x - item.width / 2, y: placed.y - item.height / 2, w: item.width, h: item.height, center: placed.x },
+				{ x: placed.x - item.width / 2, y: placed.y - item.height / 2, w: item.width, h: item.height, rank: placed.rank ?? 0 },
 			];
 		}),
 	);
@@ -280,13 +287,12 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 
 	const laid: LayoutNode[] = [];
 	for (const item of packed) {
-		const placed = graph.node(item.node.id);
-		// dagreが返すのは箱の中心, Vue Flowは左上で受ける
-		const position = { x: placed.x - item.width / 2, y: placed.y - item.height / 2 };
+		const box = boxes.get(item.node.id)!;
 		laid.push({
 			id: item.node.id,
 			type: 'task',
-			position,
+			// 箱の左上, dagreが返す中心からは`boxes`で直している
+			position: { x: box.x, y: box.y },
 			style: { width: `${item.width}px`, height: `${item.height}px` },
 			data: item.data,
 		});

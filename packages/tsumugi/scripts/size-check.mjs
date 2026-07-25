@@ -1,5 +1,6 @@
 // ダッシュボードをJSに焼き込む以上(ADR-0025),無警戒ではバンドルが膨らむ
 // 中身が空のM0時点から検査を入れておく,実装後に初めて測ると太った後で削る羽目になる
+import { externalsIn } from './externals.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -29,17 +30,6 @@ const CANARY = { 'dist/index.js': [/extends DurableObject/, /CREATE TABLE/] };
 const IMPORT = /(?:from|import)\s*["'](\.[^"']+)["']/g;
 
 /**
- * import文に現れる外部依存の指定
- * dist/ui.jsはダッシュボードのHTMLを文字列で持つので, 文中の`import '...'`をimport文と読み違えない
- * 副作用importは行頭に限り, 動的importは括弧を必須にして区別する
- */
-const BARE_IMPORTS = [
-	/\bfrom\s*["']([^."'][^"']*)["']/g,
-	/\bimport\s*\(\s*["']([^."'][^"']*)["']/g,
-	/(?:^|[\n;}])\s*import\s*["']([^."'][^"']*)["']/g,
-];
-
-/**
  * entryごとに載ってよい外部依存
  * 外部依存はバンドルされずimport文として残るためgzip量に現れない
  * 量ではなく集合で見る, 増えた時に気づけることが目的
@@ -52,19 +42,10 @@ const ALLOWED_EXTERNALS = {
 	'dist/testing.js': [],
 };
 
-/** import文に残る外部依存をパッケージ名の集合で返す, workerdの組み込みは利用者のバンドルに載らないので除く */
+/** entryの読み込み先すべてから外部依存を集める */
 function externalsOf(files) {
 	const found = new Set();
-	for (const path of files) {
-		const source = readFileSync(path, 'utf8');
-		for (const pattern of BARE_IMPORTS) {
-			for (const [, spec] of source.matchAll(pattern)) {
-				if (spec.startsWith('cloudflare:') || spec.startsWith('node:')) continue;
-				const parts = spec.split('/');
-				found.add(spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]);
-			}
-		}
-	}
+	for (const path of files) for (const spec of externalsIn(readFileSync(path, 'utf8'))) found.add(spec);
 	return [...found].sort();
 }
 

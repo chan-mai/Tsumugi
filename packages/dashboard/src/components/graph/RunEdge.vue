@@ -8,6 +8,7 @@ import type { Point } from './runLayout';
  * 水平と垂直だけで走り, 角は円弧で丸める
  */
 const props = defineProps<{
+	id: string;
 	markerEnd?: string;
 	data: { route: Point[] };
 }>();
@@ -38,5 +39,5 @@ const path = computed(() => {
 </script>
 
 <template>
-	<BaseEdge :path="path" :marker-end="markerEnd" />
+	<BaseEdge :id="id" :path="path" :marker-end="markerEnd" />
 </template>

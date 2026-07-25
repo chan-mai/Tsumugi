@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { MarkerType, useVueFlow, VueFlow } from '@vue-flow/core';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import RunChildNode from './graph/RunChildNode.vue';
 import RunEdge from './graph/RunEdge.vue';
 import { HANDLE_TOP, runLayout, type ChildData, type TaskData } from './graph/runLayout';
@@ -25,6 +25,16 @@ function measure(id: string, height: number): void {
 	if (measured.value.get(id) === rounded) return;
 	measured.value = new Map(measured.value).set(id, rounded);
 }
+
+// 消えたノードの実寸は捨てる, 残すとRunを開き直すたびに溜まる
+watch(
+	() => props.nodes.map((node) => node.id).join('|'),
+	() => {
+		const alive = new Set(props.nodes.map((node) => node.id));
+		if ([...measured.value.keys()].every((id) => alive.has(id))) return;
+		measured.value = new Map([...measured.value].filter(([id]) => alive.has(id)));
+	},
+);
 
 const { fitView, zoomIn, zoomOut, onNodesInitialized, findNode } = useVueFlow();
 
@@ -93,11 +103,16 @@ onNodesInitialized(() => {
 		</VueFlow>
 
 		<div class="absolute right-2 bottom-2 flex gap-1">
-			<button type="button" class="rounded-card border border-border bg-background px-2 py-1 text-xs" @click="zoomOut()">-</button>
-			<button type="button" class="rounded-card border border-border bg-background px-2 py-1 text-xs" @click="zoomIn()">+</button>
+			<button type="button" class="rounded-card border border-border bg-background px-2 py-1 text-xs" aria-label="縮小" @click="zoomOut()">
+				-
+			</button>
+			<button type="button" class="rounded-card border border-border bg-background px-2 py-1 text-xs" aria-label="拡大" @click="zoomIn()">
+				+
+			</button>
 			<button
 				type="button"
 				class="rounded-card border border-border bg-background px-2 py-1 text-xs"
+				aria-label="全体を表示"
 				@click="fitView({ padding: 0.15, maxZoom: 1 })"
 			>
 				Fit

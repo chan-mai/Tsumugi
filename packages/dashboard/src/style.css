@@ -35,9 +35,10 @@
 		fill: var(--color-border);
 	}
 
-	/* 接続はさせない, 接続点は辺の端点の計算にだけ使う */
+	/* 接続はさせない, 端に置いた点がドラッグを吸わないよう当たり判定も外す */
 	.vue-flow__handle {
 		opacity: 0;
+		pointer-events: none;
 	}
 
 	.vue-flow__node {

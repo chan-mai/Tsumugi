@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Handle, Position } from '@vue-flow/core';
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import StatusCell from '../StatusCell.vue';
 import { HANDLE_TOP, type TaskData } from './runLayout';
 
@@ -10,7 +10,8 @@ const emit = defineEmits<{
 	(event: 'measure', id: string, height: number): void;
 }>();
 
-const node = props.data.node;
+// dataは組み直しのたびに別のオブジェクトになるので, 都度引き直す
+const node = computed(() => props.data.node);
 
 /**
  * 中身の実寸を返す
@@ -19,13 +20,18 @@ const node = props.data.node;
 const content = ref<HTMLElement | null>(null);
 let observer: ResizeObserver | undefined;
 
-onMounted(() => {
-	if (!content.value) return;
+function observe(element: HTMLElement | null): void {
+	observer?.disconnect();
+	if (!element) return;
 	observer = new ResizeObserver(([entry]) => {
-		if (entry) emit('measure', node.id, entry.contentRect.height);
+		if (entry) emit('measure', node.value.id, entry.contentRect.height);
 	});
-	observer.observe(content.value);
-});
+	observer.observe(element);
+}
+
+onMounted(() => observe(content.value));
+// 要素が差し替わっても観測を移す
+watch(content, observe, { flush: 'post' });
 
 onBeforeUnmount(() => observer?.disconnect());
 </script>
