@@ -109,7 +109,7 @@ describe('tickからの書き出し', () => {
 	});
 
 	it('sweepで明細を消してもメトリクスは残る', async () => {
-		// メトリクスはAnalytics Engine側にあるのでD1の明細とは寿命が別(ADR-0016)
+		// メトリクスはAnalytics Engine側にあるのでD1の明細とは保持期間が別(ADR-0016)
 		const { points, dataset } = captureDataset();
 		const stub = shard('MET2#0');
 

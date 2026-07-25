@@ -81,7 +81,7 @@ describe('リトライ', () => {
 	});
 
 	it('失敗するとバックオフぶん先の時刻にalarmが張られる', async () => {
-		// 時間を進めるAPIが無いので「いつ起きるつもりか」を検証する
+		// 時間を進めるAPIが無いので次のalarmの予定時刻を検証する
 		const clock = fixedClock(T0);
 		const { sent, queue } = captureQueue();
 		await install('BOOM', clock, queue);
@@ -151,7 +151,7 @@ describe('timeout', () => {
 });
 
 describe('reaper', () => {
-	it('沈黙したat-least-onceジョブはSCHEDULEDへ戻る', async () => {
+	it('無応答のat-least-onceジョブはSCHEDULEDへ戻る', async () => {
 		const clock = fixedClock(T0);
 		const { queue } = captureQueue();
 		await install('BOOM', clock, queue);
@@ -169,7 +169,7 @@ describe('reaper', () => {
 		expect((await rowOf('BOOM', jobId)).attempts).toBe(1);
 	});
 
-	it('沈黙したat-most-onceジョブはSTALLEDになり再投入されない', async () => {
+	it('無応答のat-most-onceジョブはSTALLEDになり再投入されない', async () => {
 		const clock = fixedClock(T0);
 		const { sent, queue } = captureQueue();
 		await install('ONCE', clock, queue);
@@ -191,7 +191,7 @@ describe('reaper', () => {
 		expect(await stateOf('ONCE', jobId)).toBe('STALLED');
 	});
 
-	it('沈黙の判定境界の手前では回収しない', async () => {
+	it('無応答の判定境界の手前では回収しない', async () => {
 		const clock = fixedClock(T0);
 		const { queue } = captureQueue();
 		await install('BOOM', clock, queue);
@@ -234,7 +234,7 @@ describe('cancel (ADR-0012)', () => {
 		expect(await stateOf('BOOM', jobId)).toBe('CANCELLED');
 	});
 
-	it('QUEUED以降は取り消せない,実行済みかもしれないので嘘をつかない', async () => {
+	it('QUEUED以降は取り消せない,実行済みかもしれないので成功を返さない', async () => {
 		const clock = fixedClock(T0);
 		const { queue } = captureQueue();
 		await install('BOOM', clock, queue);

@@ -135,7 +135,7 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 		await runDurableObjectAlarm(shard('SPLIT#0'));
 
 		expect(await stateOf('SPLIT#0', done)).toBeUndefined();
-		// 手動リトライの窓が開いている限り消えてはならない
+		// 手動リトライを受け付ける期間の内は削除されてはならない
 		expect(await stateOf('SPLIT#0', failed)).toBe('FAILED');
 	});
 
@@ -161,7 +161,7 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 	});
 
 	it('次に対象が出る時刻までalarmを飛ばす', async () => {
-		// 一定間隔で起き直すと, 失敗ジョブだけが残る間ずっと何もしない書き込みが積まれる
+		// 一定間隔で起動すると, 失敗ジョブだけが残る間ずっと何もしない書き込みが積まれる
 		const q = captureQueue();
 		await install('SPLIT4#0', T0, q.queue);
 		await shard('SPLIT4#0').configure({ sweepAfterMs: 1_000, failedRetentionMs: 60 * 60 * 1000 });

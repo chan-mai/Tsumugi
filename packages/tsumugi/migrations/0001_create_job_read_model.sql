@@ -2,7 +2,7 @@
 -- 真実の源はDOのSQLite,ここは数秒遅れる読み取りモデル
 CREATE TABLE IF NOT EXISTS job (
   id TEXT PRIMARY KEY,
-  -- 投影元のアウトボックス連番,古い投影が新しい状態を上書きしないための番人
+  -- 投影元のアウトボックス連番,古い投影による上書きを防ぐために使う
   seq INTEGER NOT NULL,
   binding TEXT NOT NULL,
   state TEXT NOT NULL,

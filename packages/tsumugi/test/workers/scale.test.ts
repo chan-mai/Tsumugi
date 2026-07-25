@@ -163,7 +163,7 @@ describe('運用診断(#10)', () => {
 	it('バックログの深さと投入が止まった制約を返す', async () => {
 		const { queue } = captureQueue();
 		await install('DIAG#0', T0, queue);
-		// 枠1に対して2件, 1件は枠待ちで止まる
+		// 上限1に対して2件, 1件は上限待ちで止まる
 		await shard('DIAG#0').configure({ policy: { concurrency: 1, perKeyConcurrency: 1 } });
 		await shard('DIAG#0').enqueueMany([
 			{ binding: 'DIAG', payload: {} },
@@ -174,7 +174,7 @@ describe('運用診断(#10)', () => {
 		const diag = await shard('DIAG#0').diagnostics();
 		// QUEUED1件+SCHEDULED1件, どちらも稼働中
 		expect(diag.active).toBe(2);
-		// 枠が尽きて投入が止まったことが外から分かる
+		// 上限に達して投入が止まったことが外から分かる
 		expect(diag.blocked.capacity).toBe(true);
 	});
 
@@ -250,11 +250,11 @@ describe('enqueueMany', () => {
 	});
 });
 
-describe('投入候補の窓(ADR-0019 / ADR-0020, #4)', () => {
+describe('投入候補の読み取り範囲(ADR-0019 / ADR-0020, #4)', () => {
 	it('稼働中がTICK_LIMITを埋めても後から入った実行可能ジョブが投入される', async () => {
 		const { sent, queue } = captureQueue();
 		await install('WIN#0', T0, queue);
-		// 枠は空けたまま作成順の窓を実行中で埋める
+		// 上限は空けたまま作成順の読み取り範囲を実行中のジョブで埋める
 		await shard('WIN#0').configure({ policy: { concurrency: 400, perKeyConcurrency: 400 } });
 
 		// 200件を投入してtickでQUEUEDにする(実行中の在庫)
@@ -268,7 +268,7 @@ describe('投入候補の窓(ADR-0019 / ADR-0020, #4)', () => {
 		const late = await shard('WIN#0').enqueue({ binding: 'WIN', payload: { late: true }, priority: 10 });
 		await runDurableObjectAlarm(shard('WIN#0'));
 
-		// 作成順の単一窓だと201件目は選考へ入らず投入されない
+		// 作成順の単一の読み取り範囲では201件目は選考へ入らず投入されない
 		expect(sent.map((m) => m.jobId)).toContain(late);
 		expect(await stateOf('WIN#0', late)).toBe('QUEUED');
 	});

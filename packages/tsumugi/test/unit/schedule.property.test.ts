@@ -18,14 +18,14 @@ const RUNS = 500;
 const activeById = (input: ScheduleInput) => new Map(input.jobs.map((j) => [j.id, j]));
 const dispatches = (decisions: Decision[]) => decisions.filter((d) => d.type === 'dispatch');
 
-/** 回収後にin-flightとして残るジョブ数, dispatch枠の基準 */
+/** 回収後にin-flightとして残るジョブ数, 投入可能数の基準 */
 function inFlightAfterReap(input: ScheduleInput, decisions: Decision[]): number {
 	const reaped = new Set(decisions.filter((d) => d.type !== 'dispatch').map((d) => d.id));
 	return input.jobs.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id)).length;
 }
 
 describe('schedule()の不変条件', () => {
-	it('dispatch数が同時実行の空き枠を超えない', () => {
+	it('dispatch数が同時実行の空き数を超えない', () => {
 		fc.assert(
 			fc.property(scheduleInput, (input) => {
 				const out = schedule(input);
@@ -137,7 +137,7 @@ describe('schedule()の不変条件', () => {
 	});
 
 	it('dispatchの決定が独立な参照モデルと一致する', () => {
-		// 上限だけの検査は枠を広げる変異を相殺で見逃す, あるべき結果を実装と別に計算して丸ごと突き合わせる
+		// 上限だけの検査は上限を広げる変異を相殺で見逃す, あるべき結果を実装と別に計算して丸ごと突き合わせる
 		fc.assert(
 			fc.property(scheduleInput, (input) => {
 				const actual = dispatches(schedule(input).decisions).map((d) => d.id);

@@ -36,7 +36,7 @@ describe('dispatchの基本', () => {
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a', 'b']);
 	});
 
-	it('runAfterが未来のジョブは投入せず,その時刻に起きる', () => {
+	it('runAfterが未来のジョブは投入せず,その時刻に起動する', () => {
 		const out = schedule({
 			now: T0,
 			jobs: [job({ id: 'later', runAfter: T0 + 5_000 })],
@@ -60,7 +60,7 @@ describe('dispatchの基本', () => {
 });
 
 describe('同時実行数の上限(ADR-0009)', () => {
-	it('在庫を差し引いた枠までしか投入しない', () => {
+	it('実行中の件数を差し引いた分までしか投入しない', () => {
 		const jobs = [
 			job({ id: 'run1', state: 'RUNNING', dispatchedAt: T0 }),
 			job({ id: 'run2', state: 'QUEUED', dispatchedAt: T0 }),
@@ -71,7 +71,7 @@ describe('同時実行数の上限(ADR-0009)', () => {
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
 	});
 
-	it('枠が埋まっていれば何も投入しない', () => {
+	it('同時実行の上限に達していれば何も投入しない', () => {
 		const jobs = [job({ id: 'run1', state: 'RUNNING', dispatchedAt: T0 }), job({ id: 'a' })];
 		const out = schedule({ now: T0, jobs, policy: policy({ concurrency: 1 }), bucket: unlimited });
 		expect(out.decisions).toEqual([]);
@@ -125,7 +125,7 @@ describe('レート制限(ADR-0009)', () => {
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a', 'b']);
 	});
 
-	it('トークン切れならその回復時刻に起きる', () => {
+	it('トークン切れならその回復時刻に起動する', () => {
 		const out = schedule({
 			now: T0,
 			jobs: [job({ id: 'a' })],
@@ -207,7 +207,7 @@ describe('優先度とエージング(ADR-0019 / ADR-0020)', () => {
 describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	const dispatched = (over: Partial<JobView> & { id: string }) => job({ state: 'QUEUED', dispatchedAt: T0, timeoutMs: 60_000, ...over });
 
-	it('沈黙していなければ触らない', () => {
+	it('無応答でなければ変更しない', () => {
 		const out = schedule({
 			now: T0 + 60_000 + 30_000 - 1,
 			jobs: [dispatched({ id: 'a' })],
@@ -248,8 +248,8 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 		expect(out.decisions).toEqual([{ type: 'fail', id: 'a', reason: 'exhausted' }]);
 	});
 
-	it('回収で空いた枠は,同じtickで他のジョブが使える', () => {
-		// 固着したジョブに枠を永久占有させる方が害が大きい
+	it('回収で空いた分は,同じtickで他のジョブが使える', () => {
+		// 応答しないジョブに上限を占有させ続ける方が害が大きい
 		const jobs = [dispatched({ id: 'stuck' }), job({ id: 'waiting' })];
 		const out = schedule({ now: T0 + 90_000, jobs, policy: policy({ concurrency: 1 }), bucket: unlimited });
 		expect(ids(out.decisions, 'reap')).toEqual(['stuck']);
@@ -264,12 +264,12 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 		expect(out.nextAlarmAt).toBe(T0 + 90_000);
 	});
 
-	it('回収予定がなければ,次の沈黙判定時刻に起きる', () => {
+	it('回収予定がなければ,次の無応答判定時刻に起動する', () => {
 		const out = schedule({ now: T0, jobs: [dispatched({ id: 'a' })], policy: policy(), bucket: unlimited });
 		expect(out.nextAlarmAt).toBe(T0 + 60_000 + 30_000);
 	});
 
-	it('RUNNING中に落ちたジョブが固着しない', () => {
+	it('RUNNING中に落ちたジョブが滞留しない', () => {
 		// 待ち状態しか見ない実装ではisolateが落ちたジョブが永久に放置される
 		const out = schedule({
 			now: T0 + 10_000_000,
@@ -282,9 +282,9 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 });
 
 describe('nextAlarmAt', () => {
-	it('投入したジョブの沈黙判定時刻を含める', () => {
+	it('投入したジョブの無応答判定時刻を含める', () => {
 		// 入力のスナップショットでは投入対象はまだSCHEDULEDなので, nextSilenceには現れない
-		// ここを取りこぼすと投入後にDOを起こす予定が立たず,沈黙したジョブが永久に回収されない
+		// ここを取りこぼすと投入後にDOを起動する予定が立たず,応答が無いジョブが永久に回収されない
 		const out = schedule({
 			now: T0,
 			jobs: [job({ id: 'a', timeoutMs: 60_000 })],
@@ -307,11 +307,11 @@ describe('nextAlarmAt', () => {
 			job({ id: 'inflight', state: 'QUEUED', dispatchedAt: T0, timeoutMs: 1_000 }),
 		];
 		const out = schedule({ now: T0, jobs, policy: policy({ reaperGraceMs: 30_000 }), bucket: unlimited });
-		// 5秒後vs沈黙判定31秒後-> 5秒後
+		// 5秒後vs無応答判定31秒後-> 5秒後
 		expect(out.nextAlarmAt).toBe(T0 + 5_000);
 	});
 
-	it('枠待ちでは予約しない(完了報告が次のtickを起こすため)', () => {
+	it('上限待ちでは予約しない(完了報告が次のtickを起動するため)', () => {
 		const jobs = [job({ id: 'run', state: 'RUNNING', dispatchedAt: T0, timeoutMs: 10 ** 12 }), job({ id: 'wait' })];
 		const out = schedule({ now: T0, jobs, policy: policy({ concurrency: 1, reaperGraceMs: 10 ** 12 }), bucket: unlimited });
 		expect(ids(out.decisions, 'dispatch')).toEqual([]);
@@ -320,7 +320,7 @@ describe('nextAlarmAt', () => {
 });
 
 describe('投入が止まった制約の報告(ADR-0009, #10)', () => {
-	it('枠が尽きるとcapacity', () => {
+	it('上限に達するとcapacity', () => {
 		const out = schedule({ now: T0, jobs: [job({ id: 'a' }), job({ id: 'b' })], policy: policy({ concurrency: 1 }), bucket: unlimited });
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
 		expect(out.blocked).toEqual({ capacity: true, tokens: false, perKey: false });

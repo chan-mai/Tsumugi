@@ -70,14 +70,14 @@ describe('ダッシュボードの配信(ADR-0025)', () => {
 		expect(res.headers.get('content-type')).toContain('application/json');
 	});
 
-	it('認証が無くてもHTMLの殻は返る', async () => {
+	it('認証が無くてもHTML自体は返る', async () => {
 		// データを含まないのでトークン入力を出すために開ける(ADR-0013)
 		const res = await call(handler(), '/');
 		expect(res.status).toBe(200);
 		expect(await res.text()).toContain('<!doctype html>');
 	});
 
-	it('殻を開けてもAPIは保護される', async () => {
+	it('HTMLを返してもAPIは保護される', async () => {
 		expect((await call(handler(), '/api/jobs')).status).toBe(401);
 		expect((await call(handler(), '/api/stats')).status).toBe(401);
 	});

@@ -91,7 +91,7 @@ describe('別Workerのperformer(ADR-0026)', () => {
 	});
 
 	it('service bindingが未設定ならリトライへ回す', async () => {
-		// 握り潰すと成功扱い,設定漏れが完了ジョブとして残る
+		// 捕捉して無視すると成功扱いになり, 設定漏れが完了ジョブとして残る
 		const { sent, queue } = captureQueue();
 		await install('REMOTE3#0', queue);
 
