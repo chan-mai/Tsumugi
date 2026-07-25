@@ -9,6 +9,22 @@ import type { MutationResult, TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 import type { Ui } from '../ui/serve.js';
 import type { AuthMiddleware } from './auth.js';
+import { openapiDocument } from './openapi.js';
+import { resolveSort, SORTABLE_COLUMNS, type SortColumn } from './sort.js';
+import type {
+	AttemptRecord,
+	BindingsResponse,
+	CreateJobRequest,
+	DiagnosticsResponse,
+	FlowsResponse,
+	JobDetail,
+	JobListResponse,
+	JobSummary,
+	RunDetailResponse,
+	RunListResponse,
+	StartRunRequest,
+	StatsResponse,
+} from './types.js';
 
 export type RestEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };
 
@@ -35,15 +51,8 @@ export type RestOptions<Env extends RestEnv> = {
 	runFor?: (env: Env, runId: string) => { cancel(): Promise<MutationResult>; retry(): Promise<MutationResult> };
 };
 
-export type CreateJobInput = {
-	binding: string;
-	payload: unknown;
-	maxAttempts?: number;
-	delayMs?: number;
-	priority?: number;
-	concurrencyKey?: string;
-	uniqueKey?: string;
-};
+/** 要求と応答の型は`api/types.ts`が持つ, 外部の利用者と同じ定義を読む */
+export type CreateJobInput = CreateJobRequest;
 
 /** 投入内容の検証,通らなければ理由を返す */
 export function validateCreateJob(body: unknown, bindings: readonly string[]): { input: CreateJobInput } | { error: string } {
@@ -79,7 +88,7 @@ export function validateCreateJob(body: unknown, bindings: readonly string[]): {
 	return { input };
 }
 
-export type StartRunInput = { flow: string; input: unknown; id?: string };
+export type StartRunInput = StartRunRequest;
 
 /** 開始内容の検証,通らなければ理由を返す */
 export function validateStartRun(body: unknown, flows: readonly string[]): { input: StartRunInput } | { error: string } {
@@ -134,31 +143,29 @@ export function parseAttempts(raw: unknown): AttemptRecord[] {
  * 表示のためだけに書くと1ジョブあたりのDO書き込みが常時1回増える
  * 導出できるのはCOMPLETEDかつ開始時刻がある場合に限る,実行中や取り消しでは何も出さない
  */
-export function attemptsOf(job: Record<string, unknown>, stored: AttemptRecord[]): AttemptRecord[] {
+export function attemptsOf(
+	job: { state: string; attempts: number; dispatched_at: number | null; updated_at: number },
+	stored: AttemptRecord[],
+): AttemptRecord[] {
 	if (stored.length > 0) return stored;
-	if (job.state !== 'COMPLETED' || job.dispatched_at === null || job.dispatched_at === undefined) return [];
+	if (job.state !== 'COMPLETED' || job.dispatched_at === null) return [];
 	return [
 		{
-			attempt: Number(job.attempts) || 1,
+			attempt: job.attempts || 1,
 			state: 'COMPLETED',
-			started_at: Number(job.dispatched_at),
-			finished_at: Number(job.updated_at),
+			started_at: job.dispatched_at,
+			finished_at: job.updated_at,
 			error: null,
 		},
 	];
 }
 
-export type AttemptRecord = {
-	attempt: number;
-	state: string;
-	started_at: number | null;
-	finished_at: number;
-	error: string | null;
-};
+export type { AttemptRecord };
 
 /**
- * 並べ替えを許す列
+ * 並べ替えを許す列の対応
  * 列オブジェクトへ解決してから使うので, 許可リスト外の文字列がSQLに届かない
+ * `satisfies`で全列を網羅させる, 名前を足して対応を忘れると型検査で落ちる
  */
 const SORT_COLUMNS = {
 	updated_at: readModel.updatedAt,
@@ -167,17 +174,10 @@ const SORT_COLUMNS = {
 	state: readModel.state,
 	priority: readModel.priority,
 	attempts: readModel.attempts,
-} as const;
+} satisfies Record<SortColumn, unknown>;
 
-export const SORTABLE_COLUMNS = Object.keys(SORT_COLUMNS) as (keyof typeof SORT_COLUMNS)[];
-export type SortColumn = keyof typeof SORT_COLUMNS;
-
-/** 不正な指定は既定へ,エラー化するとUIが止まる */
-export function resolveSort(sort: string | null, order: string | null): { column: SortColumn; desc: boolean } {
-	// `in`はプロトタイプ鎖まで見るので`constructor`等が素通りし,列の代わりに関数が渡る
-	const column = sort !== null && Object.hasOwn(SORT_COLUMNS, sort) ? (sort as SortColumn) : 'updated_at';
-	return { column, desc: order !== 'asc' };
-}
+export { resolveSort, SORTABLE_COLUMNS };
+export type { SortColumn };
 
 /**
  * 一覧と詳細はD1の読み取りモデルから引く(ADR-0008)
@@ -191,17 +191,25 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	 * 読み取りモデルはDOに行が在るかを知らないので保持期間から引き算する
 	 * 実際の可否はDOが持つため410が最終的な答え, ここは押す前に分かるようにするための近似
 	 */
-	const withRetryable = (row: Record<string, unknown>, now: number) => {
+	const withRetryable = <T extends { state: string; binding: string; updated_at: number }>(
+		row: T,
+		now: number,
+	): T & { retryable: boolean } => {
 		const retryableState = row.state === 'FAILED' || row.state === 'STALLED';
 		if (!retryableState) return { ...row, retryable: false };
 		if (!failedRetentionMs) return { ...row, retryable: true };
-		const keepFor = failedRetentionMs(String(row.binding));
-		return { ...row, retryable: Number(row.updated_at) > now - keepFor };
+		const keepFor = failedRetentionMs(row.binding);
+		return { ...row, retryable: row.updated_at > now - keepFor };
 	};
 	const app = new Hono<{ Bindings: Env }>();
 	// 認証はAPIにのみ掛ける
 	// HTML自体はデータを含まず, 未認証で返すことでSPAがトークン入力欄を表示できる(ADR-0013)
 	app.use('/api/*', auth);
+
+	// 仕様の配布口, 他言語の利用者はここからクライアントを生成する
+	// D1を読まないのでマイグレーションの検査より手前に置く, 後ろだと適用漏れの環境で仕様も引けない
+	const document = openapiDocument();
+	app.get('/api/openapi.json', (c) => c.json(document));
 
 	// マイグレーションの適用漏れをここで止める
 	// 通さないとD1のraw errorが出るだけで,原因が設定漏れだと分からない
@@ -256,10 +264,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		]);
 
 		const now = Date.now();
-		return c.json({
-			jobs: page.map((row) => withRetryable(row as Record<string, unknown>, now)),
+		const body: JobListResponse = {
+			jobs: page.map((row) => withRetryable(row, now) satisfies JobSummary),
 			total: total[0]?.total ?? 0,
-		});
+		};
+		return c.json(body);
 	});
 
 	/**
@@ -267,12 +276,12 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	 * 登録済みperformerを返す,投影済みのbindingだけだと一度も動いていないものが選べない
 	 */
 	app.get('/api/bindings', async (c) => {
-		if (bindings.length > 0) return c.json({ bindings: [...bindings].sort() });
+		if (bindings.length > 0) return c.json({ bindings: [...bindings].sort() } satisfies BindingsResponse);
 		const rows = await drizzle(c.env.TSUMUGI_DB)
 			.selectDistinct({ binding: readModel.binding })
 			.from(readModel)
 			.orderBy(asc(readModel.binding));
-		return c.json({ bindings: rows.map((row) => row.binding) });
+		return c.json({ bindings: rows.map((row) => row.binding) } satisfies BindingsResponse);
 	});
 
 	app.post('/api/jobs', async (c) => {
@@ -305,10 +314,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			.from(readModel)
 			.where(eq(readModel.state, 'SCHEDULED'));
 		const oldestCreatedAt = oldest[0]?.createdAt ?? null;
-		return c.json({
+		const body: StatsResponse = {
 			byState: Object.fromEntries(rows.map((r) => [r.state, r.count])),
 			oldestScheduledMs: oldestCreatedAt === null ? null : Math.max(0, Date.now() - oldestCreatedAt),
-		});
+		};
+		return c.json(body);
 	});
 
 	// 運用診断, DOに直接問い合わせてバックログ/投影滞留/投入が止まった制約を返す(#10)
@@ -320,7 +330,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				return [binding, await stub.diagnostics()] as const;
 			}),
 		);
-		return c.json({ shard: 0, bindings: Object.fromEntries(perBinding) });
+		const body: DiagnosticsResponse = { shard: 0, bindings: Object.fromEntries(perBinding) };
+		return c.json(body);
 	});
 
 	app.get('/api/jobs/:id', async (c) => {
@@ -333,7 +344,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		if (!found) return c.json({ error: 'not found' }, 404);
 
 		// 返す列を明示する, 展開すると投影の内部列(seq)やcamelCaseの重複まで出る
-		const job: Record<string, unknown> = {
+		const job: Omit<JobDetail, 'retryable' | 'attempts_log'> = {
 			id: found.id,
 			binding: found.binding,
 			state: found.state,
@@ -352,7 +363,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		};
 		// 履歴は詳細でだけ返す, 一覧に載せると1画面で数百KBになり得る(ADR-0028)
 		// `attempts`は試行回数の数値なので別名にする, 上書きすると画面の n/m が壊れる
-		return c.json({ job: { ...withRetryable(job, Date.now()), attempts_log: attemptsOf(job, parseAttempts(found.attemptsLog)) } });
+		const detail: JobDetail = { ...withRetryable(job, Date.now()), attempts_log: attemptsOf(job, parseAttempts(found.attemptsLog)) };
+		return c.json({ job: detail });
 	});
 
 	/**
@@ -435,11 +447,12 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				.where(clause),
 		]);
 
-		return c.json({ runs: page, total: total[0]?.total ?? 0 });
+		const body: RunListResponse = { runs: page, total: total[0]?.total ?? 0 };
+		return c.json(body);
 	});
 
 	/** 開始先の選択肢, 一度も実行されていないflowも選べるよう`flows`から返す */
-	app.get('/api/flows', (c) => c.json({ flows: [...flows].sort() }));
+	app.get('/api/flows', (c) => c.json({ flows: [...flows].sort() } satisfies FlowsResponse));
 
 	app.post('/api/runs', async (c) => {
 		if (!start) return c.json({ error: 'run creation is not available' }, 501);
@@ -469,7 +482,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 		const found = runs[0];
 		if (!found) return c.json({ error: 'not found' }, 404);
-		return c.json({
+		const body: RunDetailResponse = {
 			run: {
 				id: found.id,
 				flow: found.flow,
@@ -498,7 +511,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				created_at: node.createdAt,
 				updated_at: node.updatedAt,
 			})),
-		});
+		};
+		return c.json(body);
 	});
 
 	/**
