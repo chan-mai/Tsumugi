@@ -62,6 +62,53 @@ function setCard(id: string, element: unknown): void {
 	else cards.delete(id);
 }
 
+type Rect = { l: number; r: number; t: number; b: number };
+
+/** 迂回に使う隙間の下限, これ未満は通しても線が両側のカードに接する */
+const MIN_GAP = 8;
+
+/**
+ * 中間の列を通す高さ, カードの隙間のうち目標に近いものを選ぶ
+ * 隙間が無ければ目標のまま返す, カードの背後を通る
+ */
+function passY(column: Rect[], target: number, bottom: number): number {
+	const gaps: [number, number][] = [];
+	for (let i = 0; i + 1 < column.length; i++) gaps.push([column[i]!.b, column[i + 1]!.t]);
+	const last = column[column.length - 1];
+	if (last) gaps.push([last.b, bottom]);
+
+	let best: number | null = null;
+	for (const [from, to] of gaps) {
+		if (to - from < MIN_GAP) continue;
+		const center = (from + to) / 2;
+		if (best === null || Math.abs(center - target) < Math.abs(best - target)) best = center;
+	}
+	return best ?? target;
+}
+
+/**
+ * 1本ぶんの経路
+ * 隣の列へはそのまま曲線を引く, 列を跨ぐ場合は中間の列を隙間で横切る
+ */
+function pathFor(a: Rect, b: Rect, between: Rect[][], bottom: number): string {
+	const y1 = (a.t + a.b) / 2;
+	const y2 = (b.t + b.b) / 2;
+	let x = a.r;
+	let y = y1;
+	let d = `M${x} ${y}`;
+	for (const column of between) {
+		const left = Math.min(...column.map((rect) => rect.l));
+		const right = Math.max(...column.map((rect) => rect.r));
+		const at = passY(column, (y1 + y2) / 2, bottom);
+		const mid = x + (left - x) / 2;
+		d += ` C${mid} ${y} ${mid} ${at} ${left} ${at} L${right} ${at}`;
+		x = right;
+		y = at;
+	}
+	const mid = x + (b.l - x) / 2;
+	return `${d} C${mid} ${y} ${mid} ${y2} ${b.l} ${y2}`;
+}
+
 /**
  * カードの実寸から線を引き直す, 位置決めをブラウザに任せているので測るしかない
  * 実寸にはモーダルの開閉アニメーションのscaleが乗るので, SVGの座標系へ戻してから使う
@@ -72,19 +119,40 @@ function draw(): void {
 	if (!root || !base) return;
 	// 縮小中の値をそのまま置くと線が縮み, 端がカードから離れる
 	const scale = root.clientWidth > 0 ? base.width / root.clientWidth : 1;
-	const at = (x: number, y: number) => [(x - base.left) / scale, (y - base.top) / scale] as const;
+	const rectOf = (id: string): Rect | null => {
+		const element = cards.get(id);
+		if (!element) return null;
+		const r = element.getBoundingClientRect();
+		return {
+			l: (r.left - base.left) / scale,
+			r: (r.right - base.left) / scale,
+			t: (r.top - base.top) / scale,
+			b: (r.bottom - base.top) / scale,
+		};
+	};
+
+	const columnOf = new Map<string, number>();
+	const rects: Rect[][] = [];
+	columns.value.forEach((column, index) => {
+		rects[index] = [];
+		for (const node of column) {
+			columnOf.set(node.id, index);
+			const rect = rectOf(node.id);
+			if (rect) rects[index]!.push(rect);
+		}
+	});
+	const bottom = base.height / scale;
+
 	const next: string[] = [];
 	for (const node of roots.value) {
 		for (const from of node.after) {
-			const source = cards.get(from);
-			const target = cards.get(node.id);
-			if (!source || !target) continue;
-			const a = source.getBoundingClientRect();
-			const b = target.getBoundingClientRect();
-			const [x1, y1] = at(a.right, a.top + a.height / 2);
-			const [x2, y2] = at(b.left, b.top + b.height / 2);
-			const mid = x1 + (x2 - x1) / 2;
-			next.push(`M${x1} ${y1} C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`);
+			const a = rectOf(from);
+			const b = rectOf(node.id);
+			const source = columnOf.get(from);
+			const target = columnOf.get(node.id);
+			if (!a || !b || source === undefined || target === undefined) continue;
+			const between = rects.slice(source + 1, target).filter((column) => column.length > 0);
+			next.push(pathFor(a, b, between, bottom));
 		}
 	}
 	paths.value = next;
