@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateCreateJob } from '../../src/api/rest.js';
+import { validateCreateJob, validateReschedule } from '../../src/api/rest.js';
 
 const BINDINGS = ['MAIL', 'CHARGE'];
 
@@ -85,5 +85,46 @@ describe('投入内容の検証', () => {
 	it('登録一覧が空ならbindingの照合をしない', () => {
 		// createRestに登録名を渡していない構成でも動くようにする
 		expect(validateCreateJob({ binding: 'ANY', payload: {} }, [])).toHaveProperty('input');
+	});
+});
+
+describe('実行時刻の変更内容の検証', () => {
+	const NOW = 1_000_000;
+	const check = (body: unknown) => validateReschedule(body, NOW);
+
+	it('runAtをそのまま実行予定時刻にする', () => {
+		expect(check({ runAt: 2_000_000 })).toEqual({ input: { runAfter: 2_000_000 } });
+	});
+
+	it('delayMsは受け取った時刻からの相対にする', () => {
+		expect(check({ delayMs: 5_000 })).toEqual({ input: { runAfter: NOW + 5_000 } });
+	});
+
+	it('priorityを同時に変更できる', () => {
+		expect(check({ runAt: 2_000_000, priority: 10 })).toEqual({ input: { runAfter: 2_000_000, priority: 10 } });
+	});
+
+	it('runAtとdelayMsの同時指定を拒否する', () => {
+		// どちらを優先するかが仕様として決まらない
+		expect(check({ runAt: 2_000_000, delayMs: 5_000 })).toEqual({ error: 'runAt and delayMs are mutually exclusive' });
+	});
+
+	it('どちらも無ければ拒否する', () => {
+		expect(check({ priority: 10 })).toEqual({ error: 'runAt or delayMs is required' });
+	});
+
+	it('負のdelayMsを拒否する', () => {
+		expect(check({ delayMs: -1 })).toEqual({ error: 'delayMs must not be negative' });
+	});
+
+	it('数値でない指定を拒否する', () => {
+		expect(check({ runAt: '2000000' })).toEqual({ error: 'runAt must be a number' });
+		expect(check({ delayMs: Number.NaN })).toEqual({ error: 'delayMs must be a number' });
+		expect(check({ runAt: 1, priority: 'high' })).toEqual({ error: 'priority must be a number' });
+	});
+
+	it('オブジェクトでない本文を拒否する', () => {
+		expect(check(null)).toEqual({ error: 'body must be an object' });
+		expect(check('runAt=1')).toEqual({ error: 'body must be an object' });
 	});
 });

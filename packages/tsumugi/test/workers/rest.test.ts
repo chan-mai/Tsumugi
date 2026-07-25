@@ -23,6 +23,7 @@ const ROUTES: [method: string, path: string][] = [
 	['GET', '/api/jobs/REST%230:abc'],
 	['POST', '/api/jobs/REST%230:abc/retry'],
 	['POST', '/api/jobs/REST%230:abc/cancel'],
+	['POST', '/api/jobs/REST%230:abc/reschedule'],
 	['GET', '/'],
 	['GET', '/api/unknown'],
 ];
@@ -155,6 +156,7 @@ describe('REST API', () => {
 			'priority',
 			'result',
 			'retryable',
+			'run_after',
 			'state',
 			'unique_key',
 			'updated_at',
@@ -490,5 +492,79 @@ describe('試行履歴(ADR-0028)', () => {
 		const row = jobs.find((j) => j.id === jobId);
 		expect(row).toBeDefined();
 		expect(row).not.toHaveProperty('attempts_log');
+	});
+});
+
+describe('予約済みジョブの実行時刻の変更', () => {
+	const authorized = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+
+	const post = (path: string, body: unknown) =>
+		withAuth.fetch!(
+			new Request(`https://example.com${path}`, { method: 'POST', headers: authorized, body: JSON.stringify(body) }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+
+	/** 先の時刻を予約したジョブ, tickを回してもSCHEDULEDのまま残る */
+	async function scheduled(runAt: number): Promise<string> {
+		await runInDurableObject(shard('REST#0'), (instance) => {
+			(instance as any).clock = { now: () => T0 };
+			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+		});
+		const jobId = await shard('REST#0').enqueue({ binding: 'REST', payload: {}, runAt });
+		await runDurableObjectAlarm(shard('REST#0'));
+		return jobId;
+	}
+
+	const detailOf = async (jobId: string) => {
+		const res = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`, { authorization: `Bearer ${TOKEN}` });
+		const { job } = await res.json<{ job: { state: string; run_after: number | null; priority: number } }>();
+		return job;
+	};
+
+	it('予定時刻を動かすと読み取りモデルにも反映される', async () => {
+		const jobId = await scheduled(T0 + 3_600_000);
+		expect((await detailOf(jobId)).run_after).toBe(T0 + 3_600_000);
+
+		const res = await post(`/api/jobs/${encodeURIComponent(jobId)}/reschedule`, { runAt: T0 + 60_000 });
+		expect(res.status).toBe(200);
+		await runDurableObjectAlarm(shard('REST#0'));
+
+		const job = await detailOf(jobId);
+		expect(job.run_after).toBe(T0 + 60_000);
+		// 取り消して再投入する場合と異なり同じジョブIDのまま変更される
+		expect(job.state).toBe('SCHEDULED');
+	});
+
+	it('priorityも同じ経路で変更できる', async () => {
+		const jobId = await scheduled(T0 + 3_600_000);
+
+		await post(`/api/jobs/${encodeURIComponent(jobId)}/reschedule`, { runAt: T0 + 120_000, priority: 7 });
+		await runDurableObjectAlarm(shard('REST#0'));
+
+		expect((await detailOf(jobId)).priority).toBe(7);
+	});
+
+	it('SCHEDULED以外は409', async () => {
+		// QUEUED以降は投入済みなので予定を変えても実行は止まらない
+		const jobId = await seedJob();
+		const res = await post(`/api/jobs/${encodeURIComponent(jobId)}/reschedule`, { runAt: T0 + 60_000 });
+		expect(res.status).toBe(409);
+	});
+
+	it('DOに無いジョブは410', async () => {
+		const res = await post('/api/jobs/REST%230:missingjob/reschedule', { runAt: T0 + 60_000 });
+		expect(res.status).toBe(410);
+	});
+
+	it('検証に落ちた本文は400', async () => {
+		const jobId = await scheduled(T0 + 3_600_000);
+		const res = await post(`/api/jobs/${encodeURIComponent(jobId)}/reschedule`, { runAt: T0, delayMs: 1_000 });
+		expect(res.status).toBe(400);
+	});
+
+	it('不正な形式のジョブIDは400', async () => {
+		const res = await post('/api/jobs/not-a-job-id/reschedule', { runAt: T0 });
+		expect(res.status).toBe(400);
 	});
 });
