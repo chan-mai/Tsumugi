@@ -16,6 +16,13 @@ export const run = sqliteTable('run', {
 	shape: text('shape').notNull(),
 	/** 取り消しが要求された, 未起動を止めて実行中の終端を待つ */
 	cancelling: integer('cancelling').notNull().default(0),
+	/** subflowとして起動された場合の親 */
+	parentRunId: text('parent_run_id'),
+	parentNodeId: text('parent_node_id'),
+	/** 入れ子の深さ, 上限を超える起動を弾く */
+	depth: integer('depth').notNull().default(0),
+	/** 親へ終端を伝え終えたか */
+	parentNotified: integer('parent_notified').notNull().default(0),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
 });
@@ -36,8 +43,12 @@ export const node = sqliteTable(
 		/** 実行時に増えたノードのpayloadと投入設定, 静的ノードはflow定義から作るのでnull */
 		payload: text('payload'),
 		options: text('options'),
+		/** subflowノードが起動する子のflow名 */
+		subflow: text('subflow'),
 		/** 最後に走ったジョブ, 再開で張り替わる(ADR-0034) */
 		jobId: text('job_id'),
+		/** subflowノードが起動した子のrunID */
+		childRunId: text('child_run_id'),
 		/** 後続のpayloadの材料, fan-outノードは集計値が入る(ADR-0035) */
 		result: text('result'),
 		error: text('error'),

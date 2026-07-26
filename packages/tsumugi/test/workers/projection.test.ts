@@ -75,7 +75,7 @@ describe('D1への投影(ADR-0008)', () => {
 		const brokenDb = {
 			prepare: () => ({ bind: () => ({}) }),
 			batch: async () => {
-				throw new Error('D1が落ちている');
+				throw new Error('D1 is down');
 			},
 		};
 		await install('PROJ4#0', T0, brokenDb);

@@ -29,7 +29,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 		attempts: 1,
 		ack: () => {},
 		retry: () => {
-			throw new Error('consumerはretryを呼んではならない(ADR-0004)');
+			throw new Error('consumer must not call retry (ADR-0004)');
 		},
 	}));
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;

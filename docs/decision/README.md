@@ -38,3 +38,4 @@
 - [ADR-0033](0033-no-unique-key-in-node.md) — runのノードでuniqueKeyを受け付けない
 - [ADR-0034](0034-resume-from-failed-node.md) — 失敗したrunは失敗したノードから再開する
 - [ADR-0035](0035-bounded-run-data.md) — runを跨ぐデータと規模に上限を設ける
+- [ADR-0036](0036-startup-validation-vs-cli.md) — 起動時検証は検出に徹しCLIが生成を担う

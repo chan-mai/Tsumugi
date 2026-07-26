@@ -6,7 +6,7 @@ import StatusCell from './StatusCell.vue';
 import { cancelRun, getRun, retryRun, type Run, type RunNode } from '../api';
 
 const props = defineProps<{ runId: string | null }>();
-const emit = defineEmits<{ close: []; changed: []; job: [jobId: string] }>();
+const emit = defineEmits<{ close: []; changed: []; job: [jobId: string]; run: [runId: string] }>();
 
 const run = ref<Run | null>(null);
 const nodes = ref<RunNode[]>([]);
@@ -120,6 +120,18 @@ const pretty = (input: string | undefined) => {
 								<dd class="font-mono text-xs break-all">{{ run.id }}</dd>
 								<dt class="text-muted-foreground">Flow</dt>
 								<dd>{{ run.flow }}</dd>
+								<template v-if="run.parent_run_id">
+									<dt class="text-muted-foreground">Parent run</dt>
+									<dd>
+										<button
+											type="button"
+											class="border-none font-mono text-xs break-all underline underline-offset-2 hover:text-foreground"
+											@click="emit('run', run.parent_run_id)"
+										>
+											{{ run.parent_run_id }}
+										</button>
+									</dd>
+								</template>
 								<dt class="text-muted-foreground">Nodes</dt>
 								<dd class="tabular-nums">
 									{{ run.node_done }} / {{ run.node_total }}
@@ -133,7 +145,7 @@ const pretty = (input: string | undefined) => {
 
 							<div>
 								<p class="mb-1 text-muted-foreground">Graph</p>
-								<RunGraph :nodes="nodes" @select="emit('job', $event)" />
+								<RunGraph :nodes="nodes" @select="emit('job', $event)" @run="emit('run', $event)" />
 							</div>
 
 							<div>

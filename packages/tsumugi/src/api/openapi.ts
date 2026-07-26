@@ -96,11 +96,12 @@ const SCHEMAS: Record<string, unknown> = {
 			concurrency_key: nullable('string'),
 			unique_key: nullable('string'),
 			guarantee: { type: 'string', enum: ['at-least-once', 'at-most-once'] },
+			run_after: { ...nullable('integer'), description: 'When a scheduled job becomes eligible to run.' },
 			payload: string('JSON-encoded string'),
 			result: { ...nullable('string'), description: 'JSON-encoded return value of perform. Present only on success.' },
 			attempts_log: { type: 'array', items: ref('AttemptRecord'), description: 'Newest attempt first' },
 		},
-		required: [...JOB_SUMMARY_REQUIRED, 'concurrency_key', 'unique_key', 'guarantee', 'payload', 'result', 'attempts_log'],
+		required: [...JOB_SUMMARY_REQUIRED, 'concurrency_key', 'unique_key', 'guarantee', 'run_after', 'payload', 'result', 'attempts_log'],
 	},
 	CreateJobRequest: {
 		type: 'object',
@@ -125,9 +126,11 @@ const SCHEMAS: Record<string, unknown> = {
 		properties: {
 			...RUN_SUMMARY_PROPERTIES,
 			input: string('JSON-encoded string'),
+			parent_run_id: { ...nullable('string'), description: 'Set when this run was started by a subflow node.' },
+			parent_node_id: nullable('string'),
 			retryable: { type: 'boolean', description: 'Only failed runs can be resumed.' },
 		},
-		required: [...RUN_SUMMARY_REQUIRED, 'input', 'retryable'],
+		required: [...RUN_SUMMARY_REQUIRED, 'input', 'parent_run_id', 'parent_node_id', 'retryable'],
 	},
 	RunNode: {
 		type: 'object',
@@ -140,6 +143,7 @@ const SCHEMAS: Record<string, unknown> = {
 			origin: { type: 'string', enum: ['static', 'fanOut', 'spawn'] },
 			after: { type: 'array', items: string(), description: 'Node ids this node depends on' },
 			job_id: nullable('string'),
+			child_run_id: { ...nullable('string'), description: 'Set on subflow nodes, holding the run they started.' },
 			result: { ...nullable('string'), description: 'Set on fan-out nodes only, holding the child summary.' },
 			error: nullable('string'),
 			position: integer('Display order'),
@@ -155,12 +159,60 @@ const SCHEMAS: Record<string, unknown> = {
 			'origin',
 			'after',
 			'job_id',
+			'child_run_id',
 			'result',
 			'error',
 			'position',
 			'created_at',
 			'updated_at',
 		],
+	},
+	BulkRequest: {
+		type: 'object',
+		description: 'Either ids, or the filter fields. When ids is present the filter fields are ignored.',
+		properties: {
+			ids: { type: 'array', items: string(), minItems: 1, maxItems: 200, description: 'Job ids to process' },
+			binding: string('Filter by performer binding name'),
+			state: string('Only a state the operation accepts'),
+			unique_key: string('Exact uniqueKey'),
+			concurrency_key: string('Exact concurrencyKey'),
+			created_from: integer('Lower bound of created_at, inclusive'),
+			created_to: integer('Upper bound of created_at, inclusive'),
+			limit: { ...integer('Jobs to process in one request'), minimum: 1, maximum: 200, default: 200 },
+		},
+	},
+	BulkResult: {
+		type: 'object',
+		properties: {
+			ok: { type: 'array', items: string(), description: 'Job ids the coordinator accepted' },
+			failed: {
+				type: 'array',
+				description: 'Jobs the coordinator refused, with the reason',
+				items: {
+					type: 'object',
+					properties: {
+						id: string(),
+						reason: {
+							type: 'string',
+							enum: ['invalid-state', 'gone', 'invalid-id'],
+							description: 'invalid-state matches 409, gone matches 410, invalid-id is a malformed job id',
+						},
+					},
+					required: ['id', 'reason'],
+				},
+			},
+			remaining: integer('Estimated matches left after the limit. Always 0 when ids was given.'),
+		},
+		required: ['ok', 'failed', 'remaining'],
+	},
+	RescheduleRequest: {
+		type: 'object',
+		description: 'Exactly one of runAt and delayMs is required.',
+		properties: {
+			runAt: integer('Absolute epoch milliseconds'),
+			delayMs: { ...integer('Relative to the time of the request'), minimum: 0 },
+			priority: integer('Changed together with the schedule when present'),
+		},
 	},
 	StartRunRequest: {
 		type: 'object',
@@ -232,6 +284,8 @@ const RESPONSES = {
 const badJobId = { 400: { description: 'Malformed job id', ...json(ref('Error')) } };
 const badRunId = { 400: { description: 'Malformed run id', ...json(ref('Error')) } };
 const badBody = { 400: { description: 'Invalid request body', ...json(ref('Error')) } };
+// 400は1つしか書けないので, 本文とジョブIDの両方で断る経路は説明をまとめる
+const badJobIdOrBody = { 400: { description: 'Malformed job id, or invalid request body', ...json(ref('Error')) } };
 
 const queryParam = (name: string, schema: unknown, description?: string) => ({
 	name,
@@ -320,6 +374,16 @@ export function openapiDocument(): OpenApiDocument {
 				responses: { ...RESPONSES.mutation, ...badJobId, ...RESPONSES.unauthorized, ...RESPONSES.unavailable },
 			},
 		},
+		'/api/jobs/{id}/reschedule': {
+			post: {
+				operationId: 'rescheduleJob',
+				summary: 'Change when a scheduled job runs',
+				description: 'Accepted for SCHEDULED jobs only. The job id and any uniqueKey reservation are kept.',
+				parameters: [idParam('id', 'Job id')],
+				requestBody: { required: true, ...json(ref('RescheduleRequest')) },
+				responses: { ...RESPONSES.mutation, ...badJobIdOrBody, ...RESPONSES.unauthorized, ...RESPONSES.unavailable },
+			},
+		},
 		'/api/jobs/{id}/cancel': {
 			post: {
 				operationId: 'cancelJob',
@@ -327,6 +391,34 @@ export function openapiDocument(): OpenApiDocument {
 				description: 'Accepted for SCHEDULED jobs only. From QUEUED onwards execution may already have begun.',
 				parameters: [idParam('id', 'Job id')],
 				responses: { ...RESPONSES.mutation, ...badJobId, ...RESPONSES.unauthorized, ...RESPONSES.unavailable },
+			},
+		},
+		'/api/jobs/bulk-retry': {
+			post: {
+				operationId: 'bulkRetryJobs',
+				summary: 'Retry several failed jobs',
+				description: 'Accepts FAILED and STALLED jobs. Jobs in any other state are reported in failed.',
+				requestBody: { required: true, ...json(ref('BulkRequest')) },
+				responses: {
+					200: { description: 'Processed, including partial refusals', ...json(ref('BulkResult')) },
+					...badBody,
+					...RESPONSES.unauthorized,
+					...RESPONSES.unavailable,
+				},
+			},
+		},
+		'/api/jobs/bulk-cancel': {
+			post: {
+				operationId: 'bulkCancelJobs',
+				summary: 'Cancel several jobs that have not started',
+				description: 'Accepts SCHEDULED jobs. Jobs in any other state are reported in failed.',
+				requestBody: { required: true, ...json(ref('BulkRequest')) },
+				responses: {
+					200: { description: 'Processed, including partial refusals', ...json(ref('BulkResult')) },
+					...badBody,
+					...RESPONSES.unauthorized,
+					...RESPONSES.unavailable,
+				},
 			},
 		},
 		'/api/bindings': {
