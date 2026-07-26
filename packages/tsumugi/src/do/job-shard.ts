@@ -55,6 +55,10 @@ export type ShardEnv = {
  */
 export type MutationResult = { ok: true } | { ok: false; reason: 'invalid-state' | 'gone' };
 
+/** まとめて処理した結果、断られた理由は個別のretry / cancelと同じ区別を持つ */
+export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' };
+export type BulkResult = { ok: string[]; failed: BulkFailure[] };
+
 /** DOに持たせる設定,流量制御と保持期間 */
 export type ShardSettings = {
 	policy?: Partial<Policy>;
@@ -435,6 +439,31 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			return { ok: true };
 		}
 		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
+	}
+
+	/**
+	 * 一括のリトライと取り消し
+	 *
+	 * 対象は数秒遅れる読み取りモデル由来なので、状態の判定はここで改めて行う
+	 * 1件ずつのRPCにすると200件で200往復になるため、shard単位で1回にまとめる
+	 * alarmは全件の処理後に1回だけ張る、件数だけ張り直しても予定は変わらない
+	 */
+	async mutateMany(action: 'retry' | 'cancel', jobIds: readonly string[]): Promise<BulkResult> {
+		const now = this.clock.now();
+		const ok: string[] = [];
+		const failed: BulkFailure[] = [];
+
+		for (const jobId of jobIds) {
+			const applied =
+				action === 'retry'
+					? this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', { now, runAfter: now, dispatchedAt: null })
+					: this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now });
+			if (applied) ok.push(jobId);
+			else failed.push({ id: jobId, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' });
+		}
+
+		if (ok.length > 0) await this.#armAlarm(now);
+		return { ok, failed };
 	}
 
 	async alarm(): Promise<void> {

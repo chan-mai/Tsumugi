@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import CheckBox from './CheckBox.vue';
 
 defineProps<{ options: { key: string; label: string }[]; visible: Record<string, boolean> }>();
 const emit = defineEmits<{ toggle: [key: string] }>();
@@ -43,20 +44,7 @@ const emit = defineEmits<{ toggle: [key: string] }>();
 					class="flex w-full items-center gap-2 rounded-sm border-none px-2 py-1.5 text-left text-sm hover:bg-accent"
 					@click="emit('toggle', option.key)"
 				>
-					<span class="flex size-4 shrink-0 items-center justify-center rounded-sm border border-border">
-						<svg
-							v-if="visible[option.key]"
-							viewBox="0 0 16 16"
-							class="size-3"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<path d="M3.5 8.5l3 3 6-6" />
-						</svg>
-					</span>
+					<CheckBox :checked="visible[option.key] === true" />
 					{{ option.label }}
 				</button>
 			</PopoverPanel>
