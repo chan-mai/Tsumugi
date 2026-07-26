@@ -62,7 +62,7 @@ at-least-onceでは同じジョブが2回実行される場合があるため、
 class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, void, { concurrencyKey: true }, Env> {
   async perform(payload: { customerId: string; amountJpy: number }): Promise<void> {
     const res = await this.env.PAYMENT.charge(payload);
-    if (!res.ok) throw new Error(`決済に失敗: ${res.status}`);
+    if (!res.ok) throw new Error(`payment failed: ${res.status}`);
   }
 }
 ```

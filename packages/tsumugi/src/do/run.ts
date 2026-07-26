@@ -119,7 +119,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			if (existing) return { id: runId, created: false };
 
 			const flow = flows[input.flow];
-			if (!flow) throw new Error(`flowが未登録: ${input.flow}`);
+			if (!flow) throw new Error(`flow is not registered: ${input.flow}`);
 
 			const shape = shapeOf(flow);
 			this.repo.insertRun({ id: runId, flow: input.flow, input: JSON.stringify(input.input ?? null), shape: JSON.stringify(shape), now });
@@ -234,7 +234,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			const flow = flows[runRow.flow];
 			if (!flow) {
 				// 定義ごと消えた, 待っても解決しないので理由を残して落とす(ADR-0030)
-				this.#failRun(runRow.id, `flowが未登録: ${runRow.flow}`, now);
+				this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
 				await this.#project();
 				return;
 			}
@@ -319,7 +319,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				case 'start': {
 					const built = this.#buildJob(row, definitions, runInput);
 					if (!built) {
-						this.repo.updateNode(row.id, { state: 'FAILED', error: `ノードの定義が見つからない: ${row.id}` }, now);
+						this.repo.updateNode(row.id, { state: 'FAILED', error: `node definition is missing: ${row.id}` }, now);
 						return [row.id];
 					}
 					// 先にジョブIDを確保する, 投入だけ成功して落ちても同じIDで再投入すれば二重にならない
@@ -361,13 +361,13 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		#expand(row: NodeRow, definitions: Map<string, FlowNode>, runInput: unknown, now: number): string[] {
 			const definition = definitions.get(row.id);
 			if (!definition?.over || !definition.item) {
-				this.repo.updateNode(row.id, { state: 'FAILED', error: `fan-outの定義が見つからない: ${row.id}` }, now);
+				this.repo.updateNode(row.id, { state: 'FAILED', error: `fan-out definition is missing: ${row.id}` }, now);
 				return [row.id];
 			}
 
 			const items = definition.over(runInput, this.#depsOf(definition, runInput));
 			if (this.repo.countNodes() + items.length > maxNodes) {
-				this.repo.updateNode(row.id, { state: 'FAILED', error: `ノード数の上限を超えた: ${maxNodes}` }, now);
+				this.repo.updateNode(row.id, { state: 'FAILED', error: `node count exceeded the limit: ${maxNodes}` }, now);
 				return [row.id];
 			}
 
@@ -401,7 +401,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		#applySpawns(parentId: string, spawns: readonly SpawnRequest[], now: number): string[] {
 			if (spawns.length === 0) return [];
 			if (this.repo.countNodes() + spawns.length > maxNodes) {
-				this.repo.updateNode(parentId, { state: 'FAILED', error: `ノード数の上限を超えた: ${maxNodes}` }, now);
+				this.repo.updateNode(parentId, { state: 'FAILED', error: `node count exceeded the limit: ${maxNodes}` }, now);
 				return [parentId];
 			}
 

@@ -25,7 +25,7 @@ export class TsumugiTimeoutError extends Error {
 		readonly jobId: string,
 		readonly timeoutMs: number,
 	) {
-		super(`ジョブがタイムアウトした(${jobId}, ${timeoutMs}ms)`);
+		super(`job timed out (${jobId}, ${timeoutMs}ms)`);
 		this.name = 'TsumugiTimeoutError';
 	}
 }
@@ -107,7 +107,7 @@ async function handleOne<Env extends ConsumerEnv>(
 		// 分割代入もtryに入れる, 本文がnull等で壊れていても例外がackを飛ばさない(ADR-0004)
 		const body = message.body;
 		// jobIdが無い/文字列でない本文はここで弾く, performer実行とreportの対象にしない
-		if (typeof body?.jobId !== 'string') throw new Error('dispatchメッセージが不正: jobIdが無い');
+		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
 		const { binding, attempt, payload, timeoutMs, claimRequired } = body;
 
@@ -118,13 +118,13 @@ async function handleOne<Env extends ConsumerEnv>(
 		}
 
 		const entry = performers[binding];
-		if (!entry) throw new Error(`performerが未登録: ${binding}`);
+		if (!entry) throw new Error(`performer is not registered: ${binding}`);
 		const base = { jobId, attempt, idempotencyKey: jobId };
 
 		if (isRemoteRef(entry)) {
 			const service = (env as Record<string, unknown>)[entry.binding] as RemotePerformerService | undefined;
 			// 設定漏れは即時失敗にする, 捕捉して無視すると検知できないまま失敗が続く
-			if (typeof service?.perform !== 'function') throw new Error(`service bindingが未設定: ${entry.binding}`);
+			if (typeof service?.perform !== 'function') throw new Error(`service binding is not configured: ${entry.binding}`);
 			// signalもspawnも非対応, 呼び出し中だけ有効なものはリモートへ渡さない(ADR-0026)
 			result = await withTimeout(jobId, timeoutMs, () => Promise.resolve(service.perform(payload, base)));
 		} else {

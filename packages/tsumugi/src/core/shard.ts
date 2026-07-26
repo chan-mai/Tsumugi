@@ -24,7 +24,9 @@ export function hashToShard(partitionKey: string, shards: number): number {
 export function resolveShard(binding: string, shards: number, partitionKey: string | undefined): number {
 	if (shards <= 1) return 0;
 	if (partitionKey === undefined) {
-		throw new InvalidJobIdError(`${binding}はshards=${shards}で分割されているためpartitionKeyが必須,省略するとキー単位の保証が失われる`);
+		throw new InvalidJobIdError(
+			`${binding} is split into shards=${shards} and requires partitionKey, omitting it drops the per-key guarantees`,
+		);
 	}
 	return hashToShard(partitionKey, shards);
 }

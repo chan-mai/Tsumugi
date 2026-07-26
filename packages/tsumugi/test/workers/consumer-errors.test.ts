@@ -37,7 +37,7 @@ function message(body: unknown): FakeMessage {
 		ack: vi.fn(),
 		// consumerはretryを呼ばない, 呼べばQueuesのリトライに乗る(ADR-0004)
 		retry: vi.fn(() => {
-			throw new Error('retryは呼ばれてはならない');
+			throw new Error('retry must not be called');
 		}),
 	};
 }
@@ -86,7 +86,7 @@ describe('壊れたメッセージ(ADR-0004)', () => {
 describe('reportの失敗(ADR-0004)', () => {
 	it('reportがthrowしてもackは行われQueuesのリトライに乗らない', async () => {
 		const report = vi.fn(async () => {
-			throw new Error('DO到達不能');
+			throw new Error('DO unreachable');
 		});
 		const failingEnv = {
 			JOB_SHARD: {

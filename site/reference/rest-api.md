@@ -68,7 +68,7 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
         "state": "FAILED",
         "started_at": 1753000010000,
         "finished_at": 1753000012000,
-        "error": "決済に失敗: 502"
+        "error": "payment failed: 502"
       }
     ]
   }

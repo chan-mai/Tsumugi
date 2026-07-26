@@ -5,7 +5,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 export class SendMail extends WorkerEntrypoint {
 	async perform(payload, ctx) {
 		// RPC境界を越える例外の伝播を見るための口
-		if (payload?.fail) throw new Error('意図的な失敗');
+		if (payload?.fail) throw new Error('intentional failure');
 		return { to: payload?.to ?? null, jobId: ctx?.jobId ?? null, keys: Object.keys(ctx ?? {}) };
 	}
 }

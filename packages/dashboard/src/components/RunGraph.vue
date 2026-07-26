@@ -103,16 +103,26 @@ onNodesInitialized(() => {
 		</VueFlow>
 
 		<div class="absolute right-2 bottom-2 flex gap-1">
-			<button type="button" class="rounded-card border border-border bg-background px-2 py-1 text-xs" aria-label="縮小" @click="zoomOut()">
+			<button
+				type="button"
+				class="rounded-card border border-border bg-background px-2 py-1 text-xs"
+				aria-label="Zoom out"
+				@click="zoomOut()"
+			>
 				-
 			</button>
-			<button type="button" class="rounded-card border border-border bg-background px-2 py-1 text-xs" aria-label="拡大" @click="zoomIn()">
+			<button
+				type="button"
+				class="rounded-card border border-border bg-background px-2 py-1 text-xs"
+				aria-label="Zoom in"
+				@click="zoomIn()"
+			>
 				+
 			</button>
 			<button
 				type="button"
 				class="rounded-card border border-border bg-background px-2 py-1 text-xs"
-				aria-label="全体を表示"
+				aria-label="Fit view"
 				@click="fitView({ padding: 0.15, maxZoom: 1 })"
 			>
 				Fit
