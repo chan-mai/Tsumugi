@@ -20,6 +20,9 @@ export const run = sqliteTable(
 		nodeFailed: integer('node_failed').notNull(),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
+		/** subflowとして起動された場合の親 */
+		parentRunId: text('parent_run_id'),
+		parentNodeId: text('parent_node_id'),
 	},
 	(t) => [
 		index('run_state').on(t.state, t.updatedAt),
@@ -43,6 +46,8 @@ export const runNode = sqliteTable(
 		origin: text('origin').notNull(),
 		after: text('after').notNull(),
 		jobId: text('job_id'),
+		/** subflowノードが起動した子のrunID */
+		childRunId: text('child_run_id'),
 		/** fan-outノードの集計値のみが入る,通常ノードの戻り値はjob表に投影済み(ADR-0035) */
 		result: text('result'),
 		error: text('error'),

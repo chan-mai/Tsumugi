@@ -5,7 +5,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 export class SendMail extends WorkerEntrypoint {
 	async perform(payload, ctx) {
 		// RPC境界を越える例外の伝播を見るための口
-		if (payload?.fail) throw new Error('意図的な失敗');
+		if (payload?.fail) throw new Error('intentional failure');
 		// 関数がstubとして越えているかを呼び返して確かめる
 		const spawned = typeof ctx?.spawn === 'function';
 		if (spawned) await ctx.spawn('child', 'MAIL', { to: 'b@example.com' });

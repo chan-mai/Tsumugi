@@ -170,7 +170,7 @@ describe('Runのグラフの配置', () => {
 
 	it('子は親の箱の中に収まる', () => {
 		const children = Array.from({ length: 9 }, (_unused, i) => child('each', i));
-		const result = runLayout([node({ id: 'each', container: true, job_id: 'GREET#0:x', error: '意図的な失敗' }), ...children]);
+		const result = runLayout([node({ id: 'each', container: true, job_id: 'GREET#0:x', error: 'intentional failure' }), ...children]);
 
 		const parent = taskOf(result, 'each')!;
 		const width = Number.parseFloat(parent.style.width);

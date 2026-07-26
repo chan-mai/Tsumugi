@@ -24,13 +24,13 @@ export class InvalidJobIdError extends Error {
 
 export function assertValidBinding(binding: string): void {
 	if (!BINDING_PATTERN.test(binding)) {
-		throw new InvalidJobIdError(`binding名が不正: ${JSON.stringify(binding)} (英字またはアンダースコア始まりの英数字のみ)`);
+		throw new InvalidJobIdError(`invalid binding name: ${JSON.stringify(binding)} (alphanumeric, must start with a letter or underscore)`);
 	}
 }
 
 function assertValidShard(shard: number): void {
 	if (!Number.isInteger(shard) || shard < 0) {
-		throw new InvalidJobIdError(`shardが不正: ${shard} (0以上の整数)`);
+		throw new InvalidJobIdError(`invalid shard: ${shard} (non-negative integer)`);
 	}
 }
 
@@ -46,26 +46,26 @@ export function formatJobId(address: JobAddress): string {
 	assertValidBinding(binding);
 	assertValidShard(shard);
 	if (!LOCAL_ID_PATTERN.test(localId)) {
-		throw new InvalidJobIdError(`localIdが不正: ${JSON.stringify(localId)}`);
+		throw new InvalidJobIdError(`invalid localId: ${JSON.stringify(localId)}`);
 	}
 	return `${binding}#${shard}:${localId}`;
 }
 
 export function parseJobId(jobId: string): JobAddress {
 	const hash = jobId.indexOf('#');
-	if (hash < 0) throw new InvalidJobIdError(`#がない: ${JSON.stringify(jobId)}`);
+	if (hash < 0) throw new InvalidJobIdError(`missing "#": ${JSON.stringify(jobId)}`);
 	const colon = jobId.indexOf(':', hash + 1);
-	if (colon < 0) throw new InvalidJobIdError(`:がない: ${JSON.stringify(jobId)}`);
+	if (colon < 0) throw new InvalidJobIdError(`missing ":": ${JSON.stringify(jobId)}`);
 
 	const binding = jobId.slice(0, hash);
 	const shardText = jobId.slice(hash + 1, colon);
 	const localId = jobId.slice(colon + 1);
 
 	assertValidBinding(binding);
-	if (!/^\d+$/.test(shardText)) throw new InvalidJobIdError(`shardが数値でない: ${JSON.stringify(shardText)}`);
+	if (!/^\d+$/.test(shardText)) throw new InvalidJobIdError(`shard is not a number: ${JSON.stringify(shardText)}`);
 	const shard = Number(shardText);
 	assertValidShard(shard);
-	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidJobIdError(`localIdが不正: ${JSON.stringify(localId)}`);
+	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidJobIdError(`invalid localId: ${JSON.stringify(localId)}`);
 
 	return { binding, shard, localId };
 }
@@ -94,22 +94,23 @@ export class InvalidRunIdError extends Error {
 
 export function assertValidFlow(flow: string): void {
 	if (!FLOW_PATTERN.test(flow)) {
-		throw new InvalidRunIdError(`flow名が不正: ${JSON.stringify(flow)} (英数字とハイフンとアンダースコアのみ)`);
+		throw new InvalidRunIdError(`invalid flow name: ${JSON.stringify(flow)} (alphanumeric, hyphen and underscore only)`);
 	}
 }
 
 export function formatRunId({ flow, localId }: RunAddress): string {
-	if (!FLOW_PATTERN.test(flow)) throw new InvalidRunIdError(`flow名が不正: ${JSON.stringify(flow)} (英数字とハイフンとアンダースコアのみ)`);
-	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidRunIdError(`localIdが不正: ${JSON.stringify(localId)}`);
+	if (!FLOW_PATTERN.test(flow))
+		throw new InvalidRunIdError(`invalid flow name: ${JSON.stringify(flow)} (alphanumeric, hyphen and underscore only)`);
+	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidRunIdError(`invalid localId: ${JSON.stringify(localId)}`);
 	return `${flow}:${localId}`;
 }
 
 export function parseRunId(runId: string): RunAddress {
 	const colon = runId.indexOf(':');
-	if (colon < 0) throw new InvalidRunIdError(`:がない: ${JSON.stringify(runId)}`);
+	if (colon < 0) throw new InvalidRunIdError(`missing ":": ${JSON.stringify(runId)}`);
 	const flow = runId.slice(0, colon);
 	const localId = runId.slice(colon + 1);
-	if (!FLOW_PATTERN.test(flow)) throw new InvalidRunIdError(`flow名が不正: ${JSON.stringify(flow)}`);
-	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidRunIdError(`localIdが不正: ${JSON.stringify(localId)}`);
+	if (!FLOW_PATTERN.test(flow)) throw new InvalidRunIdError(`invalid flow name: ${JSON.stringify(flow)}`);
+	if (!LOCAL_ID_PATTERN.test(localId)) throw new InvalidRunIdError(`invalid localId: ${JSON.stringify(localId)}`);
 	return { flow, localId };
 }

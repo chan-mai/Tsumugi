@@ -31,7 +31,7 @@ export class TsumugiTimeoutError extends Error {
 		readonly jobId: string,
 		readonly timeoutMs: number,
 	) {
-		super(`ジョブがタイムアウトした(${jobId}, ${timeoutMs}ms)`);
+		super(`job timed out (${jobId}, ${timeoutMs}ms)`);
 		this.name = 'TsumugiTimeoutError';
 	}
 }
@@ -105,7 +105,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		// 分割代入もtryに入れる, 本文がnull等で壊れていても例外がackを飛ばさない(ADR-0004)
 		const body = message.body;
 		// jobIdが無い/文字列でない本文はここで弾く, performer実行とreportの対象にしない
-		if (typeof body?.jobId !== 'string') throw new Error('dispatchメッセージが不正: jobIdが無い');
+		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
 		const { binding, attempt, payload, timeoutMs, claimRequired } = body;
 
@@ -119,7 +119,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		const service = (exports[binding] ?? (env as Record<string, unknown>)[binding]) as PerformerService | undefined;
 		// 設定漏れは即時失敗にする, 捕捉して無視すると検知できないまま失敗が続く
 		if (typeof service?.perform !== 'function') {
-			throw new Error(`performerが見つからない: ${binding} (exportするか, service bindingを足す)`);
+			throw new Error(`performer not found: ${binding} (export it, or add a service binding)`);
 		}
 
 		// 要求は溜めるだけ, 送るのは完了報告と同じ便(ADR-0031)

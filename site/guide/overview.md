@@ -50,6 +50,9 @@ Tsumugiはその配線を中に持ちます
 あなたが書くのはたった2つだけです
 
 ```ts
+import { enqueue } from 'tsumugi';
+import { Performer } from 'tsumugi/performer';
+
 // 1. ジョブの中身をperformerとして定義してexportする
 export class SendMail extends Performer<{ to: string }, void, {}, Env> {
   async perform(payload: { to: string }): Promise<void> {

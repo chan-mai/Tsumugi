@@ -8,7 +8,7 @@ const greet = {
 
 const boom = {
 	perform: (): void => {
-		throw new Error('意図的な失敗');
+		throw new Error('intentional failure');
 	},
 };
 

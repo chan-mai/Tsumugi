@@ -32,7 +32,13 @@ performerの解決を「binding名でexportを引く」ことに一本化し,実
 
 `AbortSignal`はRPCの引数として越えられないため,全performerがservice binding越しになる構成では`ctx.signal`を配れない
 代わりに`ctx.deadlineAt`(timeoutが切れる時刻,epochミリ秒)を渡す
-中断が要るperformerは`AbortSignal.timeout(ctx.deadlineAt - Date.now())`を自分で組み立てる
+中断が要るperformerは残り時間から`AbortSignal`を自分で組み立てる
+`AbortSignal.timeout`は負の値を受け付けないため,期限を過ぎている場合は`AbortSignal.abort()`を使う
+
+```ts
+const remaining = ctx.deadlineAt - Date.now();
+const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort();
+```
 
 ## 帰結
 

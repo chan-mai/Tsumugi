@@ -12,19 +12,26 @@ const performers = { ...local, MAIL: remote<SendMail>() };
 // flowの定義口をperformersから作る, bindingもpayloadもここから型が決まる(ADR-0030)
 const flow = createFlow(performers);
 
+// 一覧を取り, 件数だけ実行時に決まる並列で挨拶し, 最後に要約を書く
+const GREETINGS = flow<{ prefix: string }>((f) => {
+	const list = f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
+	const each = f.fanOut('greet', 'Greet', {
+		after: { list },
+		over: (_i, d) => d.list.names,
+		input: (name) => ({ name }),
+	});
+	f.node('report', 'Report', {
+		after: { each },
+		input: (_i, d) => ({ total: d.each.total, failed: d.each.failed }),
+	});
+});
+
 const flows = {
-	// 一覧を取り, 件数だけ実行時に決まる並列で挨拶し, 最後に要約を書く
-	GREETINGS: flow<{ prefix: string }>((f) => {
-		const list = f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
-		const each = f.fanOut('greet', 'Greet', {
-			after: { list },
-			over: (_i, d) => d.list.names,
-			input: (name) => ({ name }),
-		});
-		f.node('report', 'Report', {
-			after: { each },
-			input: (_i, d) => ({ total: d.each.total, failed: d.each.failed }),
-		});
+	GREETINGS,
+	// 子のrunとしてGREETINGSを起動し, その終端を待ってから要約する
+	PIPELINE: flow<{ prefix: string }>((f) => {
+		const greetings = f.subflow('greetings', GREETINGS, { input: (i) => ({ prefix: i.prefix }) });
+		f.node('summary', 'Report', { after: { greetings }, input: () => ({ total: 1, failed: 0 }) });
 	}),
 };
 

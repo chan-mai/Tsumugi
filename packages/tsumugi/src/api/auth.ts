@@ -50,7 +50,7 @@ export type TokenResolver = (env: any) => string | undefined;
  * 解決できなければ通さない,設定漏れを素通りにしない(ADR-0013)
  */
 export function bearerAuth(token: string | TokenResolver, options: BearerOptions = {}): AuthMiddleware {
-	if (typeof token === 'string' && token.length === 0) throw new Error('bearerAuthのトークンが空, fail-closedの前提が崩れる');
+	if (typeof token === 'string' && token.length === 0) throw new Error('bearerAuth token is empty, the fail-closed premise breaks');
 
 	return async (c, next) => {
 		const expected = typeof token === 'string' ? token : token(c.env);

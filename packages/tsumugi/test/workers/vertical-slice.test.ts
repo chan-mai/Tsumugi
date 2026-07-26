@@ -19,7 +19,7 @@ const performers = {
 	},
 	BOOM: {
 		perform: async (): Promise<void> => {
-			throw new Error('意図的な失敗');
+			throw new Error('intentional failure');
 		},
 	},
 	// 戻り値を返すperformer, resultの保存経路を見る(#9)
@@ -55,7 +55,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 			acked.push(String(i));
 		},
 		retry: () => {
-			throw new Error('consumerはretryを呼んではならない(ADR-0004)');
+			throw new Error('consumer must not call retry (ADR-0004)');
 		},
 	}));
 	return { acked, batch: { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage> };

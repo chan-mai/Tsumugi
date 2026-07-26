@@ -7,6 +7,7 @@ import { HANDLE_TOP, type TaskData } from './runLayout';
 const props = defineProps<{ data: TaskData }>();
 const emit = defineEmits<{
 	(event: 'select', jobId: string): void;
+	(event: 'run', runId: string): void;
 	(event: 'measure', id: string, height: number): void;
 }>();
 
@@ -59,6 +60,14 @@ onBeforeUnmount(() => observer?.disconnect());
 				@click="emit('select', node.job_id)"
 			>
 				Job
+			</button>
+			<button
+				v-if="node.child_run_id"
+				type="button"
+				class="nodrag nopan mt-2 block border-none text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+				@click="emit('run', node.child_run_id)"
+			>
+				Run
 			</button>
 			<!-- 描き切れない子は状態ごとの件数で出す(ADR-0035) -->
 			<p v-if="data.summary" class="mt-2 truncate text-xs tabular-nums text-muted-foreground">{{ data.summary }}</p>

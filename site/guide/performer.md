@@ -9,10 +9,12 @@ import { Performer, type JobContext } from 'tsumugi/performer';
 
 export class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env> {
   async perform(payload: { to: string; subject: string }, ctx: JobContext): Promise<void> {
+    const remaining = ctx.deadlineAt - Date.now();
     await fetch('https://api.example.com/mail', {
       method: 'POST',
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(ctx.deadlineAt - Date.now()),
+      // AbortSignal.timeoutは負の値を受け付けないため、期限を過ぎていれば即座に中断する
+      signal: remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort(),
     });
   }
 }
@@ -35,6 +37,15 @@ export { SendMail } from './performers/send-mail.js';
 
 ```ts
 export { SendMail as MAIL } from './performers/send-mail.js';
+```
+
+この場合は`performers`のキーも同じ名前に揃えます
+揃えないと型の上のbinding名は元のクラス名のままになり、実行時の解決先とずれます
+
+```ts
+import { SendMail } from './performers/send-mail.js';
+
+const performers = { MAIL: SendMail };
 ```
 
 `defineTsumugi`の`performers`には、performerをまとめたモジュールをそのまま渡します
@@ -65,8 +76,11 @@ at-least-onceでは同じジョブが2回実行される場合があるため、
 中断が必要な処理には`deadlineAt`から`AbortSignal`を組み立てて渡します
 `AbortSignal`はRPCの引数として渡せない制約があるため、Tsumugiが渡すのは時刻のみです
 
+`AbortSignal.timeout`は負の値を受け付けないため、期限を過ぎている場合は`AbortSignal.abort()`を使います
+
 ```ts
-const signal = AbortSignal.timeout(ctx.deadlineAt - Date.now());
+const remaining = ctx.deadlineAt - Date.now();
+const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort();
 ```
 
 中断は協調的な要求であり、応じないperformerは期限を過ぎても実行を継続する可能性があります。
@@ -82,7 +96,7 @@ const signal = AbortSignal.timeout(ctx.deadlineAt - Date.now());
 class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, void, { concurrencyKey: true }, Env> {
   async perform(payload: { customerId: string; amountJpy: number }): Promise<void> {
     const res = await this.env.PAYMENT.charge(payload);
-    if (!res.ok) throw new Error(`決済に失敗: ${res.status}`);
+    if (!res.ok) throw new Error(`payment failed: ${res.status}`);
   }
 }
 ```
@@ -152,7 +166,9 @@ const performers = { ...local, MAIL: remote<SendMail>() };
 
 ### 別Worker時の制約
 
-`ctx.spawn`はRPCの呼び出しになるため、`await`が必要になります。`spawn`を呼んだ時点で子ノードの実行が始まるため、`await`しなければ`perform`の完了報告に間に合わず、要求が失われてしまいます
+`spawn`が要求した子ノードは`perform`の完了報告に同梱されてから処理されます。呼び出した時点では実行は始まりません
+
+別Workerでは`ctx.spawn`がRPCの呼び出しになるため、`await`が必要になります。`await`せずに`perform`が終わると、要求が完了報告に載らないまま失われます
 
 ```ts
 await ctx.spawn('child', 'MAIL', payload);

@@ -42,7 +42,7 @@ export class InvalidTransitionError extends Error {
 		readonly from: JobState,
 		readonly to: JobState,
 	) {
-		super(`不正な状態遷移: ${from} -> ${to}`);
+		super(`invalid state transition: ${from} -> ${to}`);
 		this.name = 'InvalidTransitionError';
 	}
 }

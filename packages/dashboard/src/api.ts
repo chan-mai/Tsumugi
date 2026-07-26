@@ -141,6 +141,29 @@ export const startRun = async (input: StartRunInput) => {
 	return { id: body.id as string };
 };
 
+export type BulkInput = { ids: string[] };
+
+export type BulkOutcome = {
+	ok: string[];
+	failed: { id: string; reason: string }[];
+	/** 上限で切った残りの見積り、0になるまで繰り返す */
+	remaining: number;
+};
+
+/** 選択したジョブをまとめて処理する、状態の判定はサーバ側が行う */
+export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): Promise<BulkOutcome> => {
+	const res = await fetch(`${base()}/api/jobs/bulk-${action}`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(input),
+	});
+	if (res.status === 401) throw new UnauthorizedError();
+	const body = (await res.json().catch(() => ({}))) as Partial<BulkOutcome> & { error?: string };
+	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	return { ok: body.ok ?? [], failed: body.failed ?? [], remaining: body.remaining ?? 0 };
+};
+
 export const getStats = () => call<{ byState: Record<string, number> }>('/api/stats');
 export const getBindings = () => call<{ bindings: string[] }>('/api/bindings');
 export const getJob = (id: string) => call<{ job: Job }>(`/api/jobs/${encodeURIComponent(id)}`);
