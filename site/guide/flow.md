@@ -91,6 +91,34 @@ class Crawl extends Performer<{ url: string }, void, {}, Env> {
 `perform`が失敗した場合、その試行で要求した子ノードは作成されません。再実行時に改めて要求してください
 service binding越しのリモートperformerには`spawn`が渡されません
 
+## 別のFlowの起動
+
+`f.subflow`は、別のFlowをRunとして起動し、その終端を待ちます
+
+```ts
+const REPORTING = flow<{ ids: string[] }>((f) => {
+  // ...
+});
+
+const PIPELINE = flow<{ prefix: string }>((f) => {
+  const list = f.node('list', 'LIST', { input: (i) => ({ prefix: i.prefix }) });
+  const reported = f.subflow('report', REPORTING, { input: (_i, d) => ({ ids: d.list.ids }) });
+  f.node('notify', 'NOTIFY', { after: { reported }, input: () => ({}) });
+});
+```
+
+第2引数にはFlowの定義そのものを渡します。`input`の型は渡したFlowの型引数から決まります
+起動先は`flows`に登録されている必要があります。登録されていない場合は起動時にエラーになります
+
+子のrunIdは`<子のFlow名>:<親のrunIdのローカル部>-<ノードID>`です
+
+子の状態がそのままノードの状態になります。`COMPLETED`、`FAILED`、`CANCELLED`のいずれかです
+子の戻り値は受け取りません。結果が必要な場合は、performerからR2やD1へ書き込んでください
+
+親を取り消すと子も取り消されます
+
+入れ子は既定で3段までです。`defineTsumugi`の`runs.maxDepth`で変更可能です
+
 ## 待ち合わせ
 
 ノードは、自身と子孫のすべてが終わった時点で完了として扱われます
@@ -135,6 +163,7 @@ fan-outは`over`の結果に従って展開されます。`ctx.spawn`による�
 - ノードは`uniqueKey`を受け付けません。`uniqueKey`を必須と宣言したperformerをノードに指定すると型エラーになります
 - ノードの戻り値が8,192文字を超えた場合、そのノードは失敗になります。大きい結果はR2等へ書き込み、参照を戻り値としてください
 - 1つのRunに含められるノード数は既定で10,000件です。`defineTsumugi`の`runs.maxNodes`で変更可能です
+- subflowの入れ子は既定で3段までです。`defineTsumugi`の`runs.maxDepth`で変更可能です
 
 ## 設定
 

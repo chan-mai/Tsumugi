@@ -346,6 +346,28 @@ export class JobRepo {
 		return true;
 	}
 
+	/**
+	 * 予約済みジョブの実行時刻と優先度を差し替える
+	 *
+	 * 状態を変えないので`compareAndSet`は使えない, 遷移表はSCHEDULED->SCHEDULEDを許さない(ADR-0012)
+	 * 条件付きUPDATEである点は同様で, SCHEDULED以外なら更新行が無いので失敗と判定できる
+	 */
+	reschedule(id: string, runAfter: number, priority: number | undefined, now: number): boolean {
+		const set: Record<string, unknown> = { runAfter, updatedAt: now };
+		if (priority !== undefined) set.priority = priority;
+
+		const updated = this.db
+			.update(job)
+			.set(set)
+			.where(and(eq(job.id, id), eq(job.state, 'SCHEDULED')))
+			.returning({ id: job.id })
+			.all();
+		this.writes++;
+		if (updated.length === 0) return false;
+		this.#appendOutbox(id);
+		return true;
+	}
+
 	appendNotify(runId: string, event: NodeEvent): void {
 		this.db
 			.insert(runNotify)

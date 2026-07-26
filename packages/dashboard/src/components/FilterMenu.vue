@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import CheckBox from './CheckBox.vue';
 
 defineProps<{ title: string; options: string[]; selected: string }>();
 const emit = defineEmits<{ select: [value: string] }>();
@@ -42,20 +43,7 @@ const emit = defineEmits<{ select: [value: string] }>();
 						close();
 					"
 				>
-					<span class="flex size-4 shrink-0 items-center justify-center rounded-sm border border-border">
-						<svg
-							v-if="selected === option"
-							viewBox="0 0 16 16"
-							class="size-3"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<path d="M3.5 8.5l3 3 6-6" />
-						</svg>
-					</span>
+					<CheckBox :checked="selected === option" />
 					{{ option }}
 				</button>
 				<p v-if="options.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">No options</p>

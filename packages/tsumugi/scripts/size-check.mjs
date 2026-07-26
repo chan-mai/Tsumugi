@@ -77,7 +77,7 @@ let failed = false;
 for (const [path, budget] of Object.entries(BUDGETS)) {
 	const files = closureOf(path);
 	if (files.length === 0) {
-		console.error(`✗ ${path}が見つからない(先にbuildが必要)`);
+		console.error(`✗ ${path} not found (build first)`);
 		failed = true;
 		continue;
 	}
@@ -86,33 +86,33 @@ for (const [path, budget] of Object.entries(BUDGETS)) {
 	const size = gzipSync(Buffer.from(source)).length;
 	const pct = Math.round((size / budget) * 100);
 	const externals = externalsOf(files);
-	const deps = externals.length > 0 ? `, 外部: ${externals.join(' ')}` : '';
+	const deps = externals.length > 0 ? `, external: ${externals.join(' ')}` : '';
 
 	if (size > budget) {
-		console.error(`✗ ${path} ${fmt(size)}/予算${fmt(budget)} (${pct}%) [${files.length}ファイル${deps}]`);
+		console.error(`✗ ${path} ${fmt(size)}/budget ${fmt(budget)} (${pct}%) [${files.length} files${deps}]`);
 		failed = true;
 	} else {
-		console.log(`✓ ${path} ${fmt(size)}/予算${fmt(budget)} (${pct}%) [${files.length}ファイル${deps}]`);
+		console.log(`✓ ${path} ${fmt(size)}/budget ${fmt(budget)} (${pct}%) [${files.length} files${deps}]`);
 	}
 
 	const allowed = ALLOWED_EXTERNALS[path] ?? [];
 	for (const dep of externals) {
 		if (!allowed.includes(dep)) {
-			console.error(`  ✗ 宣言していない外部依存: ${dep}`);
+			console.error(`  ✗ undeclared external dependency: ${dep}`);
 			failed = true;
 		}
 	}
 
 	for (const pattern of FORBIDDEN[path] ?? []) {
 		if (pattern.test(source)) {
-			console.error(`  ✗ 取り込まれてはならない実体がある: ${pattern}`);
+			console.error(`  ✗ found an implementation that must not be bundled: ${pattern}`);
 			failed = true;
 		}
 	}
 
 	for (const pattern of CANARY[path] ?? []) {
 		if (!pattern.test(source)) {
-			console.error(`  ✗ 印が見つからない,遮断の検査が形骸化している: ${pattern}`);
+			console.error(`  ✗ marker not found, the isolation check is no longer meaningful: ${pattern}`);
 			failed = true;
 		}
 	}
