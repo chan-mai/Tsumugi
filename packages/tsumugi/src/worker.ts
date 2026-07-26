@@ -185,13 +185,17 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		jobs(env: Env): JobQueue<PerformersOf<R>> {
 			return {
 				// positional形をDOが受けるEnqueueInputへ変換する, 型はJobQueue<M>で縛る
-				enqueue: (binding: string, payload: unknown, options?: object) =>
-					client.enqueue(env, { binding, payload, ...options } as EnqueueInput),
-				enqueueMany: (items: readonly { binding: string; payload: unknown; options?: object }[]) =>
-					client.enqueueMany(
+				enqueue: (binding: string, payload: unknown, options?: object) => {
+					assertConfigured(env);
+					return client.enqueue(env, { binding, payload, ...options } as EnqueueInput);
+				},
+				enqueueMany: (items: readonly { binding: string; payload: unknown; options?: object }[]) => {
+					assertConfigured(env);
+					return client.enqueueMany(
 						env,
 						items.map((it) => ({ binding: it.binding, payload: it.payload, ...it.options }) as EnqueueInput),
-					),
+					);
+				},
 			} as JobQueue<PerformersOf<R>>;
 		},
 		shardFor(env: Env, binding: string, partitionKey?: string): DurableObjectStub<TsumugiJobShard> {

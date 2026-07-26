@@ -63,6 +63,7 @@ export function validateConfig(env: Record<string, unknown>, config: ValidateInp
 	}
 
 	// 別Workerのperformerはservice bindingで解決する, binding名は`performers`のキー(ADR-0037)
+	// キーは一意なので同じbindingが二度並ぶことはない
 	for (const [name, entry] of Object.entries(config.performers)) {
 		if (!isRemoteRef(entry)) continue;
 		const service = env[name] as { perform?: unknown } | undefined;
