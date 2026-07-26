@@ -514,7 +514,7 @@ describe('一括リトライと一括取り消し', () => {
 		});
 		const jobId = await stub.enqueue({ binding: 'REST', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(stub);
-		await stub.report(jobId, { ok: false, error: '意図的な失敗' });
+		await stub.report(jobId, { ok: false, error: 'intentional failure' });
 		await runDurableObjectAlarm(stub);
 		return jobId;
 	}
