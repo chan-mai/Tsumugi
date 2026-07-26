@@ -11,6 +11,8 @@ import type { AuthMiddleware } from './api/auth.js';
 import { createRest, type RestEnv } from './api/rest.js';
 import { sweepReadModel, type SweepOptions } from './projection/sweep.js';
 import type { Ui } from './ui/serve.js';
+import { cachedValidate } from './config/validate.js';
+import { configErrorMessage } from './config/fragment.js';
 
 export type { BindingConfig, ClientEnv };
 
@@ -113,14 +115,28 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 	// flow名はrunIdの一部になる, 起動時に弾かないと開始まで誤りに気付けない(ADR-0029)
 	for (const flow of Object.keys(flows)) assertValidFlow(flow);
 
+	// Workersに起動フックが無いので, 最初の呼び出しを起動とみなして検証する(ADR-0036)
+	const checkConfig = cachedValidate({ performers, flows });
+
+	/**
+	 * 設定漏れを不足の一覧付きで断る(ADR-0013)
+	 * 貼り付けられる断片まで含めた本文にする, 番号だけでは何を足せばよいか分からない
+	 */
+	const assertConfigured = (env: Env): void => {
+		const status = checkConfig(env as unknown as Record<string, unknown>);
+		if (!status.ok) throw new Error(configErrorMessage(status.missing));
+	};
+
 	/** 設定漏れは開始時にエラーにする, エラーにしないとノードが永久に実行されない(ADR-0013) */
 	const runFor = (env: Env, runId: string): DurableObjectStub<RunControl> => {
 		const namespace = env.RUN;
+		// RUNだけ個別に見る, 不足の一覧より宛先が無い事実を先に伝える方が短い
 		if (!namespace) throw new Error('RUN binding が未設定, wranglerにRun DOのbindingを足す必要がある');
 		return namespace.get(namespace.idFromName(runId));
 	};
 
 	const start = async (env: Env, flow: string, input: unknown, options?: { id?: string }): Promise<string> => {
+		assertConfigured(env);
 		if (!flows[flow]) throw new Error(`flowが未登録: ${flow}`);
 		const runId = formatRunId({ flow, localId: options?.id ?? createId() });
 		const result = await runFor(env, runId).start({ flow, input });
@@ -149,6 +165,12 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 			// 認証が設定されるまで何も提供しない, 設定漏れが動作しない状態として現れる(ADR-0013)
 			if (!rest) return new Response('not found', { status: 404 });
+
+			// bindingの不足はマイグレーションの適用漏れと同じく503で断る, どちらも構成の問題(ADR-0036)
+			const status = checkConfig(env as unknown as Record<string, unknown>);
+			if (!status.ok && new URL(request.url).pathname.startsWith('/api/')) {
+				return Response.json({ error: configErrorMessage(status.missing), missing: status.missing }, { status: 503 });
+			}
 			return rest.fetch(request, env, ctx);
 		},
 		async queue(batch: MessageBatch<DispatchMessage>, env: Env): Promise<void> {
@@ -162,23 +184,29 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		jobs(env: Env): JobQueue<PerformersOf<R>> {
 			return {
 				// positional形をDOが受けるEnqueueInputへ変換する, 型はJobQueue<M>で縛る
-				enqueue: (binding: string, payload: unknown, options?: object) =>
-					client.enqueue(env, { binding, payload, ...options } as EnqueueInput),
-				enqueueMany: (items: readonly { binding: string; payload: unknown; options?: object }[]) =>
-					client.enqueueMany(
+				enqueue: (binding: string, payload: unknown, options?: object) => {
+					assertConfigured(env);
+					return client.enqueue(env, { binding, payload, ...options } as EnqueueInput);
+				},
+				enqueueMany: (items: readonly { binding: string; payload: unknown; options?: object }[]) => {
+					assertConfigured(env);
+					return client.enqueueMany(
 						env,
 						items.map((it) => ({ binding: it.binding, payload: it.payload, ...it.options }) as EnqueueInput),
-					),
+					);
+				},
 			} as JobQueue<PerformersOf<R>>;
 		},
 		shardFor(env: Env, binding: string, partitionKey?: string): DurableObjectStub<TsumugiJobShard> {
 			return client.shardFor(env, binding, partitionKey) as DurableObjectStub<TsumugiJobShard>;
 		},
 		enqueue(env: Env, input: TypedEnqueueInput<PerformersOf<R>>): Promise<string> {
+			assertConfigured(env);
 			// TypedEnqueueInputは構造的にEnqueueInputの部分集合なのでそのまま渡せる
 			return client.enqueue(env, input as unknown as EnqueueInput);
 		},
 		enqueueMany(env: Env, inputs: readonly TypedEnqueueInput<PerformersOf<R>>[]): Promise<string[]> {
+			assertConfigured(env);
 			return client.enqueueMany(env, inputs as unknown as readonly EnqueueInput[]);
 		},
 		start,
