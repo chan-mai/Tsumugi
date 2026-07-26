@@ -159,10 +159,10 @@ describe('設定断片の生成', () => {
 describe('設定漏れの説明', () => {
 	it('不足の一覧と次に実行するコマンドを含む', () => {
 		const status = validateConfig({}, { performers });
-		if (status.ok) throw new Error('不足しているはず');
+		if (status.ok) throw new Error('expected a missing binding');
 		const message = configErrorMessage(status.missing);
 
-		expect(message).toContain('✗ TSUMUGI_DB (D1) が未設定');
+		expect(message).toContain('✗ TSUMUGI_DB (D1) is not configured');
 		expect(message).toContain('wrangler d1 create');
 		expect(message).toContain('wrangler d1 migrations apply');
 		expect(message).toContain('wrangler queues create');
@@ -173,7 +173,7 @@ describe('設定漏れの説明', () => {
 		const env = complete();
 		delete (env as Record<string, unknown>).TSUMUGI_QUEUE;
 		const status = validateConfig(env, { performers });
-		if (status.ok) throw new Error('不足しているはず');
+		if (status.ok) throw new Error('expected a missing binding');
 
 		const message = configErrorMessage(status.missing);
 		expect(message).toContain('wrangler queues create');
@@ -182,7 +182,7 @@ describe('設定漏れの説明', () => {
 
 	it('performerを持たないservice bindingは理由を分ける', () => {
 		const status = validateConfig({ ...complete(), MAIL_SERVICE: {} }, { performers: withRemote });
-		if (status.ok) throw new Error('不足しているはず');
-		expect(configErrorMessage(status.missing)).toContain('performerを持たない');
+		if (status.ok) throw new Error('expected a missing binding');
+		expect(configErrorMessage(status.missing)).toContain('has no performer');
 	});
 });

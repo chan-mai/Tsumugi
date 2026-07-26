@@ -20,14 +20,14 @@ const durableObjects = (entries: MissingBinding[]): string[] => {
 	const bindings = entries.map((entry) => ({ name: entry.name, class_name: entry.className ?? entry.name }));
 	return [
 		`"durable_objects": { "bindings": ${jsonc(bindings)} }`,
-		`// tagは既存と衝突しない番号へ振り直す\n"migrations": ${jsonc([{ tag: DO_MIGRATION_TAG, new_sqlite_classes: bindings.map((b) => b.class_name) }])}`,
+		`// renumber tag so it does not collide with existing ones\n"migrations": ${jsonc([{ tag: DO_MIGRATION_TAG, new_sqlite_classes: bindings.map((b) => b.class_name) }])}`,
 	];
 };
 
 const d1 = (entries: MissingBinding[]): string[] =>
 	entries.map(
 		(entry) =>
-			`// database_idは\`wrangler d1 create <name>\`の出力を貼る\n"d1_databases": ${jsonc([
+			`// paste database_id from the output of \`wrangler d1 create <name>\`\n"d1_databases": ${jsonc([
 				{
 					binding: entry.name,
 					database_name: '<database>',
@@ -52,7 +52,7 @@ const analytics = (entries: MissingBinding[]): string[] =>
 const services = (entries: MissingBinding[]): string[] => {
 	if (entries.length === 0) return [];
 	const list = entries.map((entry) => ({ binding: entry.name, service: '<worker>', entrypoint: '<PerformerClass>' }));
-	return [`// serviceとentrypointは相手のWorkerの名前とクラス名に合わせる\n"services": ${jsonc(list)}`];
+	return [`// set service and entrypoint to the target Worker name and class name\n"services": ${jsonc(list)}`];
 };
 
 const BUILDERS: Record<BindingKind, (entries: MissingBinding[]) => string[]> = {
@@ -85,19 +85,19 @@ const LABELS: Record<BindingKind, string> = {
  */
 export function configErrorMessage(missing: readonly MissingBinding[]): string {
 	const lines = missing.map((entry) => {
-		const detail = entry.reason === 'invalid' ? 'performerを持たない' : '未設定';
-		return `✗ ${entry.name} (${LABELS[entry.kind]}) が${detail}`;
+		const detail = entry.reason === 'invalid' ? 'has no performer' : 'is not configured';
+		return `✗ ${entry.name} (${LABELS[entry.kind]}) ${detail}`;
 	});
 
-	const next = ['wrangler.jsonc へ次の断片を追記する'];
+	const next = ['append the following fragment to wrangler.jsonc'];
 	if (missing.some((entry) => entry.kind === 'd1')) {
-		next.push('wrangler d1 create <database> でデータベースを作る');
-		next.push('wrangler d1 migrations apply <database> --remote で読み取りモデルを用意する');
+		next.push('run wrangler d1 create <database> to create the database');
+		next.push('run wrangler d1 migrations apply <database> --remote to set up the read model');
 	}
-	if (missing.some((entry) => entry.kind === 'queue')) next.push('wrangler queues create <queue> でキューを作る');
+	if (missing.some((entry) => entry.kind === 'queue')) next.push('run wrangler queues create <queue> to create the queue');
 
 	return [
-		'tsumugi: wranglerの設定が足りない',
+		'tsumugi: the wrangler configuration is incomplete',
 		...lines,
 		'',
 		...next.map((step, index) => `${index + 1}. ${step}`),
