@@ -112,6 +112,13 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 	const flows: Flows = config.flows ?? {};
 	// flow名はrunIdの一部になる, 起動時に弾かないと開始まで誤りに気付けない(ADR-0029)
 	for (const flow of Object.keys(flows)) assertValidFlow(flow);
+	// subflowの起動先が`flows`に無いと子のrunIdを決められない, 同じく起動時に弾く
+	const registered = new Set(Object.values(flows));
+	for (const [name, flow] of Object.entries(flows)) {
+		for (const node of flow.nodes) {
+			if (node.subflow && !registered.has(node.subflow)) throw new Error(`subflowの起動先が未登録: ${name}.${node.id}`);
+		}
+	}
 
 	/** 設定漏れは開始時にエラーにする, エラーにしないとノードが永久に実行されない(ADR-0013) */
 	const runFor = (env: Env, runId: string): DurableObjectStub<RunControl> => {

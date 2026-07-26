@@ -29,6 +29,8 @@ export type NewNode = {
 	origin: NodeOrigin;
 	after: readonly string[];
 	seq: number;
+	/** subflowノードのみ, 起動する子のflow名 */
+	subflow?: string;
 	/** 実行時に増えたノードだけが持つ, 静的ノードはflow定義から作る */
 	payload?: string;
 	options?: string;
@@ -37,6 +39,7 @@ export type NewNode = {
 export type NodePatch = {
 	state?: NodeState;
 	jobId?: string | null;
+	childRunId?: string | null;
 	result?: string | null;
 	error?: string | null;
 };
@@ -53,6 +56,9 @@ export type RunSnapshot = {
 	node_total: number;
 	node_done: number;
 	node_failed: number;
+	/** subflowとして起動された場合の親 */
+	parent_run_id: string | null;
+	parent_node_id: string | null;
 };
 
 export type NodeSnapshot = {
@@ -65,6 +71,8 @@ export type NodeSnapshot = {
 	origin: string;
 	after: string;
 	job_id: string | null;
+	/** subflowノードが起動した子のrunID */
+	child_run_id: string | null;
 	/**
 	 * fan-outノードの集計値のみを持たせる(ADR-0035)
 	 * 通常ノードの戻り値はジョブ側で投影済みなので, ここに持つと同じものを二度運ぶ
@@ -97,7 +105,15 @@ export class RunRepo {
 	}
 
 	/** 開始を1回に絞る, 同じrunIdは必ず同じDOに当たるので検査と挿入が不可分になる(ADR-0029) */
-	insertRun(input: { id: string; flow: string; input: string; shape: string; now: number }): boolean {
+	insertRun(input: {
+		id: string;
+		flow: string;
+		input: string;
+		shape: string;
+		now: number;
+		parent?: { runId: string; nodeId: string } | undefined;
+		depth?: number;
+	}): boolean {
 		const inserted = this.db
 			.insert(run)
 			.values({
@@ -107,6 +123,10 @@ export class RunRepo {
 				input: input.input,
 				shape: input.shape,
 				cancelling: 0,
+				parentRunId: input.parent?.runId ?? null,
+				parentNodeId: input.parent?.nodeId ?? null,
+				depth: input.depth ?? 0,
+				parentNotified: 0,
 				createdAt: input.now,
 				updatedAt: input.now,
 			})
@@ -118,6 +138,11 @@ export class RunRepo {
 
 	setRunState(id: string, state: RunState, now: number): void {
 		this.db.update(run).set({ state, updatedAt: now }).where(eq(run.id, id)).run();
+	}
+
+	/** 親へ終端を伝え終えた印, 立てるまで毎tickで再送する */
+	markParentNotified(id: string, now: number): void {
+		this.db.update(run).set({ parentNotified: 1, updatedAt: now }).where(eq(run.id, id)).run();
 	}
 
 	markCancelling(id: string, now: number): void {
@@ -144,7 +169,9 @@ export class RunRepo {
 					after: JSON.stringify(n.after),
 					payload: n.payload ?? null,
 					options: n.options ?? null,
+					subflow: n.subflow ?? null,
 					jobId: null,
+					childRunId: null,
 					result: null,
 					error: null,
 					seq: n.seq,
@@ -167,6 +194,7 @@ export class RunRepo {
 				id: node.id,
 				state: node.state,
 				container: node.container,
+				subflow: node.subflow,
 				parent: node.parent,
 				origin: node.origin,
 				after: node.after,
@@ -178,6 +206,7 @@ export class RunRepo {
 			id: row.id,
 			state: row.state as NodeState,
 			container: row.container === 1,
+			subflow: row.subflow !== null,
 			parent: row.parent,
 			origin: row.origin as NodeOrigin,
 			after: JSON.parse(row.after) as string[],
@@ -207,6 +236,7 @@ export class RunRepo {
 		const set: Record<string, unknown> = { updatedAt: now };
 		if (patch.state !== undefined) set.state = patch.state;
 		if (patch.jobId !== undefined) set.jobId = patch.jobId;
+		if (patch.childRunId !== undefined) set.childRunId = patch.childRunId;
 		if (patch.result !== undefined) set.result = patch.result;
 		if (patch.error !== undefined) set.error = patch.error;
 		this.db.update(node).set(set).where(eq(node.id, id)).run();
@@ -285,6 +315,8 @@ export class RunRepo {
 			node_total: total,
 			node_done: done,
 			node_failed: failed,
+			parent_run_id: row.parent_run_id,
+			parent_node_id: row.parent_node_id,
 		};
 		this.db
 			.insert(runOutbox)
@@ -320,6 +352,7 @@ export class RunRepo {
 						origin: row.origin,
 						after: row.after,
 						job_id: row.jobId,
+						child_run_id: row.childRunId,
 						result: row.container === 1 ? row.result : null,
 						error: row.error,
 						position: row.seq,
@@ -356,6 +389,10 @@ export class RunRepo {
 			input: row.input,
 			shape: row.shape,
 			cancelling: row.cancelling,
+			parent_run_id: row.parentRunId,
+			parent_node_id: row.parentNodeId,
+			depth: row.depth,
+			parent_notified: row.parentNotified,
 			created_at: row.createdAt,
 			updated_at: row.updatedAt,
 		};
@@ -372,7 +409,9 @@ export class RunRepo {
 			after: row.after,
 			payload: row.payload,
 			options: row.options,
+			subflow: row.subflow,
 			job_id: row.jobId,
+			child_run_id: row.childRunId,
 			result: row.result,
 			error: row.error,
 			seq: row.seq,

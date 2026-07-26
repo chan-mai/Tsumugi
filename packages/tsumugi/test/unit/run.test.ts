@@ -8,12 +8,14 @@ type NodeSpec = {
 	parent?: string;
 	origin?: NodeView['origin'];
 	container?: boolean;
+	subflow?: boolean;
 };
 
 const node = (n: NodeSpec): NodeView => ({
 	id: n.id,
 	state: n.state,
 	container: n.container ?? false,
+	subflow: n.subflow ?? false,
 	parent: n.parent ?? null,
 	origin: n.origin ?? 'static',
 	after: n.after ?? [],
@@ -183,5 +185,39 @@ describe('runの状態', () => {
 
 	it('取り消しは全て終端になった時点でCANCELLED', () => {
 		expect(stateOf([node({ id: 'a', state: 'CANCELLED' })], true)).toBe('CANCELLED');
+	});
+});
+
+describe('subflowノード', () => {
+	it('依存が揃うと子のrunの開始を要求する', () => {
+		const nodes = [node({ id: 'list', state: 'COMPLETED' }), node({ id: 'child', state: 'PENDING', subflow: true, after: ['list'] })];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'startRun', id: 'child' }]);
+	});
+
+	it('ジョブの投入は要求しない', () => {
+		// performerを持たないので, startを出すとJob DOへ空のbindingが渡る
+		const nodes = [node({ id: 'child', state: 'PENDING', subflow: true })];
+		expect(advance({ nodes, cancelling: false }).decisions).not.toContainEqual({ type: 'start', id: 'child' });
+	});
+
+	it('実行中は下流を待たせる', () => {
+		const nodes = [node({ id: 'child', state: 'RUNNING', subflow: true }), node({ id: 'after', state: 'PENDING', after: ['child'] })];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([]);
+	});
+
+	it('子が失敗すると下流を打ち切る', () => {
+		const nodes = [node({ id: 'child', state: 'FAILED', subflow: true }), node({ id: 'after', state: 'PENDING', after: ['child'] })];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'after' }]);
+	});
+
+	it('取り消し中は実行中の子も止める', () => {
+		// ジョブと違い子のrunは実行中でも取り消せる
+		const nodes = [node({ id: 'child', state: 'RUNNING', subflow: true })];
+		expect(advance({ nodes, cancelling: true }).decisions).toEqual([{ type: 'cancel', id: 'child' }]);
+	});
+
+	it('取り消し中でも終端に達した子には何もしない', () => {
+		const nodes = [node({ id: 'child', state: 'COMPLETED', subflow: true })];
+		expect(advance({ nodes, cancelling: true }).decisions).toEqual([]);
 	});
 });

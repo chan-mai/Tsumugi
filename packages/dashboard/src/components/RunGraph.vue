@@ -14,7 +14,7 @@ import type { RunNode } from '../api';
  * 実行時に増えたノードは親ノードの中に入る(ADR-0032)
  */
 const props = defineProps<{ nodes: RunNode[] }>();
-const emit = defineEmits<{ (event: 'select', jobId: string): void }>();
+const emit = defineEmits<{ (event: 'select', jobId: string): void; (event: 'run', runId: string): void }>();
 
 // カードの中身の実寸, 届くまでは`runLayout`の見積もりで置く
 const measured = ref(new Map<string, number>());
@@ -92,7 +92,7 @@ onNodesInitialized(() => {
 			:only-render-visible-elements="true"
 		>
 			<template #node-task="{ data }">
-				<RunTaskNode :data="data as TaskData" @select="emit('select', $event)" @measure="measure" />
+				<RunTaskNode :data="data as TaskData" @select="emit('select', $event)" @run="emit('run', $event)" @measure="measure" />
 			</template>
 			<template #node-child="{ data }">
 				<RunChildNode :data="data as ChildData" />

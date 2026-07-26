@@ -23,6 +23,8 @@ function toRunValues(snapshot: RunSnapshot, seq: number): typeof run.$inferInser
 		nodeFailed: snapshot.node_failed,
 		createdAt: snapshot.created_at,
 		updatedAt: snapshot.updated_at,
+		parentRunId: snapshot.parent_run_id,
+		parentNodeId: snapshot.parent_node_id,
 	};
 }
 
@@ -38,6 +40,7 @@ function toNodeValues(snapshot: NodeSnapshot, seq: number): typeof runNode.$infe
 		origin: snapshot.origin,
 		after: snapshot.after,
 		jobId: snapshot.job_id,
+		childRunId: snapshot.child_run_id,
 		result: snapshot.result,
 		error: snapshot.error,
 		position: snapshot.position,

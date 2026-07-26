@@ -6,7 +6,7 @@ import StatusCell from './StatusCell.vue';
 import { cancelRun, getRun, retryRun, type Run, type RunNode } from '../api';
 
 const props = defineProps<{ runId: string | null }>();
-const emit = defineEmits<{ close: []; changed: []; job: [jobId: string] }>();
+const emit = defineEmits<{ close: []; changed: []; job: [jobId: string]; run: [runId: string] }>();
 
 const run = ref<Run | null>(null);
 const nodes = ref<RunNode[]>([]);
@@ -133,7 +133,7 @@ const pretty = (input: string | undefined) => {
 
 							<div>
 								<p class="mb-1 text-muted-foreground">Graph</p>
-								<RunGraph :nodes="nodes" @select="emit('job', $event)" />
+								<RunGraph :nodes="nodes" @select="emit('job', $event)" @run="emit('run', $event)" />
 							</div>
 
 							<div>
