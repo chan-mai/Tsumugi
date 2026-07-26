@@ -218,6 +218,8 @@ const RESPONSES = {
 const badJobId = { 400: { description: 'Malformed job id', ...json(ref('Error')) } };
 const badRunId = { 400: { description: 'Malformed run id', ...json(ref('Error')) } };
 const badBody = { 400: { description: 'Invalid request body', ...json(ref('Error')) } };
+// 400は1つしか書けないので, 本文とジョブIDの両方で断る経路は説明をまとめる
+const badJobIdOrBody = { 400: { description: 'Malformed job id, or invalid request body', ...json(ref('Error')) } };
 
 const queryParam = (name: string, schema: unknown, description?: string) => ({
 	name,
@@ -313,7 +315,7 @@ export function openapiDocument(): OpenApiDocument {
 				description: 'Accepted for SCHEDULED jobs only. The job id and any uniqueKey reservation are kept.',
 				parameters: [idParam('id', 'Job id')],
 				requestBody: { required: true, ...json(ref('RescheduleRequest')) },
-				responses: { ...RESPONSES.mutation, ...badBody, ...RESPONSES.unauthorized, ...RESPONSES.unavailable },
+				responses: { ...RESPONSES.mutation, ...badJobIdOrBody, ...RESPONSES.unauthorized, ...RESPONSES.unavailable },
 			},
 		},
 		'/api/jobs/{id}/cancel': {

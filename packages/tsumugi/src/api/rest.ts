@@ -437,20 +437,20 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		try {
 			body = await c.req.json();
 		} catch {
-			return c.json({ error: 'body must be valid JSON' }, 400);
+			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
 		}
 
 		const parsed = validateReschedule(body, Date.now());
-		if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
 		try {
 			// SCHEDULED以外は予定を変えても実行が止まらないのでDO側で断る
 			const result = await stubOf(c.env, id).reschedule(id, parsed.input);
-			if (result.ok) return c.json({ ok: true }, 200);
+			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
 			const { body: refused, status } = refusal(result);
 			return c.json(refused, status);
 		} catch (error) {
-			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' }, 400);
+			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
 			throw error;
 		}
 	});
