@@ -136,9 +136,12 @@ describe('subflowの縦串', () => {
 
 	it('入れ子の上限を超える起動を弾く', async () => {
 		// 既定は3, 深さの判定は起動された側が行う
-		await expect(runStub('GREETINGS:too-deep').start({ flow: 'GREETINGS', input: { prefix: 'x' }, depth: 4 })).rejects.toThrow(
-			'subflowの入れ子が上限を超えた',
-		);
+		// RPC越しの例外はvitest-pool-workersが未処理rejectionとして報告するためDO内で実行
+		await expect(
+			runInDurableObject(runStub('GREETINGS:too-deep'), (instance) =>
+				(instance as any).start({ flow: 'GREETINGS', input: { prefix: 'x' }, depth: 4 }),
+			),
+		).rejects.toThrow('subflowの入れ子が上限を超えた');
 	});
 
 	it('子のrunが親を覚えている', async () => {
