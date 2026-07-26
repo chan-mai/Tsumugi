@@ -15,7 +15,7 @@ function captureQueue() {
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
 				const items = [...batch];
 				// プロデューサ側の100件上限, 超えると本番のsendBatchも失敗する
-				if (items.length > 100) throw new Error(`sendBatch上限100件を超過: ${items.length}`);
+				if (items.length > 100) throw new Error(`sendBatch exceeded the limit of 100: ${items.length}`);
 				batches.push(items.length);
 				for (const m of items) sent.push(m.body);
 			},

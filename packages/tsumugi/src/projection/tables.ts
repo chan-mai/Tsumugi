@@ -24,6 +24,8 @@ export const job = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 		dispatchedAt: integer('dispatched_at'),
+		/** SCHEDULEDが実行可能になる時刻, 後から変更できるので投影する */
+		runAfter: integer('run_after'),
 		payload: text('payload').notNull(),
 		// performの戻り値, DOのjob.resultをそのまま投影する(#9)
 		result: text('result'),

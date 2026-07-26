@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import BulkActions from './components/BulkActions.vue';
+import CheckBox from './components/CheckBox.vue';
 import DateRangeMenu from './components/DateRangeMenu.vue';
 import FilterMenu from './components/FilterMenu.vue';
 import JobDetailModal from './components/JobDetailModal.vue';
 import NewJobModal from './components/NewJobModal.vue';
 import NewRunModal from './components/NewRunModal.vue';
 import Pagination from './components/Pagination.vue';
+import RefreshMenu from './components/RefreshMenu.vue';
 import RowActions from './components/RowActions.vue';
 import RunDetailModal from './components/RunDetailModal.vue';
 import SearchBox from './components/SearchBox.vue';
@@ -14,6 +17,7 @@ import StatusCell from './components/StatusCell.vue';
 import TokenPrompt from './components/TokenPrompt.vue';
 import ViewMenu from './components/ViewMenu.vue';
 import { getBindings, getFlows, getStats, isUnauthorized, listJobs, listRuns, tokenCookie, type Job, type Run } from './api';
+import { loadRefresh, REFRESH_KEY } from './refresh';
 import { isJobId, type SearchField } from './search';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
@@ -35,11 +39,12 @@ const pageSize = ref(20);
 const sort = ref('updated_at');
 const desc = ref(true);
 const selected = ref<string | null>(null);
+const picked = ref<string[]>([]);
 const creating = ref(false);
 const message = ref<string | null>(null);
 const error = ref<string | null>(null);
 const unauthorized = ref(false);
-const autoRefresh = ref(true);
+const refreshMs = ref(loadRefresh(localStorage));
 const canPromptToken = tokenCookie() !== null;
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -141,10 +146,36 @@ function resetFilters() {
 
 const progressOf = (run: Run) => `${run.node_done} / ${run.node_total}`;
 
+/** 一覧に残っている行だけを選択として扱う、再読込で消えた行は落とす */
+const selectedIds = computed(() => picked.value.filter((id) => jobs.value.some((job) => job.id === id)));
+const allPicked = computed(() => jobs.value.length > 0 && jobs.value.every((job) => picked.value.includes(job.id)));
+
+function clearSelection() {
+	picked.value = [];
+}
+
+function togglePick(id: string) {
+	picked.value = picked.value.includes(id) ? picked.value.filter((value) => value !== id) : [...picked.value, id];
+}
+
+function toggleAll() {
+	picked.value = allPicked.value ? [] : jobs.value.map((job) => job.id);
+}
+
 function restartTimer() {
 	if (timer) clearInterval(timer);
-	// 投影は数秒遅れる読み取りモデルなので短い間隔にしても意味がない
-	if (autoRefresh.value) timer = setInterval(load, 3_000);
+	if (refreshMs.value > 0) timer = setInterval(load, refreshMs.value);
+}
+
+/** 間隔の変更を保存して即座に反映する */
+function setRefresh(ms: number) {
+	refreshMs.value = ms;
+	restartTimer();
+	try {
+		localStorage.setItem(REFRESH_KEY, String(ms));
+	} catch {
+		// プライベートモード等の書き込み不可, 選択自体は継続
+	}
 }
 
 watch([state, binding, runFlow, searchField, search, createdFrom, createdTo, pageSize, sort, desc], () => {
@@ -279,18 +310,17 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				<div class="flex items-center gap-2">
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
-					<ViewMenu v-if="tab === 'jobs'" :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
-					<button
-						type="button"
-						class="flex h-8 items-center gap-2 rounded-card border border-border bg-background px-3 text-sm hover:bg-accent"
-						@click="
-							autoRefresh = !autoRefresh;
-							restartTimer();
+					<BulkActions
+						v-if="selectedIds.length > 0"
+						:ids="selectedIds"
+						@changed="
+							clearSelection();
+							load();
 						"
-					>
-						<span class="size-2 rounded-full" :class="autoRefresh ? 'animate-pulse bg-green-500' : 'bg-gray-300'" aria-hidden="true" />
-						{{ autoRefresh ? 'Live' : 'Paused' }}
-					</button>
+						@message="message = $event"
+					/>
+					<ViewMenu v-if="tab === 'jobs'" :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
+					<RefreshMenu :interval="refreshMs" @update:interval="setRefresh" />
 					<button
 						type="button"
 						class="flex h-8 items-center gap-1.5 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
@@ -346,6 +376,16 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				<table class="w-full caption-bottom text-sm">
 					<thead class="[&_tr]:border-b [&_tr]:border-border">
 						<tr>
+							<th class="h-12 w-10 pl-4">
+								<button
+									type="button"
+									class="flex size-6 items-center justify-center rounded-sm border-none hover:bg-accent"
+									aria-label="Select all rows"
+									@click="toggleAll"
+								>
+									<CheckBox :checked="allPicked" />
+								</button>
+							</th>
 							<th :class="HEAD">
 								<SortHeader label="Binding" column="binding" :sort="sort" :desc="desc" @sort="sortBy" />
 							</th>
@@ -372,6 +412,16 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 							class="cursor-pointer border-b border-border transition-colors hover:bg-muted"
 							@click="selected = job.id"
 						>
+							<td class="pl-4 align-middle" @click.stop>
+								<button
+									type="button"
+									class="flex size-6 items-center justify-center rounded-sm border-none hover:bg-accent"
+									:aria-label="`Select ${job.id}`"
+									@click="togglePick(job.id)"
+								>
+									<CheckBox :checked="picked.includes(job.id)" />
+								</button>
+							</td>
 							<td class="p-4 align-middle">
 								{{ job.binding }}
 								<!-- ID列を隠す幅では行の識別ができなくなるので,ここに含めて表示する -->
@@ -389,7 +439,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 							</td>
 						</tr>
 						<tr v-if="jobs.length === 0">
-							<td colspan="8" class="h-24 text-center text-muted-foreground">No results.</td>
+							<td colspan="9" class="h-24 text-center text-muted-foreground">No results.</td>
 						</tr>
 					</tbody>
 				</table>
@@ -416,6 +466,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				selectedRun = null;
 				selected = $event;
 			"
+			@run="selectedRun = $event"
 		/>
 		<NewRunModal
 			:open="startingRun"
