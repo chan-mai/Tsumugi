@@ -35,6 +35,8 @@ export type JobDetail = JobSummary & {
 	concurrency_key: string | null;
 	unique_key: string | null;
 	guarantee: string;
+	/** SCHEDULEDが実行可能になる時刻, 投影前の古い行はnull */
+	run_after: number | null;
 	/** 実行中のジョブが報告した進捗, 0以上1以下で報告が無ければnull */
 	progress: number | null;
 	payload: string;
@@ -84,6 +86,9 @@ export type RunSummary = {
 
 export type RunDetail = RunSummary & {
 	input: string;
+	/** subflowとして起動された場合の親, それ以外はnull */
+	parent_run_id: string | null;
+	parent_node_id: string | null;
 	/** 終端でなければ再開できない(ADR-0034) */
 	retryable: boolean;
 };
@@ -98,6 +103,8 @@ export type RunNodeView = {
 	origin: string;
 	after: string[];
 	job_id: string | null;
+	/** subflowノードが起動した子のrunID */
+	child_run_id: string | null;
 	/** fan-outノードの集計値のみが入る(ADR-0035) */
 	result: string | null;
 	error: string | null;

@@ -69,7 +69,7 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
         "state": "FAILED",
         "started_at": 1753000010000,
         "finished_at": 1753000012000,
-        "error": "決済に失敗: 502"
+        "error": "payment failed: 502"
       }
     ]
   }
@@ -124,7 +124,81 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
 
 `QUEUED`以降は既に実行されている可能性があるため409を返します
 
-返る状態は`retry`と同じです
+返る状態は`retry`と同様です
+
+## POST /api/jobs/bulk-retry
+
+## POST /api/jobs/bulk-cancel
+
+複数のジョブをまとめて処理します。対象はIDの列挙か、絞り込み条件のいずれかで指定します
+
+IDで指定する場合は`ids`のみを渡します
+
+```json
+{ "ids": ["MAIL#0:xxxxxxxxxxxxxxxxxxxxxxxx", "MAIL#0:yyyyyyyyyyyyyyyyyyyyyyyy"] }
+```
+
+条件で指定する場合は`ids`を省略します
+
+```json
+{ "binding": "MAIL", "state": "FAILED", "created_from": 1753000000000, "limit": 200 }
+```
+
+| 項目              | 必須 | 説明                                       |
+| ----------------- | ---- | ------------------------------------------ |
+| `ids`             | 任意 | ジョブIDの配列。1件以上200件以下           |
+| `binding`         | 任意 | binding名での絞り込み                      |
+| `state`           | 任意 | 操作が受け付ける状態のみ指定できます       |
+| `unique_key`      | 任意 | 完全一致                                   |
+| `concurrency_key` | 任意 | 完全一致                                   |
+| `created_from`    | 任意 | `created_at`の下限                         |
+| `created_to`      | 任意 | `created_at`の上限                         |
+| `limit`           | 任意 | 1回で処理する件数。既定と最大はいずれも200 |
+
+`ids`を指定した場合、他の条件は無視されます
+
+条件で指定し`state`を省略した場合、`bulk-retry`は`FAILED`と`STALLED`、`bulk-cancel`は`SCHEDULED`を対象とします
+これ以外の状態を指定した場合は400を返します。対象が減らず、繰り返しても終わらないためです
+
+### レスポンス
+
+```json
+{
+  "ok": ["MAIL#0:xxxxxxxxxxxxxxxxxxxxxxxx"],
+  "failed": [{ "id": "MAIL#0:yyyyyyyyyyyyyyyyyyyyyyyy", "reason": "gone" }],
+  "remaining": 320
+}
+```
+
+一部が断られても全体は200です。全体を失敗にすると、成功した分まで再送されるためです
+
+`reason`は個別のリトライと取り消しが返す理由に対応します。`invalid-state`は409、`gone`は410に相当します
+
+`remaining`は条件で指定した場合に、上限で処理しきれなかった件数です。0になるまで同じ要求を繰り返します
+読み取りモデルは数秒遅れるため、この値は見積りです。`ids`で指定した場合は常に0です
+
+対象は読み取りモデルから引きますが、状態の判定はDurable Object側で改めて行います
+一覧に表示されていても、その時点で条件に合わないジョブは`failed`に入ります
+
+## POST /api/jobs/:id/reschedule
+
+予約済みジョブの実行時刻を変更します。対象は`SCHEDULED`のジョブのみです
+
+```json
+{ "runAt": 1753003600000, "priority": 10 }
+```
+
+| 項目       | 必須 | 説明                                          |
+| ---------- | ---- | --------------------------------------------- |
+| `runAt`    | 条件 | 絶対時刻。`delayMs`とは排他                   |
+| `delayMs`  | 条件 | 現在時刻からの相対。`runAt`とは排他           |
+| `priority` | 任意 | 同時に変更する場合に指定                      |
+
+`runAt`と`delayMs`はどちらか一方が必要です。両方を指定すると400を返します
+
+ジョブIDは変わりません。取り消して再投入する場合と異なり、`uniqueKey`の予約も解放されません
+
+返る状態は`retry`と同様です
 
 ## GET /api/stats
 

@@ -108,7 +108,7 @@ export function clearJwksCache(): void {
 
 export function cloudflareAccess(options: AccessOptions): AuthMiddleware {
 	if (options.teamDomain.length === 0 || options.aud.length === 0) {
-		throw new Error('cloudflareAccessにはteamDomainとaudが必須, fail-closedの前提が崩れる');
+		throw new Error('cloudflareAccess requires teamDomain and aud, otherwise the fail-closed premise breaks');
 	}
 
 	return async (c, next) => {

@@ -137,7 +137,7 @@ describe('tickからの書き出し', () => {
 		// writeDataPointが例外を投げる状況, メトリクスは省略可能なのでtickを止めてはいけない
 		const boom = {
 			writeDataPoint: () => {
-				throw new Error('AE不調');
+				throw new Error('AE is down');
 			},
 		} as unknown as AnalyticsEngineDataset;
 		const stub = shard('MET3#0');

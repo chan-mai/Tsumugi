@@ -1,11 +1,11 @@
-import { and, asc, desc as sqlDesc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc as sqlDesc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
 import { job as readModel } from '../projection/tables.js';
 import { run as runModel, runNode } from '../projection/run-tables.js';
 import { InvalidJobIdError, InvalidRunIdError, parseRunId, shardName, shardNameOf } from '../core/ids.js';
-import type { MutationResult, TsumugiJobShard } from '../do/job-shard.js';
+import type { BulkFailure, MutationResult, TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 import type { Ui } from '../ui/serve.js';
 import type { AuthMiddleware } from './auth.js';
@@ -93,6 +93,35 @@ export function validateCreateJob(body: unknown, bindings: readonly string[]): {
 	return { input };
 }
 
+export type RescheduleInput = { runAfter: number; priority?: number };
+
+/**
+ * 実行時刻の変更内容の検証,通らなければ理由を返す
+ * `runAt`と`delayMs`は排他、両方指定された場合にどちらを優先するかは決めない
+ */
+export function validateReschedule(body: unknown, now: number): { input: RescheduleInput } | { error: string } {
+	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
+	const raw = body as Record<string, unknown>;
+
+	const numbers: [string, unknown][] = [
+		['runAt', raw.runAt],
+		['delayMs', raw.delayMs],
+		['priority', raw.priority],
+	];
+	for (const [name, value] of numbers) {
+		if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) return { error: `${name} must be a number` };
+	}
+
+	const hasRunAt = typeof raw.runAt === 'number';
+	const hasDelay = typeof raw.delayMs === 'number';
+	if (hasRunAt && hasDelay) return { error: 'runAt and delayMs are mutually exclusive' };
+	if (!hasRunAt && !hasDelay) return { error: 'runAt or delayMs is required' };
+	if (hasDelay && (raw.delayMs as number) < 0) return { error: 'delayMs must not be negative' };
+
+	const runAfter = hasRunAt ? (raw.runAt as number) : now + (raw.delayMs as number);
+	return { input: { runAfter, ...(typeof raw.priority === 'number' ? { priority: raw.priority } : {}) } };
+}
+
 export type StartRunInput = StartRunRequest;
 
 /** 開始内容の検証,通らなければ理由を返す */
@@ -109,6 +138,107 @@ export function validateStartRun(body: unknown, flows: readonly string[]): { inp
 	const input: StartRunInput = { flow: raw.flow, input: raw.input };
 	if (typeof raw.id === 'string' && raw.id) input.id = raw.id;
 	return { input };
+}
+
+/**
+ * 一括操作が1回で扱う件数の上限
+ * DOのtickが1回で扱う上限と揃える、超えた分は呼び出し側が繰り返して処理する
+ */
+export const BULK_LIMIT_MAX = 200;
+
+/**
+ * 一括操作の対象になる状態
+ * 個別のretry / cancelが受け付ける状態と同じ、ここを広げるとDO側で断られるだけの要求が増える
+ */
+export const BULK_STATES = {
+	retry: ['FAILED', 'STALLED'],
+	cancel: ['SCHEDULED'],
+} as const;
+
+/**
+ * 一括操作の対象
+ * 画面はIDを列挙し、一覧に出ない件数を扱う利用者は条件を渡す
+ */
+export type BulkTarget =
+	| { kind: 'ids'; ids: string[] }
+	| {
+			kind: 'filter';
+			binding?: string;
+			/** 未指定なら操作が受け付ける状態すべてを対象にする */
+			states: readonly string[];
+			uniqueKey?: string;
+			concurrencyKey?: string;
+			createdFrom?: number;
+			createdTo?: number;
+			limit: number;
+	  };
+
+/**
+ * 一括操作の対象の検証、通らなければ理由を返す
+ *
+ * `ids`があればそれだけを対象にする、条件との併用は対象が二通りに読める
+ * 条件で指定する場合の状態は操作が受け付けるものに限る、限らないと対象が減らず繰り返しが終わらない
+ */
+export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input: BulkTarget } | { error: string } {
+	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
+	const raw = body as Record<string, unknown>;
+	const allowed: readonly string[] = BULK_STATES[action];
+
+	if (raw.ids !== undefined) {
+		if (!Array.isArray(raw.ids)) return { error: 'ids must be an array' };
+		if (raw.ids.length === 0) return { error: 'ids must not be empty' };
+		if (raw.ids.length > BULK_LIMIT_MAX) return { error: `ids must not exceed ${BULK_LIMIT_MAX} entries` };
+		if (raw.ids.some((id) => typeof id !== 'string' || id.length === 0)) return { error: 'ids must be non-empty strings' };
+		return { input: { kind: 'ids', ids: raw.ids as string[] } };
+	}
+
+	for (const name of ['binding', 'state', 'unique_key', 'concurrency_key'] as const) {
+		if (raw[name] !== undefined && typeof raw[name] !== 'string') return { error: `${name} must be a string` };
+	}
+	if (typeof raw.state === 'string' && !allowed.includes(raw.state)) {
+		return { error: `state must be one of ${allowed.join(', ')} for ${action}` };
+	}
+
+	for (const name of ['created_from', 'created_to', 'limit'] as const) {
+		if (raw[name] !== undefined && (typeof raw[name] !== 'number' || !Number.isFinite(raw[name]))) {
+			return { error: `${name} must be a number` };
+		}
+	}
+	if (typeof raw.limit === 'number' && raw.limit < 1) return { error: 'limit must be at least 1' };
+
+	return {
+		input: {
+			kind: 'filter',
+			states: typeof raw.state === 'string' ? [raw.state] : allowed,
+			limit: Math.min(typeof raw.limit === 'number' ? raw.limit : BULK_LIMIT_MAX, BULK_LIMIT_MAX),
+			...(typeof raw.binding === 'string' && raw.binding ? { binding: raw.binding } : {}),
+			...(typeof raw.unique_key === 'string' && raw.unique_key ? { uniqueKey: raw.unique_key } : {}),
+			...(typeof raw.concurrency_key === 'string' && raw.concurrency_key ? { concurrencyKey: raw.concurrency_key } : {}),
+			...(typeof raw.created_from === 'number' ? { createdFrom: raw.created_from } : {}),
+			...(typeof raw.created_to === 'number' ? { createdTo: raw.created_to } : {}),
+		},
+	};
+}
+
+/** ジョブIDをshardごとにまとめる、1件ずつ送るとDOへの往復が件数だけ増える */
+export function groupByShard(jobIds: readonly string[]): { groups: Map<string, string[]>; invalid: string[] } {
+	const groups = new Map<string, string[]>();
+	const invalid: string[] = [];
+
+	for (const jobId of jobIds) {
+		let name: string;
+		try {
+			name = shardNameOf(jobId);
+		} catch {
+			// 読み取りモデルの行が壊れている場合は落とさず理由に載せる
+			invalid.push(jobId);
+			continue;
+		}
+		const bucket = groups.get(name);
+		if (bucket) bucket.push(jobId);
+		else groups.set(name, [jobId]);
+	}
+	return { groups, invalid };
 }
 
 /** 一覧のページング, 上限の変更漏れを避けるため両方の一覧で共有する */
@@ -306,6 +436,74 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		return c.json({ id } satisfies CreateJobResponse, 201);
 	});
 
+	/**
+	 * 条件に一致するジョブをまとめて処理する
+	 *
+	 * 対象は読み取りモデルから引く、横断的な絞り込みはDOには問い合わせられない(ADR-0008)
+	 * 数秒遅れるので状態の判定はDO側で改めて行い、条件に合わないものは理由付きで返す
+	 * 一部が断られても全体を失敗にしない、失敗にすると成功した分まで再送される
+	 */
+	const bulk = async (action: 'retry' | 'cancel', env: Env, body: unknown) => {
+		const parsed = validateBulk(body, action);
+		if ('error' in parsed) return { body: { error: parsed.error }, status: 400 } as const;
+		const target = parsed.input;
+
+		let targets: string[];
+		let remaining = 0;
+		if (target.kind === 'ids') {
+			targets = target.ids;
+		} else {
+			const { states, limit, binding, uniqueKey, concurrencyKey, createdFrom, createdTo } = target;
+			const d = drizzle(env.TSUMUGI_DB);
+			const clause = and(
+				...[
+					inArray(readModel.state, [...states]),
+					binding ? eq(readModel.binding, binding) : undefined,
+					uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
+					concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
+					createdFrom !== undefined ? gte(readModel.createdAt, createdFrom) : undefined,
+					createdTo !== undefined ? lte(readModel.createdAt, createdTo) : undefined,
+				].filter((f) => f !== undefined),
+			);
+
+			// 古い順に処理する、繰り返し呼んだときに対象が順に減る
+			const [page, total] = await d.batch([
+				d.select({ id: readModel.id }).from(readModel).where(clause).orderBy(asc(readModel.createdAt), asc(readModel.id)).limit(limit),
+				d
+					.select({ total: sql<number>`count(*)` })
+					.from(readModel)
+					.where(clause),
+			]);
+			targets = page.map((row) => row.id);
+			// 上限で切った残り、読み取りモデルの遅れを含むので見積り
+			remaining = Math.max(0, (total[0]?.total ?? 0) - targets.length);
+		}
+
+		const { groups, invalid } = groupByShard(targets);
+		const results = await Promise.all(
+			[...groups].map(([name, ids]) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)).mutateMany(action, ids)),
+		);
+
+		const failed: (BulkFailure | { id: string; reason: 'invalid-id' })[] = [
+			...results.flatMap((result) => result.failed),
+			...invalid.map((id) => ({ id, reason: 'invalid-id' as const })),
+		];
+		return { body: { ok: results.flatMap((result) => result.ok), failed, remaining }, status: 200 } as const;
+	};
+
+	for (const action of ['retry', 'cancel'] as const) {
+		app.post(`/api/jobs/bulk-${action}`, async (c) => {
+			let body: unknown;
+			try {
+				body = await c.req.json();
+			} catch {
+				return c.json({ error: 'body must be valid JSON' }, 400);
+			}
+			const { body: result, status } = await bulk(action, c.env, body);
+			return c.json(result, status);
+		});
+	}
+
 	app.get('/api/stats', async (c) => {
 		const db = drizzle(c.env.TSUMUGI_DB);
 		const rows = await db
@@ -362,6 +560,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			created_at: found.createdAt,
 			updated_at: found.updatedAt,
 			dispatched_at: found.dispatchedAt,
+			// SCHEDULEDが実行可能になる時刻, 変更できるので現在値を返す
+			run_after: found.runAfter,
 			progress: found.progress,
 			payload: found.payload,
 			// performの戻り値, 成功時のみ入り未完了はnull(#9), payloadと同じくJSON文字列のまま返す
@@ -394,6 +594,31 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
 			const { body, status } = refusal(result);
 			return c.json(body, status);
+		} catch (error) {
+			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
+			throw error;
+		}
+	});
+
+	app.post('/api/jobs/:id/reschedule', async (c) => {
+		const id = c.req.param('id');
+
+		let body: unknown;
+		try {
+			body = await c.req.json();
+		} catch {
+			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
+		}
+
+		const parsed = validateReschedule(body, Date.now());
+		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
+
+		try {
+			// SCHEDULED以外は予定を変えても実行が止まらないのでDO側で断る
+			const result = await stubOf(c.env, id).reschedule(id, parsed.input);
+			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
+			const { body: refused, status } = refusal(result);
+			return c.json(refused, status);
 		} catch (error) {
 			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
 			throw error;
@@ -499,6 +724,9 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				node_failed: found.nodeFailed,
 				created_at: found.createdAt,
 				updated_at: found.updatedAt,
+				// subflowとして起動された場合の親, 画面から親のrunへ辿る
+				parent_run_id: found.parentRunId,
+				parent_node_id: found.parentNodeId,
 				// 終端でなければ再開できない, 押す前に可否を出す(ADR-0034)
 				retryable: found.state === 'FAILED',
 			},
@@ -511,6 +739,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				origin: node.origin,
 				after: parseAfter(node.after),
 				job_id: node.jobId,
+				child_run_id: node.childRunId,
 				result: node.result,
 				error: node.error,
 				position: node.position,

@@ -55,6 +55,10 @@ export type ShardEnv = {
  */
 export type MutationResult = { ok: true } | { ok: false; reason: 'invalid-state' | 'gone' };
 
+/** まとめて処理した結果、断られた理由は個別のretry / cancelと同じ区別を持つ */
+export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' };
+export type BulkResult = { ok: string[]; failed: BulkFailure[] };
+
 /** DOに持たせる設定,流量制御と保持期間 */
 export type ShardSettings = {
 	policy?: Partial<Policy>;
@@ -320,7 +324,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const serialized = outcome.ok ? serializeResult(outcome.result) : null;
 		// runのノードでは戻り値が後段のpayloadの材料になる, 保存できないまま成功にすると気付かないままnullが下流へ渡る(ADR-0035)
 		if (outcome.ok && row.run_id !== null && outcome.result !== undefined && serialized === null) {
-			await this.report(jobId, { ok: false, error: `結果を保存できない(上限${RESULT_MAX_CHARS}文字または直列化不能)` });
+			await this.report(jobId, { ok: false, error: `cannot store the result (over ${RESULT_MAX_CHARS} chars or not serializable)` });
 			return;
 		}
 
@@ -422,6 +426,23 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
+	 * 予約済みジョブの実行時刻と優先度の変更
+	 *
+	 * 対象はSCHEDULEDのみ, QUEUED以降は投入済みなので予定を変えても実行は止まらない
+	 * 取り消して再投入するとジョブIDが変わりuniqueKeyの予約も解放されるため, 同じ行を更新する
+	 */
+	async reschedule(jobId: string, patch: { runAfter: number; priority?: number }): Promise<MutationResult> {
+		const now = this.clock.now();
+		const ok = this.repo.reschedule(jobId, patch.runAfter, patch.priority, now);
+		if (ok) {
+			// 前倒しと後ろ倒しの両方を扱う, 張り直さないと早めた予定でalarmが発火しない
+			await this.#armAlarm(Math.min(patch.runAfter, now));
+			return { ok: true };
+		}
+		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
+	}
+
+	/**
 	 * 実行前のジョブの取り消し
 	 * QUEUED以降はconsumerが既に実行を始めているかもしれず,取り消せていない場合に成功を返さない(ADR-0012)
 	 */
@@ -434,6 +455,31 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			return { ok: true };
 		}
 		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
+	}
+
+	/**
+	 * 一括のリトライと取り消し
+	 *
+	 * 対象は数秒遅れる読み取りモデル由来なので、状態の判定はここで改めて行う
+	 * 1件ずつのRPCにすると200件で200往復になるため、shard単位で1回にまとめる
+	 * alarmは全件の処理後に1回だけ張る、件数だけ張り直しても予定は変わらない
+	 */
+	async mutateMany(action: 'retry' | 'cancel', jobIds: readonly string[]): Promise<BulkResult> {
+		const now = this.clock.now();
+		const ok: string[] = [];
+		const failed: BulkFailure[] = [];
+
+		for (const jobId of jobIds) {
+			const applied =
+				action === 'retry'
+					? this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', { now, runAfter: now, dispatchedAt: null })
+					: this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now });
+			if (applied) ok.push(jobId);
+			else failed.push({ id: jobId, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' });
+		}
+
+		if (ok.length > 0) await this.#armAlarm(now);
+		return { ok, failed };
 	}
 
 	async alarm(): Promise<void> {
@@ -556,7 +602,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const namespace = this.env.RUN;
 		if (!namespace) {
 			// flowsを使うのにbindingが無い設定漏れ, 消さずに残して設定後に届くようにする(ADR-0013)
-			console.error('tsumugi: RUN binding が未設定のため完了通知を送れない');
+			console.error('tsumugi: cannot notify the run, RUN binding is not configured');
 			return 0;
 		}
 
