@@ -126,9 +126,11 @@ const SCHEMAS: Record<string, unknown> = {
 		properties: {
 			...RUN_SUMMARY_PROPERTIES,
 			input: string('JSON-encoded string'),
+			parent_run_id: { ...nullable('string'), description: 'Set when this run was started by a subflow node.' },
+			parent_node_id: nullable('string'),
 			retryable: { type: 'boolean', description: 'Only failed runs can be resumed.' },
 		},
-		required: [...RUN_SUMMARY_REQUIRED, 'input', 'retryable'],
+		required: [...RUN_SUMMARY_REQUIRED, 'input', 'parent_run_id', 'parent_node_id', 'retryable'],
 	},
 	RunNode: {
 		type: 'object',
@@ -141,6 +143,7 @@ const SCHEMAS: Record<string, unknown> = {
 			origin: { type: 'string', enum: ['static', 'fanOut', 'spawn'] },
 			after: { type: 'array', items: string(), description: 'Node ids this node depends on' },
 			job_id: nullable('string'),
+			child_run_id: { ...nullable('string'), description: 'Set on subflow nodes, holding the run they started.' },
 			result: { ...nullable('string'), description: 'Set on fan-out nodes only, holding the child summary.' },
 			error: nullable('string'),
 			position: integer('Display order'),
@@ -156,6 +159,7 @@ const SCHEMAS: Record<string, unknown> = {
 			'origin',
 			'after',
 			'job_id',
+			'child_run_id',
 			'result',
 			'error',
 			'position',

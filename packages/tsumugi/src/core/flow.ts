@@ -66,6 +66,12 @@ export type FanOutOptions<M extends Performers, K extends keyof M, Input, A exte
 	key?: (item: Item, index: number) => string;
 } & ConcurrencyKeyOption<ReqOf<M[K]>, (item: Item, index: number) => string>;
 
+/** 子のrunへ渡す入力を組み立てる, 戻り値の型は子のflowの入力に一致させる */
+export type SubflowOptions<Input, A extends Refs, ChildInput> = {
+	after?: A;
+	input: (input: Input, deps: DepsOf<A>) => ChildInput;
+};
+
 export type FlowBuilder<M extends Performers, Input> = {
 	node<K extends NodeBindings<M>, const A extends Refs = {}>(
 		id: string,
@@ -77,6 +83,15 @@ export type FlowBuilder<M extends Performers, Input> = {
 		binding: K,
 		options: FanOutOptions<M, K, Input, A, Item>,
 	): NodeRef<FanOutSummary>;
+	/**
+	 * 別のflowをrunとして起動し, 終端に達するまで待つ
+	 * 子の戻り値は受け取らない, runを跨ぐデータを増やさないため(ADR-0035)
+	 */
+	subflow<ChildInput, const A extends Refs = {}>(
+		id: string,
+		flow: Flow<ChildInput>,
+		options: SubflowOptions<Input, A, ChildInput>,
+	): NodeRef<void>;
 };
 
 /** 組み立て済みのノードが持つ関数,型引数を落として実行時の形に揃える */
@@ -105,6 +120,8 @@ export type FlowNode = {
 	key?: ChildKeyFn;
 	/** fan-outノードのみ, 子に渡す設定 */
 	childConcurrencyKey?: string | ChildKeyFn;
+	/** subflowノードのみ, 起動する子のflow定義 */
+	subflow?: AnyFlow;
 };
 
 export type Flow<Input = unknown> = {
@@ -122,17 +139,28 @@ export type Flows = Record<string, AnyFlow>;
 export type InputOf<F> = F extends Flow<infer I> ? I : never;
 
 /** Run DOへ保存するグラフの形(ADR-0030),関数は含まない */
-export type FlowShapeNode = { id: string; binding: string; container: boolean; after: readonly string[] };
+export type FlowShapeNode = { id: string; binding: string; container: boolean; after: readonly string[]; subflow?: string };
 export type FlowShape = readonly FlowShapeNode[];
 
-export function shapeOf(flow: AnyFlow): FlowShape {
+/**
+ * 保存する形へ落とす
+ * subflowノードは起動する子のflow名が要る, 名前はflow定義そのものからは引けないので外から渡す
+ */
+export function shapeOf(flow: AnyFlow, nameOf?: (child: AnyFlow) => string | undefined): FlowShape {
 	return flow.nodes.map((node) => ({
 		id: node.id,
 		binding: node.binding,
 		container: node.container,
 		// 同じ依存先を複数の受け取り口で受けた場合に重複するので畳む, 依存の数を数える側がずれる
 		after: [...new Set(Object.values(node.after))],
+		...(node.subflow ? { subflow: subflowNameOf(node.id, nameOf?.(node.subflow)) } : {}),
 	}));
+}
+
+/** 起動先のflow名、名前の無い形を保存するとrunIdを組み立てる時点まで誤りに気付けない */
+function subflowNameOf(nodeId: string, name: string | undefined): string {
+	if (!name) throw new InvalidFlowError(`subflow target is not registered: ${nodeId}`);
+	return name;
 }
 
 export function assertNodeId(id: string): void {
@@ -187,6 +215,18 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 					job: jobOptionsOf(options as NodeJobOptions),
 					input: options.input as InputFn,
 					...(options.concurrencyKey !== undefined ? { concurrencyKey: options.concurrencyKey as string | ConcurrencyKeyFn } : {}),
+				});
+			},
+			subflow(id: string, child: AnyFlow, options: Record<string, any>) {
+				return register({
+					id,
+					// bindingはperformerを指さない, 画面には起動するflow名を出す
+					binding: '',
+					container: false,
+					after: refIds(options.after as Refs | undefined),
+					job: {},
+					input: options.input as InputFn,
+					subflow: child,
 				});
 			},
 			fanOut(id: string, binding: string, options: Record<string, any>) {

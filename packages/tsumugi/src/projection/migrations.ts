@@ -15,7 +15,8 @@ export const EXPECTED_MIGRATIONS = [
 	'0002_add_attempt_log.sql',
 	'0003_add_result.sql',
 	'0004_create_run_read_model.sql',
-	'0005_add_run_after.sql',
+	'0005_add_subflow.sql',
+	'0006_add_run_after.sql',
 ] as const;
 
 /**

@@ -5,6 +5,7 @@ import JobDetailModal from './components/JobDetailModal.vue';
 import NewJobModal from './components/NewJobModal.vue';
 import NewRunModal from './components/NewRunModal.vue';
 import Pagination from './components/Pagination.vue';
+import RefreshMenu from './components/RefreshMenu.vue';
 import RowActions from './components/RowActions.vue';
 import RunDetailModal from './components/RunDetailModal.vue';
 import SortHeader from './components/SortHeader.vue';
@@ -12,6 +13,7 @@ import StatusCell from './components/StatusCell.vue';
 import TokenPrompt from './components/TokenPrompt.vue';
 import ViewMenu from './components/ViewMenu.vue';
 import { getBindings, getFlows, getStats, isUnauthorized, listJobs, listRuns, tokenCookie, type Job, type Run } from './api';
+import { loadRefresh, REFRESH_KEY } from './refresh';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 /** runが取る4つ(ADR-0029) */
@@ -32,7 +34,7 @@ const creating = ref(false);
 const message = ref<string | null>(null);
 const error = ref<string | null>(null);
 const unauthorized = ref(false);
-const autoRefresh = ref(true);
+const refreshMs = ref(loadRefresh(localStorage));
 const canPromptToken = tokenCookie() !== null;
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -114,8 +116,18 @@ const progressOf = (run: Run) => `${run.node_done} / ${run.node_total}`;
 
 function restartTimer() {
 	if (timer) clearInterval(timer);
-	// 投影は数秒遅れる読み取りモデルなので短い間隔にしても意味がない
-	if (autoRefresh.value) timer = setInterval(load, 3_000);
+	if (refreshMs.value > 0) timer = setInterval(load, refreshMs.value);
+}
+
+/** 間隔の変更を保存して即座に反映する */
+function setRefresh(ms: number) {
+	refreshMs.value = ms;
+	restartTimer();
+	try {
+		localStorage.setItem(REFRESH_KEY, String(ms));
+	} catch {
+		// プライベートモード等の書き込み不可, 選択自体は継続
+	}
 }
 
 watch([state, binding, runFlow, pageSize, sort, desc], () => {
@@ -241,17 +253,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
 					<ViewMenu v-if="tab === 'jobs'" :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
-					<button
-						type="button"
-						class="flex h-8 items-center gap-2 rounded-card border border-border bg-background px-3 text-sm hover:bg-accent"
-						@click="
-							autoRefresh = !autoRefresh;
-							restartTimer();
-						"
-					>
-						<span class="size-2 rounded-full" :class="autoRefresh ? 'animate-pulse bg-green-500' : 'bg-gray-300'" aria-hidden="true" />
-						{{ autoRefresh ? 'Live' : 'Paused' }}
-					</button>
+					<RefreshMenu :interval="refreshMs" @update:interval="setRefresh" />
 					<button
 						type="button"
 						class="flex h-8 items-center gap-1.5 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
@@ -377,6 +379,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				selectedRun = null;
 				selected = $event;
 			"
+			@run="selectedRun = $event"
 		/>
 		<NewRunModal
 			:open="startingRun"

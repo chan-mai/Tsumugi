@@ -28,6 +28,8 @@ export type NodeView = {
 	state: NodeState;
 	/** fan-outノード, ジョブを持たず子の展開と集約のみを行う */
 	container: boolean;
+	/** subflowノード, ジョブを持たず子のrunの終端を待つ */
+	subflow: boolean;
 	/** 実行時に増えたノードの親,静的ノードはnull */
 	parent: string | null;
 	origin: NodeOrigin;
@@ -38,6 +40,8 @@ export type NodeView = {
 export type RunDecision =
 	/** ジョブを作って投入する */
 	| { type: 'start'; id: string }
+	/** 子のrunを開始する, 終端はその子からの通知で決まる */
+	| { type: 'startRun'; id: string }
 	/** fan-outノードの展開, overを評価して子を作る */
 	| { type: 'expand'; id: string }
 	/** fan-outノードの集約, 子孫が全て終端に達したので自身を終端へ進める */
@@ -137,6 +141,8 @@ export function advance({ nodes, cancelling }: AdvanceInput): AdvanceOutput {
 		if (cancelling) {
 			// QUEUED以降は取り消せていない場合に成功を返さない(ADR-0012), 送っても断られるので出さない
 			if (node.state === 'PENDING' || node.state === 'SCHEDULED') decisions.push({ type: 'cancel', id: node.id });
+			// 子のrunは実行中でも取り消せる, 親が終わった後も動き続けるのを防ぐ
+			else if (node.subflow && node.state === 'RUNNING') decisions.push({ type: 'cancel', id: node.id });
 			continue;
 		}
 
@@ -147,7 +153,8 @@ export function advance({ nodes, cancelling }: AdvanceInput): AdvanceOutput {
 			if (!missing && !deps.every((dep) => dep !== undefined && settled(dep))) continue;
 			const ready = !missing && deps.every((dep) => dep !== undefined && succeeded(dep));
 			if (!ready) decisions.push({ type: 'skip', id: node.id });
-			else decisions.push({ type: node.container ? 'expand' : 'start', id: node.id });
+			else if (node.container) decisions.push({ type: 'expand', id: node.id });
+			else decisions.push({ type: node.subflow ? 'startRun' : 'start', id: node.id });
 		}
 	}
 
