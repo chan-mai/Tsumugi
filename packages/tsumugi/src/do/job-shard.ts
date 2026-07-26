@@ -324,7 +324,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const serialized = outcome.ok ? serializeResult(outcome.result) : null;
 		// runのノードでは戻り値が後段のpayloadの材料になる, 保存できないまま成功にすると気付かないままnullが下流へ渡る(ADR-0035)
 		if (outcome.ok && row.run_id !== null && outcome.result !== undefined && serialized === null) {
-			await this.report(jobId, { ok: false, error: `結果を保存できない(上限${RESULT_MAX_CHARS}文字または直列化不能)` });
+			await this.report(jobId, { ok: false, error: `cannot store the result (over ${RESULT_MAX_CHARS} chars or not serializable)` });
 			return;
 		}
 
@@ -569,7 +569,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const namespace = this.env.RUN;
 		if (!namespace) {
 			// flowsを使うのにbindingが無い設定漏れ, 消さずに残して設定後に届くようにする(ADR-0013)
-			console.error('tsumugi: RUN binding が未設定のため完了通知を送れない');
+			console.error('tsumugi: cannot notify the run, RUN binding is not configured');
 			return 0;
 		}
 

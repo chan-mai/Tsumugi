@@ -667,6 +667,9 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				node_failed: found.nodeFailed,
 				created_at: found.createdAt,
 				updated_at: found.updatedAt,
+				// subflowとして起動された場合の親, 画面から親のrunへ辿る
+				parent_run_id: found.parentRunId,
+				parent_node_id: found.parentNodeId,
 				// 終端でなければ再開できない, 押す前に可否を出す(ADR-0034)
 				retryable: found.state === 'FAILED',
 			},
@@ -679,6 +682,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				origin: node.origin,
 				after: parseAfter(node.after),
 				job_id: node.jobId,
+				child_run_id: node.childRunId,
 				result: node.result,
 				error: node.error,
 				position: node.position,

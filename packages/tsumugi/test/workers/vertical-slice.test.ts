@@ -18,7 +18,7 @@ class Hello extends Performer<{ name: string }, void, {}, ConsumerEnv> {
 
 class Boom extends Performer<unknown, void, {}, ConsumerEnv> {
 	async perform(): Promise<void> {
-		throw new Error('意図的な失敗');
+		throw new Error('intentional failure');
 	}
 }
 
@@ -58,7 +58,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 			acked.push(String(i));
 		},
 		retry: () => {
-			throw new Error('consumerはretryを呼んではならない(ADR-0004)');
+			throw new Error('consumer must not call retry (ADR-0004)');
 		},
 	}));
 	return { acked, batch: { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage> };
