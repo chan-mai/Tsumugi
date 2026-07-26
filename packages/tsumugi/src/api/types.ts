@@ -35,6 +35,8 @@ export type JobDetail = JobSummary & {
 	concurrency_key: string | null;
 	unique_key: string | null;
 	guarantee: string;
+	/** SCHEDULEDが実行可能になる時刻, 投影前の古い行はnull */
+	run_after: number | null;
 	payload: string;
 	/** performの戻り値, 成功時のみ入る(#9) */
 	result: string | null;

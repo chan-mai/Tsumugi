@@ -96,11 +96,12 @@ const SCHEMAS: Record<string, unknown> = {
 			concurrency_key: nullable('string'),
 			unique_key: nullable('string'),
 			guarantee: { type: 'string', enum: ['at-least-once', 'at-most-once'] },
+			run_after: { ...nullable('integer'), description: 'When a scheduled job becomes eligible to run.' },
 			payload: string('JSON-encoded string'),
 			result: { ...nullable('string'), description: 'JSON-encoded return value of perform. Present only on success.' },
 			attempts_log: { type: 'array', items: ref('AttemptRecord'), description: 'Newest attempt first' },
 		},
-		required: [...JOB_SUMMARY_REQUIRED, 'concurrency_key', 'unique_key', 'guarantee', 'payload', 'result', 'attempts_log'],
+		required: [...JOB_SUMMARY_REQUIRED, 'concurrency_key', 'unique_key', 'guarantee', 'run_after', 'payload', 'result', 'attempts_log'],
 	},
 	CreateJobRequest: {
 		type: 'object',
@@ -204,6 +205,15 @@ const SCHEMAS: Record<string, unknown> = {
 		},
 		required: ['ok', 'failed', 'remaining'],
 	},
+	RescheduleRequest: {
+		type: 'object',
+		description: 'Exactly one of runAt and delayMs is required.',
+		properties: {
+			runAt: integer('Absolute epoch milliseconds'),
+			delayMs: { ...integer('Relative to the time of the request'), minimum: 0 },
+			priority: integer('Changed together with the schedule when present'),
+		},
+	},
 	StartRunRequest: {
 		type: 'object',
 		properties: {
@@ -250,6 +260,8 @@ const RESPONSES = {
 const badJobId = { 400: { description: 'Malformed job id', ...json(ref('Error')) } };
 const badRunId = { 400: { description: 'Malformed run id', ...json(ref('Error')) } };
 const badBody = { 400: { description: 'Invalid request body', ...json(ref('Error')) } };
+// 400は1つしか書けないので, 本文とジョブIDの両方で断る経路は説明をまとめる
+const badJobIdOrBody = { 400: { description: 'Malformed job id, or invalid request body', ...json(ref('Error')) } };
 
 const queryParam = (name: string, schema: unknown, description?: string) => ({
 	name,
@@ -336,6 +348,16 @@ export function openapiDocument(): OpenApiDocument {
 				description: 'Accepted for FAILED and STALLED jobs only.',
 				parameters: [idParam('id', 'Job id')],
 				responses: { ...RESPONSES.mutation, ...badJobId, ...RESPONSES.unauthorized, ...RESPONSES.unavailable },
+			},
+		},
+		'/api/jobs/{id}/reschedule': {
+			post: {
+				operationId: 'rescheduleJob',
+				summary: 'Change when a scheduled job runs',
+				description: 'Accepted for SCHEDULED jobs only. The job id and any uniqueKey reservation are kept.',
+				parameters: [idParam('id', 'Job id')],
+				requestBody: { required: true, ...json(ref('RescheduleRequest')) },
+				responses: { ...RESPONSES.mutation, ...badJobIdOrBody, ...RESPONSES.unauthorized, ...RESPONSES.unavailable },
 			},
 		},
 		'/api/jobs/{id}/cancel': {

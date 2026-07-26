@@ -410,6 +410,23 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
+	 * 予約済みジョブの実行時刻と優先度の変更
+	 *
+	 * 対象はSCHEDULEDのみ, QUEUED以降は投入済みなので予定を変えても実行は止まらない
+	 * 取り消して再投入するとジョブIDが変わりuniqueKeyの予約も解放されるため, 同じ行を更新する
+	 */
+	async reschedule(jobId: string, patch: { runAfter: number; priority?: number }): Promise<MutationResult> {
+		const now = this.clock.now();
+		const ok = this.repo.reschedule(jobId, patch.runAfter, patch.priority, now);
+		if (ok) {
+			// 前倒しと後ろ倒しの両方を扱う, 張り直さないと早めた予定でalarmが発火しない
+			await this.#armAlarm(Math.min(patch.runAfter, now));
+			return { ok: true };
+		}
+		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
+	}
+
+	/**
 	 * 実行前のジョブの取り消し
 	 * QUEUED以降はconsumerが既に実行を始めているかもしれず,取り消せていない場合に成功を返さない(ADR-0012)
 	 */
