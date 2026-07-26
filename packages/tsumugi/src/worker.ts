@@ -4,7 +4,7 @@ import { createClient, type BindingConfig, type ClientEnv } from './client/enque
 import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
 import { createRunClass, type RunClass, type RunSettings, type StartResult } from './do/run.js';
-import { handleBatch, type ConsumerEnv, type PerformerRegistry } from './queue/consumer.js';
+import { handleBatch, type ConsumerEnv, type PerformerRegistry, type PerformerSource } from './queue/consumer.js';
 import type { EnvOf, JobQueue, Performers, PerformersOf, TypedEnqueueInput } from './core/api.js';
 import type { Flows, InputOf } from './core/flow.js';
 import type { AuthMiddleware } from './api/auth.js';
@@ -34,8 +34,8 @@ export interface RunControl extends Rpc.DurableObjectBranded {
 export type TsumugiConfig<Env extends ConsumerEnv> = {
 	/**
 	 * binding名とperformerの対応
-	 * ここ1箇所に書けばwranglerのservice bindingも型引数の手書きも要らない
-	 * `performers`からenqueueのpayloadと必須キーの型が決まる(ADR-0010)
+	 * performerのモジュールをそのまま渡す, 実行時の解決は`ctx.exports`が行う(ADR-0037)
+	 * ここからenqueueのpayloadと必須キーの型が決まる(ADR-0010)
 	 */
 	performers: PerformerRegistry<Env>;
 	/**
@@ -173,8 +173,9 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 			}
 			return rest.fetch(request, env, ctx);
 		},
-		async queue(batch: MessageBatch<DispatchMessage>, env: Env): Promise<void> {
-			await handleBatch(batch, env, performers);
+		async queue(batch: MessageBatch<DispatchMessage>, env: Env, ctx: ExecutionContext): Promise<void> {
+			// performerは`ctx.exports`から引く, 同一Workerでも別途のbindingは要らない(ADR-0037)
+			await handleBatch(batch, env, (ctx as unknown as { exports?: PerformerSource }).exports ?? {});
 		},
 		async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
 			// DO側の掃除はtickが行う,ここはD1の読み取りモデルだけ

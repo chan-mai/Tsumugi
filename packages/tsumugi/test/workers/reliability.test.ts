@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Performer } from '../../src/core/api.js';
+import type { JobContext } from '../../src/core/api.js';
 import { fixedClock, type Clock } from '../../src/do/clock.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
@@ -10,25 +10,26 @@ const consumerEnv: ConsumerEnv = env;
 
 let aborted = false;
 
-class Boom extends Performer<unknown, void, {}, ConsumerEnv> {
-	async perform(): Promise<void> {
+const boom = {
+	perform: async (): Promise<void> => {
 		throw new Error('意図的な失敗');
-	}
-}
+	},
+};
 
-/** abortされるまで待つ, timeoutが協調的な中断を依頼できているかを見る */
-class WaitForAbort extends Performer<unknown, void, {}, ConsumerEnv> {
-	async perform(_payload: unknown, ctx: { signal: AbortSignal }): Promise<void> {
+/** 期限まで待つ, `deadlineAt`から中断を組み立てられるかを見る(ADR-0037) */
+const waitForDeadline = {
+	perform: async (_payload: unknown, ctx: JobContext): Promise<void> => {
+		const signal = AbortSignal.timeout(Math.max(0, ctx.deadlineAt - Date.now()));
 		await new Promise<void>((resolve) => {
-			ctx.signal.addEventListener('abort', () => {
+			signal.addEventListener('abort', () => {
 				aborted = true;
 				resolve();
 			});
 		});
-	}
-}
+	},
+};
 
-const registry = { BOOM: Boom, SLOW: WaitForAbort, ONCE: Boom };
+const performers = { BOOM: boom, SLOW: waitForDeadline, ONCE: boom };
 
 function captureQueue() {
 	const sent: DispatchMessage[] = [];
@@ -94,7 +95,7 @@ describe('リトライ', () => {
 			backoff: { kind: 'fixed', delayMs: 5_000 },
 		});
 		await runDurableObjectAlarm(shard('BOOM'));
-		await handleBatch(makeBatch(sent), consumerEnv, registry);
+		await handleBatch(makeBatch(sent), consumerEnv, performers);
 
 		expect(await stateOf('BOOM', jobId)).toBe('SCHEDULED');
 		const row = await rowOf('BOOM', jobId);
@@ -119,7 +120,7 @@ describe('リトライ', () => {
 			sent.length = 0;
 			await install('BOOM', clock, queue);
 			await runDurableObjectAlarm(shard('BOOM'));
-			await handleBatch(makeBatch(sent), consumerEnv, registry);
+			await handleBatch(makeBatch(sent), consumerEnv, performers);
 			clock.advance(2_000);
 		}
 
@@ -129,7 +130,7 @@ describe('リトライ', () => {
 });
 
 describe('timeout', () => {
-	it('signalがabortされ,ジョブはリトライに回る', async () => {
+	it('performerが期限を検知でき,ジョブはリトライに回る', async () => {
 		const clock = fixedClock(T0);
 		const { sent, queue } = captureQueue();
 		await install('SLOW', clock, queue);
@@ -142,9 +143,9 @@ describe('timeout', () => {
 			backoff: { kind: 'fixed', delayMs: 1_000 },
 		});
 		await runDurableObjectAlarm(shard('SLOW'));
-		await handleBatch(makeBatch(sent), consumerEnv, registry);
+		await handleBatch(makeBatch(sent), consumerEnv, performers);
 
-		// 待つのをやめるだけでなく中断を依頼できていること
+		// consumerが待つのをやめるだけでなく, performer側でも期限が分かること
 		expect(aborted).toBe(true);
 		expect(await stateOf('SLOW', jobId)).toBe('SCHEDULED');
 	});

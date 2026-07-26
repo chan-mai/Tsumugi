@@ -3,7 +3,7 @@
  * @ts-expect-errorが不要になるとTS2578で落ちるため検査が形骸化しない
  * (実際に1つを正しいコードへ変えてTS2578が出ることを確認済み)
  */
-import { Performer } from '../../src/core/api.js';
+import { Performer } from '../../src/performer/entrypoint.js';
 import type { JobContext } from '../../src/core/api.js';
 import { defineTsumugi } from '../../src/worker.js';
 

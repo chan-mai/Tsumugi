@@ -62,12 +62,13 @@ export function validateConfig(env: Record<string, unknown>, config: ValidateInp
 		}
 	}
 
-	for (const entry of Object.values(config.performers)) {
+	// 別Workerのperformerはservice bindingで解決する, binding名は`performers`のキー(ADR-0037)
+	for (const [name, entry] of Object.entries(config.performers)) {
 		if (!isRemoteRef(entry)) continue;
-		const service = env[entry.binding] as { perform?: unknown } | undefined;
-		if (absent(service)) missing.push({ kind: 'service', name: entry.binding, reason: 'absent' });
+		const service = env[name] as { perform?: unknown } | undefined;
+		if (absent(service)) missing.push({ kind: 'service', name, reason: 'absent' });
 		// 名前は在るが相手がperformerでない場合, 実行時まで気付けないので同じ扱いにする
-		else if (typeof service?.perform !== 'function') missing.push({ kind: 'service', name: entry.binding, reason: 'invalid' });
+		else if (typeof service?.perform !== 'function') missing.push({ kind: 'service', name, reason: 'invalid' });
 	}
 
 	return missing.length === 0 ? { ok: true } : { ok: false, missing };

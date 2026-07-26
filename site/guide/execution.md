@@ -126,7 +126,7 @@ await enqueue(env, {
 ## タイムアウトと回収
 
 `timeoutMs`を過ぎると待機を打ち切ります
-ローカルのperformerには`signal`のabortが届きますが、リモートのperformerには`signal`がないため打ち切りは伝わりません
+performerには期限が`ctx.deadlineAt`として渡るため、中断に応じるかはperformer側の実装に依存します
 どちらの場合もperformerの実行そのものは停止しません
 
 さらに`reaperGraceMs`(既定30秒)だけ応答が無い状態が続いたジョブは回収されます

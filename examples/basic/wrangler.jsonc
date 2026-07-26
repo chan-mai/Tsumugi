@@ -29,10 +29,10 @@
     "consumers": [{ "queue": "tsumugi-example", "max_batch_size": 10, "max_retries": 5 }],
   },
   "analytics_engine_datasets": [{ "binding": "TSUMUGI_METRICS", "dataset": "tsumugi_jobs" }],
-  // 別Workerのperformer, entrypointへのクラス名指定でRPC呼び出しになる(ADR-0026)
+  // 別Workerのperformer, bindingの名前がそのままbinding名になる(ADR-0037)
   "services": [
     {
-      "binding": "MAIL_SERVICE",
+      "binding": "MAIL",
       "service": "tsumugi-example-remote-performer",
       "entrypoint": "SendMail",
     },
