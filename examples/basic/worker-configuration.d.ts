@@ -6,6 +6,8 @@ interface __BaseEnv_Env {
 	TSUMUGI_METRICS: AnalyticsEngineDataset;
 	TSUMUGI_QUEUE: Queue;
 	TSUMUGI_TOKEN: string;
+	CF_ACCOUNT_ID?: string;
+	CF_API_TOKEN?: string;
 	JOB_SHARD: DurableObjectNamespace<import("./src/index").TsumugiJobShard>;
 	RUN: DurableObjectNamespace<import("./src/index").TsumugiRun>;
 	MAIL_SERVICE: Service /* entrypoint SendMail from tsumugi-example-remote-performer */;

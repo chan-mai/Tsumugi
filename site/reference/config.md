@@ -11,6 +11,7 @@ const tsumugi = defineTsumugi<Env>({
   auth,
   ui,
   retention,
+  metrics,
 });
 ```
 
@@ -23,9 +24,31 @@ const tsumugi = defineTsumugi<Env>({
 | `auth`       |      | 認証ミドルウェア。未設定の場合はAPIもダッシュボードも無効     |
 | `ui`         |      | `tsumugi/ui`の`ui()`。未指定の場合はバンドルに含まれない      |
 | `retention`  |      | 一覧の保持設定                                                |
+| `metrics`    |      | Analytics Engineの読み取り設定。未設定の場合はメトリクスが無効 |
 
 戻り値は`fetch`と`queue`と`scheduled`を持つハンドラで、`enqueue`と`enqueueMany`と`shardFor`も提供します
 `flows`を指定した場合は`start`と`runFor`、wranglerに登録するクラスの`runClass`も提供します
+
+## metrics
+
+Analytics Engineに書いた値をダッシュボードから参照する場合に指定します
+
+```ts
+const tsumugi = defineTsumugi<Env>({
+  performers,
+  auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN),
+  metrics: (env: Env) => ({
+    accountId: env.CF_ACCOUNT_ID,
+    apiToken: env.CF_API_TOKEN,
+    dataset: 'tsumugi_jobs',
+  }),
+});
+```
+
+`apiToken`にはAccount Analyticsの読み取り権限が必要です。secretとして設定してください
+`dataset`はwranglerの`analytics_engine_datasets`に書いた名前と揃えます
+
+指定しない場合、メトリクスのタブとAPIは無効です
 
 ## RunSettings
 

@@ -9,6 +9,7 @@ import type { MutationResult, TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 import type { Ui } from '../ui/serve.js';
 import type { AuthMiddleware } from './auth.js';
+import { MetricsQueryError, parseMetricsQuery, readMetrics, type MetricsResolver } from '../analytics/reader.js';
 import { openapiDocument } from './openapi.js';
 import { resolveSort, SORTABLE_COLUMNS, type SortColumn } from './sort.js';
 import type {
@@ -54,6 +55,8 @@ export type RestOptions<Env extends RestEnv> = {
 	start?: (env: Env, flow: string, input: unknown, id?: string) => Promise<string>;
 	/** 取り消しと再開はDOへ直接送る, 読み取りモデルは正の根拠に使えない(ADR-0015) */
 	runFor?: (env: Env, runId: string) => { cancel(): Promise<MutationResult>; retry(): Promise<MutationResult> };
+	/** Analytics Engineの読み取り設定, 未設定なら`/api/metrics`は501を返す */
+	metrics?: MetricsResolver<Env>;
 };
 
 /** 要求と応答の型は`api/types.ts`が持つ, 外部の利用者と同じ定義を読む */
@@ -189,7 +192,7 @@ export type { SortColumn };
  * 稼働中も投影済みなのでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings = [], enqueue, failedRetentionMs, flows = [], start, runFor } = options;
+	const { dashboard, bindings = [], enqueue, failedRetentionMs, flows = [], start, runFor, metrics } = options;
 
 	/**
 	 * 一覧の1行にretryの可否を載せる
@@ -304,6 +307,26 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 		const id = await enqueue(c.env, parsed.input);
 		return c.json({ id } satisfies CreateJobResponse, 201);
+	});
+
+	/**
+	 * Analytics Engineの集計(ADR-0016)
+	 * D1の明細はsweepで消えるが, ここは保持期間の長い時系列から引く
+	 */
+	app.get('/api/metrics', async (c) => {
+		const config = metrics?.(c.env);
+		if (!config) return c.json({ error: 'metrics is not configured' }, 501);
+
+		const parsed = parseMetricsQuery(new URL(c.req.url));
+		if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+
+		try {
+			return c.json(await readMetrics(config, parsed.query));
+		} catch (error) {
+			// 上流の失敗を500にすると設定の誤りと区別がつかない
+			if (error instanceof MetricsQueryError) return c.json({ error: error.message }, 502);
+			throw error;
+		}
 	});
 
 	app.get('/api/stats', async (c) => {

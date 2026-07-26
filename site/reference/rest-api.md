@@ -133,6 +133,43 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
 { "byState": { "SCHEDULED": 12, "RUNNING": 3, "COMPLETED": 480, "FAILED": 2 } }
 ```
 
+## GET /api/metrics
+
+Analytics Engineに書いた時系列から、binding別の失敗率と所要時間を返します
+
+### クエリパラメータ
+
+| 名前      | 既定 | 内容                    |
+| --------- | ---- | ----------------------- |
+| `hours`   | `24` | 遡る時間。1以上720以下  |
+| `binding` | なし | binding名での絞り込み   |
+
+### レスポンス
+
+```json
+{
+  "hours": 24,
+  "bindings": [
+    {
+      "binding": "MAIL",
+      "total": 1200,
+      "failed": 18,
+      "failureRate": 0.015,
+      "avgDurationMs": 820,
+      "maxDurationMs": 5400,
+      "p95DurationMs": 2100,
+      "avgAttempts": 1.04
+    }
+  ],
+  "series": [{ "at": 1753000000000, "total": 50, "failed": 1, "avgDurationMs": 810 }]
+}
+```
+
+件数と所要時間はサンプリングの重みを掛けて集計し、サンプリングが有効になった区間でも実際の件数に近い値が返ります
+
+`metrics`を設定していない構成では501を返します
+Analytics Engine側が要求を断った場合は502を返し、本文に理由が入ります
+
 ## GET /api/bindings
 
 投入先の選択肢と絞り込み用のbinding名を返します
