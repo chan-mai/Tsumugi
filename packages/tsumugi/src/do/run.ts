@@ -70,6 +70,9 @@ type SubflowStart = { nodeId: string; childRunId: string; flow: string; input: u
 /** ノード1件ぶんの投入内容, 宛先はRun DOが被せる */
 type BuiltJob = Omit<EnqueueInput, 'binding' | 'id' | 'runId' | 'nodeId' | 'partitionKey' | 'uniqueKey' | 'uniqueForMs'>;
 
+/** ノードのerror列へ入れる文言、stackは載せず理由だけを残す */
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 /** Job DOから見たRun DO, 通知だけを送る(ADR-0031) */
 export interface RunStub extends Rpc.DurableObjectBranded {
 	notify(events: readonly NodeEvent[]): Promise<void>;
@@ -155,11 +158,11 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			if (existing) return { id: runId, created: false };
 
 			const flow = flows[input.flow];
-			if (!flow) throw new Error(`flowが未登録: ${input.flow}`);
+			if (!flow) throw new Error(`flow is not registered: ${input.flow}`);
 
 			const depth = input.depth ?? 0;
 			// 深さの判定は起動された側で行う, 親が上限を知らなくても入れ子が止まる
-			if (depth > maxDepth) throw new Error(`subflowの入れ子が上限を超えた: ${maxDepth}`);
+			if (depth > maxDepth) throw new Error(`subflow nesting exceeded the limit: ${maxDepth}`);
 
 			const shape = shapeOf(flow, nameOf);
 			this.repo.insertRun({
@@ -236,7 +239,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			// 再開で子が張り替わっているなら古い便, 適用すると再実行の結果を上書きする(ADR-0034)
 			if (!row || row.child_run_id !== childRunId || state === 'RUNNING') return;
 
-			this.repo.updateNode(nodeId, { state, ...(state === 'FAILED' ? { error: `子のrunが失敗: ${childRunId}` } : {}) }, now);
+			this.repo.updateNode(nodeId, { state, ...(state === 'FAILED' ? { error: `child run failed: ${childRunId}` } : {}) }, now);
 			this.repo.appendNodeOutbox(run.id, [nodeId]);
 			await this.#armAlarm(now);
 		}
@@ -301,7 +304,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			const flow = flows[runRow.flow];
 			if (!flow) {
 				// 定義ごと消えた, 待っても解決しないので理由を残して落とす(ADR-0030)
-				this.#failRun(runRow.id, `flowが未登録: ${runRow.flow}`, now);
+				this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
 				await this.#project();
 				return;
 			}
@@ -342,15 +345,24 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				await client.enqueueMany(this.env, inputs);
 			}
 			// 子のrunは同じIDで二度開始しても既存を返すので, 落ちた後の再実行で増えない(ADR-0029)
+			const unstarted = new Set<string>();
 			for (const child of subflows) {
-				await this.#runStub(child.childRunId).start({
-					flow: child.flow,
-					input: child.input,
-					parent: { runId: runRow.id, nodeId: child.nodeId },
-					depth: runRow.depth + 1,
-				});
+				try {
+					await this.#runStub(child.childRunId).start({
+						flow: child.flow,
+						input: child.input,
+						parent: { runId: runRow.id, nodeId: child.nodeId },
+						depth: runRow.depth + 1,
+					});
+				} catch (error) {
+					// 入れ子の上限超過などは待っても解決しない、落とさないとtickが同じ失敗を繰り返す
+					this.repo.updateNode(child.nodeId, { state: 'FAILED', error: `failed to start child run: ${messageOf(error)}` }, now);
+					unstarted.add(child.nodeId);
+					touched.add(child.nodeId);
+				}
 			}
 			for (const id of starting) {
+				if (unstarted.has(id)) continue;
 				// subflowノードは子の終端を待つ, ジョブと違いSCHEDULEDを経ない
 				this.repo.updateNode(id, { state: subflows.some((child) => child.nodeId === id) ? 'RUNNING' : 'SCHEDULED' }, now);
 				touched.add(id);
@@ -400,7 +412,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				case 'start': {
 					const built = this.#buildJob(row, definitions, runInput);
 					if (!built) {
-						this.repo.updateNode(row.id, { state: 'FAILED', error: `ノードの定義が見つからない: ${row.id}` }, now);
+						this.repo.updateNode(row.id, { state: 'FAILED', error: `node definition is missing: ${row.id}` }, now);
 						return [row.id];
 					}
 					// 先にジョブIDを確保する, 投入だけ成功して落ちても同じIDで再投入すれば二重にならない
@@ -414,11 +426,18 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				case 'startRun': {
 					const definition = definitions.get(row.id);
 					if (!definition?.subflow || row.subflow === null) {
-						this.repo.updateNode(row.id, { state: 'FAILED', error: `subflowの定義が見つからない: ${row.id}` }, now);
+						this.repo.updateNode(row.id, { state: 'FAILED', error: `subflow definition is missing: ${row.id}` }, now);
 						return [row.id];
 					}
 					// 子のrunIdは親のrunIdとノードIDから決まる, 再送しても同じ子に当たる(ADR-0029)
-					const childRunId = formatRunId({ flow: row.subflow, localId: `${parseRunId(runId).localId}-${row.id}` });
+					let childRunId: string;
+					try {
+						childRunId = formatRunId({ flow: row.subflow, localId: `${parseRunId(runId).localId}-${row.id}` });
+					} catch (error) {
+						// flow名が形として使えない、待っても解決しない
+						this.repo.updateNode(row.id, { state: 'FAILED', error: `invalid child run id: ${messageOf(error)}` }, now);
+						return [row.id];
+					}
 					if (row.child_run_id === null) this.repo.updateNode(row.id, { childRunId }, now);
 					starting.push(row.id);
 					subflows.push({
@@ -445,11 +464,9 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 
 				case 'cancel': {
 					if (row.child_run_id !== null) {
-						// 子は実行中でも取り消せる, 断られた場合は子の通知を待つ
-						const result = await this.#runStub(row.child_run_id).cancel();
-						if (!result.ok) return [];
-						this.repo.updateNode(row.id, { state: 'CANCELLED' }, now);
-						return [row.id];
+						// 子のcancelは要求の受理までで、終端に達したかは子からの通知で決まる
+						await this.#runStub(row.child_run_id).cancel();
+						return [];
 					}
 					if (row.job_id === null || row.state === 'PENDING') {
 						this.repo.updateNode(row.id, { state: 'CANCELLED' }, now);
@@ -468,13 +485,13 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		#expand(row: NodeRow, definitions: Map<string, FlowNode>, runInput: unknown, now: number): string[] {
 			const definition = definitions.get(row.id);
 			if (!definition?.over || !definition.item) {
-				this.repo.updateNode(row.id, { state: 'FAILED', error: `fan-outの定義が見つからない: ${row.id}` }, now);
+				this.repo.updateNode(row.id, { state: 'FAILED', error: `fan-out definition is missing: ${row.id}` }, now);
 				return [row.id];
 			}
 
 			const items = definition.over(runInput, this.#depsOf(definition, runInput));
 			if (this.repo.countNodes() + items.length > maxNodes) {
-				this.repo.updateNode(row.id, { state: 'FAILED', error: `ノード数の上限を超えた: ${maxNodes}` }, now);
+				this.repo.updateNode(row.id, { state: 'FAILED', error: `node count exceeded the limit: ${maxNodes}` }, now);
 				return [row.id];
 			}
 
@@ -508,7 +525,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		#applySpawns(parentId: string, spawns: readonly SpawnRequest[], now: number): string[] {
 			if (spawns.length === 0) return [];
 			if (this.repo.countNodes() + spawns.length > maxNodes) {
-				this.repo.updateNode(parentId, { state: 'FAILED', error: `ノード数の上限を超えた: ${maxNodes}` }, now);
+				this.repo.updateNode(parentId, { state: 'FAILED', error: `node count exceeded the limit: ${maxNodes}` }, now);
 				return [parentId];
 			}
 
@@ -577,14 +594,19 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			if (state === 'RUNNING') return true;
 			if (row.parent_notified === 1) return true;
 
-			await this.#runStub(row.parent_run_id).notifyChild(row.parent_node_id, row.id, state);
+			try {
+				await this.#runStub(row.parent_run_id).notifyChild(row.parent_node_id, row.id, state);
+			} catch (error) {
+				console.error('tsumugi: notifyParent failed', error);
+				return false;
+			}
 			this.repo.markParentNotified(row.id, now);
 			return true;
 		}
 
 		#runStub(runId: string): DurableObjectStub<RunPeerStub> {
 			const namespace = this.env.RUN as DurableObjectNamespace<RunPeerStub> | undefined;
-			if (!namespace) throw new Error('RUN binding が未設定, wranglerにRun DOのbindingを足す必要がある');
+			if (!namespace) throw new Error('RUN binding is not configured, add the Run DO binding to wrangler');
 			return namespace.get(namespace.idFromName(runId));
 		}
 

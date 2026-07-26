@@ -251,12 +251,16 @@ export class RunRepo {
 	/**
 	 * 再開のために打ち切られたノードを起動前へ戻す(ADR-0034)
 	 * fan-outノードは子を作り直さず集約待ちへ戻す, 作り直すと成功済みの子も削除される
+	 * 子のrunIDも外す、残すと旧い子の遅れた通知が再開後の状態を上書きする
 	 */
 	resetForRetry(now: number): string[] {
+		// 親への通知済みの印を戻す、立てたままでは再開後の終端が親へ届かない
+		this.db.update(run).set({ parentNotified: 0, updatedAt: now }).run();
 		const cursor = this.sql.exec<{ id: string }>(
 			`UPDATE node SET
 				state = CASE WHEN container = 1 AND EXISTS(SELECT 1 FROM node child WHERE child.parent = node.id) THEN 'RUNNING' ELSE 'PENDING' END,
 				job_id = CASE WHEN container = 1 THEN job_id ELSE NULL END,
+				child_run_id = NULL,
 				error = NULL,
 				updated_at = ?
 			WHERE state IN ('FAILED', 'STALLED', 'SKIPPED', 'CANCELLED')

@@ -50,7 +50,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 		attempts: 1,
 		ack: () => {},
 		retry: () => {
-			throw new Error('consumerはretryを呼んではならない(ADR-0004)');
+			throw new Error('consumer must not call retry (ADR-0004)');
 		},
 	}));
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;
@@ -109,8 +109,8 @@ describe('subflowの縦串', () => {
 		await settle([parent, child], registry, 3);
 		sent.length = 0;
 		const jobId = (await nodeOf(child, 'list'))?.job_id;
-		if (!jobId) throw new Error('子の先頭ノードにジョブIDが入っていない');
-		await runStub(child).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: '意図的な失敗' }]);
+		if (!jobId) throw new Error('the first node of the child run has no job id');
+		await runStub(child).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'intentional failure' }]);
 		await settle([parent, child], registry);
 
 		expect(await stateOf(child)).toBe('FAILED');
@@ -141,7 +141,7 @@ describe('subflowの縦串', () => {
 			runInDurableObject(runStub('GREETINGS:too-deep'), (instance) =>
 				(instance as any).start({ flow: 'GREETINGS', input: { prefix: 'x' }, depth: 4 }),
 			),
-		).rejects.toThrow('subflowの入れ子が上限を超えた');
+		).rejects.toThrow('subflow nesting exceeded the limit');
 	});
 
 	it('子のrunが親を覚えている', async () => {

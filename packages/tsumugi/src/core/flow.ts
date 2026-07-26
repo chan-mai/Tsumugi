@@ -153,13 +153,19 @@ export function shapeOf(flow: AnyFlow, nameOf?: (child: AnyFlow) => string | und
 		container: node.container,
 		// 同じ依存先を複数の受け取り口で受けた場合に重複するので畳む, 依存の数を数える側がずれる
 		after: [...new Set(Object.values(node.after))],
-		...(node.subflow ? { subflow: nameOf?.(node.subflow) ?? '' } : {}),
+		...(node.subflow ? { subflow: subflowNameOf(node.id, nameOf?.(node.subflow)) } : {}),
 	}));
+}
+
+/** 起動先のflow名、名前の無い形を保存するとrunIdを組み立てる時点まで誤りに気付けない */
+function subflowNameOf(nodeId: string, name: string | undefined): string {
+	if (!name) throw new InvalidFlowError(`subflow target is not registered: ${nodeId}`);
+	return name;
 }
 
 export function assertNodeId(id: string): void {
 	if (!NODE_ID_PATTERN.test(id)) {
-		throw new InvalidFlowError(`ノードIDが不正: ${JSON.stringify(id)} (英数字とハイフンとアンダースコアのみ)`);
+		throw new InvalidFlowError(`invalid node id: ${JSON.stringify(id)} (alphanumeric, hyphen and underscore only)`);
 	}
 }
 
@@ -189,11 +195,11 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 
 		const register = (node: FlowNode): NodeRef<any> => {
 			assertNodeId(node.id);
-			if (seen.has(node.id)) throw new InvalidFlowError(`ノードIDが重複: ${node.id}`);
+			if (seen.has(node.id)) throw new InvalidFlowError(`duplicate node id: ${node.id}`);
 			seen.add(node.id);
 			// 宣言済みのノードしか変数で参照できないので,循環は構文的に起きない
 			for (const dependency of Object.values(node.after)) {
-				if (!seen.has(dependency)) throw new InvalidFlowError(`未宣言のノードに依存: ${node.id} -> ${dependency}`);
+				if (!seen.has(dependency)) throw new InvalidFlowError(`depends on an undeclared node: ${node.id} -> ${dependency}`);
 			}
 			nodes.push(node);
 			return { id: node.id };
@@ -241,7 +247,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 		} as unknown as FlowBuilder<PerformersOf<R>, Input>;
 
 		build(builder);
-		if (nodes.length === 0) throw new InvalidFlowError('ノードが1つも宣言されていない');
+		if (nodes.length === 0) throw new InvalidFlowError('no nodes are declared');
 		return { nodes };
 	};
 }

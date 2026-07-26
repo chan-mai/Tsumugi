@@ -10,7 +10,7 @@ class Greet extends Performer<{ name: string }, string, never, unknown> {
 
 class Boom extends Performer<unknown, void, never, unknown> {
 	perform(): void {
-		throw new Error('意図的な失敗');
+		throw new Error('intentional failure');
 	}
 }
 

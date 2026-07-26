@@ -116,19 +116,19 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 	const registered = new Set(Object.values(flows));
 	for (const [name, flow] of Object.entries(flows)) {
 		for (const node of flow.nodes) {
-			if (node.subflow && !registered.has(node.subflow)) throw new Error(`subflowの起動先が未登録: ${name}.${node.id}`);
+			if (node.subflow && !registered.has(node.subflow)) throw new Error(`subflow target is not registered: ${name}.${node.id}`);
 		}
 	}
 
 	/** 設定漏れは開始時にエラーにする, エラーにしないとノードが永久に実行されない(ADR-0013) */
 	const runFor = (env: Env, runId: string): DurableObjectStub<RunControl> => {
 		const namespace = env.RUN;
-		if (!namespace) throw new Error('RUN binding が未設定, wranglerにRun DOのbindingを足す必要がある');
+		if (!namespace) throw new Error('RUN binding is not configured, add the Run DO binding to wrangler');
 		return namespace.get(namespace.idFromName(runId));
 	};
 
 	const start = async (env: Env, flow: string, input: unknown, options?: { id?: string }): Promise<string> => {
-		if (!flows[flow]) throw new Error(`flowが未登録: ${flow}`);
+		if (!flows[flow]) throw new Error(`flow is not registered: ${flow}`);
 		const runId = formatRunId({ flow, localId: options?.id ?? createId() });
 		const result = await runFor(env, runId).start({ flow, input });
 		return result.id;

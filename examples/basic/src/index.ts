@@ -11,7 +11,7 @@ class Hello extends Performer<{ name: string }, void, {}, Env> {
 /** リトライとバックオフを見るための必ず失敗するperformer */
 class Boom extends Performer<unknown, void, {}, Env> {
 	async perform(): Promise<void> {
-		throw new Error('意図的な失敗');
+		throw new Error('intentional failure');
 	}
 }
 
