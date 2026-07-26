@@ -93,6 +93,35 @@ export function validateCreateJob(body: unknown, bindings: readonly string[]): {
 	return { input };
 }
 
+export type RescheduleInput = { runAfter: number; priority?: number };
+
+/**
+ * 実行時刻の変更内容の検証,通らなければ理由を返す
+ * `runAt`と`delayMs`は排他、両方指定された場合にどちらを優先するかは決めない
+ */
+export function validateReschedule(body: unknown, now: number): { input: RescheduleInput } | { error: string } {
+	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
+	const raw = body as Record<string, unknown>;
+
+	const numbers: [string, unknown][] = [
+		['runAt', raw.runAt],
+		['delayMs', raw.delayMs],
+		['priority', raw.priority],
+	];
+	for (const [name, value] of numbers) {
+		if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) return { error: `${name} must be a number` };
+	}
+
+	const hasRunAt = typeof raw.runAt === 'number';
+	const hasDelay = typeof raw.delayMs === 'number';
+	if (hasRunAt && hasDelay) return { error: 'runAt and delayMs are mutually exclusive' };
+	if (!hasRunAt && !hasDelay) return { error: 'runAt or delayMs is required' };
+	if (hasDelay && (raw.delayMs as number) < 0) return { error: 'delayMs must not be negative' };
+
+	const runAfter = hasRunAt ? (raw.runAt as number) : now + (raw.delayMs as number);
+	return { input: { runAfter, ...(typeof raw.priority === 'number' ? { priority: raw.priority } : {}) } };
+}
+
 export type StartRunInput = StartRunRequest;
 
 /** 開始内容の検証,通らなければ理由を返す */
@@ -362,6 +391,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			created_at: found.createdAt,
 			updated_at: found.updatedAt,
 			dispatched_at: found.dispatchedAt,
+			// SCHEDULEDが実行可能になる時刻, 変更できるので現在値を返す
+			run_after: found.runAfter,
 			payload: found.payload,
 			// performの戻り値, 成功時のみ入り未完了はnull(#9), payloadと同じくJSON文字列のまま返す
 			result: found.result,
@@ -393,6 +424,31 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
 			const { body, status } = refusal(result);
 			return c.json(body, status);
+		} catch (error) {
+			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
+			throw error;
+		}
+	});
+
+	app.post('/api/jobs/:id/reschedule', async (c) => {
+		const id = c.req.param('id');
+
+		let body: unknown;
+		try {
+			body = await c.req.json();
+		} catch {
+			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
+		}
+
+		const parsed = validateReschedule(body, Date.now());
+		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
+
+		try {
+			// SCHEDULED以外は予定を変えても実行が止まらないのでDO側で断る
+			const result = await stubOf(c.env, id).reschedule(id, parsed.input);
+			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
+			const { body: refused, status } = refusal(result);
+			return c.json(refused, status);
 		} catch (error) {
 			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
 			throw error;
