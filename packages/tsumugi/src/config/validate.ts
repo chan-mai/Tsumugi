@@ -62,8 +62,11 @@ export function validateConfig(env: Record<string, unknown>, config: ValidateInp
 		}
 	}
 
+	// 同じbindingを複数のperformerが指しても報告は1件, 断片も重複させない
+	const checked = new Set<string>();
 	for (const entry of Object.values(config.performers)) {
-		if (!isRemoteRef(entry)) continue;
+		if (!isRemoteRef(entry) || checked.has(entry.binding)) continue;
+		checked.add(entry.binding);
 		const service = env[entry.binding] as { perform?: unknown } | undefined;
 		if (absent(service)) missing.push({ kind: 'service', name: entry.binding, reason: 'absent' });
 		// 名前は在るが相手がperformerでない場合, 実行時まで気付けないので同じ扱いにする

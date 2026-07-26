@@ -80,6 +80,14 @@ describe('リモートperformerの整合(ADR-0026)', () => {
 		expect(status.missing).toEqual([{ kind: 'service', name: 'MAIL_SERVICE', reason: 'invalid' }]);
 	});
 
+	it('同じbindingを指すperformerが複数でも1件にまとめる', () => {
+		// 重複するとエラー本文にも設定断片にも同じserviceが並ぶ
+		const env = complete();
+		delete (env as Record<string, unknown>).MAIL_SERVICE;
+		const shared = { A: remote('MAIL_SERVICE'), B: remote('MAIL_SERVICE') };
+		expect(names(validateConfig(env, { performers: shared }))).toEqual(['MAIL_SERVICE']);
+	});
+
 	it('揃っていれば通る', () => {
 		expect(validateConfig(complete(), { performers: withRemote })).toEqual({ ok: true });
 	});
