@@ -84,7 +84,7 @@ describe('生存報告(#35)', () => {
 		const jobId = await queued('HBE#0');
 		await stub.heartbeat(jobId, 0.7);
 
-		await stub.report(jobId, { ok: false, error: '意図的な失敗' });
+		await stub.report(jobId, { ok: false, error: 'intentional failure' });
 
 		const row = await rowOf(stub, jobId);
 		expect(row.heartbeat_at).toBeNull();
