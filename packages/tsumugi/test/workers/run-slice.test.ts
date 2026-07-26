@@ -75,7 +75,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 		attempts: 1,
 		ack: () => {},
 		retry: () => {
-			throw new Error('consumerはretryを呼んではならない(ADR-0004)');
+			throw new Error('consumer must not call retry (ADR-0004)');
 		},
 	}));
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;
@@ -130,7 +130,7 @@ async function settleRun(runId: string, rounds = 8): Promise<void> {
 		previous = current;
 		await runDurableObjectAlarm(runStub(runId));
 	}
-	throw new Error(`${rounds}回のtickでノードの状態が収束しない`);
+	throw new Error(`node states did not settle within ${rounds} ticks`);
 }
 
 const stateOf = (runId: string) =>
@@ -201,8 +201,8 @@ describe('縦串: runの開始から完了まで', () => {
 		sent.length = 0;
 		const jobId = await jobIdOf(runId, 'list');
 		// 通知はジョブIDで宛先を照合するので, 確定していなければ検査自体が成り立たない
-		if (jobId === null) throw new Error('先頭ノードにジョブIDが入っていない');
-		await stub.notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: '意図的な失敗' }]);
+		if (jobId === null) throw new Error('the first node has no job id');
+		await stub.notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'intentional failure' }]);
 		await settleRun(runId);
 
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });

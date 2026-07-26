@@ -114,6 +114,13 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 	const flows: Flows = config.flows ?? {};
 	// flow名はrunIdの一部になる, 起動時に弾かないと開始まで誤りに気付けない(ADR-0029)
 	for (const flow of Object.keys(flows)) assertValidFlow(flow);
+	// subflowの起動先が`flows`に無いと子のrunIdを決められない, 同じく起動時に弾く
+	const registered = new Set(Object.values(flows));
+	for (const [name, flow] of Object.entries(flows)) {
+		for (const node of flow.nodes) {
+			if (node.subflow && !registered.has(node.subflow)) throw new Error(`subflow target is not registered: ${name}.${node.id}`);
+		}
+	}
 
 	// Workersに起動フックが無いので, 最初の呼び出しを起動とみなして検証する(ADR-0036)
 	const checkConfig = cachedValidate({ performers, flows });
@@ -131,13 +138,13 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 	const runFor = (env: Env, runId: string): DurableObjectStub<RunControl> => {
 		const namespace = env.RUN;
 		// RUNだけ個別に見る, 不足の一覧より宛先が無い事実を先に伝える方が短い
-		if (!namespace) throw new Error('RUN binding が未設定, wranglerにRun DOのbindingを足す必要がある');
+		if (!namespace) throw new Error('RUN binding is not configured, add the Run DO binding to wrangler');
 		return namespace.get(namespace.idFromName(runId));
 	};
 
 	const start = async (env: Env, flow: string, input: unknown, options?: { id?: string }): Promise<string> => {
 		assertConfigured(env);
-		if (!flows[flow]) throw new Error(`flowが未登録: ${flow}`);
+		if (!flows[flow]) throw new Error(`flow is not registered: ${flow}`);
 		const runId = formatRunId({ flow, localId: options?.id ?? createId() });
 		const result = await runFor(env, runId).start({ flow, input });
 		return result.id;

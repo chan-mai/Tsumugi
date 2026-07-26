@@ -379,6 +379,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				selectedRun = null;
 				selected = $event;
 			"
+			@run="selectedRun = $event"
 		/>
 		<NewRunModal
 			:open="startingRun"
