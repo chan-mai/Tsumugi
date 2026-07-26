@@ -53,6 +53,8 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 		id: node.id,
 		state: 'PENDING',
 		container: node.container,
+		// subflowノードは子のrunを起こすので、ここでは扱わない
+		subflow: false,
 		parent: null,
 		origin: 'static',
 		after: node.after,
@@ -102,7 +104,15 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 						assertNodeId(key);
 						const id = `${view.id}:${key}`;
 						children.set(id, { binding: definition.binding, payload: definition.item?.(item, input, index) });
-						const child: NodeView = { id, state: 'PENDING', container: false, parent: view.id, origin: 'fanOut', after: [] };
+						const child: NodeView = {
+							id,
+							state: 'PENDING',
+							container: false,
+							subflow: false,
+							parent: view.id,
+							origin: 'fanOut',
+							after: [],
+						};
 						views.push(child);
 						byId.set(id, child);
 					});
