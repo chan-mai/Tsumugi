@@ -64,6 +64,8 @@ export class SendMail extends Performer<{ to: string }, void, {}, Env> {
 const id = await enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
 ```
 
+`defineTsumugi`の戻り値の`tsumugi.enqueue`を使用すると、bindingからpayloadと必須キーの型が決まります。[投入経路](/guide/enqueue#paths)を参照してください
+
 キューもconsumerの分岐も読み取りモデルも意識する必要はなく、リトライ、バックオフ、予約実行、優先度、流量制御、重複排除、管理画面をすべていい感じにブラックボックスとして扱うことができます
 
 

@@ -91,7 +91,8 @@ const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abor
 ## 失敗の通知
 
 例外をthrowすると失敗として扱われ、試行回数が残っていればリトライされます
-戻り値を返した場合は成功です
+例外が発生せずに完了した場合は成功で、戻り値は保存されて[REST API](/reference/rest-api#get-api-jobs-id)から取得できます
+8,192文字を超える戻り値と直列化できない値は保存されません。Flowのノードでの扱いは[Flow](/guide/flow)を参照してください
 
 ```ts
 class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, void, { concurrencyKey: true }, Env> {
@@ -105,7 +106,7 @@ class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, vo
 発生した例外のメッセージは試行履歴に保存され、ダッシュボードの詳細画面に表示されます
 本文は2,000文字で打ち切られ、1ジョブあたり20件まで保持されます
 
-## キーを必須にする
+## キーを必須にする {#required-keys}
 
 第3型引数に`{ concurrencyKey: true }`または`{ uniqueKey: true }`を指定すると、そのperformerへの投入時にキーの指定が必須になります
 
@@ -115,12 +116,16 @@ class ChargeCard extends Performer<Payload, void, { concurrencyKey: true }, Env>
 
 キーは投入時に文字列として渡します。performer側の関数で導出する形は取りません
 
-::: warning 現状の制約
-この必須化が適用されるのは`JobQueue<M>`型を経由して呼び出す場合のみです
-`enqueue(env, input)`と`createClient()`が受け取るのは`EnqueueInput`で、`binding`は`string`、`payload`は`unknown`のため、キーの渡し忘れも型エラーになりません
+必須化は`tsumugi.enqueue`と`tsumugi.jobs(env)`で適用され、渡し忘れはコンパイルエラーになります
 
-`JobQueue<M>`は型定義としてexportされていますが、この型を返すランタイムAPIは現時点でありません
-型による強制を適用するには、利用側で`JobQueue<M>`に適合するラッパーを用意する必要があります
+```ts
+await tsumugi.enqueue(env, { binding: 'CHARGE', payload, concurrencyKey: 'customer:c1' });
+await tsumugi.jobs(env).enqueue('CHARGE', payload, { concurrencyKey: 'customer:c1' });
+```
+
+::: warning
+トップレベルの`enqueue(env, input)`と`createClient()`では必須化が適用されず、キーの渡し忘れも型エラーになりません
+[投入経路](/guide/enqueue#paths)を参照してください
 :::
 
 ## 別Workerへの配置
@@ -165,7 +170,7 @@ const performers = { ...local, MAIL: remote<SendMail>() };
 
 同一Workerのperformerと別Workerのperformerは混在可能です
 
-### 別Worker時の制約
+### 別Worker時の制約 {#remote-constraints}
 
 `spawn`が要求した子ノードは`perform`の完了報告に同梱されてから処理されます。呼び出した時点では実行は始まりません
 
@@ -182,11 +187,14 @@ await ctx.spawn('child', 'MAIL', payload);
 ```ts
 import { createTestContext, runPerformer } from 'tsumugi/testing';
 
-const result = await runPerformer(new SendWelcome(env), { userId: 'u_1' });
+const result = await runPerformer(new SendWelcome(ctx, env), { userId: 'u_1' });
 
 if (result.ok) console.log(result.value);
 else console.error(result.error);
 ```
+
+`Performer`のコンストラクタは`WorkerEntrypoint`と同じ`(ctx, env)`の2引数です
+`runPerformer`が要求するのは`perform`のみのため、`this.env`を使わないperformerは`perform`を持つ通常のオブジェクトでも検証できます
 
 `runPerformer`は例外を再送出せず、成功と失敗を同じ形式で返します
 
@@ -194,14 +202,14 @@ else console.error(result.error);
 
 ```ts
 const ctx = createTestContext({ attempt: 3 });
-await runPerformer(new SendWelcome(env), payload, ctx);
+await runPerformer(performer, payload, ctx);
 ```
 
 `deadlineAt`を過去や近い将来に置くと、期限に対する振る舞いを検証できます
 
 ```ts
 const ctx = createTestContext({ deadlineAt: Date.now() + 50 });
-await runPerformer(new SlowJob(env), payload, ctx);
+await runPerformer(performer, payload, ctx);
 ```
 
 ### スケジューラとバックオフ

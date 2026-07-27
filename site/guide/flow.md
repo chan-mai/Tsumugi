@@ -11,22 +11,22 @@ binding名とpayloadの型は単発のジョブと同じように検査されま
 ```ts
 import { createFlow, defineTsumugi } from 'tsumugi';
 
-const performers = { LIST: ListNames, GREET: Greet, REPORT: Report };
+const performers = { ListNames, Greet, Report };
 const flow = createFlow(performers);
 
 const flows = {
   GREETINGS: flow<{ prefix: string }>((f) => {
-    const list = f.node('list', 'LIST', {
+    const list = f.node('list', 'ListNames', {
       input: (i) => ({ prefix: i.prefix }),
     });
 
-    const each = f.fanOut('greet', 'GREET', {
+    const each = f.fanOut('greet', 'Greet', {
       after: { list },
       over: (_i, d) => d.list.names,
       input: (name) => ({ name }),
     });
 
-    f.node('report', 'REPORT', {
+    f.node('report', 'Report', {
       after: { each },
       input: (_i, d) => ({ total: d.each.total, failed: d.each.failed }),
     });
@@ -36,8 +36,12 @@ const flows = {
 const tsumugi = defineTsumugi({ performers, flows, auth: /* ... */ });
 ```
 
+binding名は[exportした名前](/guide/performer)で解決されるため、`performers`のキーはexport名と一致させます
+
 `f.node`の第1引数はノードID、第2引数はbinding、`input`は前段の戻り値からpayloadを組み立てる関数です
 `after`に渡したオブジェクトのキーが、`input`の第2引数のプロパティ名になります
+
+ノードIDに使用できる文字は英数字とハイフンとアンダースコアです
 
 依存は変数で指定します。宣言済みのノードしか参照しないので、循環する定義にはなりません
 
@@ -58,7 +62,7 @@ const runId = await tsumugi.start(env, 'GREETINGS', { prefix: 'hello' });
 
 実行時に件数が決まる並列処理は`f.fanOut`で定義します
 `over`が返した配列の要素ごとに子ノードが1つ作成され、子のノードIDには要素の添字が使われます(`greet:0`, `greet:1`)
-`key`を指定した場合は添字の代わりにその戻り値を使います
+`key`を指定した場合は添字の代わりにその戻り値を使います。使用できる文字はノードIDと同じです
 
 後続のノードが受け取るのは集計値です
 
@@ -85,11 +89,12 @@ class Crawl extends Performer<{ url: string }, void, {}, Env> {
 ```
 
 第1引数のIDは必須です。同じIDで二度要求しても子ノードは1つだけ作成されます
+使用できる文字はノードIDと同じで、子のノードIDは`<親のノードID>:<指定したID>`になります
 
 `spawn`には型検査が適用されません。binding名もpayloadも実行時の値として渡します
 
 `perform`が失敗した場合、その試行で要求した子ノードは作成されません。再実行時に改めて要求してください
-service binding越しのリモートperformerには`spawn`が渡されません
+service binding越しのリモートperformerからも`spawn`を呼び出せますが、[`await`が必要です](/guide/performer#remote-constraints)
 
 ## 別のFlowの起動
 
@@ -130,13 +135,17 @@ const PIPELINE = flow<{ prefix: string }>((f) => {
 依存関係のないノードは最後まで実行され、すべてのノードが終わった時点でRunが`FAILED`になります
 
 `FAILED`のRunはダッシュボードとREST APIから再開可能です
-失敗したノードは新しいジョブとして再作成され、`SKIPPED`にした下流は未実行の状態に戻ります
-成功済みのノードは再実行しません
+成功済みのノードの結果はそのまま使われ、それ以外のノードは未実行の状態に戻って改めて実行されます
 
 ## 取り消し
 
 `cancel`は未実行のノードを停止します
 実行中のジョブは停止しないので、それらが終わった時点でRunが`CANCELLED`になります
+
+## 保持期間
+
+終了したRunは`runs.sweepAfterMs`(既定5分)、`FAILED`のRunは`runs.failedRetentionMs`(既定7日)の経過後に削除されます
+再開を受け付けるのはこの期間内のみで、経過後の再開の要求は410になります。[RunSettings](/reference/config#runsettings)を参照してください
 
 ## テスト
 
@@ -161,7 +170,7 @@ fan-outは`over`の結果に従って展開されます。`ctx.spawn`による�
 ## 制約
 
 - ノードは`uniqueKey`を受け付けません。`uniqueKey`を必須と宣言したperformerをノードに指定すると型エラーになります
-- ノードの戻り値が8,192文字を超えた場合、そのノードは失敗になります。大きい結果はR2等へ書き込み、参照を戻り値としてください
+- ノードの戻り値が8,192文字を超えた場合と直列化できない場合、その試行は失敗として扱われ、`maxAttempts`まで再試行されます。大きい結果はR2等へ書き込み、参照を戻り値としてください
 - 1つのRunに含められるノード数は既定で10,000件です。`defineTsumugi`の`runs.maxNodes`で変更可能です
 - subflowの入れ子は既定で3段までです。`defineTsumugi`の`runs.maxDepth`で変更可能です
 

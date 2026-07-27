@@ -7,6 +7,21 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
 
 機械可読な仕様は[`/api/openapi.json`](#get-api-openapi-json)が返します。
 
+## 共通のレスポンス {#common-responses}
+
+| 状態 | 意味                       |
+| ---- | -------------------------- |
+| 401  | 認証に失敗した             |
+| 501  | その操作が構成されていない |
+| 503  | 構成が完了していない       |
+
+503の応答本文には理由が含まれます
+未適用のマイグレーションがある場合は未適用のファイル名が、bindingが不足している場合は不足の一覧が含まれます
+
+Flowを登録していない構成では、Runの開始と再開と取り消しが501になります
+
+`/api/openapi.json`は構成が完了していなくても取得可能です
+
 ## GET /api/jobs
 
 一覧を取得します
@@ -60,7 +75,17 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
     "binding": "MAIL",
     "state": "FAILED",
     "payload": "{\"to\":\"a@example.com\"}",
+    "result": null,
+    "priority": 0,
     "attempts": 3,
+    "max_attempts": 3,
+    "concurrency_key": "domain:example.com",
+    "unique_key": null,
+    "guarantee": "at-least-once",
+    "created_at": 1753000000000,
+    "updated_at": 1753000060000,
+    "dispatched_at": 1753000030000,
+    "run_after": null,
     "retryable": true,
     "attempts_log": [
       {
@@ -74,6 +99,10 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
   }
 }
 ```
+
+`result`はperformの戻り値です。成功時のみ含まれ、それ以外はnullです
+`run_after`は予約済みジョブの実行予定時刻です
+`attempts_log`は新しい試行から順に並びます
 
 見つからない場合は404です
 
@@ -96,7 +125,11 @@ HTML自体はデータを含まないため未認証でも返します。SPA側�
 `binding`と`payload`が必須です
 `performers`にないbindingは受け付けません。投入できても実行時に必ず失敗するためです
 
+指定できるのは上記の項目のみです。`timeoutMs`や`backoff`などは指定できず、既定値が使われます
+`partitionKey`も指定できないため、分割したbindingへの投入には利用できません
+
 成功すると201で`{ "id": "..." }`が返ります
+`uniqueKey`が既存のジョブと衝突した場合も201です。新規には作成されず、応答には既存のジョブIDが含まれます
 
 | 状態 | 意味                                 |
 | ---- | ------------------------------------ |
@@ -152,7 +185,7 @@ IDで指定する場合は`ids`のみを渡します
 | `concurrency_key` | 任意 | 完全一致                                   |
 | `created_from`    | 任意 | `created_at`の下限                         |
 | `created_to`      | 任意 | `created_at`の上限                         |
-| `limit`           | 任意 | 1回で処理する件数。既定と最大はいずれも200 |
+| `limit`           | 任意 | 1回で処理する件数。1以上、既定と最大はいずれも200 |
 
 `ids`を指定した場合、他の条件は無視されます
 
@@ -172,6 +205,7 @@ IDで指定する場合は`ids`のみを渡します
 一部が断られても全体は200です。全体を失敗にすると、成功した分まで再送されるためです
 
 `reason`は個別のリトライと取り消しが返す理由に対応します。`invalid-state`は409、`gone`は410に相当します
+`ids`にジョブIDとして不正な値が含まれていた場合、その要素は`invalid-id`として`failed`に含まれます
 
 `remaining`は条件で指定した場合に、上限で処理しきれなかった件数です。0になるまで同じ要求を繰り返します
 読み取りモデルは数秒遅れるため、この値は見積りです。`ids`で指定した場合は常に0です
@@ -204,8 +238,40 @@ IDで指定する場合は`ids`のみを渡します
 状態別の件数を返します
 
 ```json
-{ "byState": { "SCHEDULED": 12, "RUNNING": 3, "COMPLETED": 480, "FAILED": 2 } }
+{
+  "byState": { "SCHEDULED": 12, "RUNNING": 3, "COMPLETED": 480, "FAILED": 2 },
+  "oldestScheduledMs": 45000
+}
 ```
+
+`oldestScheduledMs`は最も古い`SCHEDULED`のジョブが投入から待たされている時間です。対象が無い場合はnullです
+
+## GET /api/diagnostics
+
+bindingごとの滞留の診断情報を取得します
+
+```json
+{
+  "shard": 0,
+  "bindings": {
+    "MAIL": {
+      "active": 2,
+      "outbox": 0,
+      "blocked": { "capacity": 0, "tokens": 5, "perKey": 1 }
+    }
+  }
+}
+```
+
+| 項目      | 意味                                             |
+| --------- | ------------------------------------------------ |
+| `active`  | 実行中の件数                                     |
+| `outbox`  | 一覧への反映を待っている件数                     |
+| `blocked` | 実行待ちのジョブがどの制約で止まっているかの内訳 |
+
+`blocked`の内訳は、`capacity`が同時実行数、`tokens`がレート、`perKey`がキー単位の上限に対応します
+
+対象はshard 0のみです。分割している場合、他のshardは含まれません
 
 ## GET /api/bindings
 
@@ -216,6 +282,16 @@ IDで指定する場合は`ids`のみを渡します
 ```
 
 一度も実行されていないbindingも含めて、`performers`に登録された全てのbindingを返します
+
+## GET /api/flows
+
+登録済みのFlow名を取得します
+
+```json
+{ "flows": ["GREETINGS", "PIPELINE"] }
+```
+
+一度も実行されていないFlowも含めて、`flows`に登録された全てのFlow名を取得できます
 
 ## GET /api/runs
 
@@ -256,7 +332,20 @@ Runの一覧を返します
 
 ```json
 {
-  "run": { "id": "GREETINGS:cl9x0a1b2c3d", "flow": "GREETINGS", "state": "RUNNING", "retryable": false },
+  "run": {
+    "id": "GREETINGS:cl9x0a1b2c3d",
+    "flow": "GREETINGS",
+    "state": "RUNNING",
+    "input": "{\"prefix\":\"hello\"}",
+    "node_total": 6,
+    "node_done": 4,
+    "node_failed": 0,
+    "created_at": 1767225600000,
+    "updated_at": 1767225603000,
+    "parent_run_id": null,
+    "parent_node_id": null,
+    "retryable": false
+  },
   "nodes": [
     {
       "id": "greet",
@@ -267,16 +356,21 @@ Runの一覧を返します
       "origin": "static",
       "after": ["list"],
       "job_id": null,
+      "child_run_id": null,
       "result": null,
       "error": null,
-      "position": 1
+      "position": 1,
+      "created_at": 1767225600000,
+      "updated_at": 1767225603000
     }
   ]
 }
 ```
 
-`container`はfan-outノードを示します。ジョブを持たないので`job_id`はnullで、`result`には子ノードの集計値が入ります
+`container`はfan-outノードを示します。ジョブを持たないので`job_id`はnullで、`result`には子ノードの集計値が含まれます
 `parent`を持つノードは実行時に追加されたノードで、`origin`は`fanOut`または`spawn`になります
+subflowとして起動されたRunでは、`parent_run_id`と`parent_node_id`に親のRunとノードのIDが含まれます
+subflowのノードでは、起動した子のrunIdが`child_run_id`に含まれます
 
 ## POST /api/runs
 
@@ -300,13 +394,18 @@ Runを開始します
 
 ## POST /api/runs/:id/retry
 
-失敗したRunを再開します。失敗したノードは新しいジョブとして再作成され、`SKIPPED`にした下流は未実行の状態に戻ります
-`RUNNING`と`COMPLETED`のRunには409、保持期間を過ぎたRunには410を返します
+失敗したRunを再開します
+完了したノードの結果はそのまま使われ、`FAILED` `STALLED` `SKIPPED` `CANCELLED`のノードは未実行の状態に戻り、改めて実行されます
+
+再開できるのは`FAILED`のRunのみです。それ以外は409、保持期間を過ぎたRunは410になります
+runIdの形式が不正な場合は400です
 
 ## POST /api/runs/:id/cancel
 
 未実行のノードを停止します。実行中のジョブは停止しないので、それらが終わるまで待ちます
-`RUNNING`以外のRunには409を返します
+
+取り消しできるのは`RUNNING`のRunのみです。それ以外は409になります
+runIdの形式が不正な場合は400です
 
 ## GET /api/openapi.json
 

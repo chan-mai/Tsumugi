@@ -7,14 +7,15 @@
 | 状態        | 意味                                            |
 | ----------- | ----------------------------------------------- |
 | `SCHEDULED` | 実行待ち。初回待ちもリトライ待ちも含む          |
-| `QUEUED`    | Queuesに投入済み、performerはまだ開始していない |
-| `RUNNING`   | performerが実行中                               |
+| `QUEUED`    | Queuesに投入済み。実行中の場合も含む            |
+| `RUNNING`   | performerが実行中。`at-most-once`のみ           |
 | `COMPLETED` | 成功                                            |
 | `FAILED`    | 試行回数を使い切って失敗                        |
 | `CANCELLED` | 取り消された                                    |
 | `STALLED`   | 応答が無く回収できず、手動での判断を待っている  |
 
-`QUEUED`と`RUNNING`は別の状態です。performerが未開始か実行中かの判別が可能です
+`RUNNING`へ遷移するのは`at-most-once`のジョブのみです
+既定の`at-least-once`では`QUEUED`のまま実行されるため、`QUEUED`は未開始と実行中の両方を含みます
 
 初回待ちとリトライ待ちはどちらも`SCHEDULED`です。判別には`attempts`を使います
 
@@ -22,7 +23,7 @@
 
 ```
 SCHEDULED → QUEUED, CANCELLED
-QUEUED    → RUNNING, COMPLETED, FAILED, SCHEDULED, STALLED
+QUEUED    → RUNNING(at-most-onceのみ), COMPLETED, FAILED, SCHEDULED, STALLED
 RUNNING   → COMPLETED, FAILED, SCHEDULED, STALLED
 COMPLETED → なし
 CANCELLED → なし
@@ -53,7 +54,7 @@ consumerは結果を報告したあと常にackするため通常は作用しま
 固定間隔の指定も可能です
 
 ```ts
-await enqueue(env, {
+await tsumugi.enqueue(env, {
   binding: 'MAIL',
   payload,
   backoff: { kind: 'fixed', delayMs: 30_000, jitter: true },
@@ -73,7 +74,7 @@ binding単位に3軸で宣言します
 | `perKeyConcurrency` | `1`    | `concurrencyKey`単位の同時実行数の上限 |
 
 ```ts
-const tsumugi = defineTsumugi<Env>({
+const tsumugi = defineTsumugi({
   performers,
   bindings: {
     MAIL: {
@@ -90,6 +91,21 @@ const tsumugi = defineTsumugi<Env>({
 `concurrencyKey`がnullのジョブに`perKeyConcurrency`は適用されません
 
 3軸を全て有効にした場合のスループット低下は実測で約17%です
+
+### 滞留の診断 {#diagnostics}
+
+投入したジョブが実行されない場合、[GET /api/diagnostics](/reference/rest-api#get-api-diagnostics)で、どの軸によって止まっているかを確認できます
+
+### 実行時の上書き
+
+`tsumugi.shardFor`で取得したstubの`configure`で、デプロイなしに`policy`と保持期間を変更できます
+
+```ts
+await tsumugi.shardFor(env, 'MAIL').configure({ policy: { concurrency: 5 } });
+```
+
+一度`configure`を実行すると、以降は`bindings`の静的な設定より`configure`の内容が優先されます
+静的な設定へ戻す場合は、改めて`configure`で同じ内容を指定します
 
 ## エージング
 
@@ -113,7 +129,7 @@ effectivePriority = priority + floor(waited / agingIntervalMs)
 | `at-most-once`        | 再投入せず`STALLED`に落とし、手動での判断を待つ |
 
 ```ts
-await enqueue(env, {
+await tsumugi.enqueue(env, {
   binding: 'CHARGE',
   payload,
   guarantee: 'at-most-once',
@@ -130,7 +146,8 @@ performerには期限が`ctx.deadlineAt`として渡るため、中断に応じ�
 どちらの場合もperformerの実行そのものは停止しません
 
 さらに`reaperGraceMs`(既定30秒)だけ応答が無い状態が続いたジョブは回収されます
-試行回数が残っていれば保証に従って再投入か`STALLED`、使い切っていれば`FAILED`になります
+`at-most-once`のジョブは、試行回数に関わらず`STALLED`になります
+`at-least-once`のジョブは、試行回数が残っていれば再投入され、使い切っていれば`FAILED`になります
 
 ## shard {#shard}
 
@@ -160,14 +177,19 @@ bindings: {
 | `COMPLETED` / `CANCELLED` | `sweepAfterMs`      | 5分  |
 | `FAILED` / `STALLED`      | `failedRetentionMs` | 7日  |
 
-一覧そのものの保持は`retention`で指定し、cronトリガーの`scheduled`で削除します
+どちらも`bindings`のbinding単位で指定します
 
 ```ts
-const tsumugi = defineTsumugi<Env>({
+const tsumugi = defineTsumugi({
   performers,
-  retention: {/* SweepOptions */},
+  bindings: {
+    MAIL: { sweepAfterMs: 60 * 60 * 1000, failedRetentionMs: 14 * 24 * 60 * 60 * 1000 },
+  },
 });
 ```
+
+一覧そのものの保持はこれとは別の設定で、`retention`で指定します
+cronトリガーを設定すると、期間を過ぎた終了済みのジョブが一覧から削除されます。[SweepOptions](/reference/config#sweepoptions)を参照してください
 
 既定では両者の期間が揃っているため、一覧に表示されているジョブはリトライが可能です
 片方だけ変えると、一覧に表示されていてもリトライを受け付けないジョブが出ます
