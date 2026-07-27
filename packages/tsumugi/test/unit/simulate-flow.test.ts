@@ -1,25 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { Performer } from '../../src/core/api.js';
+import type { PerformerLike } from '../../src/core/api.js';
 import { createFlow } from '../../src/core/flow.js';
 import { simulateFlow } from '../../src/testing/flow.js';
 
-class ListNames extends Performer<{ prefix: string }, { names: string[] }> {
-	async perform() {
-		return { names: [] as string[] };
-	}
-}
+// `createFlow`はctorのインスタンス型からpayloadと戻り値を引くので, 実体は呼ばれない
+// `Performer`は`cloudflare:workers`に依存し, workerdを起動しないこのプロジェクトでは読めない
+type Ctor<P, R> = new (...args: any[]) => PerformerLike<P, R>;
 
-class Greet extends Performer<{ name: string }, { greeted: string }> {
-	async perform() {
-		return { greeted: '' };
-	}
-}
+const performers = {
+	LIST: class {} as Ctor<{ prefix: string }, { names: string[] }>,
+	GREET: class {} as Ctor<{ name: string }, { greeted: string }>,
+	REPORT: class {} as Ctor<{ total: number; failed: number }, void>,
+};
 
-class Report extends Performer<{ total: number; failed: number }, void> {
-	async perform() {}
-}
-
-const flow = createFlow({ LIST: ListNames, GREET: Greet, REPORT: Report });
+const flow = createFlow(performers);
 
 /** exampleと同じ形, 一覧を取り件数だけ実行時に決まる並列で挨拶し最後に要約する */
 const greetings = flow<{ prefix: string }>((f) => {
