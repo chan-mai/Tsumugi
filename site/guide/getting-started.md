@@ -25,6 +25,7 @@ pnpm wrangler queues create my-jobs
 ## wrangler.jsonc
 
 Tsumugiが使うbindingは4つです
+`TSUMUGI_METRICS`のみ任意で、設定しない場合はメトリクスが記録されませんが、その他の動作に影響はありません
 
 ```jsonc
 {
@@ -77,7 +78,8 @@ pnpm wrangler d1 migrations apply my-jobs --remote
 
 ::: warning
 Tsumugiを更新した場合も同じコマンドが必要です。マイグレーションはバージョンによって追加されます
-未適用のマイグレーションがある場合、REST APIとダッシュボードは503を返し、未適用のファイル名を応答本文に含めます
+未適用のマイグレーションがある場合、REST APIは503になり、応答本文に未適用のファイル名が含まれます
+ダッシュボードの画面自体は表示されますが、一覧の読み込みが同じ理由で失敗します
 :::
 
 ## performer
@@ -107,7 +109,7 @@ export * from './hello.js';
 performerをWorkerのトップレベルからexportします。binding名はexportした名前がそのまま利用されます
 
 ```ts
-import { bearerAuth, defineTsumugi, enqueue } from 'tsumugi';
+import { bearerAuth, defineTsumugi } from 'tsumugi';
 import { ui } from 'tsumugi/ui';
 import * as performers from './performers/index.js';
 
@@ -127,7 +129,7 @@ export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     if (pathname === '/enqueue') {
-      const id = await enqueue(env, { binding: 'Hello', payload: { name: 'world' } });
+      const id = await tsumugi.enqueue(env, { binding: 'Hello', payload: { name: 'world' } });
       return Response.json({ id });
     }
     // 残りはダッシュボードとREST APIへ
@@ -139,7 +141,11 @@ export default {
 `performers`はペイロードと必須キーの型を引くためのもので、実行時の解決には使いません
 解決先はexportした名前なので、`export * from`を書き忘れると実行時に見つからないエラーになります
 
-`defineTsumugi`が返すのは`fetch`と`queue`と`scheduled`を持つハンドラです
+`tsumugi.enqueue`では、bindingからpayloadと必須キーの型が決まります
+投入の経路は[ジョブの投入](/guide/enqueue#paths)を参照してください
+
+`defineTsumugi`の戻り値には、`fetch`と`queue`と`scheduled`のほかに投入とFlowの開始の口が含まれます
+全体は[設定](/reference/config#definetsumugi)を参照してください
 独自の`fetch`を追加する場合は上のようにスプレッドし、処理しなかったパスを`tsumugi.fetch`へ渡します
 
 ## トークンの設定

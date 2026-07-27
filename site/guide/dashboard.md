@@ -11,7 +11,7 @@
 ```ts
 import { bearerAuth, defineTsumugi } from 'tsumugi';
 
-const tsumugi = defineTsumugi<Env>({
+const tsumugi = defineTsumugi({
   performers,
   auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
 });
@@ -36,7 +36,7 @@ cookieで受け取る構成はCSRFの対象になります。発行側で`SameSi
 ```ts
 import { cloudflareAccess, defineTsumugi } from 'tsumugi';
 
-const tsumugi = defineTsumugi<Env>({
+const tsumugi = defineTsumugi({
   performers,
   auth: cloudflareAccess({ teamDomain: 'example', aud: 'audience tag' }),
 });
@@ -57,7 +57,7 @@ const tsumugi = defineTsumugi<Env>({
 ```ts
 import { ui } from 'tsumugi/ui';
 
-const tsumugi = defineTsumugi<Env>({
+const tsumugi = defineTsumugi({
   performers,
   auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
   ui: ui({ tokenCookie: 'tsumugi_token' }),
@@ -76,16 +76,13 @@ const tsumugi = defineTsumugi<Env>({
 `tokenCookie`を指定すると、APIが401を返したときに入力欄が表示されます
 Cloudflare Accessのようにブラウザ側で認証が完結する構成では不要です
 
-`/admin`の下に配置する場合は次のように指定します
-
-```ts
-ui: ui({ basePath: '/admin', tokenCookie: 'tsumugi_token' });
-```
+::: warning 現状の制約
+`basePath`を指定した配置は現時点では動作しません。ダッシュボードはルート(`/`)に配置してください
+:::
 
 ### 機能
 
 - 状態とbindingによる絞り込み、ページング、列ごとの並べ替え
-- 状態別の件数の表示
 - 詳細画面での試行履歴の表示
 - 手動リトライと取り消し
 - 選択したジョブへの一括リトライと一括取り消し
@@ -94,14 +91,25 @@ ui: ui({ basePath: '/admin', tokenCookie: 'tsumugi_token' });
 
 行の左端のチェックボックスでジョブを選択します。見出し行のチェックボックスは表示中の行をまとめて選択、1件以上を選択するとメニューが現れ、リトライと取り消しをまとめて実行可能です
 
+### 表示の調整
+
+いずれの設定もブラウザに保存され、次回以降も適用されます
+
+- 更新間隔: Off / 1s / 3s / 10s / 30s / 1mから選択します。既定は3秒です
+- 列の表示切替: ID / Started at / Updated at / Attempts / Processing timeの表示を切り替えます。BindingとStatusは常に表示されます
+- 1ページの件数: 10 / 20 / 30 / 50から選択します
+
 ### Runs
 
 `flows`を設定している場合、ヘッダーにRunsのタブが表示されます
 `flows`が空の構成ではタブを表示しません
 
-一覧にはFlow、状態、ノードの進捗が表示されます
+一覧にはFlow、状態、ノードの進捗が表示されます。Flowと状態による絞り込みが可能です
 行を選択するとグラフが表示され、依存関係、各ノードの状態、fan-outノードの子ノードの進捗が並びます
+子ノードの表示は24件までで、超えた分は状態別の件数に集約されます
 ノードのJobを選択すると、そのジョブの詳細画面へ移動します
+
+subflowとして起動されたRunの詳細からは親のRunへ、subflowノードからは子のRunへ移動できます
 
 Runの開始、再開、取り消しもこの画面から実行します
 再開の対象は`FAILED`のRun、取り消しの対象は`RUNNING`のRunのみです
