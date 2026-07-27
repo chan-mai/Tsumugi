@@ -33,21 +33,6 @@ binding名はWorkerのエントリからexportした名前で解決され、`exp
 export { SendMail } from './performers/send-mail.js';
 ```
 
-別名を付ける場合はexportの時点で変えます
-
-```ts
-export { SendMail as MAIL } from './performers/send-mail.js';
-```
-
-この場合は`performers`のキーも同じ名前に揃えます
-揃えないと型の上のbinding名は元のクラス名のままになり、実行時の解決先とずれます
-
-```ts
-import { SendMail } from './performers/send-mail.js';
-
-const performers = { MAIL: SendMail };
-```
-
 `defineTsumugi`の`performers`には、performerをまとめたモジュールをそのまま渡します
 これはペイロードと必須キーの型を引くためのもので、実行時の解決には使いません
 
@@ -57,6 +42,22 @@ import * as performers from './performers/index.js';
 export * from './performers/index.js';
 
 const tsumugi = defineTsumugi({ performers, /* ... */ });
+```
+
+別名を付ける場合はバレルのexportで変えます
+実行時の解決先と`performers`のキーが同じ1箇所から決まるため、両者がずれません
+
+```ts
+// src/performers/index.ts
+export { SendMail as MAIL } from './send-mail.js';
+```
+
+Workerのエントリでのみ別名を付けると、実行時は`MAIL`で解決される一方で`performers`のキーは`SendMail`のまま残り、型の上のbinding名と一致しなくなります
+
+```ts
+// src/index.ts
+// 実行時のexportだけが変わるので、これだけでは足りない
+export { SendMail as MAIL } from './performers/send-mail.js';
 ```
 
 ## 実行文脈
