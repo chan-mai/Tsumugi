@@ -187,6 +187,9 @@ await ctx.spawn('child', 'MAIL', payload);
 ```ts
 import { createTestContext, runPerformer } from 'tsumugi/testing';
 
+declare const ctx: ExecutionContext;
+declare const env: Env;
+
 const result = await runPerformer(new SendWelcome(ctx, env), { userId: 'u_1' });
 
 if (result.ok) console.log(result.value);
