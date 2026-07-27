@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { Performer } from '../../src/core/api.js';
 import { createFlow, InvalidFlowError, shapeOf } from '../../src/core/flow.js';
 
-class Fetch extends Performer<{ since: number }, { items: string[] }> {
-	async perform() {
+// 型の導出だけを見るのでperformの中身は問わない
+class Fetch {
+	async perform(_payload: { since: number }) {
 		return { items: ['a', 'b'] };
 	}
 }
 
-class Work extends Performer<{ id: string }, { ok: boolean }> {
-	async perform() {
+class Work {
+	async perform(_payload: { id: string }) {
 		return { ok: true };
 	}
 }

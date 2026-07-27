@@ -7,12 +7,14 @@
 ```ts
 import { Performer, type JobContext } from 'tsumugi/performer';
 
-class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env> {
+export class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env> {
   async perform(payload: { to: string; subject: string }, ctx: JobContext): Promise<void> {
+    const remaining = ctx.deadlineAt - Date.now();
     await fetch('https://api.example.com/mail', {
       method: 'POST',
       body: JSON.stringify(payload),
-      signal: ctx.signal,
+      // AbortSignal.timeoutは負の値を受け付けないため、期限を過ぎていれば即座に中断する
+      signal: remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort(),
     });
   }
 }
@@ -22,16 +24,40 @@ class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env>
 
 bindingは`WorkerEntrypoint`と同様にコンストラクタで受け取るため、`this.env`から参照可能です
 
-## performers
+## binding名
 
-binding名とperformerの対応は`defineTsumugi`の`performers`に記述します
-この1箇所に記述すれば、wranglerのservice bindingの追加も型引数の明示も不要です
+binding名はWorkerのエントリからexportした名前で解決され、`export class SendMail`と書けばbinding名は`SendMail`になり、別途の登録は不要です
 
 ```ts
-const tsumugi = defineTsumugi<Env>({
-  performers: { MAIL: SendMail, CHARGE: ChargeCard },
-  // ...
-});
+// src/index.ts
+export { SendMail } from './performers/send-mail.js';
+```
+
+`defineTsumugi`の`performers`には、performerをまとめたモジュールをそのまま渡します
+これはペイロードと必須キーの型を引くためのもので、実行時の解決には使いません
+
+```ts
+import * as performers from './performers/index.js';
+
+export * from './performers/index.js';
+
+const tsumugi = defineTsumugi({ performers, /* ... */ });
+```
+
+別名を付ける場合はバレルのexportで変えます
+実行時の解決先と`performers`のキーが同じ1箇所から決まるため、両者がずれません
+
+```ts
+// src/performers/index.ts
+export { SendMail as MAIL } from './send-mail.js';
+```
+
+Workerのエントリでのみ別名を付けると、実行時は`MAIL`で解決される一方で`performers`のキーは`SendMail`のまま残り、型の上のbinding名と一致しなくなります
+
+```ts
+// src/index.ts
+// 実行時のexportだけが変わるので、これだけでは足りない
+export { SendMail as MAIL } from './performers/send-mail.js';
 ```
 
 ## 実行文脈
@@ -43,13 +69,22 @@ const tsumugi = defineTsumugi<Env>({
 | `jobId`          | `<binding>#<shard>:<localId>`形式のジョブID          |
 | `attempt`        | 1始まりの試行回数                                    |
 | `idempotencyKey` | ジョブ単位で一定の値、再実行でも同じ値               |
-| `signal`         | タイムアウト時にabortされる`AbortSignal`             |
+| `deadlineAt`     | タイムアウトが切れる時刻、epochミリ秒               |
 | `spawn`          | Flowのノードとして実行中に子ノードを追加する関数     |
 
 at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください
 
-`signal`は協調的な中断の要求です
-中断に応じないperformerは実行を継続するため、中断させる処理には`signal`を渡す必要があります
+中断が必要な処理には`deadlineAt`から`AbortSignal`を組み立てて渡します
+`AbortSignal`はRPCの引数として渡せない制約があるため、Tsumugiが渡すのは時刻のみです
+
+`AbortSignal.timeout`は負の値を受け付けないため、期限を過ぎている場合は`AbortSignal.abort()`を使います
+
+```ts
+const remaining = ctx.deadlineAt - Date.now();
+const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort();
+```
+
+中断は協調的な要求であり、応じないperformerは期限を過ぎても実行を継続する可能性があります。
 
 `spawn`の使用方法は[Flow](/guide/flow)を参照してください
 
@@ -91,14 +126,13 @@ class ChargeCard extends Performer<Payload, void, { concurrencyKey: true }, Env>
 ## 別Workerへの配置
 
 performerはservice binding越しに別のWorkerへの配置が可能です
-その場合は`RemotePerformer`を継承します
 
 ```ts
 // 相手側のWorker
-import { RemotePerformer, type RemoteJobContext } from 'tsumugi/performer';
+import { Performer, type JobContext } from 'tsumugi/performer';
 
-export class SendMail extends RemotePerformer<{ to: string; subject: string }, void, {}, Env> {
-  async perform(payload: { to: string; subject: string }, ctx: RemoteJobContext): Promise<void> {
+export class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env> {
+  async perform(payload: { to: string; subject: string }, ctx: JobContext): Promise<void> {
     // ...
   }
 }
@@ -111,31 +145,35 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-呼び出し側の`performers`には、クラスの代わりに`remote()`を指定します
-
-```ts
-import { remote } from 'tsumugi';
-
-const performers = { HELLO: Hello, MAIL: remote<SendMail>('MAIL_SERVICE') };
-```
-
-wrangler.jsoncではentrypointにクラス名を指定します
+wrangler.jsoncのservice bindingで、binding名とentrypointを対応させます
 
 ```jsonc
 "services": [
-  { "binding": "MAIL_SERVICE", "service": "my-mailer", "entrypoint": "SendMail" },
+  { "binding": "MAIL", "service": "my-mailer", "entrypoint": "SendMail" },
 ],
 ```
 
-ローカルのperformerとリモートのperformerは同じ`performers`に混在可能です
+呼び出し側の`performers`には、クラスの代わりに`remote()`を置きます
+相手のクラスは別Workerにあるためimportできず、型を運ぶためだけに指定します
 
-### リモートでの制約
+```ts
+import { remote } from 'tsumugi';
+import type { SendMail } from 'my-mailer';
 
-RPCの引数は`AbortSignal`に対応していないため、`RemoteJobContext`には`signal`がありません
-タイムアウト時は呼び出し側が待機を打ち切るだけで、リモート側の処理は継続します
-中断が必要な処理はローカルに配置してください
+const performers = { ...local, MAIL: remote<SendMail>() };
+```
 
-`spawn`も渡されません
+同一Workerのperformerと別Workerのperformerは混在可能です
+
+### 別Worker時の制約
+
+`spawn`が要求した子ノードは`perform`の完了報告に同梱されてから処理されます。呼び出した時点では実行は始まりません
+
+別Workerでは`ctx.spawn`がRPCの呼び出しになるため、`await`が必要になります。`await`せずに`perform`が終わると、要求が完了報告に載らないまま失われます
+
+```ts
+await ctx.spawn('child', 'MAIL', payload);
+```
 
 ## テスト
 
@@ -159,14 +197,11 @@ const ctx = createTestContext({ attempt: 3 });
 await runPerformer(new SendWelcome(env), payload, ctx);
 ```
 
-`signal`は実際の`AbortController`から取得するため、中断に対応するperformerの検証も可能です
+`deadlineAt`を過去や近い将来に置くと、期限に対する振る舞いを検証できます
 
 ```ts
-const ctx = createTestContext();
-const running = runPerformer(new SlowJob(env), payload, ctx);
-
-ctx.abort();
-await running;
+const ctx = createTestContext({ deadlineAt: Date.now() + 50 });
+await runPerformer(new SlowJob(env), payload, ctx);
 ```
 
 ### スケジューラとバックオフ

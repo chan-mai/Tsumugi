@@ -1,6 +1,5 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { Performer } from '../../src/core/api.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { TsumugiRunInstance } from '../../src/do/run.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
@@ -11,23 +10,20 @@ import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
  * flowの定義はexamples/basicが持つ(PIPELINEがGREETINGSを起動する)
  */
 
-class ListNames extends Performer<{ prefix: string }, { names: string[] }, {}, ConsumerEnv> {
-	async perform(payload: { prefix: string }) {
-		return { names: [`${payload.prefix}-1`, `${payload.prefix}-2`] };
-	}
-}
+// consumerへ渡すのは`perform`を持つ実体, `ctx.exports`から引かれる形と同じ(ADR-0037)
+const ListNames = {
+	perform: async (payload: { prefix: string }) => ({ names: [`${payload.prefix}-1`, `${payload.prefix}-2`] }),
+};
 
-class Greet extends Performer<{ name: string }, { greeted: string }, {}, ConsumerEnv> {
-	async perform(payload: { name: string }) {
-		return { greeted: payload.name };
-	}
-}
+const Greet = {
+	perform: async (payload: { name: string }) => ({ greeted: payload.name }),
+};
 
-class Report extends Performer<{ total: number; failed: number }, void, {}, ConsumerEnv> {
-	async perform(): Promise<void> {}
-}
+const Report = {
+	perform: async (): Promise<void> => {},
+};
 
-const BINDINGS = ['LIST', 'GREET', 'REPORT'] as const;
+const BINDINGS = ['ListNames', 'Greet', 'Report'] as const;
 const consumerEnv: ConsumerEnv = env;
 
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
@@ -78,7 +74,7 @@ const stateOf = (runId: string) => runInDurableObject(runStub(runId), (instance)
 const nodeOf = (runId: string, nodeId: string) => runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId));
 
 describe('subflowの縦串', () => {
-	const registry = { LIST: ListNames, GREET: Greet, REPORT: Report };
+	const registry = { ListNames, Greet, Report };
 
 	it('子のrunを起動し, その終端を待って後段へ進む', async () => {
 		const parent = 'PIPELINE:sub-ok';

@@ -16,7 +16,7 @@ const tsumugi = defineTsumugi<Env>({
 
 | 名前         | 必須 | 内容                                                          |
 | ------------ | ---- | ------------------------------------------------------------- |
-| `performers` | ○    | binding名とperformerの対応。`remote()`との混在も可能          |
+| `performers` | ○    | performerのモジュール, ペイロードと必須キーの型の導出に利用  |
 | `flows`      |      | Flow名と定義の対応。指定すると`RUN`のbindingが必要            |
 | `runs`       |      | Runの上限と保持期間の設定                                     |
 | `bindings`   |      | binding単位の分割数、流量制御、保持期間                       |
@@ -101,7 +101,7 @@ const tsumugi = defineTsumugi<Env>({
 | import元            | 内容                                                             |
 | ------------------- | ---------------------------------------------------------------- |
 | `tsumugi`           | `defineTsumugi` `enqueue` `bearerAuth` `TsumugiJobShard`など本体 |
-| `tsumugi/performer` | `Performer` `RemotePerformer`                                    |
+| `tsumugi/performer` | `Performer`                                                      |
 | `tsumugi/client`    | `createClient`。Durable Object実装を含まない                     |
 | `tsumugi/ui`        | `ui()`。ダッシュボードのHTML                                     |
 | `tsumugi/types`     | 型のみ。ランタイムコードを含まない                               |

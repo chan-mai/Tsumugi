@@ -80,23 +80,41 @@ Tsumugiを更新した場合も同じコマンドが必要です。マイグレ�
 未適用のマイグレーションがある場合、REST APIとダッシュボードは503を返し、未適用のファイル名を応答本文に含めます
 :::
 
-## Worker
+## performer
 
-performerを定義して、`defineTsumugi`の`performers`に渡します
+ジョブの処理内容をファイルに分けて定義します
 
 ```ts
-import { bearerAuth, defineTsumugi, enqueue } from 'tsumugi';
+// src/performers/hello.ts
 import { Performer } from 'tsumugi/performer';
-import { ui } from 'tsumugi/ui';
 
-class Hello extends Performer<{ name: string }, void, {}, Env> {
+export class Hello extends Performer<{ name: string }, void, {}, Env> {
   async perform(payload: { name: string }): Promise<void> {
     console.log(`hello, ${payload.name}`);
   }
 }
+```
 
-const tsumugi = defineTsumugi<Env>({
-  performers: { HELLO: Hello },
+まとめてexportするファイルを1つ置きます。ここに並べた名前がそのままbinding名になります
+
+```ts
+// src/performers/index.ts
+export * from './hello.js';
+```
+
+## Worker
+
+performerをWorkerのトップレベルからexportします。binding名はexportした名前がそのまま利用されます
+
+```ts
+import { bearerAuth, defineTsumugi, enqueue } from 'tsumugi';
+import { ui } from 'tsumugi/ui';
+import * as performers from './performers/index.js';
+
+export * from './performers/index.js';
+
+const tsumugi = defineTsumugi({
+  performers,
   auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
   ui: ui({ tokenCookie: 'tsumugi_token' }),
 });
@@ -109,7 +127,7 @@ export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     if (pathname === '/enqueue') {
-      const id = await enqueue(env, { binding: 'HELLO', payload: { name: 'world' } });
+      const id = await enqueue(env, { binding: 'Hello', payload: { name: 'world' } });
       return Response.json({ id });
     }
     // 残りはダッシュボードとREST APIへ
@@ -117,6 +135,9 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 ```
+
+`performers`はペイロードと必須キーの型を引くためのもので、実行時の解決には使いません
+解決先はexportした名前なので、`export * from`を書き忘れると実行時に見つからないエラーになります
 
 `defineTsumugi`が返すのは`fetch`と`queue`と`scheduled`を持つハンドラです
 独自の`fetch`を追加する場合は上のようにスプレッドし、処理しなかったパスを`tsumugi.fetch`へ渡します

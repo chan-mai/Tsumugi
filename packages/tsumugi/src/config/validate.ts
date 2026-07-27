@@ -62,15 +62,14 @@ export function validateConfig(env: Record<string, unknown>, config: ValidateInp
 		}
 	}
 
-	// 同じbindingを複数のperformerが指しても報告は1件, 断片も重複させない
-	const checked = new Set<string>();
-	for (const entry of Object.values(config.performers)) {
-		if (!isRemoteRef(entry) || checked.has(entry.binding)) continue;
-		checked.add(entry.binding);
-		const service = env[entry.binding] as { perform?: unknown } | undefined;
-		if (absent(service)) missing.push({ kind: 'service', name: entry.binding, reason: 'absent' });
+	// 別Workerのperformerはservice bindingで解決する, binding名は`performers`のキー(ADR-0037)
+	// キーは一意なので同じbindingが二度並ぶことはない
+	for (const [name, entry] of Object.entries(config.performers)) {
+		if (!isRemoteRef(entry)) continue;
+		const service = env[name] as { perform?: unknown } | undefined;
+		if (absent(service)) missing.push({ kind: 'service', name, reason: 'absent' });
 		// 名前は在るが相手がperformerでない場合, 実行時まで気付けないので同じ扱いにする
-		else if (typeof service?.perform !== 'function') missing.push({ kind: 'service', name: entry.binding, reason: 'invalid' });
+		else if (typeof service?.perform !== 'function') missing.push({ kind: 'service', name, reason: 'invalid' });
 	}
 
 	return missing.length === 0 ? { ok: true } : { ok: false, missing };

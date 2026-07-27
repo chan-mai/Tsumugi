@@ -1,12 +1,11 @@
-import { RemotePerformer, type RemoteJobContext } from 'tsumugi/performer';
+import { Performer, type JobContext } from 'tsumugi/performer';
 
 /**
  * ジョブ管理Workerとは別Workerのperformer
- * 呼び出し側はservice bindingとして参照,`performers`には`remote('MAIL_SERVICE')`(ADR-0026)
+ * 同一Workerに置く場合と書き方は変わらない, 呼び出し側がservice bindingで参照する(ADR-0026)
  */
-export class SendMail extends RemotePerformer<{ to: string; subject: string }, void, {}, Env> {
-	async perform(payload: { to: string; subject: string }, ctx: RemoteJobContext): Promise<void> {
-		// ctxに`signal`なし, RPCの引数はAbortSignal非対応で中断の依頼は届かない
+export class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env> {
+	async perform(payload: { to: string; subject: string }, ctx: JobContext): Promise<void> {
 		console.log(`send mail to ${payload.to} (${ctx.jobId}, attempt ${ctx.attempt})`);
 	}
 }
