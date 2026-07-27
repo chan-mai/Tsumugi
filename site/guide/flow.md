@@ -138,6 +138,26 @@ const PIPELINE = flow<{ prefix: string }>((f) => {
 `cancel`は未実行のノードを停止します
 実行中のジョブは停止しないので、それらが終わった時点でRunが`CANCELLED`になります
 
+## テスト
+
+`simulateFlow`は、ある入力に対してノードがどの順序で実行され、各ノードにどのpayloadが渡るかを返します
+
+```ts
+import { simulateFlow } from 'tsumugi/testing';
+
+const result = simulateFlow(flows.GREETINGS, { prefix: 'hello' }, { results: { list: { names: ['a', 'b'] } } });
+
+expect(result.nodes.map((node) => node.id)).toEqual(['list', 'greet:0', 'greet:1', 'greet', 'report']);
+expect(result.nodes[1].payload).toEqual({ name: 'a' });
+```
+
+performerは実行しません。各ノードの戻り値は`results`にノードIDとの対応で指定します
+関数も指定可能です。指定の無いノードの戻り値は`undefined`です
+
+`fails`に渡したノードは失敗します。下流は`SKIPPED`、Runは`FAILED`になります
+
+fan-outは`over`の結果に従って展開されます。`ctx.spawn`による追加は含まれません
+
 ## 制約
 
 - ノードは`uniqueKey`を受け付けません。`uniqueKey`を必須と宣言したperformerをノードに指定すると型エラーになります
