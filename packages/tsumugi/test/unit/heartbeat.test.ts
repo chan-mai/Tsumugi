@@ -50,4 +50,15 @@ describe('生存報告の間引き', () => {
 		);
 		await expect(heartbeat()).resolves.toBeUndefined();
 	});
+
+	it('送信が滞っても待機は上限で切り上げる', async () => {
+		// DOが応答しない場合にperformerの処理を止めない
+		const heartbeat = createHeartbeat(
+			() => new Promise(() => {}),
+			() => 0,
+			HEARTBEAT_MIN_INTERVAL_MS,
+			10,
+		);
+		await expect(heartbeat()).resolves.toBeUndefined();
+	});
 });

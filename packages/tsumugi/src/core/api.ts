@@ -15,8 +15,8 @@ export type JobContext = {
 	signal: AbortSignal;
 	/**
 	 * 実行中であることをDOへ報告する
-	 * 報告のあいだはreaperの無応答判定が延び、timeoutMsを最長の所要時間に合わせずに済む
-	 * `progress`は0以上1以下, 範囲外と非数は捨てる
+	 * 報告のあいだは無応答判定とtimeoutの起点が最後の報告時刻に移り、timeoutMsを最長の所要時間に合わせずに済む
+	 * `progress`は0以上1以下, 範囲外は両端へ丸め, 非数は進捗なしとして扱う
 	 * 実行間隔には下限があり、下限に満たない要求は送信せずに捨てる
 	 */
 	heartbeat(progress?: number): Promise<void>;

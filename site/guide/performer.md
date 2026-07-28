@@ -67,13 +67,13 @@ class Import extends Performer<{ rows: string[] }, void, {}, Env> {
   async perform(payload: { rows: string[] }, ctx: JobContext): Promise<void> {
     for (const [index, row] of payload.rows.entries()) {
       await store(row);
-      await ctx.heartbeat(index / payload.rows.length);
+      await ctx.heartbeat((index + 1) / payload.rows.length);
     }
   }
 }
 ```
 
-引数の進捗は0以上1以下です。範囲外の値と数値以外は無視されます
+引数の進捗は0以上1以下です。範囲外の値は0以上1以下へ丸められ、数値以外は進捗なしの報告として扱われます
 報告した進捗はジョブの詳細画面に表示されます
 
 実行間隔には5秒の下限があります。これより短い間隔で実行しても、報告は5秒に1回までです

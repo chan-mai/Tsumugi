@@ -15,11 +15,26 @@ class Boom extends Performer<unknown, void, {}, Env> {
 	}
 }
 
+/** 中断に応じる待機, timeoutで打ち切られた試行を続けない */
+const wait = (ms: number, signal: AbortSignal) =>
+	new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(resolve, ms);
+		signal.addEventListener(
+			'abort',
+			() => {
+				clearTimeout(timer);
+				reject(signal.reason ?? new Error('aborted'));
+			},
+			{ once: true },
+		);
+	});
+
 /** 進捗を報告しながら進む長いジョブ */
 class Slow extends Performer<{ steps: number }, void, {}, Env> {
 	async perform(payload: { steps: number }, ctx: JobContext): Promise<void> {
 		for (let step = 0; step < payload.steps; step++) {
-			await new Promise((resolve) => setTimeout(resolve, 1_000));
+			ctx.signal.throwIfAborted();
+			await wait(1_000, ctx.signal);
 			await ctx.heartbeat((step + 1) / payload.steps);
 		}
 	}
