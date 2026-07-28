@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * Job DOのSQLiteスキーマ
@@ -24,6 +24,10 @@ export const job = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 		dispatchedAt: integer('dispatched_at'),
+		/** performerからの最後の生存報告, reaperの無応答判定の起点 */
+		heartbeatAt: integer('heartbeat_at'),
+		/** 実行中の進捗, 0以上1以下 */
+		progress: real('progress'),
 		payload: text('payload').notNull(),
 		// performの戻り値, 成功時にJSON文字列で入る(#9)
 		result: text('result'),

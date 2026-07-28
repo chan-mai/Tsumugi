@@ -90,6 +90,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
     "priority": 0,
     "attempts": 3,
     "max_attempts": 3,
+    "progress": null,
     "concurrency_key": "domain:example.com",
     "unique_key": null,
     "guarantee": "at-least-once",

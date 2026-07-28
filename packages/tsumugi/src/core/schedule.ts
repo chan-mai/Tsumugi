@@ -6,10 +6,14 @@ export function effectivePriority(job: JobView, now: number, agingIntervalMs: nu
 	return job.priority + Math.floor(Math.max(0, now - job.createdAt) / agingIntervalMs);
 }
 
-/** 無応答とみなす判定の期限 */
+/**
+ * 無応答とみなす判定の期限
+ * 生存報告があればそこを起点にする, 所要時間が入力で変わるジョブに合わせてtimeoutMsを伸ばさずに済む
+ */
 function silenceDeadline(job: JobView, policy: Policy): number | null {
 	if (job.dispatchedAt === null) return null;
-	return job.dispatchedAt + job.timeoutMs + policy.reaperGraceMs;
+	const since = job.heartbeatAt === null ? job.dispatchedAt : Math.max(job.dispatchedAt, job.heartbeatAt);
+	return since + job.timeoutMs + policy.reaperGraceMs;
 }
 
 function refill(bucket: Bucket, policy: Policy, now: number): Bucket {

@@ -625,6 +625,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			dispatched_at: found.dispatchedAt,
 			// SCHEDULEDが実行可能になる時刻, 変更できるので現在値を返す
 			run_after: found.runAfter,
+			progress: found.progress,
 			payload: found.payload,
 			// performの戻り値, 成功時のみ入り未完了はnull(#9), payloadと同じくJSON文字列のまま返す
 			result: found.result,

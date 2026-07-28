@@ -26,6 +26,42 @@ export type ConsumerEnv = {
 	JOB_SHARD: DurableObjectNamespace<TsumugiJobShard>;
 };
 
+/**
+ * 生存報告をDOへ送る最短の間隔
+ * performerが短い周期で実行してもDOへの書き込みはこの間隔に収まる
+ */
+export const HEARTBEAT_MIN_INTERVAL_MS = 5_000;
+
+/** 生存報告の送信を待つ上限, DOが応答しなくてもperformerの処理を止めない */
+export const HEARTBEAT_SEND_TIMEOUT_MS = 1_000;
+
+/**
+ * 間引き付きの生存報告を作る
+ * 直前の送信からの経過が下限に満たない要求は送信せずに捨てる
+ * 送信の失敗は捨てる, 報告が届かなくてもreaperが回収するだけで実行自体は続く
+ * 送信の待機には上限があり, 超えた分は結果を待たずに捨てる
+ */
+export function createHeartbeat(
+	send: (progress?: number) => Promise<unknown>,
+	now: () => number,
+	minIntervalMs = HEARTBEAT_MIN_INTERVAL_MS,
+	sendTimeoutMs = HEARTBEAT_SEND_TIMEOUT_MS,
+): (progress?: number) => Promise<void> {
+	let lastAt = Number.NEGATIVE_INFINITY;
+	return async (progress) => {
+		const at = now();
+		if (at - lastAt < minIntervalMs) return;
+		lastAt = at;
+		const sending = Promise.resolve(send(progress)).then(
+			() => undefined,
+			(error: unknown) => {
+				console.error('tsumugi: heartbeat failed', error);
+			},
+		);
+		await Promise.race([sending, new Promise<void>((resolve) => setTimeout(resolve, sendTimeoutMs))]);
+	};
+}
+
 export class TsumugiTimeoutError extends Error {
 	constructor(
 		readonly jobId: string,
@@ -45,13 +81,25 @@ export function shardStub<Env extends ConsumerEnv>(env: Env, jobId: string): Dur
  *
  * performerの実行自体は止められない,ランタイムの制約で回避不能
  * 中断が要るperformerは`ctx.deadlineAt`から自分でAbortSignalを作る(ADR-0037)
+ * `touch`は期限の測り直し, 生存報告が受理されるたびに呼びDO側のreaper期限と起点を揃える
  */
-function withTimeout<T>(jobId: string, timeoutMs: number, run: () => Promise<T>): Promise<T> {
-	if (timeoutMs <= 0) return run();
+function withTimeout<T>(jobId: string, timeoutMs: number, run: (touch: () => void) => Promise<T>): Promise<T> {
+	if (timeoutMs <= 0) return run(() => {});
 
 	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => reject(new TsumugiTimeoutError(jobId, timeoutMs)), timeoutMs);
-		run().then(
+		let fired = false;
+		const fire = () => {
+			fired = true;
+			reject(new TsumugiTimeoutError(jobId, timeoutMs));
+		};
+		let timer = setTimeout(fire, timeoutMs);
+		const touch = () => {
+			// 打ち切り後の測り直しは受けない, 遅れて届いた受理で期限が復活しないようにする
+			if (fired) return;
+			clearTimeout(timer);
+			timer = setTimeout(fire, timeoutMs);
+		};
+		run(touch).then(
 			(value) => {
 				clearTimeout(timer);
 				resolve(value);
@@ -127,10 +175,22 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		const spawn = (id: string, target: string, childPayload: unknown, options?: SpawnRequest['options']) => {
 			spawns.push({ id, binding: target, payload: childPayload, ...(options ? { options } : {}) });
 		};
-		const ctx = { jobId, attempt, idempotencyKey: jobId, deadlineAt: Date.now() + timeoutMs, spawn };
+		const stableId = jobId;
+		const stub = shardStub(env, stableId);
 
 		// performの戻り値を拾ってDOへ渡す, 保存はDO側で行う(#9)
-		result = await withTimeout(jobId, timeoutMs, () => Promise.resolve(service.perform(payload, ctx)));
+		result = await withTimeout(stableId, timeoutMs, (touch) => {
+			// DOが受理した報告だけ期限を測り直す, timeoutMsを報告間隔として扱えるようにする
+			const heartbeat = createHeartbeat(
+				(progress) =>
+					stub.heartbeat(stableId, progress).then((accepted) => {
+						if (accepted) touch();
+					}),
+				() => Date.now(),
+			);
+			const ctx = { jobId: stableId, attempt, idempotencyKey: stableId, deadlineAt: Date.now() + timeoutMs, spawn, heartbeat };
+			return Promise.resolve(service.perform(payload, ctx));
+		});
 		ok = true;
 	} catch (error) {
 		// 本文をDOへ渡す, 捨てるとダッシュボードから失敗の理由が永久に分からない(ADR-0028)

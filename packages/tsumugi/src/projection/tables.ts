@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * D1の読み取りモデル(ADR-0008)
@@ -26,6 +26,8 @@ export const job = sqliteTable(
 		dispatchedAt: integer('dispatched_at'),
 		/** SCHEDULEDが実行可能になる時刻, 後から変更できるので投影する */
 		runAfter: integer('run_after'),
+		/** 実行中のジョブが報告した進捗, 0以上1以下 */
+		progress: real('progress'),
 		payload: text('payload').notNull(),
 		// performの戻り値, DOのjob.resultをそのまま投影する(#9)
 		result: text('result'),

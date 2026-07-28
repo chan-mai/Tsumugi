@@ -55,6 +55,7 @@ const toView = (row: JobRow): JobView => ({
 	runAfter: row.run_after,
 	createdAt: row.created_at,
 	dispatchedAt: row.dispatched_at,
+	heartbeatAt: row.heartbeat_at,
 	guarantee: row.guarantee as DeliveryGuarantee,
 	timeoutMs: row.timeout_ms,
 });
@@ -109,6 +110,8 @@ export class JobRepo {
 				createdAt: newJob.createdAt,
 				updatedAt: newJob.createdAt,
 				dispatchedAt: null,
+				heartbeatAt: null,
+				progress: null,
 				payload: JSON.stringify(newJob.payload),
 				result: null,
 				runId: newJob.runId ?? null,
@@ -280,6 +283,8 @@ export class JobRepo {
 			created_at: r.createdAt,
 			updated_at: r.updatedAt,
 			dispatched_at: r.dispatchedAt,
+			heartbeat_at: r.heartbeatAt,
+			progress: r.progress,
 			payload: r.payload,
 			result: r.result,
 			run_id: r.runId,
@@ -311,7 +316,8 @@ export class JobRepo {
 	): boolean {
 		for (const state of from) assertTransition(state, to);
 
-		const set: Record<string, unknown> = { state: to, updatedAt: patch.now };
+		// 遷移のたびに生存報告を落とす, 残すと前の試行の報告でreaperの期限が延びる
+		const set: Record<string, unknown> = { state: to, updatedAt: patch.now, heartbeatAt: null, progress: null };
 		if (patch.dispatchedAt !== undefined) set.dispatchedAt = patch.dispatchedAt;
 		if (patch.attempts !== undefined) set.attempts = patch.attempts;
 		if (patch.runAfter !== undefined) set.runAfter = patch.runAfter;
@@ -343,6 +349,28 @@ export class JobRepo {
 				...(patch.spawns && patch.spawns.length > 0 ? { spawns: patch.spawns } : {}),
 			});
 		}
+		return true;
+	}
+
+	/**
+	 * performerからの生存報告
+	 * 実行中のジョブにだけ効く, 終端に達した後の遅れた報告は当たらない
+	 * 進捗も同じUPDATEで入れる, 別文にすると書き込みが1回増える
+	 */
+	heartbeat(id: string, now: number, progress: number | null): boolean {
+		const set: Record<string, unknown> = { heartbeatAt: now };
+		if (progress !== null) set.progress = progress;
+
+		const updated = this.db
+			.update(job)
+			.set(set)
+			.where(and(eq(job.id, id), inArray(job.state, ['QUEUED', 'RUNNING'])))
+			.returning({ id: job.id })
+			.all();
+		this.writes++;
+		if (updated.length === 0) return false;
+		// 進捗を画面へ出すには投影が要る, 書き込みが増えるぶんは報告側の間引きで抑える
+		this.#appendOutbox(id);
 		return true;
 	}
 

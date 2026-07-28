@@ -70,6 +70,7 @@ export { SendMail as MAIL } from './performers/send-mail.js';
 | `attempt`        | 1始まりの試行回数                                    |
 | `idempotencyKey` | ジョブ単位で一定の値、再実行でも同じ値               |
 | `deadlineAt`     | タイムアウトが切れる時刻、epochミリ秒               |
+| `heartbeat`      | 実行中であることを報告する関数                       |
 | `spawn`          | Flowのノードとして実行中に子ノードを追加する関数     |
 
 at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください
@@ -87,6 +88,31 @@ const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abor
 中断は協調的な要求であり、応じないperformerは期限を過ぎても実行を継続する可能性があります。
 
 `spawn`の使用方法は[Flow](/guide/flow)を参照してください
+
+### heartbeat
+
+所要時間が入力によって大きく変わる処理では、`timeoutMs`を最長の場合に合わせる必要があります
+その場合、実際に停止したジョブの回収も同じだけ遅れてしまいます
+
+`ctx.heartbeat()`を実行すると、無応答とみなす判定の起点が最後の報告時刻に移ります
+`timeoutMs`は1回の報告間隔に対して設定してください
+
+```ts
+class Import extends Performer<{ rows: string[] }, void, {}, Env> {
+  async perform(payload: { rows: string[] }, ctx: JobContext): Promise<void> {
+    for (const [index, row] of payload.rows.entries()) {
+      await store(row);
+      await ctx.heartbeat((index + 1) / payload.rows.length);
+    }
+  }
+}
+```
+
+引数の進捗は0以上1以下です。範囲外の値は0以上1以下へ丸められ、数値以外は進捗なしの報告として扱われます
+報告した進捗はジョブの詳細画面に表示されます
+
+実行間隔には5秒の下限があります。これより短い間隔で実行しても、報告は5秒に1回までです
+報告に失敗しても例外にはなりません。その場合は報告が無いジョブと同様に扱われます
 
 ## 失敗の通知
 
@@ -179,6 +205,8 @@ const performers = { ...local, MAIL: remote<SendMail>() };
 ```ts
 await ctx.spawn('child', 'MAIL', payload);
 ```
+
+`ctx.heartbeat`もRPCの呼び出しになりますが、こちらは元から`await`を前提としています
 
 ## テスト
 

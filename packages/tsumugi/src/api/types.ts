@@ -37,6 +37,8 @@ export type JobDetail = JobSummary & {
 	guarantee: string;
 	/** SCHEDULEDが実行可能になる時刻, 投影前の古い行はnull */
 	run_after: number | null;
+	/** 実行中のジョブが報告した進捗, 0以上1以下で報告が無ければnull */
+	progress: number | null;
 	payload: string;
 	/** performの戻り値, 成功時のみ入る(#9) */
 	result: string | null;
