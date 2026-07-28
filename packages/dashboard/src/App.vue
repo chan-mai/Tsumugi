@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import BulkActions from './components/BulkActions.vue';
 import CheckBox from './components/CheckBox.vue';
+import DateRangeMenu from './components/DateRangeMenu.vue';
 import FilterMenu from './components/FilterMenu.vue';
 import JobDetailModal from './components/JobDetailModal.vue';
 import MetricsView from './components/MetricsView.vue';
@@ -11,6 +12,7 @@ import Pagination from './components/Pagination.vue';
 import RefreshMenu from './components/RefreshMenu.vue';
 import RowActions from './components/RowActions.vue';
 import RunDetailModal from './components/RunDetailModal.vue';
+import SearchBox from './components/SearchBox.vue';
 import SortHeader from './components/SortHeader.vue';
 import StatusCell from './components/StatusCell.vue';
 import TokenPrompt from './components/TokenPrompt.vue';
@@ -29,6 +31,7 @@ import {
 	type Run,
 } from './api';
 import { loadRefresh, REFRESH_KEY } from './refresh';
+import { isJobId, type SearchField } from './search';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 /** runが取る4つ(ADR-0029) */
@@ -40,6 +43,10 @@ const byState = ref<Record<string, number>>({});
 const bindings = ref<string[]>([]);
 const state = ref('');
 const binding = ref('');
+const searchField = ref<SearchField>('id');
+const search = ref('');
+const createdFrom = ref<number | null>(null);
+const createdTo = ref<number | null>(null);
 const page = ref(0);
 const pageSize = ref(20);
 const sort = ref('updated_at');
@@ -67,6 +74,18 @@ const selectedRun = ref<string | null>(null);
 const startingRun = ref(false);
 /** 定期更新でメトリクスを取り直すための参照 */
 const metricsView = ref<InstanceType<typeof MetricsView> | null>(null);
+
+/** 選んだ対象だけをクエリに載せる, 対象を切り替えたときに前の条件が残らない */
+const searchParam = () => (search.value ? { [searchField.value]: search.value } : {});
+
+/**
+ * 検索語を確定する
+ * ジョブIDの形式なら詳細を直接開く, 障害の調査はIDから入ることが多い
+ */
+function commitSearch(value: string) {
+	search.value = value;
+	if (searchField.value === 'id' && isJobId(value)) selected.value = value;
+}
 
 async function load() {
 	// 切替前に発行した応答で共有の状態を上書きしないよう, 開始時のタブを覚えておく
@@ -101,6 +120,9 @@ async function load() {
 				binding: binding.value || undefined,
 				sort: sort.value,
 				order: desc.value ? 'desc' : 'asc',
+				...searchParam(),
+				created_from: createdFrom.value ?? undefined,
+				created_to: createdTo.value ?? undefined,
 				limit: pageSize.value,
 				offset: page.value * pageSize.value,
 			}),
@@ -131,11 +153,18 @@ async function load() {
 function switchTab(next: 'jobs' | 'runs' | 'metrics') {
 	if (tab.value === next) return;
 	tab.value = next;
+	resetFilters();
+	page.value = 0;
+	load();
+}
+
+function resetFilters() {
 	state.value = '';
 	binding.value = '';
 	runFlow.value = '';
-	page.value = 0;
-	load();
+	search.value = '';
+	createdFrom.value = null;
+	createdTo.value = null;
 }
 
 const progressOf = (run: Run) => `${run.node_done} / ${run.node_total}`;
@@ -172,7 +201,7 @@ function setRefresh(ms: number) {
 	}
 }
 
-watch([state, binding, runFlow, pageSize, sort, desc], () => {
+watch([state, binding, runFlow, searchField, search, createdFrom, createdTo, pageSize, sort, desc], () => {
 	page.value = 0;
 	load();
 });
@@ -281,18 +310,28 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 		<div class="space-y-4">
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<div v-if="tab !== 'metrics'" class="flex flex-wrap items-center gap-2">
+					<SearchBox
+						v-if="tab === 'jobs'"
+						:field="searchField"
+						:value="search"
+						@update:field="searchField = $event"
+						@update:value="commitSearch($event)"
+					/>
 					<FilterMenu v-if="tab === 'jobs'" title="Binding" :options="bindings" :selected="binding" @select="binding = $event" />
 					<FilterMenu v-else title="Flow" :options="flows" :selected="runFlow" @select="runFlow = $event" />
 					<FilterMenu title="Status" :options="tab === 'jobs' ? STATES : RUN_STATES" :selected="state" @select="state = $event" />
+					<DateRangeMenu
+						v-if="tab === 'jobs'"
+						:from="createdFrom"
+						:to="createdTo"
+						@update:from="createdFrom = $event"
+						@update:to="createdTo = $event"
+					/>
 					<button
-						v-if="state || binding || runFlow"
+						v-if="state || binding || runFlow || search || createdFrom !== null || createdTo !== null"
 						type="button"
 						class="h-8 rounded-card border-none px-2 text-sm text-muted-foreground hover:bg-accent"
-						@click="
-							state = '';
-							binding = '';
-							runFlow = '';
-						"
+						@click="resetFilters()"
 					>
 						Reset
 					</button>
