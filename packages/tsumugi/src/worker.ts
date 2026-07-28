@@ -11,6 +11,7 @@ import type { AuthMiddleware } from './api/auth.js';
 import { createRest, type RestEnv } from './api/rest.js';
 import { sweepReadModel, type SweepOptions } from './projection/sweep.js';
 import type { Ui } from './ui/serve.js';
+import type { MetricsResolver } from './analytics/reader.js';
 import { cachedValidate } from './config/validate.js';
 import { configErrorMessage } from './config/fragment.js';
 
@@ -61,6 +62,12 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	 * cronトリガーを設定すると`scheduled`で古い終端ジョブを落とす
 	 */
 	retention?: SweepOptions;
+	/**
+	 * Analytics Engineを読むための設定
+	 * アカウントのAPIトークンが要るので, secretと同じく`env`から引く関数で渡す
+	 * 未設定ならメトリクスの画面もAPIも出さない
+	 */
+	metrics?: MetricsResolver<Env>;
 };
 
 /**
@@ -158,6 +165,8 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 				// 一覧のretryable判定に使う, UI側が押す前に可否を出せるようにする(ADR-0027)
 				failedRetentionMs: (binding) => config.bindings?.[binding]?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 				flows: Object.keys(flows),
+				// 未設定なら渡さない, `/api/metrics`は501を返す
+				...(config.metrics ? { metrics: config.metrics as MetricsResolver<Env> } : {}),
 				// flowが1つも無い構成では渡さない, 渡すとRESTが501の代わりに500で落ちる
 				...(Object.keys(flows).length > 0
 					? {

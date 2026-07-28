@@ -42,6 +42,11 @@ const tsumugi = defineTsumugi({
 	// secretから引く,直書きするとリポジトリとバンドルの両方に残る
 	auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
 	ui: ui({ tokenCookie: 'tsumugi_token' }),
+	// Analytics Engineを読むにはアカウントのAPIトークンが要る, secretから引く
+	metrics: (env: Env) =>
+		env.CF_ACCOUNT_ID && env.CF_API_TOKEN
+			? { accountId: env.CF_ACCOUNT_ID, apiToken: env.CF_API_TOKEN, dataset: 'tsumugi_jobs' }
+			: undefined,
 });
 
 export { TsumugiJobShard } from 'tsumugi';

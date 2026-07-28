@@ -223,6 +223,30 @@ const SCHEMAS: Record<string, unknown> = {
 		},
 		required: ['flow', 'input'],
 	},
+	BindingMetrics: {
+		type: 'object',
+		properties: {
+			binding: string(),
+			total: integer('Terminal jobs in the window'),
+			failed: integer('Jobs that ended as FAILED or STALLED'),
+			failureRate: { type: 'number', minimum: 0, maximum: 1 },
+			avgDurationMs: { type: 'number' },
+			maxDurationMs: { type: 'number' },
+			p95DurationMs: { type: 'number' },
+			avgAttempts: { type: 'number' },
+		},
+		required: ['binding', 'total', 'failed', 'failureRate', 'avgDurationMs', 'maxDurationMs', 'p95DurationMs', 'avgAttempts'],
+	},
+	MetricsPoint: {
+		type: 'object',
+		properties: {
+			at: integer('Start of the hour, epoch milliseconds'),
+			total: integer(),
+			failed: integer(),
+			avgDurationMs: { type: 'number' },
+		},
+		required: ['at', 'total', 'failed', 'avgDurationMs'],
+	},
 	Diagnostics: {
 		type: 'object',
 		properties: {
@@ -414,6 +438,38 @@ export function openapiDocument(): OpenApiDocument {
 						...json({ type: 'object', properties: { bindings: { type: 'array', items: string() } }, required: ['bindings'] }),
 					},
 					...RESPONSES.unauthorized,
+					...RESPONSES.unavailable,
+				},
+			},
+		},
+		'/api/metrics': {
+			get: {
+				operationId: 'getMetrics',
+				summary: 'Failure rate and duration from Analytics Engine',
+				description:
+					'Reads the time series written for terminal jobs. Available only when the deployment configures an account API token. ' +
+					'Counts are weighted by the sample interval, so they stay comparable when sampling kicks in.',
+				parameters: [
+					queryParam('hours', { type: 'integer', default: 24, minimum: 1, maximum: 720 }, 'How far back to aggregate'),
+					queryParam('binding', { type: 'string' }, 'Filter by performer binding name'),
+				],
+				responses: {
+					200: {
+						description: 'Aggregates per binding and per hour',
+						...json({
+							type: 'object',
+							properties: {
+								hours: integer(),
+								bindings: { type: 'array', items: ref('BindingMetrics') },
+								series: { type: 'array', items: ref('MetricsPoint') },
+							},
+							required: ['hours', 'bindings', 'series'],
+						}),
+					},
+					400: { description: 'Invalid window or binding name', ...json(ref('Error')) },
+					...RESPONSES.unauthorized,
+					...RESPONSES.notImplemented,
+					502: { description: 'Analytics Engine refused the query', ...json(ref('Error')) },
 					...RESPONSES.unavailable,
 				},
 			},

@@ -158,6 +158,39 @@ export const startRun = async (input: StartRunInput) => {
 	return { id: body.id as string };
 };
 
+export type BindingMetrics = {
+	binding: string;
+	total: number;
+	failed: number;
+	failureRate: number;
+	avgDurationMs: number;
+	maxDurationMs: number;
+	p95DurationMs: number;
+	avgAttempts: number;
+};
+
+export type MetricsPoint = { at: number; total: number; failed: number; avgDurationMs: number };
+export type Metrics = { hours: number; bindings: BindingMetrics[]; series: MetricsPoint[] };
+
+/** 未設定の構成では501が返る, 画面はそれを受けてタブを出さない */
+export class MetricsUnavailableError extends Error {
+	readonly unavailable = true;
+}
+
+export const getMetrics = async (params: { hours: number; binding?: string }): Promise<Metrics> => {
+	const query = new URLSearchParams({ hours: String(params.hours) });
+	if (params.binding) query.set('binding', params.binding);
+	const res = await fetch(`${base()}/api/metrics?${query}`, { credentials: 'same-origin' });
+	if (res.status === 401) throw new UnauthorizedError();
+	if (res.status === 501) throw new MetricsUnavailableError();
+	const body = (await res.json().catch(() => ({}))) as Partial<Metrics> & { error?: string };
+	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	return { hours: body.hours ?? params.hours, bindings: body.bindings ?? [], series: body.series ?? [] };
+};
+
+export const isMetricsUnavailable = (error: unknown): boolean =>
+	typeof error === 'object' && error !== null && (error as { unavailable?: unknown }).unavailable === true;
+
 export type BulkInput = { ids: string[] };
 
 export type BulkOutcome = {

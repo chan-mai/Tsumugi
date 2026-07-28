@@ -26,6 +26,7 @@ const ROUTES: [method: string, path: string][] = [
 	['POST', '/api/jobs/REST%230:abc/reschedule'],
 	['POST', '/api/jobs/bulk-retry'],
 	['POST', '/api/jobs/bulk-cancel'],
+	['GET', '/api/metrics'],
 	['GET', '/'],
 	['GET', '/api/unknown'],
 ];
@@ -494,6 +495,69 @@ describe('試行履歴(ADR-0028)', () => {
 		const row = jobs.find((j) => j.id === jobId);
 		expect(row).toBeDefined();
 		expect(row).not.toHaveProperty('attempts_log');
+	});
+});
+
+describe('メトリクスの参照', () => {
+	const authorized = { authorization: `Bearer ${TOKEN}` };
+
+	it('未設定なら501', async () => {
+		// Analytics Engineの読み取りにはアカウントのAPIトークンが要る
+		const res = await call(withAuth, 'GET', '/api/metrics', authorized);
+		expect(res.status).toBe(501);
+	});
+
+	it('設定があれば集計を返す', async () => {
+		const configured = defineTsumugi({
+			performers: { REST: Noop },
+			auth: bearerAuth(TOKEN),
+			metrics: () => ({ accountId: 'acct', apiToken: 'token', dataset: 'tsumugi_jobs' }),
+		});
+		// 上流の応答を差し替える, 実際のAnalytics Engineへは出さない
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response(JSON.stringify({ data: [{ binding: 'REST', total: '4', failed: '1' }] }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' },
+			})) as unknown as typeof globalThis.fetch;
+
+		try {
+			const res = await call(configured, 'GET', '/api/metrics?hours=48', authorized);
+			expect(res.status).toBe(200);
+			const body = await res.json<{ hours: number; bindings: { binding: string; failureRate: number }[] }>();
+			expect(body.hours).toBe(48);
+			expect(body.bindings[0]).toMatchObject({ binding: 'REST', failureRate: 0.25 });
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+
+	it('範囲外の区間は400', async () => {
+		const configured = defineTsumugi({
+			performers: { REST: Noop },
+			auth: bearerAuth(TOKEN),
+			metrics: () => ({ accountId: 'acct', apiToken: 'token', dataset: 'tsumugi_jobs' }),
+		});
+		const res = await call(configured, 'GET', '/api/metrics?hours=1000', authorized);
+		expect(res.status).toBe(400);
+	});
+
+	it('上流が断ると502', async () => {
+		// 設定の誤りと上流の不調を500で混ぜない
+		const configured = defineTsumugi({
+			performers: { REST: Noop },
+			auth: bearerAuth(TOKEN),
+			metrics: () => ({ accountId: 'acct', apiToken: 'token', dataset: 'tsumugi_jobs' }),
+		});
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => new Response('unauthorized', { status: 403 })) as unknown as typeof globalThis.fetch;
+
+		try {
+			const res = await call(configured, 'GET', '/api/metrics', authorized);
+			expect(res.status).toBe(502);
+		} finally {
+			globalThis.fetch = original;
+		}
 	});
 });
 

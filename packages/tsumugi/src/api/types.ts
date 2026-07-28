@@ -142,3 +142,21 @@ export type ListRunsQuery = {
 	limit?: number;
 	offset?: number;
 };
+
+/** Analytics Engineのbinding単位の集計 */
+export type BindingMetricsView = {
+	binding: string;
+	total: number;
+	failed: number;
+	/** 0以上1以下 */
+	failureRate: number;
+	avgDurationMs: number;
+	maxDurationMs: number;
+	p95DurationMs: number;
+	avgAttempts: number;
+};
+
+/** 1時間ごとの推移 */
+export type MetricsPointView = { at: number; total: number; failed: number; avgDurationMs: number };
+
+export type MetricsResponse = { hours: number; bindings: BindingMetricsView[]; series: MetricsPointView[] };

@@ -5,6 +5,7 @@ import CheckBox from './components/CheckBox.vue';
 import DateRangeMenu from './components/DateRangeMenu.vue';
 import FilterMenu from './components/FilterMenu.vue';
 import JobDetailModal from './components/JobDetailModal.vue';
+import MetricsView from './components/MetricsView.vue';
 import NewJobModal from './components/NewJobModal.vue';
 import NewRunModal from './components/NewRunModal.vue';
 import Pagination from './components/Pagination.vue';
@@ -16,7 +17,19 @@ import SortHeader from './components/SortHeader.vue';
 import StatusCell from './components/StatusCell.vue';
 import TokenPrompt from './components/TokenPrompt.vue';
 import ViewMenu from './components/ViewMenu.vue';
-import { getBindings, getFlows, getStats, isUnauthorized, listJobs, listRuns, tokenCookie, type Job, type Run } from './api';
+import {
+	getBindings,
+	getFlows,
+	getMetrics,
+	getStats,
+	isMetricsUnavailable,
+	isUnauthorized,
+	listJobs,
+	listRuns,
+	tokenCookie,
+	type Job,
+	type Run,
+} from './api';
 import { loadRefresh, REFRESH_KEY } from './refresh';
 import { isJobId, type SearchField } from './search';
 
@@ -49,12 +62,18 @@ const canPromptToken = tokenCookie() !== null;
 let timer: ReturnType<typeof setInterval> | undefined;
 
 /** flowsを設定していない利用者にはrunの画面自体を出さない */
-const tab = ref<'jobs' | 'runs'>('jobs');
+const tab = ref<'jobs' | 'runs' | 'metrics'>('jobs');
+/** Analytics Engineの設定がある構成でのみメトリクスのタブを出す */
+const hasMetrics = ref(false);
+/** 設定した機能のぶんだけタブを出す */
+const tabs = computed(() => ['jobs', ...(flows.value.length > 0 ? ['runs'] : []), ...(hasMetrics.value ? ['metrics'] : [])] as const);
 const flows = ref<string[]>([]);
 const runs = ref<Run[]>([]);
 const runFlow = ref('');
 const selectedRun = ref<string | null>(null);
 const startingRun = ref(false);
+/** 定期更新でメトリクスを取り直すための参照 */
+const metricsView = ref<InstanceType<typeof MetricsView> | null>(null);
 
 /** 選んだ対象だけをクエリに載せる, 対象を切り替えたときに前の条件が残らない */
 const searchParam = () => (search.value ? { [searchField.value]: search.value } : {});
@@ -72,6 +91,10 @@ async function load() {
 	// 切替前に発行した応答で共有の状態を上書きしないよう, 開始時のタブを覚えておく
 	const requested = tab.value;
 	try {
+		if (requested === 'metrics') {
+			await metricsView.value?.load();
+			return;
+		}
 		if (requested === 'runs') {
 			const [list, available] = await Promise.all([
 				listRuns({
@@ -127,7 +150,7 @@ async function load() {
 }
 
 /** 一覧が入れ替わるので絞り込みと頁は持ち越さない */
-function switchTab(next: 'jobs' | 'runs') {
+function switchTab(next: 'jobs' | 'runs' | 'metrics') {
 	if (tab.value === next) return;
 	tab.value = next;
 	resetFilters();
@@ -193,9 +216,16 @@ function sortBy(column: string) {
 	}
 }
 
-onMounted(() => {
+onMounted(async () => {
 	load();
 	restartTimer();
+	try {
+		await getMetrics({ hours: 24 });
+		hasMetrics.value = true;
+	} catch (e) {
+		// 設定が無い場合は501, それ以外の失敗はタブを出した上で画面側に理由を出す
+		hasMetrics.value = !isMetricsUnavailable(e) && !isUnauthorized(e);
+	}
 });
 onUnmounted(() => timer && clearInterval(timer));
 
@@ -263,9 +293,9 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 		<header class="mb-6 flex flex-wrap items-center gap-4">
 			<h1 class="text-xl font-bold">Tsumugi</h1>
 			<!-- flowsが1つも無い構成ではrunの画面を出さない -->
-			<nav v-if="flows.length > 0" class="flex items-center gap-1 text-sm">
+			<nav v-if="flows.length > 0 || hasMetrics" class="flex items-center gap-1 text-sm">
 				<button
-					v-for="option in ['jobs', 'runs'] as const"
+					v-for="option in tabs"
 					:key="option"
 					type="button"
 					class="h-8 rounded-card border-none px-3 capitalize"
@@ -279,7 +309,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 
 		<div class="space-y-4">
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<div class="flex flex-wrap items-center gap-2">
+				<div v-if="tab !== 'metrics'" class="flex flex-wrap items-center gap-2">
 					<SearchBox
 						v-if="tab === 'jobs'"
 						:field="searchField"
@@ -310,8 +340,10 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				<div class="flex items-center gap-2">
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
+					<div v-if="tab === 'metrics'" class="grow" />
+					<!-- 一覧向けの操作はメトリクスのタブでは出さない, 選択が残っていても対象が見えない -->
 					<BulkActions
-						v-if="selectedIds.length > 0"
+						v-if="tab !== 'metrics' && selectedIds.length > 0"
 						:ids="selectedIds"
 						@changed="
 							clearSelection();
@@ -322,6 +354,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<ViewMenu v-if="tab === 'jobs'" :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
 					<RefreshMenu :interval="refreshMs" @update:interval="setRefresh" />
 					<button
+						v-if="tab !== 'metrics'"
 						type="button"
 						class="flex h-8 items-center gap-1.5 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
 						@click="tab === 'jobs' ? (creating = true) : (startingRun = true)"
@@ -334,7 +367,9 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				</div>
 			</div>
 
-			<div v-if="tab === 'runs'" class="relative w-full overflow-x-auto rounded-card border border-border">
+			<MetricsView v-if="tab === 'metrics'" ref="metricsView" :bindings="bindings" @unauthorized="unauthorized = true" />
+
+			<div v-else-if="tab === 'runs'" class="relative w-full overflow-x-auto rounded-card border border-border">
 				<table class="w-full caption-bottom text-sm">
 					<thead class="[&_tr]:border-b [&_tr]:border-border">
 						<tr>
@@ -445,7 +480,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				</table>
 			</div>
 
-			<Pagination v-model:page="page" v-model:page-size="pageSize" :total="total" :unit="tab" />
+			<Pagination v-if="tab !== 'metrics'" v-model:page="page" v-model:page-size="pageSize" :total="total" :unit="tab" />
 		</div>
 
 		<JobDetailModal :job-id="selected" @close="selected = null" @changed="load" />

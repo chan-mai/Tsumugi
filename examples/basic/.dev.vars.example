@@ -1,2 +1,6 @@
 # ローカル開発用, 本番は`wrangler secret put TSUMUGI_TOKEN`で設定する
 TSUMUGI_TOKEN="dev-token"
+
+# Analytics Engineを読む場合のみ, Account Analyticsの読み取り権限が要る
+# CF_ACCOUNT_ID=""
+# CF_API_TOKEN=""
