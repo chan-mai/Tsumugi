@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Performer } from '../../src/core/api.js';
+import type { JobContext } from '../../src/core/api.js';
 import { parseJobId } from '../../src/core/ids.js';
 import { fixedClock } from '../../src/do/clock.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
@@ -8,28 +8,25 @@ import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
 const T0 = 1_800_000_000_000;
 
-const performed: { payload: unknown; attempt: number; jobId: string; hasSignal: boolean }[] = [];
+const performed: { payload: unknown; attempt: number; jobId: string; deadlineAt: number }[] = [];
 
-class Hello extends Performer<{ name: string }, void, {}, ConsumerEnv> {
-	async perform(payload: { name: string }, ctx: { jobId: string; attempt: number; signal: AbortSignal }): Promise<void> {
-		performed.push({ payload, attempt: ctx.attempt, jobId: ctx.jobId, hasSignal: ctx.signal instanceof AbortSignal });
-	}
-}
-
-class Boom extends Performer<unknown, void, {}, ConsumerEnv> {
-	async perform(): Promise<void> {
-		throw new Error('intentional failure');
-	}
-}
-
-/** 戻り値を返すperformer, resultの保存経路を見る(#9) */
-class Echo extends Performer<{ msg: string }, { echoed: string }, {}, ConsumerEnv> {
-	async perform(payload: { msg: string }): Promise<{ echoed: string }> {
-		return { echoed: payload.msg };
-	}
-}
-
-const registry = { HELLO: Hello, BOOM: Boom, ECHO: Echo };
+// consumerへ渡すのは`perform`を持つ実体, `ctx.exports`から引かれる形と同じ(ADR-0037)
+const performers = {
+	HELLO: {
+		perform: async (payload: { name: string }, ctx: JobContext): Promise<void> => {
+			performed.push({ payload, attempt: ctx.attempt, jobId: ctx.jobId, deadlineAt: ctx.deadlineAt });
+		},
+	},
+	BOOM: {
+		perform: async (): Promise<void> => {
+			throw new Error('intentional failure');
+		},
+	},
+	// 戻り値を返すperformer, resultの保存経路を見る(#9)
+	ECHO: {
+		perform: async (payload: { msg: string }): Promise<{ echoed: string }> => ({ echoed: payload.msg }),
+	},
+};
 
 const consumerEnv: ConsumerEnv = env;
 
@@ -101,11 +98,13 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 
 		// consumerがperformerを呼び,必ずackする
 		const { acked, batch } = makeBatch(sent);
-		await handleBatch(batch, consumerEnv, registry);
+		await handleBatch(batch, consumerEnv, performers);
 		expect(acked).toHaveLength(1);
 
 		expect(performed).toHaveLength(1);
-		expect(performed[0]).toMatchObject({ payload: { name: 'world' }, attempt: 1, jobId, hasSignal: true });
+		expect(performed[0]).toMatchObject({ payload: { name: 'world' }, attempt: 1, jobId });
+		// timeoutの残りは`deadlineAt`から引く(ADR-0037)
+		expect(performed[0]!.deadlineAt).toBeGreaterThan(Date.now());
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
 		// 1回実行して成功したのでattemptsは1,失敗時だけ数えると完了ジョブが0回に見える
@@ -126,7 +125,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		await runDurableObjectAlarm(stub);
 
 		const { acked, batch } = makeBatch(sent);
-		await handleBatch(batch, consumerEnv, registry);
+		await handleBatch(batch, consumerEnv, performers);
 
 		// 失敗してもQueuesのretryには乗せず必ずackする(ADR-0004)
 		expect(acked).toHaveLength(1);
@@ -145,7 +144,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 
 		const jobId = await stub.enqueue({ binding: 'ECHO', payload: { msg: 'hi' } });
 		await runDurableObjectAlarm(stub);
-		await handleBatch(makeBatch(sent).batch, consumerEnv, registry);
+		await handleBatch(makeBatch(sent).batch, consumerEnv, performers);
 		expect(await stateOf('ECHO', jobId)).toBe('COMPLETED');
 
 		// DOのjob行に戻り値がJSON文字列で保存される
@@ -172,7 +171,7 @@ describe('DOの書き込み回数', () => {
 		const before = await runInDurableObject(stub, (instance) => (instance as any).repo.writes as number);
 		const jobId = await stub.enqueue({ binding: 'HELLO', payload: { name: 'budget' } });
 		await runDurableObjectAlarm(stub);
-		await handleBatch(makeBatch(sent).batch, consumerEnv, registry);
+		await handleBatch(makeBatch(sent).batch, consumerEnv, performers);
 		const after = await runInDurableObject(stub, (instance) => (instance as any).repo.writes as number);
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');

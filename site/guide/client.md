@@ -67,6 +67,14 @@ const jobs = createClient<Env>({
 `enqueueMany`は宛先ごとに集約するため、件数が増えても往復の回数は増えません
 `enqueue`を逐次で呼び出すと件数に比例して遅くなります
 
+## 型
+
+`tsumugi/client`からは`EnqueueInput` `EnqueueOptions` `EnqueueItem` `JobQueue` `Performers` `BindingConfig` `TsumugiClient`などの型も参照できます
+
+`createClient`が受け取るのは`EnqueueInput`で、`binding`は`string`、`payload`は`unknown`です
+bindingごとの型と必須キーの強制は適用されません。[投入経路](/guide/enqueue#paths)を参照してください
+performerの型を共有できる場合は、`JobQueue<M>`に適合するラッパーを利用側で用意すると同じ強制を適用できます
+
 ## REST APIからの投入
 
 Workerを追加しない場合は、ジョブ管理Worker本体のREST APIを呼び出す方法もあります

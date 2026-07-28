@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Performer, type JobContext } from '../../src/core/api.js';
+import type { JobContext } from '../../src/core/api.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
@@ -8,12 +8,14 @@ const consumerEnv: ConsumerEnv = env;
 
 /** 実行されたjobIdを控える, ackだけでなく実行の有無を検証するため */
 const performed: string[] = [];
-class Ok extends Performer<unknown, void, {}, ConsumerEnv> {
-	async perform(_payload: unknown, ctx: JobContext): Promise<void> {
-		performed.push(ctx.jobId);
-	}
-}
-const registry = { OK: Ok };
+// consumerへ渡すのは`perform`を持つ実体, `ctx.exports`から引かれる形と同じ(ADR-0037)
+const performers = {
+	OK: {
+		perform: async (_payload: unknown, ctx: JobContext): Promise<void> => {
+			performed.push(ctx.jobId);
+		},
+	},
+};
 
 beforeEach(() => {
 	performed.length = 0;
@@ -60,7 +62,7 @@ describe('壊れたメッセージ(ADR-0004)', () => {
 		const broken = message(null);
 		const valid = message(validBody);
 
-		await expect(handleBatch(batchOf([broken, valid]), consumerEnv, registry)).resolves.toBeUndefined();
+		await expect(handleBatch(batchOf([broken, valid]), consumerEnv, performers)).resolves.toBeUndefined();
 
 		// 分割代入がtryの外にあると本文nullで例外が出てackに到達しない
 		expect(broken.ack).toHaveBeenCalledTimes(1);
@@ -75,7 +77,7 @@ describe('壊れたメッセージ(ADR-0004)', () => {
 		// bodyはオブジェクトだがjobIdが欠けている, claimRequired無しでも実行経路に入れない
 		const noId = message({ binding: 'OK', attempt: 1, payload: {}, timeoutMs: 60_000, claimRequired: false });
 
-		await expect(handleBatch(batchOf([noId]), consumerEnv, registry)).resolves.toBeUndefined();
+		await expect(handleBatch(batchOf([noId]), consumerEnv, performers)).resolves.toBeUndefined();
 
 		expect(performed).toEqual([]);
 		expect(noId.ack).toHaveBeenCalledTimes(1);
@@ -96,7 +98,7 @@ describe('reportの失敗(ADR-0004)', () => {
 		} as unknown as ConsumerEnv;
 
 		const msg = message(validBody);
-		await expect(handleBatch(batchOf([msg]), failingEnv, registry)).resolves.toBeUndefined();
+		await expect(handleBatch(batchOf([msg]), failingEnv, performers)).resolves.toBeUndefined();
 
 		// performerは実行され, 成功をreportしようとして失敗する
 		expect(performed).toEqual(['OK#0:valid']);

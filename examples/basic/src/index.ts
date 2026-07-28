@@ -1,55 +1,26 @@
 import { bearerAuth, createFlow, defineTsumugi, remote } from 'tsumugi';
 import { ui } from 'tsumugi/ui';
-import { Performer } from 'tsumugi/performer';
+import type { SendMail } from '../../remote-performer/src/index.js';
+import * as local from './performers/index.js';
 
-class Hello extends Performer<{ name: string }, void, {}, Env> {
-	async perform(payload: { name: string }): Promise<void> {
-		console.log(`hello, ${payload.name}`);
-	}
-}
+// performerは`ctx.exports`から引かれるので, トップレベルでexportする(ADR-0037)
+export * from './performers/index.js';
 
-/** リトライとバックオフを見るための必ず失敗するperformer */
-class Boom extends Performer<unknown, void, {}, Env> {
-	async perform(): Promise<void> {
-		throw new Error('intentional failure');
-	}
-}
-
-/** DAGの前段, 戻り値が後段のpayloadの材料になる */
-class ListNames extends Performer<{ prefix: string }, { names: string[] }, {}, Env> {
-	async perform(payload: { prefix: string }) {
-		return { names: [`${payload.prefix}-1`, `${payload.prefix}-2`, `${payload.prefix}-3`] };
-	}
-}
-
-class Greet extends Performer<{ name: string }, { greeted: string }, {}, Env> {
-	async perform(payload: { name: string }) {
-		return { greeted: payload.name };
-	}
-}
-
-class Report extends Performer<{ total: number; failed: number }, void, {}, Env> {
-	async perform(payload: { total: number; failed: number }): Promise<void> {
-		console.log(`greeted ${payload.total - payload.failed}/${payload.total}`);
-	}
-}
-
-// binding名とperformerの対応はここ1箇所だけ
-// MAILはservice binding越しの別Worker,同一の`performers`に混在可(ADR-0026)
-const performers = { HELLO: Hello, BOOM: Boom, LIST: ListNames, GREET: Greet, REPORT: Report, MAIL: remote('MAIL_SERVICE') };
+// binding名はexportした名前, MAILだけ別Workerなので型のためにremote()を置く(ADR-0026)
+const performers = { ...local, MAIL: remote<SendMail>() };
 
 // flowの定義口をperformersから作る, bindingもpayloadもここから型が決まる(ADR-0030)
 const flow = createFlow(performers);
 
 // 一覧を取り, 件数だけ実行時に決まる並列で挨拶し, 最後に要約を書く
 const GREETINGS = flow<{ prefix: string }>((f) => {
-	const list = f.node('list', 'LIST', { input: (i) => ({ prefix: i.prefix }) });
-	const each = f.fanOut('greet', 'GREET', {
+	const list = f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
+	const each = f.fanOut('greet', 'Greet', {
 		after: { list },
 		over: (_i, d) => d.list.names,
 		input: (name) => ({ name }),
 	});
-	f.node('report', 'REPORT', {
+	f.node('report', 'Report', {
 		after: { each },
 		input: (_i, d) => ({ total: d.each.total, failed: d.each.failed }),
 	});
@@ -60,7 +31,7 @@ const flows = {
 	// 子のrunとしてGREETINGSを起動し, その終端を待ってから要約する
 	PIPELINE: flow<{ prefix: string }>((f) => {
 		const greetings = f.subflow('greetings', GREETINGS, { input: (i) => ({ prefix: i.prefix }) });
-		f.node('summary', 'REPORT', { after: { greetings }, input: () => ({ total: 1, failed: 0 }) });
+		f.node('summary', 'Report', { after: { greetings }, input: () => ({ total: 1, failed: 0 }) });
 	}),
 };
 
@@ -84,7 +55,7 @@ export default {
 		const { pathname } = new URL(request.url);
 		if (pathname === '/enqueue') {
 			// bindingからpayloadの型が決まる, 取り違えはコンパイルエラー(ADR-0010)
-			const id = await tsumugi.enqueue(env, { binding: 'HELLO', payload: { name: 'world' } });
+			const id = await tsumugi.enqueue(env, { binding: 'Hello', payload: { name: 'world' } });
 			return Response.json({ id });
 		}
 		if (pathname === '/enqueue-mail') {

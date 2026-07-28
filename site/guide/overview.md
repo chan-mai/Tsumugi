@@ -29,7 +29,7 @@ Durable Objectはシングルスレッドなので、検査と挿入が追加の
 ジョブの種類が増えるほど、キューを増やすかconsumer側の分岐が膨らむかのどちらかになります
 
 Tsumugiではキューは1本のまま、種類をbinding名で分けます
-binding名とperformerの対応は`performers`1箇所に書けば済み、ペイロードの型もそこから推論されます
+binding名はperformer名がそのまま使われ、ペイロードの型も同じ場所から推論されます
 
 ### たまにキューが消失する
 
@@ -50,18 +50,22 @@ Tsumugiはその配線を中に持ちます
 あなたが書くのはたった2つだけです
 
 ```ts
-// 1. ジョブの中身をperformerとして定義する
-class SendMail extends Performer<{ to: string }, void, {}, Env> {
+import { enqueue } from 'tsumugi';
+import { Performer } from 'tsumugi/performer';
+
+// 1. ジョブの中身をperformerとして定義してexportする
+export class SendMail extends Performer<{ to: string }, void, {}, Env> {
   async perform(payload: { to: string }): Promise<void> {
     await this.env.MAILER.send(payload.to);
   }
 }
 
-// 2. 登録して投入する
-const tsumugi = defineTsumugi<Env>({ performers: { MAIL: SendMail } });
-
-const id = await enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com' } });
+// 2. 投入する。binding名はexportした名前
+const id = await enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
 ```
+
+上の例のトップレベルの`enqueue`には型の強制が適用されません
+`defineTsumugi`の戻り値の`tsumugi.enqueue`を使用すると、bindingからpayloadと必須キーの型が決まります。[投入経路](/guide/enqueue#paths)を参照してください
 
 キューもconsumerの分岐も読み取りモデルも意識する必要はなく、リトライ、バックオフ、予約実行、優先度、流量制御、重複排除、管理画面をすべていい感じにブラックボックスとして扱うことができます
 

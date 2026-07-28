@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { Performer, remote } from '../../src/core/api.js';
+import { remote } from '../../src/core/api.js';
 import { cachedValidate, validateConfig } from '../../src/config/validate.js';
 import { configErrorMessage, configFragment, DEFAULT_MIGRATIONS_DIR } from '../../src/config/fragment.js';
 
-class Noop extends Performer<unknown, void> {
+class Noop {
 	async perform(): Promise<void> {}
 }
 
@@ -14,11 +14,11 @@ const complete = () => ({
 	TSUMUGI_QUEUE: {},
 	TSUMUGI_METRICS: {},
 	RUN: {},
-	MAIL_SERVICE: { perform: () => {} },
+	MAIL: { perform: () => {} },
 });
 
 const performers = { LOCAL: Noop };
-const withRemote = { LOCAL: Noop, MAIL: remote('MAIL_SERVICE') };
+const withRemote = { LOCAL: Noop, MAIL: remote() };
 const flows = { GREETINGS: { nodes: [] } };
 
 const names = (status: ReturnType<typeof validateConfig>) => (status.ok ? [] : status.missing.map((entry) => entry.name).sort());
@@ -68,24 +68,16 @@ describe('必須bindingの検証', () => {
 describe('リモートperformerの整合(ADR-0026)', () => {
 	it('service bindingが無ければ不足に載る', () => {
 		const env = complete();
-		delete (env as Record<string, unknown>).MAIL_SERVICE;
-		expect(names(validateConfig(env, { performers: withRemote }))).toEqual(['MAIL_SERVICE']);
+		delete (env as Record<string, unknown>).MAIL;
+		expect(names(validateConfig(env, { performers: withRemote }))).toEqual(['MAIL']);
 	});
 
 	it('名前は在るがperformerでない場合も弾く', () => {
 		// 実行時までずれに気付けないので, 起動時に同じ扱いにする
-		const status = validateConfig({ ...complete(), MAIL_SERVICE: {} }, { performers: withRemote });
+		const status = validateConfig({ ...complete(), MAIL: {} }, { performers: withRemote });
 		expect(status.ok).toBe(false);
 		if (status.ok) return;
-		expect(status.missing).toEqual([{ kind: 'service', name: 'MAIL_SERVICE', reason: 'invalid' }]);
-	});
-
-	it('同じbindingを指すperformerが複数でも1件にまとめる', () => {
-		// 重複するとエラー本文にも設定断片にも同じserviceが並ぶ
-		const env = complete();
-		delete (env as Record<string, unknown>).MAIL_SERVICE;
-		const shared = { A: remote('MAIL_SERVICE'), B: remote('MAIL_SERVICE') };
-		expect(names(validateConfig(env, { performers: shared }))).toEqual(['MAIL_SERVICE']);
+		expect(status.missing).toEqual([{ kind: 'service', name: 'MAIL', reason: 'invalid' }]);
 	});
 
 	it('揃っていれば通る', () => {
@@ -143,8 +135,8 @@ describe('設定断片の生成', () => {
 
 	it('service bindingはリモートperformerの名前を反映する', () => {
 		const env = complete();
-		delete (env as Record<string, unknown>).MAIL_SERVICE;
-		expect(fragmentOf(env)).toContain('"binding": "MAIL_SERVICE"');
+		delete (env as Record<string, unknown>).MAIL;
+		expect(fragmentOf(env)).toContain('"binding": "MAIL"');
 	});
 
 	it('揃っている種別の断片は出さない', () => {
@@ -181,7 +173,7 @@ describe('設定漏れの説明', () => {
 	});
 
 	it('performerを持たないservice bindingは理由を分ける', () => {
-		const status = validateConfig({ ...complete(), MAIL_SERVICE: {} }, { performers: withRemote });
+		const status = validateConfig({ ...complete(), MAIL: {} }, { performers: withRemote });
 		if (status.ok) throw new Error('expected a missing binding');
 		expect(configErrorMessage(status.missing)).toContain('has no performer');
 	});

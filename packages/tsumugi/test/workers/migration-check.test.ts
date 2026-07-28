@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
 import type { RestEnv } from '../../src/api/rest.js';
-import { Performer } from '../../src/core/api.js';
+import { Performer } from '../../src/performer/entrypoint.js';
 import { cachedCheck, checkMigrations, EXPECTED_MIGRATIONS } from '../../src/projection/migrations.js';
 import { defineTsumugi } from '../../src/worker.js';
 
