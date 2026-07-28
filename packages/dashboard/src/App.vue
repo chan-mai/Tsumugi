@@ -65,12 +65,17 @@ const runs = ref<Run[]>([]);
 const runFlow = ref('');
 const selectedRun = ref<string | null>(null);
 const startingRun = ref(false);
+/** 定期更新でメトリクスを取り直すための参照 */
+const metricsView = ref<InstanceType<typeof MetricsView> | null>(null);
 
 async function load() {
 	// 切替前に発行した応答で共有の状態を上書きしないよう, 開始時のタブを覚えておく
 	const requested = tab.value;
 	try {
-		if (requested === 'metrics') return;
+		if (requested === 'metrics') {
+			await metricsView.value?.load();
+			return;
+		}
 		if (requested === 'runs') {
 			const [list, available] = await Promise.all([
 				listRuns({
@@ -297,8 +302,9 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
 					<div v-if="tab === 'metrics'" class="grow" />
+					<!-- 一覧向けの操作はメトリクスのタブでは出さない, 選択が残っていても対象が見えない -->
 					<BulkActions
-						v-if="selectedIds.length > 0"
+						v-if="tab !== 'metrics' && selectedIds.length > 0"
 						:ids="selectedIds"
 						@changed="
 							clearSelection();
@@ -309,6 +315,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<ViewMenu v-if="tab === 'jobs'" :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
 					<RefreshMenu :interval="refreshMs" @update:interval="setRefresh" />
 					<button
+						v-if="tab !== 'metrics'"
 						type="button"
 						class="flex h-8 items-center gap-1.5 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
 						@click="tab === 'jobs' ? (creating = true) : (startingRun = true)"
@@ -321,7 +328,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				</div>
 			</div>
 
-			<MetricsView v-if="tab === 'metrics'" :bindings="bindings" @unauthorized="unauthorized = true" />
+			<MetricsView v-if="tab === 'metrics'" ref="metricsView" :bindings="bindings" @unauthorized="unauthorized = true" />
 
 			<div v-else-if="tab === 'runs'" class="relative w-full overflow-x-auto rounded-card border border-border">
 				<table class="w-full caption-bottom text-sm">

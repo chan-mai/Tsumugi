@@ -17,11 +17,18 @@ const binding = ref('');
 const metrics = ref<Metrics | null>(null);
 const error = ref<string | null>(null);
 
+/** 遅れて届いた古い応答で最新の絞り込みの結果を上書きしないための連番 */
+let generation = 0;
+
 async function load() {
+	const requested = ++generation;
 	try {
-		metrics.value = await getMetrics({ hours: hours.value, ...(binding.value ? { binding: binding.value } : {}) });
+		const loaded = await getMetrics({ hours: hours.value, ...(binding.value ? { binding: binding.value } : {}) });
+		if (requested !== generation) return;
+		metrics.value = loaded;
 		error.value = null;
 	} catch (e) {
+		if (requested !== generation) return;
 		if (isUnauthorized(e)) {
 			emit('unauthorized');
 			return;

@@ -136,12 +136,22 @@ const num = (value: string | number | null | undefined): number => {
 	return Number.isFinite(parsed) ? parsed : 0;
 };
 
+/** SQL APIの応答を待つ上限, subrequestに既定のタイムアウトが無いため明示する */
+const QUERY_TIMEOUT_MS = 10_000;
+
 /** SQL APIへ1本投げて`data`を取り出す */
 async function query(config: MetricsConfig, sql: string, fetchImpl: typeof globalThis.fetch): Promise<SqlRow[]> {
 	const response = await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${config.accountId}/analytics_engine/sql`, {
 		method: 'POST',
 		headers: { authorization: `Bearer ${config.apiToken}`, 'content-type': 'text/plain' },
 		body: sql,
+		signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
+	}).catch((error: unknown) => {
+		// 応答が無い場合も他の失敗と同じ経路へ寄せる, 待ち続けてWorker全体の時間を使い切らない
+		if (error instanceof DOMException && error.name === 'TimeoutError') {
+			throw new MetricsQueryError(504, `analytics engine did not respond within ${QUERY_TIMEOUT_MS}ms`);
+		}
+		throw error;
 	});
 
 	if (!response.ok) {

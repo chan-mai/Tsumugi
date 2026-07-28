@@ -37,11 +37,10 @@ Analytics Engineに書いた値をダッシュボードから参照する場合�
 const tsumugi = defineTsumugi<Env>({
   performers,
   auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN),
-  metrics: (env: Env) => ({
-    accountId: env.CF_ACCOUNT_ID,
-    apiToken: env.CF_API_TOKEN,
-    dataset: 'tsumugi_jobs',
-  }),
+  metrics: (env: Env) =>
+    env.CF_ACCOUNT_ID && env.CF_API_TOKEN
+      ? { accountId: env.CF_ACCOUNT_ID, apiToken: env.CF_API_TOKEN, dataset: 'tsumugi_jobs' }
+      : undefined,
 });
 ```
 
