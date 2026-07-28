@@ -39,6 +39,9 @@ export const job = sqliteTable(
 		index('job_state').on(t.state, t.updatedAt),
 		index('job_binding').on(t.binding, t.updatedAt),
 		index('job_created').on(t.createdAt),
+		// 障害の調査はキーから入ることが多い, 索引が無いと全表走査になる
+		index('job_unique_key').on(t.uniqueKey, t.updatedAt),
+		index('job_concurrency_key').on(t.concurrencyKey, t.updatedAt),
 	],
 );
 
