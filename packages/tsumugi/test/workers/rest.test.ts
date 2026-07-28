@@ -1,7 +1,7 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
-import { Performer } from '../../src/core/api.js';
+import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
 import { SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';

@@ -1,25 +1,37 @@
 # ジョブの投入
 
+## 投入経路 {#paths}
+
+投入には3つの経路があり、
+
+| 経路                                    | 型                                     | `bindings`の設定       |
+| --------------------------------------- | -------------------------------------- | ---------------------- |
+| `tsumugi.enqueue` / `tsumugi.jobs(env)` | bindingごとにpayloadと必須キーが決まる | 反映される             |
+| `enqueue(env, input)`                   | `binding`は`string`、`payload`は`unknown` | 反映されない        |
+| `createClient(bindings)`                | 同上                                   | 引数の内容が反映される |
+
+推奨は`defineTsumugi`の戻り値を使う経路です
+トップレベルの`enqueue`は`defineTsumugi`の設定を参照しないため、`bindings`で指定した分割数、流量制御、保持期間が反映されず、`partitionKey`も無効です
+また、wranglerのbindingが不足している場合、`tsumugi.enqueue`と`tsumugi.jobs`では不足の一覧を含む例外が発生します
+
 ## enqueue
 
 ```ts
-import { enqueue } from 'tsumugi';
-
-const id = await enqueue(env, {
+const id = await tsumugi.enqueue(env, {
   binding: 'MAIL',
   payload: { to: 'a@example.com', subject: 'hi' },
 });
 ```
 
 戻り値はジョブIDです
-`defineTsumugi`が返すオブジェクトにも同じ`enqueue`があるため、`tsumugi.enqueue(env, input)`でも同じ結果になります
+bindingからpayloadの型が決まり、必須キーの渡し忘れはコンパイルエラーになります
 
 ## enqueueMany
 
 複数件をまとめて投入する場合は`enqueueMany`を使用します
 
 ```ts
-const ids = await enqueueMany(env, [
+const ids = await tsumugi.enqueueMany(env, [
   { binding: 'MAIL', payload: { to: 'a@example.com', subject: 'hi' } },
   { binding: 'MAIL', payload: { to: 'b@example.com', subject: 'hi' } },
 ]);
@@ -28,6 +40,20 @@ const ids = await enqueueMany(env, [
 件数が増えても往復の回数は増えません。`enqueue`を逐次で呼び出すと件数に比例して遅くなります
 
 戻り値は入力と同じ並び順です
+
+## jobs {#jobs}
+
+`tsumugi.jobs(env)`はenvを束ねた型付きの投入口です
+
+```ts
+const jobs = tsumugi.jobs(env);
+
+const id = await jobs.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' });
+await jobs.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { concurrencyKey: 'customer:c1' });
+```
+
+投入の内容は`tsumugi.enqueue`と同じで、引数の形だけが異なります
+[キーを必須にした](/guide/performer#required-keys)performerでは、`options`の省略とキーの渡し忘れがコンパイルエラーになります
 
 ## オプション
 
@@ -45,14 +71,16 @@ const ids = await enqueueMany(env, [
 | `uniqueForMs`    | 24時間                                      | `uniqueKey`の予約を保持する期間      |
 | `partitionKey`   | なし                                        | 分割している場合の投入先の決定に使う |
 
+`partitionKey`が有効なのは`bindings`の設定を参照する経路のみです。[投入経路](#paths)を参照してください
+
 ## 予約実行
 
 ```ts
 // 1時間後
-await enqueue(env, { binding: 'MAIL', payload, delayMs: 60 * 60 * 1000 });
+await tsumugi.enqueue(env, { binding: 'MAIL', payload, delayMs: 60 * 60 * 1000 });
 
 // 指定時刻
-await enqueue(env, { binding: 'MAIL', payload, runAt: Date.parse('2026-08-01T09:00:00+09:00') });
+await tsumugi.enqueue(env, { binding: 'MAIL', payload, runAt: Date.parse('2026-08-01T09:00:00+09:00') });
 ```
 
 12時間より先の予約も指定可能です
@@ -62,7 +90,7 @@ await enqueue(env, { binding: 'MAIL', payload, runAt: Date.parse('2026-08-01T09:
 `uniqueKey`を指定すると、同じキーのジョブが既に存在する場合は新規作成せず、既存のジョブIDを返します
 
 ```ts
-const id = await enqueue(env, {
+const id = await tsumugi.enqueue(env, {
   binding: 'SYNC',
   payload: { sku: 'X-1' },
   uniqueKey: 'sku:X-1',
@@ -80,7 +108,7 @@ HTTPリクエストのリトライやWebhookの重複配送で二重登録され
 既定は1であり、同じキーのジョブは1件ずつ順に実行されます
 
 ```ts
-await enqueue(env, {
+await tsumugi.enqueue(env, {
   binding: 'CHARGE',
   payload: { customerId: 'c1', amountJpy: 1200 },
   concurrencyKey: 'customer:c1',

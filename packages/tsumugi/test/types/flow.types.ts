@@ -2,7 +2,7 @@
  * flow定義の型レベル検証,実行時テストではないので`tsc --noEmit`で検査する
  * 依存の受け取り口が実際に前段の戻り値の型になるかがここの主眼(ADR-0030)
  */
-import { Performer } from '../../src/core/api.js';
+import { Performer } from '../../src/performer/entrypoint.js';
 import type { JobContext } from '../../src/core/api.js';
 import { createFlow } from '../../src/core/flow.js';
 

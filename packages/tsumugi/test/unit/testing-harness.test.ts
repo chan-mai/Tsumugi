@@ -1,31 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { Performer } from '../../src/core/api.js';
+import type { JobContext } from '../../src/core/api.js';
 import { createTestContext, fixedClock, nextAttempt, runPerformer, schedule } from '../../src/entries/testing.js';
 
-class Greet extends Performer<{ name: string }, string, never, unknown> {
-	perform(payload: { name: string }): string {
-		return `hello, ${payload.name}`;
-	}
-}
+const greet = {
+	perform: (payload: { name: string }): string => `hello, ${payload.name}`,
+};
 
-class Boom extends Performer<unknown, void, never, unknown> {
-	perform(): void {
+const boom = {
+	perform: (): void => {
 		throw new Error('intentional failure');
-	}
-}
+	},
+};
 
-/** timeoutに協調するperformer, `signal`を実物にしないとこの形が動かない */
-class Interruptible extends Performer<unknown, string, never, unknown> {
-	async perform(_payload: unknown, ctx: { signal: AbortSignal }): Promise<string> {
-		if (ctx.signal.aborted) return 'aborted';
+/** timeoutに協調するperformer, `deadlineAt`から自分でsignalを作る(ADR-0037) */
+const interruptible = {
+	perform: async (_payload: unknown, ctx: JobContext): Promise<string> => {
+		const remain = ctx.deadlineAt - Date.now();
+		if (remain <= 0) return 'expired';
+		const signal = AbortSignal.timeout(remain);
 		return new Promise((resolve) => {
-			ctx.signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+			signal.addEventListener('abort', () => resolve('expired'), { once: true });
 		});
-	}
-}
+	},
+};
 
 /** concurrencyKey必須のperformer, ハーネスが必須キー付きも受けられることの型テスト */
-class Charge extends Performer<{ customerId: string }, string, { concurrencyKey: true }, unknown> {
+class Charge {
+	declare readonly __requirements?: { concurrencyKey: true };
 	async perform(payload: { customerId: string }): Promise<string> {
 		return payload.customerId;
 	}
@@ -33,13 +34,13 @@ class Charge extends Performer<{ customerId: string }, string, { concurrencyKey:
 
 describe('performerのハーネス', () => {
 	it('成功した戻り値を受け取れる', async () => {
-		const result = await runPerformer(new Greet(undefined), { name: 'world' });
+		const result = await runPerformer(greet, { name: 'world' });
 		expect(result).toEqual({ ok: true, value: 'hello, world' });
 	});
 
 	it('例外は投げずに結果として返る', async () => {
 		// 本番では例外がリトライの判断になるので, 投げたか否かを同じ形で扱えるようにする
-		const result = await runPerformer(new Boom(undefined), {});
+		const result = await runPerformer(boom, {});
 		expect(result.ok).toBe(false);
 		expect(result.ok === false && result.error).toBeInstanceOf(Error);
 	});
@@ -49,24 +50,22 @@ describe('performerのハーネス', () => {
 		// idempotencyKeyはジョブID, 再試行を跨いで同値になる
 		expect(ctx.idempotencyKey).toBe(ctx.jobId);
 		expect(ctx.attempt).toBe(1);
-		expect(ctx.signal.aborted).toBe(false);
+		expect(ctx.deadlineAt).toBeGreaterThan(Date.now());
 	});
 
-	it('signalが実物なのでabortを待てる', async () => {
-		const ctx = createTestContext();
-		const running = runPerformer(new Interruptible(undefined), {}, ctx);
-		ctx.abort();
-		await expect(running).resolves.toEqual({ ok: true, value: 'aborted' });
+	it('deadlineAtから中断を組み立てられる', async () => {
+		const ctx = createTestContext({ deadlineAt: Date.now() + 20 });
+		await expect(runPerformer(interruptible, {}, ctx)).resolves.toEqual({ ok: true, value: 'expired' });
 	});
 
-	it('abort済みから始められる', async () => {
-		const ctx = createTestContext({ aborted: true });
-		await expect(runPerformer(new Interruptible(undefined), {}, ctx)).resolves.toEqual({ ok: true, value: 'aborted' });
+	it('期限切れから始められる', async () => {
+		const ctx = createTestContext({ deadlineAt: Date.now() - 1 });
+		await expect(runPerformer(interruptible, {}, ctx)).resolves.toEqual({ ok: true, value: 'expired' });
 	});
 
 	it('必須キー付きperformerも渡せる', async () => {
-		// 第3型引数をnever固定すると必須キー付きを弾く,渡せること自体が型テスト
-		const result = await runPerformer(new Charge(undefined), { customerId: 'c1' });
+		// 必須キーの印を持つperformerもハーネスが受けられること自体が型テスト
+		const result = await runPerformer(new Charge(), { customerId: 'c1' });
 		expect(result).toEqual({ ok: true, value: 'c1' });
 	});
 });

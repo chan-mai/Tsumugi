@@ -1,19 +1,18 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import type { Requirements, RemoteJobContext } from '../core/api.js';
+import type { JobContext, PerformerLike, Requirements } from '../core/api.js';
 
 /**
- * 別Workerに置くperformerの基底
+ * performerの基底(ADR-0037)
  *
- * `Performer`と違い`WorkerEntrypoint`の派生,呼び出し側にはservice bindingのRPCとして見える
- * 戻り値と`throw`の扱いはローカルと同一,例外がそのままリトライの判断
+ * `WorkerEntrypoint`の派生なので, トップレベルでexportすれば`ctx.exports`から引ける
+ * binding名はexportした名前がそのまま使われる, 別途の登録は要らない
+ * 同一Workerに置くか別Workerに置くかで書き方は変わらない
  */
-export abstract class RemotePerformer<
-	Payload = unknown,
-	Result = unknown,
-	Req extends Requirements = {},
-	Env = unknown,
-> extends WorkerEntrypoint<Env> {
+export abstract class Performer<Payload = unknown, Result = unknown, Req extends Requirements = {}, Env = unknown>
+	extends WorkerEntrypoint<Env>
+	implements PerformerLike<Payload, Result, Req>
+{
 	/** 型のためだけのプロパティ, 実体なし */
-	declare protected readonly __requirements?: Req;
-	abstract perform(payload: Payload, ctx: RemoteJobContext): Result | Promise<Result>;
+	declare readonly __requirements?: Req;
+	abstract perform(payload: Payload, ctx: JobContext): Result | Promise<Result>;
 }

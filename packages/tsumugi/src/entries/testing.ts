@@ -13,6 +13,10 @@ export type { AdvanceInput, AdvanceOutput, NodeView, RunDecision } from '../core
 export { createTestContext, runPerformer } from '../testing/harness.js';
 export type { PerformResult, TestContext, TestContextOptions } from '../testing/harness.js';
 
+// flow定義を通しで動かす, 実行順と各ノードのpayloadを確かめる
+export { simulateFlow } from '../testing/flow.js';
+export type { ResultSource, SimulatedNode, SimulateOptions, SimulationResult } from '../testing/flow.js';
+
 // Workersには時間を進めるAPIが無くfake timersもDOに効かないため, 時計は注入して明示的に進める
 export { fixedClock } from '../do/clock.js';
 export type { Clock } from '../do/clock.js';

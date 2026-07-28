@@ -27,8 +27,13 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg="$(node -p "require('./packages/tsumugi/package.json').version")"
+          api="$(node -p "require('fs').readFileSync('packages/tsumugi/src/api/openapi.ts','utf8').match(/API_VERSION = '([^']+)'/)[1]")"
           if [ "$tag" != "$pkg" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match package version $pkg"
+            exit 1
+          fi
+          if [ "$api" != "$pkg" ]; then
+            echo "::error::API_VERSION $api does not match package version $pkg"
             exit 1
           fi
           echo "publishing $pkg"

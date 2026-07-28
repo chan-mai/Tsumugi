@@ -39,3 +39,4 @@
 - [ADR-0034](0034-resume-from-failed-node.md) — 失敗したrunは失敗したノードから再開する
 - [ADR-0035](0035-bounded-run-data.md) — runを跨ぐデータと規模に上限を設ける
 - [ADR-0036](0036-startup-validation-vs-cli.md) — 起動時検証は検出に徹しCLIが生成を担う
+- [ADR-0037](0037-performers-resolved-by-export-name.md) — performerはexportした名前で解決しbindingの登録を廃止する
