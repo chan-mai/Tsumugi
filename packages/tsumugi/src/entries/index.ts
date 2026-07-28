@@ -23,10 +23,11 @@ export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } 
 export { systemClock, fixedClock } from '../do/clock.js';
 export type { Clock } from '../do/clock.js';
 export { TsumugiTimeoutError } from '../queue/consumer.js';
-export type { ConsumerEnv, PerformerCtor, PerformerRegistry, RemotePerformerService } from '../queue/consumer.js';
+export type { ConsumerEnv, PerformerCtor, PerformerRegistry, PerformerService, PerformerSource } from '../queue/consumer.js';
 export { createClient } from '../client/enqueue.js';
 export type { ClientEnv, JobShardStub, TsumugiClient } from '../client/enqueue.js';
-export { Performer, remote, isRemoteRef } from '../core/api.js';
+export { remote, isRemoteRef } from '../core/api.js';
+export { Performer } from '../performer/entrypoint.js';
 export type {
 	BaseOptions,
 	EnqueueItem,
@@ -36,7 +37,6 @@ export type {
 	JobQueue,
 	Performers,
 	PerformersOf,
-	RemoteJobContext,
 	RemoteRef,
 	Requirements,
 	TypedEnqueueInput,

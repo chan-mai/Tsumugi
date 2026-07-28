@@ -1,6 +1,5 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { Performer } from '../../src/core/api.js';
 import type { JobContext } from '../../src/core/api.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { TsumugiRunInstance } from '../../src/do/run.js';
@@ -10,44 +9,44 @@ import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
  * 縦串: runの開始からノードの完了まで
  *
  * flowの定義はexamples/basicが持つ(GREETINGS), Run DOはそこから引く(ADR-0030)
- * performerはconsumerへ渡す`performers`で差し替える, 実行結果をテストから確認するため
+ * performerはconsumerへ渡す実体で差し替える, 実行結果をテストから確認するため
  */
 
 const performed: { binding: string; payload: unknown }[] = [];
 
-class ListNames extends Performer<{ prefix: string }, { names: string[] }, {}, ConsumerEnv> {
-	async perform(payload: { prefix: string }) {
-		performed.push({ binding: 'LIST', payload });
+const listNames = {
+	perform: async (payload: { prefix: string }) => {
+		performed.push({ binding: 'ListNames', payload });
 		return { names: [`${payload.prefix}-1`, `${payload.prefix}-2`, `${payload.prefix}-3`] };
-	}
-}
+	},
+};
 
-class Greet extends Performer<{ name: string }, { greeted: string }, {}, ConsumerEnv> {
-	async perform(payload: { name: string }) {
-		performed.push({ binding: 'GREET', payload });
+const greet = {
+	perform: async (payload: { name: string }) => {
+		performed.push({ binding: 'Greet', payload });
 		return { greeted: payload.name };
-	}
-}
+	},
+};
 
-class Report extends Performer<{ total: number; failed: number }, void, {}, ConsumerEnv> {
-	async perform(payload: { total: number; failed: number }): Promise<void> {
-		performed.push({ binding: 'REPORT', payload });
-	}
-}
+const report = {
+	perform: async (payload: { total: number; failed: number }): Promise<void> => {
+		performed.push({ binding: 'Report', payload });
+	},
+};
 
 /** 自分の内側に子を1つ足すperformer, spawnの経路を見る(ADR-0032) */
-class GreetAndSpawn extends Performer<{ name: string }, { greeted: string }, {}, ConsumerEnv> {
-	async perform(payload: { name: string }, ctx: JobContext) {
-		performed.push({ binding: 'GREET', payload });
+const greetAndSpawn = {
+	perform: async (payload: { name: string }, ctx: JobContext) => {
+		performed.push({ binding: 'Greet', payload });
 		// 子は孫を作らない, 際限なく増えるので印で止める
-		if (!payload.name.endsWith('-child')) ctx.spawn('child', 'GREET', { name: `${payload.name}-child` });
+		if (!payload.name.endsWith('-child')) ctx.spawn('child', 'Greet', { name: `${payload.name}-child` });
 		return { greeted: payload.name };
-	}
-}
+	},
+};
 
-const registry = { LIST: ListNames, GREET: Greet, REPORT: Report };
-const spawningRegistry = { LIST: ListNames, GREET: GreetAndSpawn, REPORT: Report };
-const BINDINGS = ['LIST', 'GREET', 'REPORT'] as const;
+const performers = { ListNames: listNames, Greet: greet, Report: report };
+const spawningPerformers = { ListNames: listNames, Greet: greetAndSpawn, Report: report };
+const BINDINGS = ['ListNames', 'Greet', 'Report'] as const;
 
 const consumerEnv: ConsumerEnv = env;
 
@@ -94,7 +93,7 @@ async function installQueues(): Promise<void> {
 }
 
 /** Job DOとRun DOのalarmを交互に発火させ, 進みが止まるまで回す */
-async function settle(runId: string, performers: Record<string, any> = registry, rounds = 14): Promise<void> {
+async function settle(runId: string, source: Record<string, any> = performers, rounds = 14): Promise<void> {
 	for (let i = 0; i < rounds; i++) {
 		await installQueues();
 		for (const binding of BINDINGS) {
@@ -103,7 +102,7 @@ async function settle(runId: string, performers: Record<string, any> = registry,
 		if (sent.length > 0) {
 			const batch = makeBatch([...sent]);
 			sent.length = 0;
-			await handleBatch(batch, consumerEnv, performers);
+			await handleBatch(batch, consumerEnv, source);
 		}
 		await runDurableObjectAlarm(runStub(runId));
 	}
@@ -166,10 +165,10 @@ describe('縦串: runの開始から完了まで', () => {
 		});
 
 		// 前段の戻り値が後段のpayloadへ渡る, 子は並列に走るので順序は問わない
-		const greeted = performed.filter((p) => p.binding === 'GREET').map((p) => (p.payload as { name: string }).name);
+		const greeted = performed.filter((p) => p.binding === 'Greet').map((p) => (p.payload as { name: string }).name);
 		expect([...greeted].sort()).toEqual(['hello-1', 'hello-2', 'hello-3']);
 		// fan-outノードが渡すのは集計値のみ(ADR-0035)
-		expect(performed.find((p) => p.binding === 'REPORT')?.payload).toEqual({ total: 3, failed: 0 });
+		expect(performed.find((p) => p.binding === 'Report')?.payload).toEqual({ total: 3, failed: 0 });
 	});
 
 	it('performの中で足した子を親が待つ(ADR-0032)', async () => {
@@ -177,7 +176,7 @@ describe('縦串: runの開始から完了まで', () => {
 		const runId = 'GREETINGS:spawn1';
 		await installQueues();
 		await runStub(runId).start({ flow: 'GREETINGS', input: { prefix: 'sp' } });
-		await settle(runId, spawningRegistry);
+		await settle(runId, spawningPerformers);
 
 		const nodes = Object.fromEntries(await nodesOf(runId));
 		// 子は`親:名前`に入り, fan-outノードの子孫として数えられる
@@ -185,7 +184,7 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(nodes['report']).toBe('COMPLETED');
 		expect(await stateOf(runId)).toBe('COMPLETED');
 		// 3件の展開それぞれが子を1つ持つので6回走る
-		expect(performed.filter((p) => p.binding === 'GREET')).toHaveLength(6);
+		expect(performed.filter((p) => p.binding === 'Greet')).toHaveLength(6);
 	});
 
 	it('ノードの失敗で下流が打ち切られrunがFAILEDになる', async () => {

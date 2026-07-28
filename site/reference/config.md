@@ -3,7 +3,7 @@
 ## defineTsumugi
 
 ```ts
-const tsumugi = defineTsumugi<Env>({
+const tsumugi = defineTsumugi({
   performers,
   flows,
   runs,
@@ -14,9 +14,11 @@ const tsumugi = defineTsumugi<Env>({
 });
 ```
 
+型引数の指定は不要です。bindingごとのpayloadの型もEnvも`performers`から推論されます
+
 | 名前         | 必須 | 内容                                                          |
 | ------------ | ---- | ------------------------------------------------------------- |
-| `performers` | ○    | binding名とperformerの対応。`remote()`との混在も可能          |
+| `performers` | ○    | performerのモジュール, ペイロードと必須キーの型の導出に利用  |
 | `flows`      |      | Flow名と定義の対応。指定すると`RUN`のbindingが必要            |
 | `runs`       |      | Runの上限と保持期間の設定                                     |
 | `bindings`   |      | binding単位の分割数、流量制御、保持期間                       |
@@ -24,8 +26,23 @@ const tsumugi = defineTsumugi<Env>({
 | `ui`         |      | `tsumugi/ui`の`ui()`。未指定の場合はバンドルに含まれない      |
 | `retention`  |      | 一覧の保持設定                                                |
 
-戻り値は`fetch`と`queue`と`scheduled`を持つハンドラで、`enqueue`と`enqueueMany`と`shardFor`も提供します
-`flows`を指定した場合は`start`と`runFor`、wranglerに登録するクラスの`runClass`も提供します
+### 戻り値
+
+| 名前                                    | 内容                                                  |
+| --------------------------------------- | ----------------------------------------------------- |
+| `fetch` `queue` `scheduled`             | `ExportedHandler`, そのままdefault exportへ置く       |
+| `jobs(env)`                             | 型付きの投入口, `JobQueue<M>`を返す                   |
+| `enqueue(env, input)`                   | オブジェクト形の型付き投入, 1件投入してジョブIDを返す |
+| `enqueueMany(env, inputs)`              | 同じ形で複数件を投入する                              |
+| `shardFor(env, binding, partitionKey?)` | 投入先のDurable Objectのstub                          |
+| `start(env, flow, input, options?)`     | Runを開始してrunIdを返す                              |
+| `runFor(env, runId)`                    | Run Durable Objectのstub                              |
+| `runClass`                              | wranglerに登録するRun Durable Objectのクラス          |
+
+`start`と`runFor`と`runClass`は`flows`の指定に関わらず提供されます
+`flows`に無いFlow名を`start`へ渡した場合と、`RUN`のbindingが無い状態で`runFor`を呼び出した場合は例外が発生します
+
+投入の3経路の違いは[ジョブの投入](/guide/enqueue#paths)を参照してください
 
 ## RunSettings
 
@@ -34,6 +51,7 @@ const tsumugi = defineTsumugi<Env>({
 | 名前                | 既定    | 内容                                                        |
 | ------------------- | ------- | ----------------------------------------------------------- |
 | `maxNodes`          | `10000` | 1つのRunに含められるノード数の上限。超過するとRunが失敗する |
+| `maxDepth`          | `3`     | subflowの入れ子の上限。超過するとRunが失敗する              |
 | `sweepAfterMs`      | 5分     | 終了したRunを保持する時間                                   |
 | `failedRetentionMs` | 7日     | 失敗したRunを保持する時間。再開の対象となる期間             |
 
@@ -82,17 +100,42 @@ const tsumugi = defineTsumugi<Env>({
 { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 3_600_000, jitter: true }
 ```
 
+この形を受け取るのはトップレベルの`enqueue`と`createClient`です
+`defineTsumugi`の`enqueue`は`binding`ごとにpayloadと必須キーが決まる型を受け取ります
+
+## SweepOptions
+
+`retention`に指定する値です
+cronトリガーを設定すると、終了したジョブを一覧から削除します
+
+| 名前          | 既定   | 内容                           |
+| ------------- | ------ | ------------------------------ |
+| `olderThanMs` | 7日    | 終了したジョブを一覧に残す時間 |
+| `limit`       | `1000` | 1回で削除する件数の上限        |
+
+Runは対象に含みません。Runの保持期間は`runs`で指定可能です
+
 ## wranglerのbinding
 
-名前は固定です
+| binding           | 種類             | 必須 | 用途                            |
+| ----------------- | ---------------- | ---- | ------------------------------- |
+| `JOB_SHARD`       | Durable Object   | ○    | スケジューラ兼調停役            |
+| `RUN`             | Durable Object   |      | Runの実行。`flows`を使う場合    |
+| `TSUMUGI_DB`      | D1               | ○    | 読み取りモデル                  |
+| `TSUMUGI_QUEUE`   | Queues           | ○    | performerへの配送               |
+| `TSUMUGI_METRICS` | Analytics Engine |      | 時系列メトリクス                |
 
-| binding           | 種類             | 用途                            |
-| ----------------- | ---------------- | ------------------------------- |
-| `JOB_SHARD`       | Durable Object   | スケジューラ兼調停役            |
-| `RUN`             | Durable Object   | Runの実行。`flows`を使う場合    |
-| `TSUMUGI_DB`      | D1               | 読み取りモデル                  |
-| `TSUMUGI_QUEUE`   | Queues           | performerへの配送               |
-| `TSUMUGI_METRICS` | Analytics Engine | 時系列メトリクス                |
+`TSUMUGI_METRICS`が無い場合はメトリクスが記録されないだけで、動作に影響はありません
+それ以外のbindingが不足している場合、REST APIは503になり、応答に不足の一覧が含まれます
+
+`remote()`を置いたperformerにはservice bindingが必要です
+名前は固定ではなく、`performers`のキーがそのまま使われます
+
+```jsonc
+"services": [
+  { "binding": "MAIL", "service": "my-mailer", "entrypoint": "SendMail" },
+]
+```
 
 投入のみを行うWorkerに必要なbindingは`JOB_SHARD`だけです
 
@@ -101,11 +144,11 @@ const tsumugi = defineTsumugi<Env>({
 | import元            | 内容                                                             |
 | ------------------- | ---------------------------------------------------------------- |
 | `tsumugi`           | `defineTsumugi` `enqueue` `bearerAuth` `TsumugiJobShard`など本体 |
-| `tsumugi/performer` | `Performer` `RemotePerformer`                                    |
-| `tsumugi/client`    | `createClient`。Durable Object実装を含まない                     |
+| `tsumugi/performer` | `Performer`                                                      |
+| `tsumugi/client`    | `createClient`と関連する型。Durable Object実装を含まない        |
 | `tsumugi/ui`        | `ui()`。ダッシュボードのHTML                                     |
 | `tsumugi/types`     | 型のみ。ランタイムコードを含まない                               |
-| `tsumugi/testing`   | `schedule` `nextAttempt`など純粋関数                             |
+| `tsumugi/testing`   | `runPerformer` `createTestContext` `simulateFlow`など           |
 
 公開しているnpmパッケージは`tsumugi`のみです
 performerだけを持つWorkerがDurable Objectの実装をバンドルしないよう、サブパスで分割しています
