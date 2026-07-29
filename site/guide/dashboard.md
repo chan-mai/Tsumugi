@@ -75,13 +75,6 @@ const tsumugi = defineTsumugi({
 `tokenCookie`を指定すると、APIが401を返したときに入力欄が表示されます
 Cloudflare Accessのようにブラウザ側で認証が完結する構成では不要です
 
-### サブパスへの配置
-
-ダッシュボードのHTMLは、APIに一致しないGETすべてに返ります
-`/admin`のようなサブパスで開くことも可能で、指定は要りません
-
-REST APIの経路は`/api`固定です
-`/api`で始まるリクエストが`tsumugi.fetch`へ届く構成にしてください。届かない場合はダッシュボードからデータを取得できません
 
 ### 機能
 
