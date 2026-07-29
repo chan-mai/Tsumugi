@@ -12,11 +12,11 @@ class Noop extends Performer<unknown, void, {}, RestEnv> {
 	async perform(): Promise<void> {}
 }
 
-const handler = (options: { auth?: boolean; basePath?: string } = {}) =>
+const handler = (options: { auth?: boolean } = {}) =>
 	defineTsumugi({
 		performers: { UI: Noop },
 		...(options.auth === false ? {} : { auth: bearerAuth(TOKEN) }),
-		ui: ui(options.basePath === undefined ? {} : { basePath: options.basePath }),
+		ui: ui(),
 	});
 
 const call = (h: ReturnType<typeof handler>, path: string, headers: Record<string, string> = {}) =>
@@ -50,17 +50,14 @@ describe('ダッシュボードの配信(ADR-0025)', () => {
 		expect(html).not.toMatch(/<link[^>]+stylesheet/);
 	});
 
-	it('マウントパスを配信時に注入する', async () => {
-		const html = await (await call(handler({ basePath: '/admin' }), '/admin', authorized)).text();
-		expect(html).toContain('"base":"/admin"');
-	});
-
-	it('末尾のスラッシュは落とす', async () => {
-		expect(ui({ basePath: '/admin/' }).basePath).toBe('/admin');
+	it('APIは常にオリジン直下を呼ぶ', async () => {
+		// 呼び先を注入しないので, 配置先の情報はHTMLに入らない
+		const html = await (await call(handler(), '/', authorized)).text();
+		expect(html).not.toContain('"base"');
 	});
 
 	it('注入済みHTMLを使い回す', () => {
-		const dashboard = ui({ basePath: '/x' });
+		const dashboard = ui({ tokenCookie: 'tsumugi_token' });
 		// リクエストごとに数十KBの置換をしない
 		expect(dashboard.render()).toBe(dashboard.render());
 	});

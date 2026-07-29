@@ -19,11 +19,9 @@ export type RunNode = RunNodeView;
 
 declare global {
 	interface Window {
-		__TSUMUGI__?: { base: string; tokenCookie: string | null };
+		__TSUMUGI__?: { tokenCookie: string | null };
 	}
 }
-
-const base = () => window.__TSUMUGI__?.base ?? '';
 
 /** 設定されていればトークン入力を出せる, Cloudflare Access等では不要なのでnull */
 export const tokenCookie = () => window.__TSUMUGI__?.tokenCookie ?? null;
@@ -52,7 +50,7 @@ export function saveToken(value: string): void {
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
-	const res = await fetch(`${base()}${path}`, { ...init, credentials: 'same-origin' });
+	const res = await fetch(path, { ...init, credentials: 'same-origin' });
 	if (res.status === 401) throw new UnauthorizedError();
 	if (!res.ok) {
 		// サーバが理由を返す場合はそのまま見せる, 数字だけでは何をすればよいか分からない
@@ -69,7 +67,7 @@ export type MutationOutcome = { ok: boolean; gone: boolean; message: string };
  * 410は保持期間を過ぎてDOから消えた状態, 一覧には残るので押しても二度と通らない
  */
 async function mutate(path: string): Promise<MutationOutcome> {
-	const res = await fetch(`${base()}${path}`, { method: 'POST', credentials: 'same-origin' });
+	const res = await fetch(path, { method: 'POST', credentials: 'same-origin' });
 	if (res.status === 401) throw new UnauthorizedError();
 	if (res.ok) return { ok: true, gone: false, message: 'Accepted' };
 
@@ -114,7 +112,7 @@ export const listJobs = (params: ListParams) => {
 export type CreateJobInput = CreateJobRequest;
 
 export const createJob = async (input: CreateJobInput) => {
-	const res = await fetch(`${base()}/api/jobs`, {
+	const res = await fetch('/api/jobs', {
 		method: 'POST',
 		credentials: 'same-origin',
 		headers: { 'content-type': 'application/json' },
@@ -146,7 +144,7 @@ export const cancelRun = (id: string) => mutate(`/api/runs/${encodeURIComponent(
 export type StartRunInput = StartRunRequest;
 
 export const startRun = async (input: StartRunInput) => {
-	const res = await fetch(`${base()}/api/runs`, {
+	const res = await fetch('/api/runs', {
 		method: 'POST',
 		credentials: 'same-origin',
 		headers: { 'content-type': 'application/json' },
@@ -180,7 +178,7 @@ export class MetricsUnavailableError extends Error {
 export const getMetrics = async (params: { hours: number; binding?: string }): Promise<Metrics> => {
 	const query = new URLSearchParams({ hours: String(params.hours) });
 	if (params.binding) query.set('binding', params.binding);
-	const res = await fetch(`${base()}/api/metrics?${query}`, { credentials: 'same-origin' });
+	const res = await fetch(`/api/metrics?${query}`, { credentials: 'same-origin' });
 	if (res.status === 401) throw new UnauthorizedError();
 	if (res.status === 501) throw new MetricsUnavailableError();
 	const body = (await res.json().catch(() => ({}))) as Partial<Metrics> & { error?: string };
@@ -202,7 +200,7 @@ export type BulkOutcome = {
 
 /** 選択したジョブをまとめて処理する、状態の判定はサーバ側が行う */
 export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): Promise<BulkOutcome> => {
-	const res = await fetch(`${base()}/api/jobs/bulk-${action}`, {
+	const res = await fetch(`/api/jobs/bulk-${action}`, {
 		method: 'POST',
 		credentials: 'same-origin',
 		headers: { 'content-type': 'application/json' },
