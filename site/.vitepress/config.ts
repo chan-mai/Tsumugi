@@ -37,6 +37,7 @@ export default defineConfig({
 				items: [
 					{ text: 'REST API', link: '/reference/rest-api' },
 					{ text: '設定', link: '/reference/config' },
+					{ text: 'CLI', link: '/reference/cli' },
 				],
 			},
 		],

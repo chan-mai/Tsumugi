@@ -37,12 +37,15 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "tsumugi": "./dist/cli.js"
+  },
   "files": [
     "dist",
     "migrations"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.cli.json",
     "build": "tsdown",
     "prepare": "pnpm build",
     "prepack": "cp ../../README.md ../../LICENSE .",
@@ -52,6 +55,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
+    "@clack/prompts": "^1.7.0",
     "@cloudflare/workers-types": "^5.20260714.1",
     "@tsumugi/dashboard": "workspace:*",
     "publint": "^0.3.21",

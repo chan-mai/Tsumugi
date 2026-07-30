@@ -17,7 +17,7 @@ export type MissingBinding = {
 	kind: BindingKind;
 	/** wrangler設定に書くbinding名 */
 	name: string;
-	/** Durable Objectのクラス名, 種別がdurable-objectの場合のみ */
+	/** Durable Objectのクラス名, またはservice bindingのentrypointのクラス名 */
 	className?: string;
 	/** 不足の理由, 存在しないのか形が違うのか */
 	reason: 'absent' | 'invalid';
@@ -48,6 +48,17 @@ const RUN_BINDING = { name: 'RUN', kind: 'durable-object' as const, className: '
 
 const absent = (value: unknown): boolean => value === undefined || value === null;
 
+/** 必須bindingを全て不足として返す, CLIの新規生成が断片の入力に使う(ADR-0036) */
+export function requiredAsMissing(withFlows = false): MissingBinding[] {
+	const required = [...REQUIRED, ...(withFlows ? [RUN_BINDING] : [])];
+	return required.map((entry) => ({
+		kind: entry.kind,
+		name: entry.name,
+		reason: 'absent' as const,
+		...(entry.className ? { className: entry.className } : {}),
+	}));
+}
+
 /**
  * `env`と`defineTsumugi`の設定を突き合わせる
  * リモートperformerの検査はconsumerと同じ判定を起動時へ前倒しする(ADR-0026)
@@ -55,11 +66,9 @@ const absent = (value: unknown): boolean => value === undefined || value === nul
 export function validateConfig(env: Record<string, unknown>, config: ValidateInput): ConfigStatus {
 	const missing: MissingBinding[] = [];
 
-	const required = [...REQUIRED, ...(config.flows && Object.keys(config.flows).length > 0 ? [RUN_BINDING] : [])];
+	const required = requiredAsMissing(Boolean(config.flows && Object.keys(config.flows).length > 0));
 	for (const entry of required) {
-		if (absent(env[entry.name])) {
-			missing.push({ kind: entry.kind, name: entry.name, reason: 'absent', ...(entry.className ? { className: entry.className } : {}) });
-		}
+		if (absent(env[entry.name])) missing.push(entry);
 	}
 
 	// 別Workerのperformerはservice bindingで解決する, binding名は`performers`のキー(ADR-0037)

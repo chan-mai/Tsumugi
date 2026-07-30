@@ -12,6 +12,8 @@ const BUDGETS = {
 	'dist/performer.js': 16 * 1024,
 	'dist/client.js': 16 * 1024,
 	'dist/testing.js': 16 * 1024,
+	// @clack/promptsを同梱するため他の小entryより広い
+	'dist/cli.js': 32 * 1024,
 };
 
 /**
@@ -22,6 +24,7 @@ const FORBIDDEN = {
 	'dist/client.js': [/extends DurableObject/, /CREATE TABLE/],
 	'dist/performer.js': [/extends DurableObject/, /CREATE TABLE/],
 	'dist/testing.js': [/extends DurableObject/, /CREATE TABLE/, /hono/],
+	'dist/cli.js': [/extends DurableObject/, /hono/],
 };
 
 /** 印の実在確認,常に当たらないパターンは検査の形骸化 */
@@ -40,6 +43,9 @@ const ALLOWED_EXTERNALS = {
 	'dist/performer.js': [],
 	'dist/client.js': [],
 	'dist/testing.js': [],
+	// node:*はexternalsInが組み込みとして除外する, @clack/promptsの外部化漏れはここで捕まる
+	// 'tsumugi'は雛形のテンプレート文字列が持つimport行の検出分, 実importではない
+	'dist/cli.js': ['tsumugi'],
 };
 
 /** entryの読み込み先すべてから外部依存を集める */
