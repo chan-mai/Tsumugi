@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readWorkerName } from '../../src/cli/config-file.js';
 import { extractDatabaseId, init } from '../../src/cli/init.js';
 import { makeDeps, fail, ok } from './cli-harness.js';
 
@@ -23,6 +24,9 @@ const D1_CREATE_STDOUT = `✅ Successfully created DB 'my-jobs'
 
 const d1Script = (args: readonly string[]) => (args[0] === 'd1' && args[1] === 'create' ? ok(D1_CREATE_STDOUT) : ok());
 
+/** コメントと末尾カンマを落としてJSONとして読む, 生成物の構文の妥当性を確かめる */
+const parseJsonc = (source: string): unknown => JSON.parse(source.replace(/^\s*\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1'));
+
 describe('initの新規生成', () => {
 	it('wrangler設定へdatabase_idをそのまま書き込む', () => {
 		const { deps, fs } = makeDeps(d1Script);
@@ -39,6 +43,15 @@ describe('initの新規生成', () => {
 		expect(config).toContain('"queue": "my-jobs"');
 		expect(config).not.toContain('<id>');
 		expect(config).not.toContain('paste database_id');
+	});
+
+	it('生成したwrangler.jsoncは構文として妥当', () => {
+		// 部分一致の検査では構文の破れを検出できないため, パースまで通す
+		const { deps, fs } = makeDeps(d1Script);
+		expect(init({ name: 'my-jobs' }, deps)).toBe(0);
+		const parsed = parseJsonc(fs.read('/proj/wrangler.jsonc')) as { name?: string; d1_databases?: unknown[] };
+		expect(parsed.name).toBe('my-jobs');
+		expect(parsed.d1_databases).toHaveLength(1);
 	});
 
 	it('Workerの雛形と開発用トークンを生成する', () => {
@@ -145,6 +158,21 @@ describe('initの失敗', () => {
 		expect(config).toContain('"database_id": "<id>"');
 		expect(config).toContain('paste database_id');
 		expect(errors.join('\n')).toContain('could not read database_id');
+	});
+});
+
+describe('Worker名の読み取り', () => {
+	it('トップレベルのnameを読む', () => {
+		expect(readWorkerName('{\n  "name": "my-jobs",\n  "durable_objects": { "bindings": [{ "name": "JOB_SHARD" }] }\n}', 'jsonc')).toBe(
+			'my-jobs',
+		);
+		expect(readWorkerName('name = "my-jobs"\n\n[[d1_databases]]\nbinding = "TSUMUGI_DB"\n', 'toml')).toBe('my-jobs');
+	});
+
+	it('入れ子のbindingのnameは拾わない', () => {
+		// bindingがトップレベルのnameより前に並ぶ設定で誤った名前を埋めない
+		const config = '{\n  "durable_objects": { "bindings": [{ "name": "JOB_SHARD" }] },\n  "name": "my-jobs"\n}';
+		expect(readWorkerName(config, 'jsonc')).not.toBe('JOB_SHARD');
 	});
 });
 

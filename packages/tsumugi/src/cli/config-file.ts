@@ -23,6 +23,9 @@ export function detectWranglerConfig(deps: CliDeps): WranglerConfig | undefined 
 
 /** 設定から`name`だけを読む, パーサを持ち込まずregexに留める */
 export function readWorkerName(content: string, format: ConfigFormat): string | undefined {
-	const match = format === 'toml' ? content.match(/^\s*name\s*=\s*"([^"]+)"/m) : content.match(/"name"\s*:\s*"([^"]+)"/);
+	// 入れ子のbindingが持つ`name`を拾わないよう, 最初の`[`より前だけを見る
+	const bracket = content.indexOf('[');
+	const head = bracket === -1 ? content : content.slice(0, bracket);
+	const match = format === 'toml' ? head.match(/^\s*name\s*=\s*"([^"]+)"/m) : head.match(/"name"\s*:\s*"([^"]+)"/);
 	return match?.[1];
 }

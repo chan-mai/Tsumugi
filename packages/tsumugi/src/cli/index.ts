@@ -85,6 +85,10 @@ export function main(argv: readonly string[], deps: CliDeps): number {
 		return 1;
 	}
 	if (command === 'init') {
+		if (rest.length !== 0) {
+			deps.error('tsumugi: init does not accept positional arguments');
+			return 1;
+		}
 		const format = parsed.values.format ?? 'jsonc';
 		if (format !== 'jsonc' && format !== 'toml') {
 			deps.error(`tsumugi: unknown format "${format}", use jsonc or toml`);
@@ -93,9 +97,13 @@ export function main(argv: readonly string[], deps: CliDeps): number {
 		return init({ name: parsed.values.name, format }, deps);
 	}
 	if (command === 'add-performer') {
-		const name = rest[0];
+		const name = rest.length === 1 ? rest[0] : undefined;
 		if (name === undefined) {
-			deps.error('tsumugi: add-performer requires a name, e.g. `tsumugi add-performer send-mail`');
+			deps.error('tsumugi: add-performer requires exactly one name, e.g. `tsumugi add-performer send-mail`');
+			return 1;
+		}
+		if (parsed.values.name !== undefined || parsed.values.format !== undefined) {
+			deps.error('tsumugi: --name and --format are only valid with init');
 			return 1;
 		}
 		return addPerformer(name, deps);
