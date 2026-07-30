@@ -1,0 +1,9 @@
+{
+  // CLIはNodeで実行される, node:*のためにtypesへnodeを足す
+  // fragment.tsの型importが引き込むworkers-typesの大域も要るので併記する
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "@cloudflare/workers-types"]
+  },
+  "include": ["src/cli/**/*.ts", "src/entries/cli.ts"]
+}
