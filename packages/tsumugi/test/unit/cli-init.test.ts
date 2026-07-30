@@ -169,10 +169,23 @@ describe('Worker名の読み取り', () => {
 		expect(readWorkerName('name = "my-jobs"\n\n[[d1_databases]]\nbinding = "TSUMUGI_DB"\n', 'toml')).toBe('my-jobs');
 	});
 
-	it('入れ子のbindingのnameは拾わない', () => {
+	it('入れ子のbindingのnameは拾わずトップレベルを返す', () => {
 		// bindingがトップレベルのnameより前に並ぶ設定で誤った名前を埋めない
 		const config = '{\n  "durable_objects": { "bindings": [{ "name": "JOB_SHARD" }] },\n  "name": "my-jobs"\n}';
-		expect(readWorkerName(config, 'jsonc')).not.toBe('JOB_SHARD');
+		expect(readWorkerName(config, 'jsonc')).toBe('my-jobs');
+	});
+
+	it('トップレベル配列の後ろのnameも読む', () => {
+		expect(readWorkerName('{\n  "compatibility_flags": ["nodejs_compat"],\n  "name": "my-jobs"\n}', 'jsonc')).toBe('my-jobs');
+	});
+
+	it('コメントの中のnameは無視する', () => {
+		expect(readWorkerName('{\n  // "name": "wrong"\n  "name": "my-jobs"\n}', 'jsonc')).toBe('my-jobs');
+	});
+
+	it('トップレベルのnameが無ければundefined', () => {
+		expect(readWorkerName('{\n  "durable_objects": { "bindings": [{ "name": "JOB_SHARD" }] }\n}', 'jsonc')).toBeUndefined();
+		expect(readWorkerName('[[d1_databases]]\nbinding = "TSUMUGI_DB"\n', 'toml')).toBeUndefined();
 	});
 });
 
