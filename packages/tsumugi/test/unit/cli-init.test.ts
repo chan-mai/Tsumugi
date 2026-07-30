@@ -183,6 +183,15 @@ describe('Worker名の読み取り', () => {
 		expect(readWorkerName('{\n  // "name": "wrong"\n  "name": "my-jobs"\n}', 'jsonc')).toBe('my-jobs');
 	});
 
+	it('キーと値の間にコメントが挟まっても読む', () => {
+		expect(readWorkerName('{ "name" /* x */: "my-jobs" }', 'jsonc')).toBe('my-jobs');
+		expect(readWorkerName('{ "name": // x\n  "my-jobs" }', 'jsonc')).toBe('my-jobs');
+	});
+
+	it('TOMLのリテラル文字列も読む', () => {
+		expect(readWorkerName("name = 'my-jobs'\n", 'toml')).toBe('my-jobs');
+	});
+
 	it('トップレベルのnameが無ければundefined', () => {
 		expect(readWorkerName('{\n  "durable_objects": { "bindings": [{ "name": "JOB_SHARD" }] }\n}', 'jsonc')).toBeUndefined();
 		expect(readWorkerName('[[d1_databases]]\nbinding = "TSUMUGI_DB"\n', 'toml')).toBeUndefined();
