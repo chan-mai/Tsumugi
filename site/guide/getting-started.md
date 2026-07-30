@@ -13,78 +13,39 @@ cd my-jobs
 pnpm add tsumugi
 ```
 
-## リソース作成
+## セットアップ
 
-D1とQueuesを先に作ります
+initがリソースの作成から雛形の生成までを行います
 
 ```bash
-pnpm wrangler d1 create my-jobs
-pnpm wrangler queues create my-jobs
+npx tsumugi init
 ```
 
-## wrangler.jsonc
+実行が終わると次の状態になります
 
-Tsumugiが使うbindingは4つです
-`TSUMUGI_METRICS`のみ任意で、設定しない場合はメトリクスが記録されませんが、その他の動作に影響はありません
+- D1とQueuesが作成済み
+- `wrangler.jsonc`が生成済み。`wrangler d1 create`が出力した`database_id`は転記済み
+- `src/index.ts`と`src/performers/`と`.dev.vars`が生成済み
+- 読み取りモデル(一覧と検索が参照するD1のテーブル)のマイグレーションが適用済み
 
-```jsonc
-{
-  "name": "my-jobs",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-07-01",
+既にwrangler設定がある場合は書き換えず、追記する箇所が出力されます
+編集後、出力される手順に沿ってマイグレーションを適用してください
+オプションと生成物の詳細は[CLI](/reference/cli)を参照してください
 
-  "durable_objects": {
-    "bindings": [{ "name": "JOB_SHARD", "class_name": "TsumugiJobShard" }],
-  },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TsumugiJobShard"] }],
-
-  "d1_databases": [
-    {
-      "binding": "TSUMUGI_DB",
-      "database_name": "my-jobs",
-      "database_id": "d1 createが出力したid",
-      // 読み取りモデルのマイグレーションはパッケージに同梱
-      "migrations_dir": "./node_modules/tsumugi/migrations",
-    },
-  ],
-
-  "queues": {
-    "producers": [{ "binding": "TSUMUGI_QUEUE", "queue": "my-jobs" }],
-    "consumers": [{ "queue": "my-jobs", "max_batch_size": 10, "max_retries": 5 }],
-  },
-
-  "analytics_engine_datasets": [{ "binding": "TSUMUGI_METRICS", "dataset": "tsumugi_jobs" }],
-
-  // D1の読み取りモデルのcleanupをscheduledで実行
-  "triggers": { "crons": ["0 * * * *"] },
-}
-```
-
-::: info
-`max_retries`はTsumugiの試行回数とは無関係です。試行回数は`maxAttempts`で指定します
-:::
-
+`TSUMUGI_METRICS`のbindingは任意で、設定しない場合はメトリクスが記録されませんが、その他の動作に影響はありません
 Flowを使う場合はbindingが1つ増えます。単発のジョブのみを扱う構成では不要です
-詳細は[Flow](/guide/flow)を参照してください
-
-## 読み取りモデルの作成
-
-一覧と検索が参照するD1のテーブルを作成します
-
-```bash
-pnpm wrangler d1 migrations apply my-jobs --local
-pnpm wrangler d1 migrations apply my-jobs --remote
-```
+詳細は[設定](/reference/config)と[Flow](/guide/flow)を参照してください
 
 ::: warning
-Tsumugiを更新した場合も同じコマンドが必要です。マイグレーションはバージョンによって追加されます
+Tsumugiを更新した場合はマイグレーションの再適用が必要です。マイグレーションはバージョンによって追加されます
+`pnpm wrangler d1 migrations apply my-jobs --local`と`--remote`を実行してください
 未適用のマイグレーションがある場合、REST APIは503になり、応答本文に未適用のファイル名が含まれます
 ダッシュボードの画面自体は表示されますが、一覧の読み込みが同じ理由で失敗します
 :::
 
 ## performer
 
-ジョブの処理内容をファイルに分けて定義します
+ジョブの処理内容はperformerに記述します。init時に生成される`src/performers/hello.ts`が最小の形です
 
 ```ts
 // src/performers/hello.ts
@@ -97,15 +58,26 @@ export class Hello extends Performer<{ name: string }, void, {}, Env> {
 }
 ```
 
-まとめてexportするファイルを1つ置きます。ここに並べた名前がそのままbinding名になります
+`perform`の中身とpayloadの型を目的に合わせて書き換えてください
+
+performerの追加はadd-performerで行います
+
+```bash
+npx tsumugi add-performer send-mail
+```
+
+ファイルの生成と、まとめてexportするファイル(`src/performers/index.ts`)への追記が行われます
+ここに並べた名前がそのままbinding名になります
 
 ```ts
 // src/performers/index.ts
-export * from './hello.js';
+export { Hello } from './hello.js';
+export { SendMail } from './send-mail.js';
 ```
 
 ## Worker
 
+initが生成する`src/index.ts`は次の形です
 performerをWorkerのトップレベルからexportします。binding名はexportした名前がそのまま利用されます
 
 ```ts
@@ -117,6 +89,7 @@ export * from './performers/index.js';
 
 const tsumugi = defineTsumugi({
   performers,
+  // secretから引く, 直書きするとリポジトリとバンドルの両方に残る
   auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
   ui: ui({ tokenCookie: 'tsumugi_token' }),
 });
@@ -139,7 +112,6 @@ export default {
 ```
 
 `performers`はペイロードと必須キーの型を引くためのもので、実行時の解決には使いません
-解決先はexportした名前なので、`export * from`を書き忘れると実行時に見つからないエラーになります
 
 `tsumugi.enqueue`では、bindingからpayloadと必須キーの型が決まります
 投入の経路は[ジョブの投入](/guide/enqueue#paths)を参照してください
@@ -151,12 +123,17 @@ export default {
 ## トークンの設定
 
 認証はfail-closedです。設定するまでREST APIもダッシュボードも404を返します
+ローカルではinitが生成した`.dev.vars`の`TSUMUGI_TOKEN`が利用されますが、本番環境においてはSecret経由での注入を推奨します。
 
 ```bash
 pnpm wrangler secret put TSUMUGI_TOKEN
 ```
 
 ## 動作確認
+
+```bash
+pnpm wrangler dev
+```
 
 `/enqueue`にアクセスするとジョブIDが返ります
 `/`を開くとダッシュボードが表示されます。トークンを入力すると一覧が表示されます

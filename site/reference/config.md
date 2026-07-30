@@ -174,3 +174,5 @@ Runは対象に含みません。Runの保持期間は`runs`で指定可能で�
 
 公開しているnpmパッケージは`tsumugi`のみです
 performerだけを持つWorkerがDurable Objectの実装をバンドルしないよう、サブパスで分割しています
+
+セットアップ用のCLIは`npx tsumugi`で実行します。コマンドの一覧は[CLI](/reference/cli)を参照してください
