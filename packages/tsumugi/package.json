@@ -37,6 +37,9 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "tsumugi": "./dist/cli.js"
+  },
   "files": [
     "dist",
     "migrations"
