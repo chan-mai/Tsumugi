@@ -4,7 +4,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { addPerformer } from './add-performer.js';
+import { clackPrompts } from './clack.js';
 import { init } from './init.js';
+import { runTui } from './tui.js';
 
 /**
  * 専用CLIの入口(ADR-0036)
@@ -135,9 +137,12 @@ const nodeDeps = (): CliDeps => ({
 });
 
 /** binの入口, 予期しない例外もexit codeへ丸める */
-export function runCli(argv: readonly string[]): number {
+export async function runCli(argv: readonly string[]): Promise<number> {
+	const deps = nodeDeps();
 	try {
-		return main(argv, nodeDeps());
+		// 引数なしのTTYは対話モード, パイプやCIではmainがusageを出す
+		if (argv.length === 0 && deps.isTty) return await runTui(clackPrompts(), deps);
+		return main(argv, deps);
 	} catch (cause) {
 		console.error(`tsumugi: ${cause instanceof Error ? cause.message : String(cause)}`);
 		return 1;
