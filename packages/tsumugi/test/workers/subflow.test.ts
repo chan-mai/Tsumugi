@@ -72,6 +72,25 @@ async function settle(runIds: string[], performers: Record<string, unknown>, rou
 
 const stateOf = (runId: string) => runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun()?.state as string);
 const nodeOf = (runId: string, nodeId: string) => runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId));
+const nodesOf = (runId: string) =>
+	runInDurableObject(runStub(runId), (instance) =>
+		((instance as any).repo.views() as { id: string; state: string }[]).map((node) => [node.id, node.state] as const),
+	);
+
+/**
+ * Run DOのalarmだけを, ノードの状態が変わらなくなるまで発火させる
+ * performerを実行しないので投入までで止まる, ラウンド数で状況を作ると進みすぎる場合がある
+ */
+async function settleRuns(runIds: string[], rounds = 8): Promise<void> {
+	let previous = '';
+	for (let i = 0; i < rounds; i++) {
+		const current = JSON.stringify(await Promise.all(runIds.map((runId) => nodesOf(runId))));
+		if (current === previous) return;
+		previous = current;
+		for (const runId of runIds) await runDurableObjectAlarm(runStub(runId));
+	}
+	throw new Error(`node states did not settle within ${rounds} ticks`);
+}
 
 describe('subflowの縦串', () => {
 	const registry = { ListNames, Greet, Report };
@@ -102,12 +121,13 @@ describe('subflowの縦串', () => {
 		const child = 'GREETINGS:sub-fail-greetings';
 		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
 		// 子の先頭ノードを投入まで進めてから, 失敗の通知だけを手で届ける
-		await settle([parent, child], registry, 3);
+		await settleRuns([parent, child]);
+		// 投入されたメッセージは配送しない, 実行されると完了報告が返る
 		sent.length = 0;
 		const jobId = (await nodeOf(child, 'list'))?.job_id;
 		if (!jobId) throw new Error('the first node of the child run has no job id');
 		await runStub(child).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'intentional failure' }]);
-		await settle([parent, child], registry);
+		await settleRuns([parent, child]);
 
 		expect(await stateOf(child)).toBe('FAILED');
 		expect((await nodeOf(parent, 'greetings'))?.state).toBe('FAILED');
