@@ -16,14 +16,16 @@ const boom = {
 	},
 };
 
-/** 期限まで待つ, `deadlineAt`から中断を組み立てられるかを見る(ADR-0037) */
+/**
+ * 期限まで待つ, `deadlineAt`から中断を組み立てられるかを見る(ADR-0037)
+ * 自分では解決しない, 解決するとconsumerの打ち切りと競合して成功で終わる場合がある
+ */
 const waitForDeadline = {
-	perform: async (_payload: unknown, ctx: JobContext): Promise<void> => {
+	perform: (_payload: unknown, ctx: JobContext): Promise<void> => {
 		const signal = AbortSignal.timeout(Math.max(0, ctx.deadlineAt - Date.now()));
-		await new Promise<void>((resolve) => {
+		return new Promise<void>(() => {
 			signal.addEventListener('abort', () => {
 				aborted = true;
-				resolve();
 			});
 		});
 	},
