@@ -58,6 +58,7 @@
     "@clack/prompts": "^1.7.0",
     "@cloudflare/workers-types": "^5.20260714.1",
     "@tsumugi/dashboard": "workspace:*",
+    "@tsumugi/spec": "workspace:*",
     "publint": "^0.3.21",
     "tsdown": "^0.22.12",
     "unrun": "^0.3.1"
