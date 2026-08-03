@@ -85,4 +85,13 @@ describe('OpenAPI定義', () => {
 		const { version } = JSON.parse(readFileSync(packageJson, 'utf8')) as { version: string };
 		expect(API_VERSION).toBe(version);
 	});
+
+	it('生成器の表現差が正規化されている', () => {
+		// 畳み損ねは利用者のクライアント生成物を変える(ADR-0038)
+		// 意図してこれらの表現を使う時は, emit-module.mjsの正規化とこのテストをあわせて更新する
+		const text = JSON.stringify(openapiDocument());
+		expect(text).not.toContain('"unevaluatedProperties"');
+		expect(text).not.toContain('"anyOf"');
+		expect(text).not.toContain('"explode":false');
+	});
 });

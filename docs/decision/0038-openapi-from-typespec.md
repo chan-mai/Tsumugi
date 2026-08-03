@@ -12,7 +12,7 @@ OpenAPI文書の源泉をTypeSpec(`packages/spec`)へ移す
 
 - `.tsp`がモデルと経路を持ち,`tsp compile`(`@typespec/openapi3`)がOpenAPI 3.1のJSONを生成する
 - 生成物は`@tsumugi/dashboard`と同じ方式で配る。`emit-module.mjs`が`dist/index.js`の定数へ焼き込み,`prepare`がビルドし,tsdownの`noExternal`でバンドルへ畳み込む
-- 生成器の表現差はemit時に従来の形へ正規化する。nullableの`anyOf`はtype配列へ,`unevaluatedProperties`は`additionalProperties`へ,既定値と同じ`explode` / `required`と空の`parameters`は落とす。意味が同じでも表現が変わると,利用者のクライアント生成物が移行だけで変わるため
+- 生成器の表現差はemit時に従来の形へ正規化する。nullableの`anyOf`はtype配列へ,`unevaluatedProperties`は`additionalProperties`へ,スカラーのクエリパラメータで意味を持たない`explode: false`と既定値と同じ`required: false`と空の`parameters`は落とす。意味が同じでも表現が変わると,利用者のクライアント生成物が移行だけで変わるため
 - `API_VERSION`は`src/api/openapi.ts`に残し,配信時に`info.version`へ注入する。CI(version-check / release)の照合と版の単体テストの前提を変えない
 
 ## 帰結
