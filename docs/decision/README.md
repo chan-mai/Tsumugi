@@ -40,3 +40,4 @@
 - [ADR-0035](0035-bounded-run-data.md) — runを跨ぐデータと規模に上限を設ける
 - [ADR-0036](0036-startup-validation-vs-cli.md) — 起動時検証は検出に徹しCLIが生成を担う
 - [ADR-0037](0037-performers-resolved-by-export-name.md) — performerはexportした名前で解決しbindingの登録を廃止する
+- [ADR-0038](0038-openapi-from-typespec.md) — OpenAPI定義はTypeSpecから生成する
