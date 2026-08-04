@@ -20,6 +20,10 @@ export const RUN_SCHEMA = [
 		depth INTEGER NOT NULL DEFAULT 0,
 		-- 親へ終端を伝え終えたか, 失敗しても次のtickで再送する
 		parent_notified INTEGER NOT NULL DEFAULT 0,
+		-- run全体の期限(ms), 再開時にdeadline_atを引き直す材料(ADR-0039)
+		deadline_ms INTEGER,
+		-- 期限の時刻, 超過したrunは打ち切られてFAILEDになる
+		deadline_at INTEGER,
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
 	)`,
@@ -65,6 +69,8 @@ export function applyRunSchema(sql: SqlStorage): void {
 		['run', 'parent_node_id', 'TEXT'],
 		['run', 'depth', 'INTEGER NOT NULL DEFAULT 0'],
 		['run', 'parent_notified', 'INTEGER NOT NULL DEFAULT 0'],
+		['run', 'deadline_ms', 'INTEGER'],
+		['run', 'deadline_at', 'INTEGER'],
 		['node', 'subflow', 'TEXT'],
 		['node', 'child_run_id', 'TEXT'],
 	] as const) {
@@ -93,6 +99,8 @@ export type RunRow = {
 	parent_node_id: string | null;
 	depth: number;
 	parent_notified: number;
+	deadline_ms: number | null;
+	deadline_at: number | null;
 	created_at: number;
 	updated_at: number;
 };

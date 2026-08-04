@@ -58,6 +58,8 @@ const runId = await tsumugi.start(env, 'GREETINGS', { prefix: 'hello' });
 `start`の第4引数に`{ id }`を指定するとrunIdが`<flow>:<id>`に固定され、同じIDでの2回目の開始は既存のrunIdを返します
 リトライを行うHTTPハンドラから呼び出してもRunは増えません
 
+同じく第4引数の`{ deadlineMs }`でRun全体の[期限](#deadline)を指定できます
+
 ## fan-out
 
 実行時に件数が決まる並列処理は`f.fanOut`で定義します
@@ -141,6 +143,29 @@ const PIPELINE = flow<{ prefix: string }>((f) => {
 
 `cancel`は未実行のノードを停止します
 実行中のジョブは停止しないので、それらが終わった時点でRunが`CANCELLED`になります
+
+## 期限 {#deadline}
+
+Run全体の期限は、Flowの定義の第2引数で指定します
+
+```ts
+const GREETINGS = flow<{ prefix: string }>(
+  (f) => {
+    // ...
+  },
+  { deadlineMs: 10 * 60 * 1000 },
+);
+```
+
+`start`の第4引数の`{ deadlineMs }`を指定した場合はそちらが優先されます
+
+期限を超過したRunは取り消しと同じ流れで打ち切られます
+未実行のノードは`run deadline exceeded`のエラーで`FAILED`になり、実行中のジョブは停止しないので、それらが終わった時点でRunが`FAILED`になります
+実行中の子のRunは取り消されます
+
+すべてのノードが成功して終わったRunは、超過後でも`COMPLETED`になります
+
+`FAILED`になったRunは通常の失敗と同じように再開可能です。期限は再開の時点から引き直されます
 
 ## 保持期間
 

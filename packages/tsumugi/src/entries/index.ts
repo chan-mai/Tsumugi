@@ -14,7 +14,7 @@ export type { SweepOptions } from '../projection/sweep.js';
 export { toPoint, writeMetrics } from '../analytics/writer.js';
 export type { MetricPoint } from '../analytics/writer.js';
 export type { OutboxRow } from '../projection/projector.js';
-export type { BindingConfig, RunControl, RunNamespaceEnv, Tsumugi, TsumugiConfig } from '../worker.js';
+export type { BindingConfig, RunControl, RunNamespaceEnv, StartOptions, Tsumugi, TsumugiConfig } from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
 export type { DispatchMessage, EnqueueInput, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
 // createRunClassは公開しない, `defineTsumugi().runClass`を迂回すると設定が二重管理になる

@@ -31,6 +31,7 @@ export type {
 	Flow,
 	FlowBuilder,
 	FlowNode,
+	FlowOptions,
 	Flows,
 	FlowShape,
 	FlowShapeNode,

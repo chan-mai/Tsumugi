@@ -23,6 +23,10 @@ export const run = sqliteTable('run', {
 	depth: integer('depth').notNull().default(0),
 	/** 親へ終端を伝え終えたか */
 	parentNotified: integer('parent_notified').notNull().default(0),
+	/** run全体の期限(ms), 再開時にdeadline_atを引き直す材料(ADR-0039) */
+	deadlineMs: integer('deadline_ms'),
+	/** 期限の時刻, 超過したrunは打ち切られてFAILEDになる */
+	deadlineAt: integer('deadline_at'),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
 });
