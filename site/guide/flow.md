@@ -157,13 +157,14 @@ const GREETINGS = flow<{ prefix: string }>(
 );
 ```
 
+`deadlineMs`は正の整数(ミリ秒)です
 `start`の第4引数の`{ deadlineMs }`を指定した場合はそちらが優先されます
 
 期限を超過したRunは取り消しと同じ流れで打ち切られます
 未実行のノードは`run deadline exceeded`のエラーで`FAILED`になり、実行中のジョブは停止しないので、それらが終わった時点でRunが`FAILED`になります
 実行中の子のRunは取り消されます
 
-すべてのノードが成功して終わったRunは、超過後でも`COMPLETED`になります
+期限の時点で終わっていなかったRunは、残りのノードがすべて成功しても`FAILED`になります
 
 `FAILED`になったRunは通常の失敗と同じように再開可能です。期限は再開の時点から引き直されます
 

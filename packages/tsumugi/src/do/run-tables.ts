@@ -27,6 +27,8 @@ export const run = sqliteTable('run', {
 	deadlineMs: integer('deadline_ms'),
 	/** 期限の時刻, 超過したrunは打ち切られてFAILEDになる */
 	deadlineAt: integer('deadline_at'),
+	/** 超過の印, 立った後の決着はFAILEDになる */
+	expired: integer('expired').notNull().default(0),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
 });

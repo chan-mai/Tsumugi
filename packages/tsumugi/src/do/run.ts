@@ -290,7 +290,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			if (row.state !== 'FAILED') return { ok: false, reason: 'invalid-state' };
 
 			const reset = this.repo.resetForRetry(now);
-			// 期限を引き直す, 元の時刻のままでは再開直後に再び超過する(ADR-0039)
+			// 期限を引き直し超過の印を外す, 元のままでは再開直後に再び超過する(ADR-0039)
 			this.repo.resetDeadline(now);
 			this.repo.setRunState(row.id, 'RUNNING', now);
 			this.repo.appendRunOutbox();
@@ -341,7 +341,12 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			const runInput = JSON.parse(runRow.input) as unknown;
 			const cancelling = runRow.cancelling === 1;
 			// 期限超過は取り消しと同じ排水で打ち切る(ADR-0039)
-			const expired = runRow.deadline_at !== null && runRow.deadline_at <= now;
+			// 印はRUNNINGの間に一度だけ立てて永続化する, 時計から毎tick判定すると決着済みのrunが掃除のtickでFAILEDへ反転する
+			let expired = runRow.expired === 1;
+			if (!expired && runRow.state === 'RUNNING' && runRow.deadline_at !== null && runRow.deadline_at <= now) {
+				this.repo.markExpired(runRow.id, now);
+				expired = true;
+			}
 			// 打ち切られたノードへ残す理由, runには理由の置き場が無い, 取り消しはCANCELLEDのままにする
 			const deadlineError = expired && !cancelling ? `run deadline exceeded: ${runRow.deadline_ms}ms` : null;
 

@@ -220,8 +220,30 @@ describe('run全体の期限(ADR-0039)', () => {
 		const row = await runRowOf(runId);
 		expect(row?.deadline_ms).toBe(DEADLINE);
 		expect(row?.deadline_at).toBe(T0 + 60_000 + DEADLINE);
+		// 超過の印が残ると再開直後の決着が再びFAILEDになる
+		expect(row?.expired).toBe(0);
+
+		// 期限のalarmも新しい時刻へ張り直される
+		await settleRun(runId);
+		expect(await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.getAlarm())).toBe(T0 + 60_000 + DEADLINE);
 
 		await settle(runId);
+		expect(await stateOf(runId)).toBe('COMPLETED');
+	});
+
+	it('期限前に完了したrunは超過後のtickで反転しない', async () => {
+		await installQueues();
+		await shard('ListNames').configure({ policy: { concurrency: 100 } });
+		const runId = 'GREETINGS:done-in-time';
+		const stub = runStub(runId);
+		await setClock(runId, T0);
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'ok' }, deadlineMs: DEADLINE });
+		await settle(runId);
+		expect(await stateOf(runId)).toBe('COMPLETED');
+
+		// 掃除のtickは期限を過ぎた時刻に走る, 決着済みのrunをFAILEDへ倒さない
+		await setClock(runId, T0 + DEADLINE + 1);
+		await runDurableObjectAlarm(stub);
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 

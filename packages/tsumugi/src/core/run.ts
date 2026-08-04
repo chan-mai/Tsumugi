@@ -55,7 +55,7 @@ export type AdvanceInput = {
 	nodes: readonly NodeView[];
 	/** 取り消しが要求されている,未起動を止めて実行中の終端を待つ */
 	cancelling: boolean;
-	/** runの期限を超過した, 取り消しと同じ手を打ちFAILEDへ向かう(ADR-0039) */
+	/** 期限超過の印, 取り消しと同じ手を打ち決着をFAILEDにする(ADR-0039) */
 	expired?: boolean;
 };
 
@@ -166,8 +166,17 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 	const roots = nodes.filter((node) => node.parent === null);
 	// 全ノードは必ずいずれかの根に連なるので,根の決着で全体の決着が分かる
 	const done = roots.every(settled);
-	// 期限超過はここで分岐しない, 打ち切られたノードが残ればFAILEDになり, 全て成功していればCOMPLETEDを保つ(ADR-0039)
-	const state: RunState = !done ? 'RUNNING' : cancelling ? 'CANCELLED' : roots.every(succeeded) ? 'COMPLETED' : 'FAILED';
+	// 取り消しを優先する, 期限超過は残りが全て成功していてもFAILED
+	// fan-outの子の失敗は非致命(ADR-0035)なので, ノードの状態からは期限による打ち切りを区別できない(ADR-0039)
+	const state: RunState = !done
+		? 'RUNNING'
+		: cancelling
+			? 'CANCELLED'
+			: expired
+				? 'FAILED'
+				: roots.every(succeeded)
+					? 'COMPLETED'
+					: 'FAILED';
 
 	return { decisions, state };
 }
