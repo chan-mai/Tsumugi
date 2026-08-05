@@ -11,7 +11,7 @@ import { OPENAPI_DOCUMENT } from '@tsumugi/spec';
  * 定義に載せる版
  * package.jsonは実行時に読めないので写しを持つ, ずれは単体テストで突き合わせる
  */
-export const API_VERSION = '0.5.0';
+export const API_VERSION = '0.6.0';
 
 /** 3.1のJSON Schemaに沿う最小の型, 生成器へそのまま渡すので構造は緩く保つ */
 export type OpenApiDocument = {
