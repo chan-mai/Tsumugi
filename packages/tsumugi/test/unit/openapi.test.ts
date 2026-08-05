@@ -30,6 +30,7 @@ function registeredRoutes(): string[] {
 		flows: ['report'],
 		start: async () => 'report:x',
 		runFor: () => ({ cancel: async () => ({ ok: true }), retry: async () => ({ ok: true }) }),
+		schedulerFor: () => ({ list: async () => [] }),
 	});
 
 	return app.routes

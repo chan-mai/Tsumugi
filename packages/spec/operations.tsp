@@ -176,6 +176,20 @@ op getDiagnostics(): {
 	};
 } | Unauthorized | Unavailable;
 
+@route("/api/schedules")
+@operationId("listSchedules")
+@summary("List recurring schedules")
+@doc("Asks the scheduler directly rather than the read model, so the next run times are current.")
+@returnsDoc("Schedules in definition order")
+@get
+op listSchedules(): {
+	@statusCode statusCode: 200;
+
+	@body body: {
+		schedules: Schedule[];
+	};
+} | Unauthorized | NotImplemented | Unavailable;
+
 @route("/api/runs")
 @operationId("listRuns")
 @summary("List runs")

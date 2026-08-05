@@ -272,6 +272,47 @@ model Diagnostics {
 	};
 }
 
+model Schedule {
+	name: string;
+
+	@doc("Whether the schedule enqueues a job or starts a run")
+	kind: "job" | "flow";
+
+	@doc("Binding name for a job schedule, flow name for a flow schedule")
+	target: string;
+
+	@doc("Fixed interval in milliseconds. Null when cron is set.")
+	every_ms: integer | null;
+
+	@doc("Cron expression in UTC. Null when every_ms is set.")
+	cron: string | null;
+
+	@doc("What happens when the previous occurrence has not finished")
+	overlap: "skip" | "overlap";
+
+	next_run_at: integer;
+
+	@doc("Scheduled time of the latest firing. The gap to last_fired_at is the delay.")
+	last_run_at: integer | null;
+
+	@doc("When the latest firing actually happened")
+	last_fired_at: integer | null;
+
+	@doc("Job enqueued by the latest firing. Null for a flow schedule.")
+	last_job_id: string | null;
+
+	@doc("Run started by the latest firing. Null for a job schedule.")
+	last_run_id: string | null;
+
+	last_skipped_at: integer | null;
+
+	@doc("How many occurrences were skipped because the previous one was still running")
+	skipped_count: integer;
+
+	@doc("Why the latest firing failed. Null when it succeeded.")
+	last_error: string | null;
+}
+
 // 以降は応答の包み, componentsには載らない
 // 説明は@docがそのままresponsesのdescriptionになる
 

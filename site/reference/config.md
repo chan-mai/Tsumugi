@@ -6,6 +6,7 @@
 const tsumugi = defineTsumugi({
   performers,
   flows,
+  schedules,
   runs,
   bindings,
   auth,
@@ -17,16 +18,17 @@ const tsumugi = defineTsumugi({
 
 型引数の指定は不要です。bindingごとのpayloadの型もEnvも`performers`から推論されます
 
-| 名前         | 必須 | 内容                                                          |
-| ------------ | ---- | ------------------------------------------------------------- |
-| `performers` | ○    | performerのモジュール, ペイロードと必須キーの型の導出に利用  |
-| `flows`      |      | Flow名と定義の対応。指定すると`RUN`のbindingが必要            |
-| `runs`       |      | Runの上限と保持期間の設定                                     |
-| `bindings`   |      | binding単位の分割数、流量制御、保持期間                       |
-| `auth`       |      | 認証ミドルウェア。未設定の場合はAPIもダッシュボードも無効     |
-| `ui`         |      | `tsumugi/ui`の`ui()`。未指定の場合はバンドルに含まれない      |
-| `retention`  |      | 一覧の保持設定                                                |
-| `metrics`    |      | Analytics Engineの読み取り設定。未設定の場合はメトリクスが無効 |
+| 名前         | 必須 | 内容                                                            |
+| ------------ | ---- | --------------------------------------------------------------- |
+| `performers` | ○    | performerのモジュール, ペイロードと必須キーの型の導出に利用    |
+| `flows`      |      | Flow名と定義の対応。指定すると`RUN`のbindingが必要              |
+| `schedules`  |      | 定期実行の定義。指定すると`SCHEDULER`のbindingが必要            |
+| `runs`       |      | Runの上限と保持期間の設定                                       |
+| `bindings`   |      | binding単位の分割数、流量制御、保持期間                         |
+| `auth`       |      | 認証ミドルウェア。未設定の場合はAPIもダッシュボードも無効       |
+| `ui`         |      | `tsumugi/ui`の`ui()`。未指定の場合はバンドルに含まれない        |
+| `retention`  |      | 一覧の保持設定                                                  |
+| `metrics`    |      | Analytics Engineの読み取り設定。未設定の場合はメトリクスが無効   |
 
 ### 戻り値
 
@@ -40,6 +42,7 @@ const tsumugi = defineTsumugi({
 | `start(env, flow, input, options?)`     | Runを開始してrunIdを返す                              |
 | `runFor(env, runId)`                    | Run Durable Objectのstub                              |
 | `runClass`                              | wranglerに登録するRun Durable Objectのクラス          |
+| `schedulerClass`                        | wranglerに登録するScheduler Durable Objectのクラス    |
 
 `start`と`runFor`と`runClass`は`flows`の指定に関わらず提供されます
 `flows`に無いFlow名を`start`へ渡した場合と、`RUN`のbindingが無い状態で`runFor`を呼び出した場合は例外が発生します

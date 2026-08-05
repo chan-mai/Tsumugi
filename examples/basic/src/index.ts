@@ -46,6 +46,15 @@ const flows = {
 const tsumugi = defineTsumugi({
 	performers,
 	flows,
+	// 定期実行, binding名とflow名からpayloadとinputの型が決まる(ADR-0040)
+	schedules: {
+		// 固定間隔, 前回が終わっていなければ飛ばす
+		'poll-names': { binding: 'ListNames', payload: { prefix: 'poll' }, everyMs: 5 * 60 * 1000 },
+		// 前回の終了を待たずに重ねる, 実行が間隔より長引く場合に選ぶ
+		'ping-hello': { binding: 'Hello', payload: { name: 'ping' }, everyMs: 60_000, overlap: 'overlap' },
+		// cronはUTCの分精度, 発火の予定時刻を写像関数が受け取る
+		nightly: { flow: 'GREETINGS', input: ({ scheduledAt }) => ({ prefix: `nightly-${scheduledAt}` }), cron: '0 3 * * *' },
+	},
 	// secretから引く,直書きするとリポジトリとバンドルの両方に残る
 	auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
 	ui: ui({ tokenCookie: 'tsumugi_token' }),
@@ -60,6 +69,8 @@ export { TsumugiJobShard } from 'tsumugi';
 // flow定義を参照するクラスなのでパッケージからはエクスポートできない(ADR-0030)
 // クラス宣言にするのは`wrangler types`が型として参照できるようにするため
 export class TsumugiRun extends tsumugi.runClass {}
+// schedule定義を参照するクラス, 同上(ADR-0040)
+export class TsumugiScheduler extends tsumugi.schedulerClass {}
 
 export default {
 	...tsumugi,

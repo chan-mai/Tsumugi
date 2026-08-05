@@ -14,12 +14,26 @@ export type { SweepOptions } from '../projection/sweep.js';
 export { toPoint, writeMetrics } from '../analytics/writer.js';
 export type { MetricPoint } from '../analytics/writer.js';
 export type { OutboxRow } from '../projection/projector.js';
-export type { BindingConfig, RunControl, RunNamespaceEnv, StartOptions, Tsumugi, TsumugiConfig } from '../worker.js';
+export type {
+	BindingConfig,
+	RunControl,
+	RunNamespaceEnv,
+	SchedulerControl,
+	SchedulerNamespaceEnv,
+	StartOptions,
+	Tsumugi,
+	TsumugiConfig,
+} from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
 export type { DispatchMessage, EnqueueInput, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
 // createRunClassは公開しない, `defineTsumugi().runClass`を迂回すると設定が二重管理になる
 export { DEFAULT_MAX_NODES } from '../do/run.js';
 export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } from '../do/run.js';
+// createSchedulerClassはschedules定義を参照するので出さない, runClassと同じ理由(ADR-0040)
+export { SCHEDULER_DO_NAME } from '../do/scheduler.js';
+export type { SchedulerClass, SchedulerEnv, ScheduleView } from '../do/scheduler.js';
+export { InvalidScheduleError } from '../core/recurring.js';
+export { InvalidCronError, nextCronAt, parseCron } from '../core/cron.js';
 export { systemClock, fixedClock } from '../do/clock.js';
 export type { Clock } from '../do/clock.js';
 export { TsumugiTimeoutError } from '../queue/consumer.js';

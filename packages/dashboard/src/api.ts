@@ -8,6 +8,7 @@ import type {
 	RunDetail,
 	RunNodeView,
 	RunSummary,
+	ScheduleSummary,
 	StartRunRequest,
 } from '../../tsumugi/src/api/types.js';
 
@@ -16,6 +17,7 @@ export type Job = JobSummary & Partial<JobDetail>;
 export type Attempt = AttemptRecord;
 export type Run = RunSummary & Partial<RunDetail>;
 export type RunNode = RunNodeView;
+export type Schedule = ScheduleSummary;
 
 declare global {
 	interface Window {
@@ -188,6 +190,20 @@ export const getMetrics = async (params: { hours: number; binding?: string }): P
 
 export const isMetricsUnavailable = (error: unknown): boolean =>
 	typeof error === 'object' && error !== null && (error as { unavailable?: unknown }).unavailable === true;
+
+/** schedulesを定義していない構成では501が返る, 画面はそれを受けてタブを出さない */
+export class SchedulesUnavailableError extends Error {
+	readonly unavailable = true;
+}
+
+export const listSchedules = async (): Promise<Schedule[]> => {
+	const res = await fetch('/api/schedules', { credentials: 'same-origin' });
+	if (res.status === 401) throw new UnauthorizedError();
+	if (res.status === 501) throw new SchedulesUnavailableError();
+	const body = (await res.json().catch(() => ({}))) as { schedules?: Schedule[]; error?: string };
+	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	return body.schedules ?? [];
+};
 
 export type BulkInput = { ids: string[] };
 

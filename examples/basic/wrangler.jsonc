@@ -8,12 +8,15 @@
       { "name": "JOB_SHARD", "class_name": "TsumugiJobShard" },
       // flowsを使う場合だけ要る(ADR-0029)
       { "name": "RUN", "class_name": "TsumugiRun" },
+      // schedulesを使う場合だけ要る(ADR-0040)
+      { "name": "SCHEDULER", "class_name": "TsumugiScheduler" },
     ],
   },
   // exportsフィールドは片道切符なので当面migrations配列を使う
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TsumugiJobShard"] },
     { "tag": "v2", "new_sqlite_classes": ["TsumugiRun"] },
+    { "tag": "v3", "new_sqlite_classes": ["TsumugiScheduler"] },
   ],
   "d1_databases": [
     {

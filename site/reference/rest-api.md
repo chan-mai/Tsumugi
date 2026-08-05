@@ -323,6 +323,45 @@ bindingごとの滞留の診断情報を取得します
 
 対象はshard 0のみです。分割している場合、他のshardは含まれません
 
+## GET /api/schedules
+
+定期実行の一覧を取得します。定義と状態はScheduler Durable Objectが持つため、一覧の遅れはありません
+
+```json
+{
+  "schedules": [
+    {
+      "name": "nightly",
+      "kind": "flow",
+      "target": "REPORT",
+      "every_ms": null,
+      "cron": "0 3 * * *",
+      "overlap": "skip",
+      "next_run_at": 1767668400000,
+      "last_run_at": 1767582000000,
+      "last_fired_at": 1767582001200,
+      "last_job_id": null,
+      "last_run_id": "REPORT:nightly-1767582000000",
+      "last_skipped_at": null,
+      "skipped_count": 0,
+      "last_error": null
+    }
+  ]
+}
+```
+
+| 項目            | 意味                                                       |
+| --------------- | ---------------------------------------------------------- |
+| `kind`          | `job`または`flow`                                          |
+| `target`        | binding名またはFlow名                                      |
+| `next_run_at`   | 次回の実行予定                                             |
+| `last_run_at`   | 直近の発火の予定時刻                                       |
+| `last_fired_at` | 直近の発火の実時刻。`last_run_at`との差が遅れ               |
+| `skipped_count` | 前回が終わっていないために飛ばした回数                     |
+| `last_error`    | 直近の発火が失敗した理由。成功した場合は`null`             |
+
+`schedules`を定義していない構成では501になります。詳細は[定期実行](/guide/schedule)を参照してください
+
 ## GET /api/bindings
 
 投入先の選択肢と絞り込み用のbinding名を返します
