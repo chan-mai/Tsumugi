@@ -142,13 +142,14 @@ Runは対象に含みません。Runの保持期間は`runs`で指定可能で�
 
 ## wranglerのbinding
 
-| binding           | 種類             | 必須 | 用途                            |
-| ----------------- | ---------------- | ---- | ------------------------------- |
-| `JOB_SHARD`       | Durable Object   | ○    | スケジューラ兼調停役            |
-| `RUN`             | Durable Object   |      | Runの実行。`flows`を使う場合    |
-| `TSUMUGI_DB`      | D1               | ○    | 読み取りモデル                  |
-| `TSUMUGI_QUEUE`   | Queues           | ○    | performerへの配送               |
-| `TSUMUGI_METRICS` | Analytics Engine |      | 時系列メトリクス                |
+| binding           | 種類             | 必須 | 用途                                  |
+| ----------------- | ---------------- | ---- | ------------------------------------- |
+| `JOB_SHARD`       | Durable Object   | ○    | ジョブの調停と投入の判断              |
+| `RUN`             | Durable Object   |      | Runの実行。`flows`を使う場合          |
+| `SCHEDULER`       | Durable Object   |      | 定期実行の発火。`schedules`を使う場合 |
+| `TSUMUGI_DB`      | D1               | ○    | 読み取りモデル                        |
+| `TSUMUGI_QUEUE`   | Queues           | ○    | performerへの配送                     |
+| `TSUMUGI_METRICS` | Analytics Engine |      | 時系列メトリクス                      |
 
 `TSUMUGI_METRICS`が無い場合はメトリクスが記録されないだけで、動作に影響はありません
 それ以外のbindingが不足している場合、REST APIは503になり、応答に不足の一覧が含まれます

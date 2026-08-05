@@ -192,26 +192,22 @@ export function createSchedulerClass({ schedules, bindings, targets }: Scheduler
 			this.repo.writeSetting(FINGERPRINT_KEY, fingerprint);
 		}
 
-		/** 1件の発火, 予定時刻はrow.next_run_atで確定している */
+		/**
+		 * 1件の発火, 予定時刻はrow.next_run_atで確定している
+		 * 失敗しても理由を残して次回へ進める, 進めないと同じ行が先頭に居座り他のscheduleが発火しない
+		 */
 		async #fire(row: ScheduleRow, def: AnyScheduleDef, now: number): Promise<void> {
 			const occurrence = row.next_run_at;
 			const next = nextOccurrence({ everyMs: row.every_ms, cron: row.cron }, occurrence, now);
 
-			if (row.overlap === 'skip' && (await this.#previousActive(row))) {
-				this.repo.markSkipped(row.name, next, now);
-				return;
-			}
-
-			let resolved: unknown;
 			try {
-				resolved = await this.#resolve(def, { scheduledAt: occurrence });
-			} catch (error) {
-				// 写像関数の失敗は次回へ進める, 進めないと5秒間隔のホットループになる
-				this.repo.markError(row.name, messageOf(error), next, now);
-				return;
-			}
+				if (row.overlap === 'skip' && (await this.#previousActive(row))) {
+					this.repo.markSkipped(row.name, next, now);
+					return;
+				}
 
-			try {
+				const resolved = await this.#resolve(def, { scheduledAt: occurrence });
+
 				if (row.kind === 'job') {
 					const binding = def.binding as string;
 					// 決定的IDにする, 再発火しても同じIDの再投入は既存を返す(ADR-0029)
@@ -236,9 +232,9 @@ export function createSchedulerClass({ schedules, bindings, targets }: Scheduler
 					this.repo.markFired(row.name, { occurrence, runId }, next, now);
 				}
 			} catch (error) {
-				// 発火の失敗は行を進めず再試行に任せる, 決定的IDなので再発火は二重にならない
-				this.repo.markError(row.name, messageOf(error), null, now);
-				throw error;
+				// 1件の失敗で他のscheduleを止めない, 理由は一覧に出るので外から気付ける
+				console.error(`tsumugi: schedule ${row.name} failed to fire`, error);
+				this.repo.markError(row.name, messageOf(error), next, now);
 			}
 		}
 

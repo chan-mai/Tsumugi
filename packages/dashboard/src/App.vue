@@ -236,13 +236,29 @@ function sortBy(column: string) {
 	}
 }
 
-onMounted(async () => {
+/**
+ * 構成にある機能だけタブを出す
+ * 未設定なら501, 認証前は401になるので, トークンを入れた後にもう一度確かめる
+ */
+async function detectFeatures() {
+	const [metrics, schedules] = await Promise.allSettled([getMetrics({ hours: 24 }), listSchedules()]);
+	// 501と401以外の失敗はタブを出した上で画面側に理由を出す
+	const available = (result: PromiseSettledResult<unknown>) =>
+		result.status === 'fulfilled' || (!isMetricsUnavailable(result.reason) && !isUnauthorized(result.reason));
+	hasMetrics.value = available(metrics);
+	hasSchedules.value = available(schedules);
+}
+
+/** トークンを入れ直した後の再読込, 認証で隠れていたタブもここで戻る */
+function reload() {
+	load();
+	detectFeatures();
+}
+
+onMounted(() => {
 	load();
 	restartTimer();
-	// 設定が無い場合は501, それ以外の失敗はタブを出した上で画面側に理由を出す
-	const [metrics, schedules] = await Promise.allSettled([getMetrics({ hours: 24 }), listSchedules()]);
-	hasMetrics.value = metrics.status === 'fulfilled' || (!isMetricsUnavailable(metrics.reason) && !isUnauthorized(metrics.reason));
-	hasSchedules.value = schedules.status === 'fulfilled' || (!isMetricsUnavailable(schedules.reason) && !isUnauthorized(schedules.reason));
+	detectFeatures();
 });
 onUnmounted(() => timer && clearInterval(timer));
 
@@ -299,7 +315,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 </script>
 
 <template>
-	<TokenPrompt v-if="unauthorized && canPromptToken" @saved="load" />
+	<TokenPrompt v-if="unauthorized && canPromptToken" @saved="reload" />
 
 	<div v-else-if="unauthorized" class="mx-auto mt-24 max-w-sm px-4 text-center">
 		<h1 class="mb-2 text-xl font-bold">Tsumugi</h1>

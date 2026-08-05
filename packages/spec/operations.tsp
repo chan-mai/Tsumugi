@@ -180,7 +180,7 @@ op getDiagnostics(): {
 @operationId("listSchedules")
 @summary("List recurring schedules")
 @doc("Asks the scheduler directly rather than the read model, so the next run times are current.")
-@returnsDoc("Schedules in definition order")
+@returnsDoc("Schedules ordered by name")
 @get
 op listSchedules(): {
 	@statusCode statusCode: 200;

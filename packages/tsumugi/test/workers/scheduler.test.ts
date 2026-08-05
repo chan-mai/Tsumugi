@@ -235,6 +235,50 @@ describe('定期実行(ADR-0040)', () => {
 		});
 	});
 
+	it('発火に失敗しても理由を残して次回へ進む', async () => {
+		const base = day(11);
+		await sync(base);
+		const occurrence = nightlyOf(base);
+
+		// RUNのbindingを外して子のrunの起動を失敗させる
+		const restore = await runInDurableObject(inside(), (instance) => {
+			const saved = (instance as any).env.RUN;
+			(instance as any).env.RUN = undefined;
+			return saved;
+		});
+		await tickAt(occurrence);
+		await runInDurableObject(inside(), (instance) => {
+			(instance as any).env.RUN = restore;
+		});
+
+		const row = await rowOf('nightly');
+		expect(row?.last_error).toContain('RUN binding is not configured');
+		// 進めないと同じ行が先頭に居座り, 他のscheduleが発火しなくなる
+		expect(row?.next_run_at).toBe(occurrence + 24 * 60 * 60 * 1000);
+		expect(row?.last_run_at).toBeNull();
+	});
+
+	it('1件の失敗が他のscheduleの発火を止めない', async () => {
+		const base = day(12);
+		await sync(base);
+		// nightlyは名前順で先頭, 同じtickで後続のping-helloまで進むかを見る
+		const occurrence = nightlyOf(base);
+
+		const restore = await runInDurableObject(inside(), (instance) => {
+			const saved = (instance as any).env.RUN;
+			(instance as any).env.RUN = undefined;
+			return saved;
+		});
+		await tickAt(occurrence);
+		await runInDurableObject(inside(), (instance) => {
+			(instance as any).env.RUN = restore;
+		});
+
+		expect((await rowOf('nightly'))?.last_error).not.toBeNull();
+		// ping-helloは起点から見て何周期も過ぎているので, 同じtickで発火している
+		expect((await rowOf('ping-hello'))?.last_fired_at).toBe(occurrence);
+	});
+
 	it('cronの予定でrunを起動する', async () => {
 		const base = day(8);
 		await sync(base);

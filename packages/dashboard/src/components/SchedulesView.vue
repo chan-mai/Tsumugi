@@ -48,7 +48,7 @@ const delay = (row: Schedule) =>
 		: `+${duration(row.last_fired_at - row.last_run_at)}`;
 
 const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
-const LINK = 'cursor-pointer font-mono text-xs underline-offset-2 hover:underline';
+const LINK = 'block border-none p-0 font-mono text-xs break-all underline underline-offset-2 hover:text-foreground';
 </script>
 
 <template>
@@ -84,8 +84,12 @@ const LINK = 'cursor-pointer font-mono text-xs underline-offset-2 hover:underlin
 						<td class="p-4 align-middle tabular-nums">
 							{{ at(row.last_run_at) }}
 							<span v-if="delay(row)" class="text-xs text-muted-foreground">{{ delay(row) }}</span>
-							<p v-if="row.last_job_id" :class="LINK" @click="emit('job', row.last_job_id)">{{ row.last_job_id }}</p>
-							<p v-else-if="row.last_run_id" :class="LINK" @click="emit('run', row.last_run_id)">{{ row.last_run_id }}</p>
+							<button v-if="row.last_job_id" type="button" :class="LINK" @click="emit('job', row.last_job_id)">
+								{{ row.last_job_id }}
+							</button>
+							<button v-else-if="row.last_run_id" type="button" :class="LINK" @click="emit('run', row.last_run_id)">
+								{{ row.last_run_id }}
+							</button>
 						</td>
 						<td class="p-4 align-middle tabular-nums">
 							{{ row.skipped_count }}
