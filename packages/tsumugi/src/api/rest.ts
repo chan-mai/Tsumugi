@@ -29,8 +29,10 @@ import type {
 	RunListResponse,
 	StartRunRequest,
 	StartRunResponse,
+	SchedulesResponse,
 	StatsResponse,
 } from './types.js';
+import type { ScheduleView } from '../do/scheduler.js';
 
 export type RestEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };
 
@@ -55,6 +57,8 @@ export type RestOptions<Env extends RestEnv> = {
 	start?: (env: Env, flow: string, input: unknown, options?: { id?: string; deadlineMs?: number }) => Promise<string>;
 	/** 取り消しと再開はDOへ直接送る, 読み取りモデルは正の根拠に使えない(ADR-0015) */
 	runFor?: (env: Env, runId: string) => { cancel(): Promise<MutationResult>; retry(): Promise<MutationResult> };
+	/** 定期実行の一覧, Scheduler DOが正なので直接聞く(ADR-0040)。未設定なら`/api/schedules`は501を返す */
+	schedulerFor?: (env: Env) => { list(): Promise<ScheduleView[]> };
 	/** Analytics Engineの読み取り設定, 未設定なら`/api/metrics`は501を返す */
 	metrics?: MetricsResolver<Env>;
 };
@@ -359,7 +363,7 @@ export type { SortColumn };
  * 稼働中も投影済みなのでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings = [], enqueue, failedRetentionMs, flows = [], start, runFor, metrics } = options;
+	const { dashboard, bindings = [], enqueue, failedRetentionMs, flows = [], start, runFor, schedulerFor, metrics } = options;
 
 	/**
 	 * 一覧の1行にretryの可否を載せる
@@ -602,6 +606,13 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		);
 		const body: DiagnosticsResponse = { shard: 0, bindings: Object.fromEntries(perBinding) };
 		return c.json(body);
+	});
+
+	// 定期実行の一覧, 定義と状態はScheduler DOが正なので直接聞く(ADR-0040)
+	app.get('/api/schedules', async (c) => {
+		if (!schedulerFor) return c.json({ error: 'schedules are not available' } satisfies ErrorResponse, 501);
+		const schedules = await schedulerFor(c.env).list();
+		return c.json({ schedules } satisfies SchedulesResponse);
 	});
 
 	app.get('/api/jobs/:id', async (c) => {

@@ -28,6 +28,7 @@ export default defineConfig({
 					{ text: 'ジョブの投入', link: '/guide/enqueue' },
 					{ text: '実行の制御', link: '/guide/execution' },
 					{ text: 'Flow', link: '/guide/flow' },
+					{ text: '定期実行', link: '/guide/schedule' },
 					{ text: 'ダッシュボードと認証', link: '/guide/dashboard' },
 					{ text: '別Workerからの投入', link: '/guide/client' },
 				],

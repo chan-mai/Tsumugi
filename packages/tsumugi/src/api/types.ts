@@ -126,6 +126,27 @@ export type StartRunRequest = {
 };
 export type StartRunResponse = { id: string };
 
+/** 定期実行の1件, Scheduler DOのlist()をそのまま運ぶ(ADR-0040) */
+export type ScheduleSummary = {
+	name: string;
+	kind: 'job' | 'flow';
+	target: string;
+	every_ms: number | null;
+	cron: string | null;
+	overlap: 'skip' | 'overlap';
+	next_run_at: number;
+	/** 直近発火の予定時刻, last_fired_atとの差が遅延 */
+	last_run_at: number | null;
+	last_fired_at: number | null;
+	last_job_id: string | null;
+	last_run_id: string | null;
+	last_skipped_at: number | null;
+	skipped_count: number;
+	last_error: string | null;
+};
+
+export type SchedulesResponse = { schedules: ScheduleSummary[] };
+
 /** retry / cancelの応答 */
 export type MutationResponse = { ok: true };
 

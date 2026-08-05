@@ -119,6 +119,7 @@ export interface TsumugiRunInstance extends Rpc.DurableObjectBranded {
 	notifyChild(nodeId: string, childRunId: string, state: RunState): Promise<void>;
 	cancel(): Promise<MutationResult>;
 	retry(): Promise<MutationResult>;
+	state(): Promise<RunState | null>;
 	alarm(): Promise<void>;
 }
 
@@ -268,6 +269,14 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			this.repo.updateNode(nodeId, { state, ...(state === 'FAILED' ? { error: `child run failed: ${childRunId}` } : {}) }, now);
 			this.repo.appendNodeOutbox(run.id, [nodeId]);
 			await this.#armAlarm(now);
+		}
+
+		/**
+		 * scheduleのskip判定のための読み取り, 削除済みはnull(ADR-0040)
+		 * 削除後の照会は空のDOを再生成するが, 行もalarmも無いので無害
+		 */
+		async state(): Promise<RunState | null> {
+			return (this.repo.findRun()?.state as RunState | undefined) ?? null;
 		}
 
 		/** 画面とREST APIからの取り消し, 未起動を止めて実行中の終端を待つ */

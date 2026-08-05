@@ -13,6 +13,18 @@ export type {
 	ScheduleOutput,
 } from '../core/types.js';
 export type { JobAddress, RunAddress } from '../core/ids.js';
+export type { CronSpec } from '../core/cron.js';
+export type {
+	AnyScheduleDef,
+	AnySchedules,
+	FlowSchedule,
+	JobSchedule,
+	NormalizedSchedule,
+	ScheduleContext,
+	ScheduleDefs,
+	ScheduleJobOptions,
+	ScheduleTiming,
+} from '../core/recurring.js';
 export type {
 	AdvanceInput,
 	AdvanceOutput,

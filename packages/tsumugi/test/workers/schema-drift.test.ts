@@ -2,6 +2,7 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
 import { describe, expect, it } from 'vitest';
 import { attempt, job, outbox, setting, uniqueKey } from '../../src/do/tables.js';
+import { schedule, schedulerSetting } from '../../src/do/scheduler-tables.js';
 import { job as readModel } from '../../src/projection/tables.js';
 
 /**
@@ -33,6 +34,33 @@ describe('DDLとDrizzle定義の一致', () => {
 
 			expect(actual.length).toBeGreaterThan(0);
 			expect(actual).toEqual(declared);
+		});
+	}
+});
+
+/** Scheduler DOも`scheduler-schema.ts`と`scheduler-tables.ts`の二重管理(ADR-0040) */
+describe('Scheduler DOのDDLとDrizzle定義の一致', () => {
+	// 面をそのまま通すと型の展開が深くなりTS2589に触れる, ここでは呼ばないので空で受ける
+	interface SchedulerFace extends Rpc.DurableObjectBranded {}
+	const namespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
+	const stub = namespace.get(namespace.idFromName('scheduler'));
+
+	const columnsOf = (table: string) =>
+		runInDurableObject(stub, (instance) =>
+			((instance as any).repo.sql as SqlStorage)
+				.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
+				.toArray()
+				.map((r) => r.name)
+				.sort(),
+		);
+
+	for (const table of [schedule, schedulerSetting]) {
+		const config = getTableConfig(table);
+
+		it(`${config.name}の列が一致する`, async () => {
+			const actual = await columnsOf(config.name);
+			expect(actual.length).toBeGreaterThan(0);
+			expect(actual).toEqual(config.columns.map((c) => c.name).sort());
 		});
 	}
 });

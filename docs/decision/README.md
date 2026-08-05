@@ -42,3 +42,4 @@
 - [ADR-0037](0037-performers-resolved-by-export-name.md) — performerはexportした名前で解決しbindingの登録を廃止する
 - [ADR-0038](0038-openapi-from-typespec.md) — OpenAPI定義はTypeSpecから生成する
 - [ADR-0039](0039-run-deadline.md) — run全体の期限で止まったrunを打ち切る
+- [ADR-0040](0040-schedules-in-code-state-in-do.md) — 定期実行の定義はコードに置き状態を専用DOが持つ

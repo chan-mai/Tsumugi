@@ -27,6 +27,7 @@ const ROUTES: [method: string, path: string][] = [
 	['POST', '/api/jobs/bulk-retry'],
 	['POST', '/api/jobs/bulk-cancel'],
 	['GET', '/api/metrics'],
+	['GET', '/api/schedules'],
 	['GET', '/'],
 	['GET', '/api/unknown'],
 ];

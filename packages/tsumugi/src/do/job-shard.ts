@@ -216,6 +216,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return { active: this.repo.countActive(), outbox: this.repo.countOutbox(), blocked: this.#lastBlocked };
 	}
 
+	/** scheduleのskip判定のための読み取り, 掃除済みはnull(ADR-0040) */
+	async stateOf(jobId: string): Promise<string | null> {
+		return this.repo.find(jobId)?.state ?? null;
+	}
+
 	/** 永続化した直近blockedを一度だけ読み戻す,無ければfalse既定のまま(#10) */
 	#loadBlocked(): void {
 		if (this.#blockedLoaded) return;

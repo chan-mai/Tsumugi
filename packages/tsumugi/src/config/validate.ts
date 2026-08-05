@@ -32,10 +32,11 @@ export type ConfigStatus = { ok: true } | { ok: false; missing: MissingBinding[]
 export type ValidateInput = {
 	performers: PerformerRegistry<any>;
 	flows?: Flows;
+	schedules?: Record<string, unknown>;
 };
 
 /**
- * 常に要るbinding, flowを使う構成では`RUN`が加わる
+ * 常に要るbinding, flowを使う構成では`RUN`, scheduleを使う構成では`SCHEDULER`が加わる
  * `TSUMUGI_METRICS`は含めない, 未設定でもメトリクスが書かれないだけで実行は成立する(ADR-0036)
  */
 const REQUIRED: readonly { name: string; kind: BindingKind; className?: string }[] = [
@@ -46,11 +47,13 @@ const REQUIRED: readonly { name: string; kind: BindingKind; className?: string }
 
 const RUN_BINDING = { name: 'RUN', kind: 'durable-object' as const, className: 'TsumugiRun' };
 
+const SCHEDULER_BINDING = { name: 'SCHEDULER', kind: 'durable-object' as const, className: 'TsumugiScheduler' };
+
 const absent = (value: unknown): boolean => value === undefined || value === null;
 
 /** 必須bindingを全て不足として返す, CLIの新規生成が断片の入力に使う(ADR-0036) */
-export function requiredAsMissing(withFlows = false): MissingBinding[] {
-	const required = [...REQUIRED, ...(withFlows ? [RUN_BINDING] : [])];
+export function requiredAsMissing(withFlows = false, withSchedules = false): MissingBinding[] {
+	const required = [...REQUIRED, ...(withFlows ? [RUN_BINDING] : []), ...(withSchedules ? [SCHEDULER_BINDING] : [])];
 	return required.map((entry) => ({
 		kind: entry.kind,
 		name: entry.name,
@@ -66,7 +69,10 @@ export function requiredAsMissing(withFlows = false): MissingBinding[] {
 export function validateConfig(env: Record<string, unknown>, config: ValidateInput): ConfigStatus {
 	const missing: MissingBinding[] = [];
 
-	const required = requiredAsMissing(Boolean(config.flows && Object.keys(config.flows).length > 0));
+	const required = requiredAsMissing(
+		Boolean(config.flows && Object.keys(config.flows).length > 0),
+		Boolean(config.schedules && Object.keys(config.schedules).length > 0),
+	);
 	for (const entry of required) {
 		if (absent(env[entry.name])) missing.push(entry);
 	}

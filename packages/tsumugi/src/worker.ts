@@ -4,6 +4,8 @@ import { createClient, type BindingConfig, type ClientEnv } from './client/enque
 import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
 import { createRunClass, type RunClass, type RunSettings, type StartResult } from './do/run.js';
+import { createSchedulerClass, SCHEDULER_DO_NAME, type SchedulerClass, type ScheduleView } from './do/scheduler.js';
+import type { AnySchedules, ScheduleDefs } from './core/recurring.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry, type PerformerSource } from './queue/consumer.js';
 import type { EnvOf, JobQueue, Performers, PerformersOf, TypedEnqueueInput } from './core/api.js';
 import type { Flows, InputOf } from './core/flow.js';
@@ -35,6 +37,20 @@ export interface RunControl extends Rpc.DurableObjectBranded {
 /** runの開始オプション, deadlineMsはflow定義の期限より優先される(ADR-0039) */
 export type StartOptions = { id?: string; deadlineMs?: number };
 
+/**
+ * Scheduler DOを参照するためのbinding(ADR-0040)
+ * schedulesを使う場合のみ必要なので任意, 未設定の場合は起動時検証が報告する(ADR-0013)
+ */
+export type SchedulerNamespaceEnv = {
+	SCHEDULER?: DurableObjectNamespace<SchedulerControl>;
+};
+
+/** worker側から見たScheduler DO */
+export interface SchedulerControl extends Rpc.DurableObjectBranded {
+	sync(): Promise<void>;
+	list(): Promise<ScheduleView[]>;
+}
+
 export type TsumugiConfig<Env extends ConsumerEnv> = {
 	/**
 	 * binding名とperformerの対応
@@ -47,6 +63,12 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	 * 指定した場合のみRun DOのエクスポートとbindingが必要, 未指定なら設定の変更は不要
 	 */
 	flows?: Flows;
+	/**
+	 * 定期実行の定義(ADR-0040)
+	 * 指定した場合のみScheduler DOのエクスポートとbindingが必要
+	 * binding名とpayloadの型は`defineTsumugi`のインライン型が`performers`から縛る
+	 */
+	schedules?: ScheduleDefs<any, any>;
 	/** runの規模と保持の設定(ADR-0034 / ADR-0035) */
 	runs?: RunSettings;
 	bindings?: Record<string, BindingConfig>;
@@ -96,6 +118,11 @@ export type Tsumugi<Env, M extends Performers = Performers, F extends Flows = Fl
 	 * flow定義を参照するのでパッケージから直接エクスポートできない
 	 */
 	runClass: RunClass;
+	/**
+	 * Scheduler DOのクラス(ADR-0040)
+	 * schedulesの定義を参照するので, runClassと同じくパッケージから直接エクスポートできない
+	 */
+	schedulerClass: SchedulerClass;
 };
 
 /** 分割していない既定構成向け, shards=1なので常に0番(ADR-0011) */
@@ -116,13 +143,18 @@ export async function enqueueMany<Env extends ConsumerEnv>(env: Env, inputs: rea
  * 明示の型引数は不要で, `performers`1箇所からenqueueのpayloadと必須キーの型が決まる
  */
 export function defineTsumugi<const R extends PerformerRegistry<any>, const F extends Flows = {}>(
-	config: { performers: R; flows?: F } & Omit<TsumugiConfig<any>, 'performers' | 'flows'>,
+	// schedulesはR/Fの型を参照するのでOmit経由にできない, NoInferで推論源にはしない
+	config: { performers: R; flows?: F; schedules?: ScheduleDefs<NoInfer<PerformersOf<R>>, NoInfer<F>> } & Omit<
+		TsumugiConfig<any>,
+		'performers' | 'flows' | 'schedules'
+	>,
 ): Tsumugi<EnvOf<R>, PerformersOf<R>, F> {
-	type Env = ConsumerEnv & RestEnv & RunNamespaceEnv;
+	type Env = ConsumerEnv & RestEnv & RunNamespaceEnv & SchedulerNamespaceEnv;
 	const client = createClient<Env>(config.bindings ?? {});
 	// 公開の型はperformersから推論する, 実行時はEnvを問わないので内部でだけ緩める
 	const performers = config.performers as unknown as PerformerRegistry<Env>;
 	const flows: Flows = config.flows ?? {};
+	const schedules: AnySchedules = (config.schedules ?? {}) as AnySchedules;
 	// flow名はrunIdの一部になる, 起動時に弾かないと開始まで誤りに気付けない(ADR-0029)
 	for (const flow of Object.keys(flows)) assertValidFlow(flow);
 	// subflowの起動先が`flows`に無いと子のrunIdを決められない, 同じく起動時に弾く
@@ -133,8 +165,15 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		}
 	}
 
+	// scheduleの定義の誤りはここで落とす, 発火まで気付けないと定期実行が黙って止まる(ADR-0040)
+	const schedulerClass = createSchedulerClass({
+		schedules,
+		bindings: config.bindings ?? {},
+		targets: { bindings: Object.keys(performers), flows: Object.keys(flows) },
+	});
+
 	// Workersに起動フックが無いので, 最初の呼び出しを起動とみなして検証する(ADR-0036)
-	const checkConfig = cachedValidate({ performers, flows });
+	const checkConfig = cachedValidate({ performers, flows, schedules });
 
 	/**
 	 * 設定漏れを不足の一覧付きで断る(ADR-0013)
@@ -151,6 +190,32 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		// RUNだけ個別に見る, 不足の一覧より宛先が無い事実を先に伝える方が短い
 		if (!namespace) throw new Error('RUN binding is not configured, add the Run DO binding to wrangler');
 		return namespace.get(namespace.idFromName(runId));
+	};
+
+	const schedulerFor = (env: Env): DurableObjectStub<SchedulerControl> => {
+		const namespace = env.SCHEDULER;
+		// SCHEDULERだけ個別に見る, 不足の一覧より宛先が無い事実を先に伝える方が短い
+		if (!namespace) throw new Error('SCHEDULER binding is not configured, add the Scheduler DO binding to wrangler');
+		return namespace.get(namespace.idFromName(SCHEDULER_DO_NAME));
+	};
+
+	/**
+	 * Scheduler DOへの同期はisolateごとに1回でよい(ADR-0040)
+	 * alarmは一度張れば自走するので, ここは初回導入とデプロイ直後の契機に徹する
+	 */
+	let primed: Promise<void> | undefined;
+	const prime = (env: Env, ctx: ExecutionContext): void => {
+		if (Object.keys(schedules).length === 0 || primed !== undefined) return;
+		// bindingの不足はcachedValidateが報告する, ここで落とすと全リクエストが道連れになる
+		if (!env.SCHEDULER) return;
+		primed = schedulerFor(env)
+			.sync()
+			.catch((error) => {
+				console.error('tsumugi: scheduler sync failed', error);
+				// 失敗は覚えない, 次のイベントで再試行する
+				primed = undefined;
+			});
+		ctx.waitUntil(primed);
 	};
 
 	const start = async (env: Env, flow: string, input: unknown, options?: StartOptions): Promise<string> => {
@@ -177,11 +242,14 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 				...(config.metrics ? { metrics: config.metrics as MetricsResolver<Env> } : {}),
 				// flowが1つも無い構成では渡さない, 渡すとRESTが501の代わりに500で落ちる
 				...(Object.keys(flows).length > 0 ? { start, runFor } : {}),
+				// scheduleが無ければ`/api/schedules`は501を返す
+				...(Object.keys(schedules).length > 0 ? { schedulerFor } : {}),
 			})
 		: null;
 
 	const handler = {
 		async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+			prime(env, ctx);
 			// 認証が設定されるまで何も提供しない, 設定漏れが動作しない状態として現れる(ADR-0013)
 			if (!rest) return new Response('not found', { status: 404 });
 
@@ -193,10 +261,12 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 			return rest.fetch(request, env, ctx);
 		},
 		async queue(batch: MessageBatch<DispatchMessage>, env: Env, ctx: ExecutionContext): Promise<void> {
+			prime(env, ctx);
 			// performerは`ctx.exports`から引く, 同一Workerでも別途のbindingは要らない(ADR-0037)
 			await handleBatch(batch, env, (ctx as unknown as { exports?: PerformerSource }).exports ?? {});
 		},
-		async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+		async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+			prime(env, ctx);
 			// DO側の掃除はtickが行う,ここはD1の読み取りモデルだけ
 			const removed = await sweepReadModel(env.TSUMUGI_DB, Date.now(), config.retention ?? {});
 			if (removed > 0) console.log(`tsumugi: swept ${removed} jobs from the read model`);
@@ -233,6 +303,8 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		runFor,
 		// flow定義を参照するクラスをここで作る, パッケージから直接エクスポートできない理由(ADR-0030)
 		runClass: createRunClass({ flows, bindings: config.bindings ?? {}, ...(config.runs ? { settings: config.runs } : {}) }),
+		// schedule定義を参照するクラス, 同上(ADR-0040)
+		schedulerClass,
 	};
 
 	return handler as unknown as Tsumugi<EnvOf<R>, PerformersOf<R>, F>;

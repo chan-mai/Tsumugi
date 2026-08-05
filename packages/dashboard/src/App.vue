@@ -12,6 +12,7 @@ import Pagination from './components/Pagination.vue';
 import RefreshMenu from './components/RefreshMenu.vue';
 import RowActions from './components/RowActions.vue';
 import RunDetailModal from './components/RunDetailModal.vue';
+import SchedulesView from './components/SchedulesView.vue';
 import SearchBox from './components/SearchBox.vue';
 import SortHeader from './components/SortHeader.vue';
 import StatusCell from './components/StatusCell.vue';
@@ -26,6 +27,7 @@ import {
 	isUnauthorized,
 	listJobs,
 	listRuns,
+	listSchedules,
 	tokenCookie,
 	type Job,
 	type Run,
@@ -62,11 +64,23 @@ const canPromptToken = tokenCookie() !== null;
 let timer: ReturnType<typeof setInterval> | undefined;
 
 /** flowsを設定していない利用者にはrunの画面自体を出さない */
-const tab = ref<'jobs' | 'runs' | 'metrics'>('jobs');
+const tab = ref<'jobs' | 'runs' | 'schedules' | 'metrics'>('jobs');
 /** Analytics Engineの設定がある構成でのみメトリクスのタブを出す */
 const hasMetrics = ref(false);
+/** schedulesを定義した構成でのみ定期実行のタブを出す */
+const hasSchedules = ref(false);
 /** 設定した機能のぶんだけタブを出す */
-const tabs = computed(() => ['jobs', ...(flows.value.length > 0 ? ['runs'] : []), ...(hasMetrics.value ? ['metrics'] : [])] as const);
+const tabs = computed(
+	() =>
+		[
+			'jobs',
+			...(flows.value.length > 0 ? ['runs'] : []),
+			...(hasSchedules.value ? ['schedules'] : []),
+			...(hasMetrics.value ? ['metrics'] : []),
+		] as const,
+);
+/** 絞り込みとページングを持つのはjobsとrunsだけ, 他のタブは自前で読む */
+const isList = computed(() => tab.value === 'jobs' || tab.value === 'runs');
 const flows = ref<string[]>([]);
 const runs = ref<Run[]>([]);
 const runFlow = ref('');
@@ -74,6 +88,8 @@ const selectedRun = ref<string | null>(null);
 const startingRun = ref(false);
 /** 定期更新でメトリクスを取り直すための参照 */
 const metricsView = ref<InstanceType<typeof MetricsView> | null>(null);
+/** 同じく定期実行の一覧を取り直すための参照 */
+const schedulesView = ref<InstanceType<typeof SchedulesView> | null>(null);
 
 /** 選んだ対象だけをクエリに載せる, 対象を切り替えたときに前の条件が残らない */
 const searchParam = () => (search.value ? { [searchField.value]: search.value } : {});
@@ -93,6 +109,10 @@ async function load() {
 	try {
 		if (requested === 'metrics') {
 			await metricsView.value?.load();
+			return;
+		}
+		if (requested === 'schedules') {
+			await schedulesView.value?.load();
 			return;
 		}
 		if (requested === 'runs') {
@@ -150,7 +170,7 @@ async function load() {
 }
 
 /** 一覧が入れ替わるので絞り込みと頁は持ち越さない */
-function switchTab(next: 'jobs' | 'runs' | 'metrics') {
+function switchTab(next: 'jobs' | 'runs' | 'schedules' | 'metrics') {
 	if (tab.value === next) return;
 	tab.value = next;
 	resetFilters();
@@ -216,16 +236,29 @@ function sortBy(column: string) {
 	}
 }
 
-onMounted(async () => {
+/**
+ * 構成にある機能だけタブを出す
+ * 未設定なら501, 認証前は401になるので, トークンを入れた後にもう一度確かめる
+ */
+async function detectFeatures() {
+	const [metrics, schedules] = await Promise.allSettled([getMetrics({ hours: 24 }), listSchedules()]);
+	// 501と401以外の失敗はタブを出した上で画面側に理由を出す
+	const available = (result: PromiseSettledResult<unknown>) =>
+		result.status === 'fulfilled' || (!isMetricsUnavailable(result.reason) && !isUnauthorized(result.reason));
+	hasMetrics.value = available(metrics);
+	hasSchedules.value = available(schedules);
+}
+
+/** トークンを入れ直した後の再読込, 認証で隠れていたタブもここで戻る */
+function reload() {
+	load();
+	detectFeatures();
+}
+
+onMounted(() => {
 	load();
 	restartTimer();
-	try {
-		await getMetrics({ hours: 24 });
-		hasMetrics.value = true;
-	} catch (e) {
-		// 設定が無い場合は501, それ以外の失敗はタブを出した上で画面側に理由を出す
-		hasMetrics.value = !isMetricsUnavailable(e) && !isUnauthorized(e);
-	}
+	detectFeatures();
 });
 onUnmounted(() => timer && clearInterval(timer));
 
@@ -282,7 +315,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 </script>
 
 <template>
-	<TokenPrompt v-if="unauthorized && canPromptToken" @saved="load" />
+	<TokenPrompt v-if="unauthorized && canPromptToken" @saved="reload" />
 
 	<div v-else-if="unauthorized" class="mx-auto mt-24 max-w-sm px-4 text-center">
 		<h1 class="mb-2 text-xl font-bold">Tsumugi</h1>
@@ -293,7 +326,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 		<header class="mb-6 flex flex-wrap items-center gap-4">
 			<h1 class="text-xl font-bold">Tsumugi</h1>
 			<!-- flowsが1つも無い構成ではrunの画面を出さない -->
-			<nav v-if="flows.length > 0 || hasMetrics" class="flex items-center gap-1 text-sm">
+			<nav v-if="tabs.length > 1" class="flex items-center gap-1 text-sm">
 				<button
 					v-for="option in tabs"
 					:key="option"
@@ -309,7 +342,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 
 		<div class="space-y-4">
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<div v-if="tab !== 'metrics'" class="flex flex-wrap items-center gap-2">
+				<div v-if="isList" class="flex flex-wrap items-center gap-2">
 					<SearchBox
 						v-if="tab === 'jobs'"
 						:field="searchField"
@@ -340,10 +373,10 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				<div class="flex items-center gap-2">
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
-					<div v-if="tab === 'metrics'" class="grow" />
-					<!-- 一覧向けの操作はメトリクスのタブでは出さない, 選択が残っていても対象が見えない -->
+					<div v-if="!isList" class="grow" />
+					<!-- 一覧向けの操作は他のタブでは出さない, 選択が残っていても対象が見えない -->
 					<BulkActions
-						v-if="tab !== 'metrics' && selectedIds.length > 0"
+						v-if="isList && selectedIds.length > 0"
 						:ids="selectedIds"
 						@changed="
 							clearSelection();
@@ -354,7 +387,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<ViewMenu v-if="tab === 'jobs'" :options="TOGGLEABLE" :visible="visible" @toggle="toggleColumn" />
 					<RefreshMenu :interval="refreshMs" @update:interval="setRefresh" />
 					<button
-						v-if="tab !== 'metrics'"
+						v-if="isList"
 						type="button"
 						class="flex h-8 items-center gap-1.5 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
 						@click="tab === 'jobs' ? (creating = true) : (startingRun = true)"
@@ -368,6 +401,14 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 			</div>
 
 			<MetricsView v-if="tab === 'metrics'" ref="metricsView" :bindings="bindings" @unauthorized="unauthorized = true" />
+
+			<SchedulesView
+				v-else-if="tab === 'schedules'"
+				ref="schedulesView"
+				@unauthorized="unauthorized = true"
+				@job="selected = $event"
+				@run="selectedRun = $event"
+			/>
 
 			<div v-else-if="tab === 'runs'" class="relative w-full overflow-x-auto rounded-card border border-border">
 				<table class="w-full caption-bottom text-sm">
@@ -480,7 +521,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				</table>
 			</div>
 
-			<Pagination v-if="tab !== 'metrics'" v-model:page="page" v-model:page-size="pageSize" :total="total" :unit="tab" />
+			<Pagination v-if="isList" v-model:page="page" v-model:page-size="pageSize" :total="total" :unit="tab" />
 		</div>
 
 		<JobDetailModal :job-id="selected" @close="selected = null" @changed="load" />
