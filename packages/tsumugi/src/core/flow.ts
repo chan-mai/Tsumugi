@@ -52,6 +52,19 @@ type ConcurrencyKeyOption<R extends Requirements, Resolve> = R['concurrencyKey']
 	? { concurrencyKey: string | Resolve }
 	: { concurrencyKey?: string | Resolve };
 
+/** flow全体の設定, ノード単位の設定はノードのオプションが持つ */
+export type FlowOptions = {
+	/** run全体の期限(ms), 超過したrunは打ち切られFAILEDになる(ADR-0039) */
+	deadlineMs?: number;
+};
+
+/** 期限の検査, flow定義とstartの両方で使う(ADR-0039) */
+export function assertDeadlineMs(value: number): void {
+	if (!Number.isInteger(value) || value <= 0) {
+		throw new InvalidFlowError(`deadlineMs must be a positive integer: ${value}`);
+	}
+}
+
 export type NodeOptions<M extends Performers, K extends keyof M, Input, A extends Refs> = NodeJobOptions & {
 	after?: A;
 	input: (input: Input, deps: DepsOf<A>) => PayloadOf<M[K]>;
@@ -126,6 +139,8 @@ export type FlowNode = {
 
 export type Flow<Input = unknown> = {
 	readonly nodes: readonly FlowNode[];
+	/** run全体の期限(ms), startの指定が優先される(ADR-0039) */
+	readonly deadlineMs?: number;
 	/** 型のためだけのプロパティ, 実体なし */
 	readonly __input?: Input;
 };
@@ -189,7 +204,8 @@ const jobOptionsOf = (options: NodeJobOptions): NodeJobOptions => ({
  * これを通すことでbinding名もpayloadも必須キーも`performers`1箇所から決まる(ADR-0010)
  */
 export function createFlow<const R extends Record<string, unknown>>(_performers: R) {
-	return function flow<Input>(build: (f: FlowBuilder<PerformersOf<R>, Input>) => void): Flow<Input> {
+	return function flow<Input>(build: (f: FlowBuilder<PerformersOf<R>, Input>) => void, options?: FlowOptions): Flow<Input> {
+		if (options?.deadlineMs !== undefined) assertDeadlineMs(options.deadlineMs);
 		const nodes: FlowNode[] = [];
 		const seen = new Set<string>();
 
@@ -248,6 +264,6 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 
 		build(builder);
 		if (nodes.length === 0) throw new InvalidFlowError('no nodes are declared');
-		return { nodes };
+		return { nodes, ...(options?.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}) };
 	};
 }

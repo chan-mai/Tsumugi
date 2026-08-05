@@ -117,7 +117,13 @@ export type RunListResponse = { runs: RunSummary[]; total: number };
 export type RunDetailResponse = { run: RunDetail; nodes: RunNodeView[] };
 export type FlowsResponse = { flows: string[] };
 
-export type StartRunRequest = { flow: string; input: unknown; id?: string };
+export type StartRunRequest = {
+	flow: string;
+	input: unknown;
+	id?: string;
+	/** run全体の期限(ms), flow定義の期限より優先される(ADR-0039) */
+	deadlineMs?: number;
+};
 export type StartRunResponse = { id: string };
 
 /** retry / cancelの応答 */

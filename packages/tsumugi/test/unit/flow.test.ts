@@ -63,6 +63,26 @@ describe('flowの組み立て', () => {
 		expect(() => flow<void>(() => {})).toThrow(InvalidFlowError);
 	});
 
+	it('deadlineMsを持つflowを組み立てる(ADR-0039)', () => {
+		const built = flow<void>((f) => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void, {
+			deadlineMs: 60_000,
+		});
+		expect(built.deadlineMs).toBe(60_000);
+	});
+
+	it('未指定のdeadlineMsはプロパティごと持たない', () => {
+		const built = flow<void>((f) => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void);
+		expect('deadlineMs' in built).toBe(false);
+	});
+
+	it('正の整数でないdeadlineMsを弾く', () => {
+		for (const deadlineMs of [0, -1, 1.5]) {
+			expect(() => flow<void>((f) => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void, { deadlineMs })).toThrow(
+				InvalidFlowError,
+			);
+		}
+	});
+
 	it('別のflowのノードへの依存を弾く', () => {
 		const other = flow<void>((f) => {
 			f.node('outside', 'FETCH', { input: () => ({ since: 0 }) });

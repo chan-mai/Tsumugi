@@ -27,10 +27,13 @@ export type RunNamespaceEnv = {
 
 /** worker側から見たRun DO */
 export interface RunControl extends Rpc.DurableObjectBranded {
-	start(input: { flow: string; input: unknown }): Promise<StartResult>;
+	start(input: { flow: string; input: unknown; deadlineMs?: number }): Promise<StartResult>;
 	cancel(): Promise<MutationResult>;
 	retry(): Promise<MutationResult>;
 }
+
+/** runの開始オプション, deadlineMsはflow定義の期限より優先される(ADR-0039) */
+export type StartOptions = { id?: string; deadlineMs?: number };
 
 export type TsumugiConfig<Env extends ConsumerEnv> = {
 	/**
@@ -84,8 +87,9 @@ export type Tsumugi<Env, M extends Performers = Performers, F extends Flows = Fl
 	/**
 	 * runを開始してrunIdを返す(ADR-0029)
 	 * `id`を渡すと同じrunIdになり,二度目の開始は既存を返すので再送で増えない
+	 * `deadlineMs`を渡すとflow定義の期限より優先される(ADR-0039)
 	 */
-	start<K extends keyof F & string>(env: Env, flow: K, input: InputOf<F[K]>, options?: { id?: string }): Promise<string>;
+	start<K extends keyof F & string>(env: Env, flow: K, input: InputOf<F[K]>, options?: StartOptions): Promise<string>;
 	runFor(env: Env, runId: string): DurableObjectStub<RunControl>;
 	/**
 	 * Run DOのクラス, wranglerのclass_nameはエクスポートした名前を指す(ADR-0030)
@@ -149,11 +153,15 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		return namespace.get(namespace.idFromName(runId));
 	};
 
-	const start = async (env: Env, flow: string, input: unknown, options?: { id?: string }): Promise<string> => {
+	const start = async (env: Env, flow: string, input: unknown, options?: StartOptions): Promise<string> => {
 		assertConfigured(env);
 		if (!flows[flow]) throw new Error(`flow is not registered: ${flow}`);
 		const runId = formatRunId({ flow, localId: options?.id ?? createId() });
-		const result = await runFor(env, runId).start({ flow, input });
+		const result = await runFor(env, runId).start({
+			flow,
+			input,
+			...(options?.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}),
+		});
 		return result.id;
 	};
 
@@ -168,12 +176,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 				// 未設定なら渡さない, `/api/metrics`は501を返す
 				...(config.metrics ? { metrics: config.metrics as MetricsResolver<Env> } : {}),
 				// flowが1つも無い構成では渡さない, 渡すとRESTが501の代わりに500で落ちる
-				...(Object.keys(flows).length > 0
-					? {
-							start: (env: Env, flow: string, input: unknown, id?: string) => start(env, flow, input, id === undefined ? {} : { id }),
-							runFor,
-						}
-					: {}),
+				...(Object.keys(flows).length > 0 ? { start, runFor } : {}),
 			})
 		: null;
 

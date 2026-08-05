@@ -33,6 +33,13 @@ const flows = {
 		const greetings = f.subflow('greetings', GREETINGS, { input: (i) => ({ prefix: i.prefix }) });
 		f.node('summary', 'Report', { after: { greetings }, input: () => ({ total: 1, failed: 0 }) });
 	}),
+	// run全体の期限付き, 超過したrunは打ち切られてFAILEDになる(ADR-0039)
+	TIMED: flow<{ prefix: string }>(
+		(f) => {
+			f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
+		},
+		{ deadlineMs: 10 * 60 * 1000 },
+	),
 };
 
 // performersからbindingごとのpayload型とEnvを推論する, 明示の型引数は要らない(ADR-0010)

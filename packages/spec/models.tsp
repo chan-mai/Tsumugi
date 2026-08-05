@@ -218,6 +218,10 @@ model StartRunRequest {
 
 	@doc("Pins the run id. Starting twice with the same id returns the existing run.")
 	id?: string;
+
+	@doc("Deadline of the whole run in milliseconds. Overrides the deadline of the flow definition.")
+	@minValue(1)
+	deadlineMs?: integer;
 }
 
 model BindingMetrics {

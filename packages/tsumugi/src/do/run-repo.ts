@@ -113,6 +113,7 @@ export class RunRepo {
 		now: number;
 		parent?: { runId: string; nodeId: string } | undefined;
 		depth?: number;
+		deadlineMs?: number;
 	}): boolean {
 		const inserted = this.db
 			.insert(run)
@@ -127,6 +128,9 @@ export class RunRepo {
 				parentNodeId: input.parent?.nodeId ?? null,
 				depth: input.depth ?? 0,
 				parentNotified: 0,
+				deadlineMs: input.deadlineMs ?? null,
+				deadlineAt: input.deadlineMs !== undefined ? input.now + input.deadlineMs : null,
+				expired: 0,
 				createdAt: input.now,
 				updatedAt: input.now,
 			})
@@ -147,6 +151,16 @@ export class RunRepo {
 
 	markCancelling(id: string, now: number): void {
 		this.db.update(run).set({ cancelling: 1, updatedAt: now }).where(eq(run.id, id)).run();
+	}
+
+	/** 超過の印を立てる, 時計から毎tick判定すると決着済みのrunが後のtickで反転する(ADR-0039) */
+	markExpired(id: string, now: number): void {
+		this.db.update(run).set({ expired: 1, updatedAt: now }).where(eq(run.id, id)).run();
+	}
+
+	/** 再開時に期限を引き直し超過の印を外す, 元のままでは再開直後に再び超過する(ADR-0039) */
+	resetDeadline(now: number): void {
+		this.sql.exec(`UPDATE run SET deadline_at = ? + deadline_ms, expired = 0, updated_at = ? WHERE deadline_ms IS NOT NULL`, now, now);
 	}
 
 	insertNodes(nodes: readonly NewNode[], now: number): void {
@@ -397,6 +411,9 @@ export class RunRepo {
 			parent_node_id: row.parentNodeId,
 			depth: row.depth,
 			parent_notified: row.parentNotified,
+			deadline_ms: row.deadlineMs,
+			deadline_at: row.deadlineAt,
+			expired: row.expired,
 			created_at: row.createdAt,
 			updated_at: row.updatedAt,
 		};

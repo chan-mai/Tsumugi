@@ -2,9 +2,26 @@ import { DurableObject } from 'cloudflare:workers';
 import { createId } from '@paralleldrive/cuid2';
 import type { BindingConfig, ClientEnv } from '../client/enqueue.js';
 import { createClient } from '../client/enqueue.js';
-import { assertNodeId, type AnyFlow, type FlowNode, type Flows, type FlowShape, type NodeJobOptions, shapeOf } from '../core/flow.js';
+import {
+	assertDeadlineMs,
+	assertNodeId,
+	type AnyFlow,
+	type FlowNode,
+	type Flows,
+	type FlowShape,
+	type NodeJobOptions,
+	shapeOf,
+} from '../core/flow.js';
 import { formatJobId, formatRunId, parseRunId, shardNameOf } from '../core/ids.js';
-import { advance, type NodeEvent, type NodeState, type RunDecision, type RunState, type SpawnRequest } from '../core/run.js';
+import {
+	advance,
+	isNodeTerminal,
+	type NodeEvent,
+	type NodeState,
+	type RunDecision,
+	type RunState,
+	type SpawnRequest,
+} from '../core/run.js';
 import { resolveShard } from '../core/shard.js';
 import type { Retention } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
@@ -57,6 +74,8 @@ export type RunSettings = {
 export type StartInput = {
 	flow: string;
 	input: unknown;
+	/** run全体の期限(ms), 未指定はflow定義の値(ADR-0039) */
+	deadlineMs?: number;
 	/** subflowとして起動された場合の親, 終端に達した時点で知らせる先 */
 	parent?: { runId: string; nodeId: string };
 	/** 入れ子の深さ, 親から受け取る */
@@ -164,6 +183,10 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			// 深さの判定は起動された側で行う, 親が上限を知らなくても入れ子が止まる
 			if (depth > maxDepth) throw new Error(`subflow nesting exceeded the limit: ${maxDepth}`);
 
+			// 期限はstartの指定を優先しflow定義を既定にする(ADR-0039)
+			const deadlineMs = input.deadlineMs ?? flow.deadlineMs;
+			if (deadlineMs !== undefined) assertDeadlineMs(deadlineMs);
+
 			const shape = shapeOf(flow, nameOf);
 			this.repo.insertRun({
 				id: runId,
@@ -173,6 +196,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				now,
 				parent: input.parent,
 				depth,
+				...(deadlineMs !== undefined ? { deadlineMs } : {}),
 			});
 			this.repo.insertNodes(
 				shape.map((node, index) => ({
@@ -211,6 +235,8 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				const row = this.repo.findNode(event.nodeId);
 				// 再開でジョブが張り替わっているなら古い便, 適用すると再実行の結果を上書きする(ADR-0034)
 				if (!row || row.job_id !== event.jobId) continue;
+				// 取り消しの便はRun DO自身が要求した結果の追認, 期限超過で先にFAILEDへ落ちたノードを上書きしない(ADR-0039)
+				if (event.state === 'CANCELLED' && isNodeTerminal(row.state as NodeState)) continue;
 
 				// 子を先に作る, 親が決着してから作ると下流が子を待たずに実行される(ADR-0032)
 				const spawned = this.#applySpawns(event.nodeId, event.spawns ?? [], now);
@@ -264,6 +290,8 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			if (row.state !== 'FAILED') return { ok: false, reason: 'invalid-state' };
 
 			const reset = this.repo.resetForRetry(now);
+			// 期限を引き直し超過の印を外す, 元のままでは再開直後に再び超過する(ADR-0039)
+			this.repo.resetDeadline(now);
 			this.repo.setRunState(row.id, 'RUNNING', now);
 			this.repo.appendRunOutbox();
 			this.repo.appendNodeOutbox(row.id, reset);
@@ -312,6 +340,15 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			const definitions = new Map(flow.nodes.map((node) => [node.id, node]));
 			const runInput = JSON.parse(runRow.input) as unknown;
 			const cancelling = runRow.cancelling === 1;
+			// 期限超過は取り消しと同じ排水で打ち切る(ADR-0039)
+			// 印はRUNNINGの間に一度だけ立てて永続化する, 時計から毎tick判定すると決着済みのrunが掃除のtickでFAILEDへ反転する
+			let expired = runRow.expired === 1;
+			if (!expired && runRow.state === 'RUNNING' && runRow.deadline_at !== null && runRow.deadline_at <= now) {
+				this.repo.markExpired(runRow.id, now);
+				expired = true;
+			}
+			// 打ち切られたノードへ残す理由, runには理由の置き場が無い, 取り消しはCANCELLEDのままにする
+			const deadlineError = expired && !cancelling ? `run deadline exceeded: ${runRow.deadline_ms}ms` : null;
 
 			const touched = new Set<string>();
 			const inputs: EnqueueInput[] = [];
@@ -323,7 +360,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 
 			// 打ち切りの連鎖は1回のadvanceでは1段しか進まない, 進みが止まるまで回して1 tickで解く
 			for (let round = 0; round < ADVANCE_ROUNDS; round++) {
-				const output = advance({ nodes: this.repo.views(), cancelling });
+				const output = advance({ nodes: this.repo.views(), cancelling, expired });
 				const fresh = output.decisions.filter((decision) => !handled.has(decision.id));
 				if (fresh.length === 0) break;
 
@@ -336,7 +373,16 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 
 				for (const decision of fresh.slice(0, room)) {
 					handled.add(decision.id);
-					const applied = await this.#apply(decision, { definitions, runInput, runId: runRow.id, now, inputs, starting, subflows });
+					const applied = await this.#apply(decision, {
+						definitions,
+						runInput,
+						runId: runRow.id,
+						now,
+						inputs,
+						starting,
+						subflows,
+						deadlineError,
+					});
 					for (const id of applied) touched.add(id);
 				}
 			}
@@ -369,7 +415,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			}
 
 			// 決定を反映した後の姿で状態を決める, 反映前だと1tick古い状態を投影する
-			const settled = advance({ nodes: this.repo.views(), cancelling });
+			const settled = advance({ nodes: this.repo.views(), cancelling, expired });
 			if (settled.state !== runRow.state) {
 				this.repo.setRunState(runRow.id, settled.state, now);
 				this.repo.appendRunOutbox();
@@ -388,6 +434,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			const hasMore =
 				deferred > 0 || projected >= PROJECTION_LIMIT || settled.decisions.length > 0 || this.repo.countOutbox() > 0 || !notified;
 			if (hasMore) await this.#armAlarm(now);
+			else if (settled.state === 'RUNNING') await this.#armDeadline(now);
 			else await this.#armSweep(now);
 		}
 
@@ -402,9 +449,11 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				inputs: EnqueueInput[];
 				starting: string[];
 				subflows: SubflowStart[];
+				/** 期限超過による打ち切りの理由, 取り消しではnull(ADR-0039) */
+				deadlineError: string | null;
 			},
 		): Promise<string[]> {
-			const { definitions, runInput, runId, now, inputs, starting, subflows } = context;
+			const { definitions, runInput, runId, now, inputs, starting, subflows, deadlineError } = context;
 			const row = this.repo.findNode(decision.id);
 			if (!row) return [];
 
@@ -463,19 +512,22 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 					return [row.id];
 
 				case 'cancel': {
+					// 期限超過の打ち切りは理由付きのFAILEDにする, 取り消しはCANCELLEDのまま(ADR-0039)
+					const terminal =
+						deadlineError !== null ? ({ state: 'FAILED', error: deadlineError } as const) : ({ state: 'CANCELLED' } as const);
 					if (row.child_run_id !== null) {
 						// 子のcancelは要求の受理までで、終端に達したかは子からの通知で決まる
 						await this.#runStub(row.child_run_id).cancel();
 						return [];
 					}
 					if (row.job_id === null || row.state === 'PENDING') {
-						this.repo.updateNode(row.id, { state: 'CANCELLED' }, now);
+						this.repo.updateNode(row.id, terminal, now);
 						return [row.id];
 					}
 					// QUEUED以降は断られる, 断られたら通知を待つ(ADR-0012)
 					const result = await this.#jobStub(row.job_id).cancel(row.job_id);
 					if (!result.ok) return [];
-					this.repo.updateNode(row.id, { state: 'CANCELLED' }, now);
+					this.repo.updateNode(row.id, terminal, now);
 					return [row.id];
 				}
 			}
@@ -651,6 +703,17 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			// 完了を待つ, 待たずに返すと削除の失敗が捨てられる
 			await this.ctx.storage.deleteAll();
 			return true;
+		}
+
+		/**
+		 * 期限の時刻に起動する(ADR-0039)
+		 * 進みの止まったrunはalarmを持たないので, 張らないと超過を判定する機会が来ない
+		 * 超過後は張らない, 実行中の終端は通知が運んでくる
+		 */
+		async #armDeadline(now: number): Promise<void> {
+			const row = this.repo.findRun();
+			if (!row || row.deadline_at === null || row.deadline_at <= now) return;
+			await this.#armAlarm(row.deadline_at);
 		}
 
 		/** 次に掃除の対象が出る時刻に起動する, 終端後に設定しないと削除の機会が来ない */

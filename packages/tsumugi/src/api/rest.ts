@@ -52,7 +52,7 @@ export type RestOptions<Env extends RestEnv> = {
 	failedRetentionMs?: (binding: string) => number;
 	/** 登録済みflowの名前,開始先の検証と選択肢に使う */
 	flows?: readonly string[];
-	start?: (env: Env, flow: string, input: unknown, id?: string) => Promise<string>;
+	start?: (env: Env, flow: string, input: unknown, options?: { id?: string; deadlineMs?: number }) => Promise<string>;
 	/** 取り消しと再開はDOへ直接送る, 読み取りモデルは正の根拠に使えない(ADR-0015) */
 	runFor?: (env: Env, runId: string) => { cancel(): Promise<MutationResult>; retry(): Promise<MutationResult> };
 	/** Analytics Engineの読み取り設定, 未設定なら`/api/metrics`は501を返す */
@@ -137,9 +137,13 @@ export function validateStartRun(body: unknown, flows: readonly string[]): { inp
 	if (flows.length > 0 && !flows.includes(raw.flow)) return { error: `unknown flow: ${raw.flow}` };
 	if (!('input' in raw)) return { error: 'input is required' };
 	if (raw.id !== undefined && typeof raw.id !== 'string') return { error: 'id must be a string' };
+	if (raw.deadlineMs !== undefined && (typeof raw.deadlineMs !== 'number' || !Number.isInteger(raw.deadlineMs) || raw.deadlineMs <= 0)) {
+		return { error: 'deadlineMs must be a positive integer' };
+	}
 
 	const input: StartRunInput = { flow: raw.flow, input: raw.input };
 	if (typeof raw.id === 'string' && raw.id) input.id = raw.id;
+	if (typeof raw.deadlineMs === 'number') input.deadlineMs = raw.deadlineMs;
 	return { input };
 }
 
@@ -761,8 +765,12 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const parsed = validateStartRun(body, flows);
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
-		const id = await start(c.env, parsed.input.flow, parsed.input.input, parsed.input.id);
-		return c.json({ id } satisfies StartRunResponse, 201);
+		const { flow, input, id, deadlineMs } = parsed.input;
+		const started = await start(c.env, flow, input, {
+			...(id !== undefined ? { id } : {}),
+			...(deadlineMs !== undefined ? { deadlineMs } : {}),
+		});
+		return c.json({ id: started } satisfies StartRunResponse, 201);
 	});
 
 	// グラフは1回のクエリで返す, 段組みの描画に全ノードが必要

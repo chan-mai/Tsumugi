@@ -55,6 +55,8 @@ export type AdvanceInput = {
 	nodes: readonly NodeView[];
 	/** 取り消しが要求されている,未起動を止めて実行中の終端を待つ */
 	cancelling: boolean;
+	/** 期限超過の印, 取り消しと同じ手を打ち決着をFAILEDにする(ADR-0039) */
+	expired?: boolean;
 };
 
 export type AdvanceOutput = { decisions: RunDecision[]; state: RunState };
@@ -93,7 +95,7 @@ export function isNodeTerminal(state: NodeState): boolean {
  * 待ち合わせの単位は「自身が終端かつ子孫も全て終端」(ADR-0032)
  * 親を`after`で待つノードは,実行時に増えた子孫の完了も自動的に待つ
  */
-export function advance({ nodes, cancelling }: AdvanceInput): AdvanceOutput {
+export function advance({ nodes, cancelling, expired = false }: AdvanceInput): AdvanceOutput {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
 	const children = new Map<string, NodeView[]>();
 	for (const node of nodes) {
@@ -129,6 +131,9 @@ export function advance({ nodes, cancelling }: AdvanceInput): AdvanceOutput {
 		return value;
 	};
 
+	// 期限超過も取り消しと同じ手を打つ, 未起動を止めて実行中の終端を待つ(ADR-0039)
+	const halting = cancelling || expired;
+
 	const decisions: RunDecision[] = [];
 	for (const node of nodes) {
 		// fan-outノードはジョブを実行しない, 子孫が全て終端に達した時点で自身を終端へ進める
@@ -138,7 +143,7 @@ export function advance({ nodes, cancelling }: AdvanceInput): AdvanceOutput {
 			continue;
 		}
 
-		if (cancelling) {
+		if (halting) {
 			// QUEUED以降は取り消せていない場合に成功を返さない(ADR-0012), 送っても断られるので出さない
 			if (node.state === 'PENDING' || node.state === 'SCHEDULED') decisions.push({ type: 'cancel', id: node.id });
 			// 子のrunは実行中でも取り消せる, 親が終わった後も動き続けるのを防ぐ
@@ -161,7 +166,17 @@ export function advance({ nodes, cancelling }: AdvanceInput): AdvanceOutput {
 	const roots = nodes.filter((node) => node.parent === null);
 	// 全ノードは必ずいずれかの根に連なるので,根の決着で全体の決着が分かる
 	const done = roots.every(settled);
-	const state: RunState = !done ? 'RUNNING' : cancelling ? 'CANCELLED' : roots.every(succeeded) ? 'COMPLETED' : 'FAILED';
+	// 取り消しを優先する, 期限超過は残りが全て成功していてもFAILED
+	// fan-outの子の失敗は非致命(ADR-0035)なので, ノードの状態からは期限による打ち切りを区別できない(ADR-0039)
+	const state: RunState = !done
+		? 'RUNNING'
+		: cancelling
+			? 'CANCELLED'
+			: expired
+				? 'FAILED'
+				: roots.every(succeeded)
+					? 'COMPLETED'
+					: 'FAILED';
 
 	return { decisions, state };
 }

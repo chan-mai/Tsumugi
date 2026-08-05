@@ -188,6 +188,49 @@ describe('runの状態', () => {
 	});
 });
 
+describe('期限超過(ADR-0039)', () => {
+	it('取り消しと同じ手を打つ', () => {
+		const nodes = [
+			node({ id: 'a', state: 'PENDING' }),
+			node({ id: 'b', state: 'SCHEDULED' }),
+			node({ id: 'c', state: 'RUNNING' }),
+			node({ id: 'child', state: 'RUNNING', subflow: true }),
+		];
+		expect(advance({ nodes, cancelling: false, expired: true }).decisions).toEqual([
+			{ type: 'cancel', id: 'a' },
+			{ type: 'cancel', id: 'b' },
+			{ type: 'cancel', id: 'child' },
+		]);
+	});
+
+	it('実行中が残る間はRUNNING', () => {
+		expect(advance({ nodes: [node({ id: 'a', state: 'RUNNING' })], cancelling: false, expired: true }).state).toBe('RUNNING');
+	});
+
+	it('打ち切られたノードが残ればFAILED', () => {
+		const nodes = [node({ id: 'a', state: 'COMPLETED' }), node({ id: 'b', state: 'FAILED' })];
+		expect(advance({ nodes, cancelling: false, expired: true }).state).toBe('FAILED');
+	});
+
+	it('全て成功していてもFAILEDになる', () => {
+		// 期限の時点で決着していなかったrunは, 残りの結果に関わらず失敗として扱う
+		expect(advance({ nodes: [node({ id: 'a', state: 'COMPLETED' })], cancelling: false, expired: true }).state).toBe('FAILED');
+	});
+
+	it('期限で打ち切られたfan-outの子は親を成功扱いにしない', () => {
+		// fan-outの子の失敗は非致命(ADR-0035)なので, ノードの状態だけではrunがCOMPLETEDに決着してしまう
+		const nodes = [
+			node({ id: 'each', state: 'COMPLETED', container: true }),
+			node({ id: 'each:0', state: 'FAILED', parent: 'each', origin: 'fanOut' }),
+		];
+		expect(advance({ nodes, cancelling: false, expired: true }).state).toBe('FAILED');
+	});
+
+	it('取り消しと重なった場合はCANCELLED', () => {
+		expect(advance({ nodes: [node({ id: 'a', state: 'CANCELLED' })], cancelling: true, expired: true }).state).toBe('CANCELLED');
+	});
+});
+
 describe('subflowノード', () => {
 	it('依存が揃うと子のrunの開始を要求する', () => {
 		const nodes = [node({ id: 'list', state: 'COMPLETED' }), node({ id: 'child', state: 'PENDING', subflow: true, after: ['list'] })];
