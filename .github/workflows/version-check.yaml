@@ -2,7 +2,7 @@ name: Version Check
 
 on:
   push:
-    branches: [main]
+    branches: [develop]
     tags: ['v*']
   pull_request:
 
