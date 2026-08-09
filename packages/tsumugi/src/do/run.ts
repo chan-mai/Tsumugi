@@ -418,6 +418,9 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			}
 			for (const id of starting) {
 				if (unstarted.has(id)) continue;
+				const current = this.repo.findNode(id);
+				// 投入を待つ間に完了通知が入ることがある, 終端に達したノードを起動中へ戻すと通知が二度と来ない
+				if (!current || isNodeTerminal(current.state as NodeState)) continue;
 				// subflowノードは子の終端を待つ, ジョブと違いSCHEDULEDを経ない
 				this.repo.updateNode(id, { state: subflows.some((child) => child.nodeId === id) ? 'RUNNING' : 'SCHEDULED' }, now);
 				touched.add(id);
