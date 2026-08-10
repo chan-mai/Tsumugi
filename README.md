@@ -16,9 +16,9 @@ A job management system designed for the Cloudflare stack.
 
 Cloudflareスタック向けに設計されたジョブ管理システム
 
-See documentation at [https://tsumugi.mq1.dev](https://tsumugi.mq1.dev)
+See documentation at [https://tsumugi.mq1.dev](https://tsumugi.mq1.dev).
 
-ドキュメントは[https://tsumugi.mq1.dev](https://tsumugi.mq1.dev)にあります
+ドキュメントは[https://tsumugi.mq1.dev](https://tsumugi.mq1.dev)にあります。
 
 ## Requirements
 
@@ -45,17 +45,19 @@ npx tsumugi init
 
 `tsumugi init` creates the D1 database and the queue, generates the wrangler config and the source templates, and applies the migrations.
 
-`tsumugi init`はD1とQueuesの作成, wrangler設定とソースの雛形の生成, マイグレーションの適用までを行います
+`tsumugi init`はD1とQueuesの作成, wrangler設定とソースの雛形の生成, マイグレーションの適用までを行います。
 
 See [Getting Started](https://tsumugi.mq1.dev/guide/getting-started) for what is generated and how to handle an existing configuration.
 
-生成される内容と既存の設定がある場合の扱いは[Getting Started](https://tsumugi.mq1.dev/guide/getting-started)を参照してください
+生成される内容と既存の設定がある場合の扱いは[Getting Started](https://tsumugi.mq1.dev/guide/getting-started)を参照してください。
 
 ## Usage
 
-Write the body of the job as a performer.
+### 1. Define a performer
 
-ジョブの処理内容はperformerに記述します
+The body of the job goes in a performer class.
+
+ジョブの処理内容はperformerクラスに記述します。
 
 ```ts
 // src/performers/send-mail.ts
@@ -68,9 +70,11 @@ export class SendMail extends Performer<{ to: string }, void, {}, Env> {
 }
 ```
 
-Export the performers from the top level of the Worker and enqueue by binding name. The binding name is the exported name, and the payload type is derived from the same place.
+### 2. Register it in the Worker
 
-performerはWorkerのトップレベルからexportし, binding名を指定して投入します。binding名はexportした名前がそのまま使われ, payloadの型も同じ場所から決定されます
+Export the performers from the top level of the Worker. The binding name is the exported name, and the payload type is derived from the same place.
+
+performerはWorkerのトップレベルからexportします。binding名はexportした名前がそのまま使われ, payloadの型も同じ場所から決まります。
 
 ```ts
 // src/index.ts
@@ -81,34 +85,59 @@ import * as performers from './performers/index.js';
 export * from './performers/index.js';
 export { TsumugiJobShard } from 'tsumugi';
 
-const tsumugi = defineTsumugi({
+export const tsumugi = defineTsumugi({
   performers,
   auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
   ui: ui({ tokenCookie: 'tsumugi_token' }),
 });
 
-export default {
-  ...tsumugi,
-  async fetch(request, env, ctx) {
-    const { pathname } = new URL(request.url);
-    if (pathname === '/enqueue') {
-      const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
-      return Response.json({ id });
-    }
-    return tsumugi.fetch!(request, env, ctx);
-  },
-} satisfies ExportedHandler<Env>;
+export default tsumugi;
 ```
 
-Scheduled execution, priority, deduplication, rate limits, Flow, recurring execution and the REST API are described in the documentation.
+`npx tsumugi init` generates this file, so it rarely needs to be written by hand.
 
-予約実行, 優先度, 重複排除, 流量制御, Flow, 定期実行, REST APIについてはドキュメントを参照してください
+このファイルは`npx tsumugi init`が生成するため, 手で書く場面はほとんどありません。
+
+### 3. Enqueue a job
+
+`enqueue` can be called from any handler. It returns the job ID, and the binding name decides the payload type.
+
+`enqueue`は任意のハンドラから呼び出せます。戻り値はジョブIDで, binding名からpayloadの型が決まります。
+
+```ts
+const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
+```
+
+Common options are passed in the same call.
+
+よく使うオプションは同じ呼び出しで指定します。
+
+```ts
+// 1分後に実行する
+await tsumugi.enqueue(env, { binding: 'SendMail', payload, delayMs: 60_000 });
+
+// 待機中の他のジョブより先に投入する
+await tsumugi.enqueue(env, { binding: 'SendMail', payload, priority: 10 });
+
+// 同じキーのジョブが残っている間は作成せず, 既存のジョブIDを返す
+await tsumugi.enqueue(env, { binding: 'SendMail', payload, uniqueKey: 'a@example.com' });
+```
+
+### Dashboard and API
+
+The dashboard is served at `/` and the REST API under `/api`, both behind the token configured above. Listing, search, retry and cancellation need no code of your own.
+
+`/`にダッシュボード, `/api`にREST APIが用意され, どちらも上で設定したトークンで認証します。一覧, 検索, 再実行, 取り消しは自分でコードを書かずに行えます。
+
+Flow, recurring execution, rate limits, delivery guarantees and remote performers are described in the documentation.
+
+Flow, 定期実行, 流量制御, 実行保証, 別Workerへの配置についてはドキュメントを参照してください。
 
 ## Development
 
 Node.js 22 and pnpm are required. This repository is a pnpm workspace.
 
-Node.js 22とpnpmが必要です。このリポジトリはpnpmのワークスペースです
+Node.js 22とpnpmが必要です。このリポジトリはpnpmのワークスペースです。
 
 ```bash
 pnpm install
@@ -141,7 +170,7 @@ pnpm test
 
 To run the documentation site or an example locally, use the workspace filter.
 
-ドキュメントサイトやexampleを動かす場合はワークスペースを指定します
+ドキュメントサイトやexampleを動かす場合はワークスペースを指定します。
 
 ```bash
 pnpm --filter @tsumugi/site dev
