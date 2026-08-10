@@ -20,6 +20,8 @@ See documentation at [https://tsumugi.mq1.dev](https://tsumugi.mq1.dev).
 
 ドキュメントは[https://tsumugi.mq1.dev](https://tsumugi.mq1.dev)にあります。
 
+![Tsumugi dashboard](https://tsumugi.mq1.dev/dashboard-jobs.jpg)
+
 ## Requirements
 
 - A **paid Workers plan**. SQLite-backed Durable Objects and Queues both require it.
@@ -128,6 +130,13 @@ await tsumugi.enqueue(env, { binding: 'SendMail', payload, uniqueKey: 'a@example
 The dashboard is served at `/` and the REST API under `/api`, both behind the token configured above. Listing, search, retry and cancellation need no code of your own.
 
 `/`にダッシュボード, `/api`にREST APIが用意され, どちらも上で設定したトークンで認証します。一覧, 検索, 再実行, 取り消しは自分でコードを書かずに行えます。
+
+|                                                               |                                                               |
+| ------------------------------------------------------------- | ------------------------------------------------------------- |
+| ![Runs](https://tsumugi.mq1.dev/dashboard-run.jpg)            | ![Job detail](https://tsumugi.mq1.dev/dashboard-attempts.jpg) |
+| `Runs`: Flowの実行状況と依存関係                              | `Job detail`: 試行ごとのエラーと再実行                        |
+| ![Schedules](https://tsumugi.mq1.dev/dashboard-schedules.jpg) | ![Bindings](https://tsumugi.mq1.dev/dashboard-bindings.jpg)   |
+| `Schedules`: 定期実行の予定と直近の発火                       | `Bindings`: 同時実行数の変更と一時停止                        |
 
 Flow, recurring execution, rate limits, delivery guarantees and remote performers are described in the documentation.
 
