@@ -27,7 +27,7 @@ See documentation at [https://tsumugi.mq1.dev](https://tsumugi.mq1.dev)
 - A **D1 database** for the read model. Migrations shipped with the package must be applied.
 - **Analytics Engine** is optional, and only needed for time series metrics.
 
-
+<br>
 
 - **Workers Paid**が必要, SQLite版のDurable ObjectsとQueuesの両方が必要とする
 - `compatibility_date`は**2025-11-17以降**, `ctx.exports`のため
