@@ -1,6 +1,7 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
-import { bearerAuth, unsafeNoAuth } from '../../src/api/auth.js';
+// 公開エントリ経由で読む, 再エクスポートが壊れた場合も検出する
+import { bearerAuth, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
 import { SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
@@ -93,21 +94,27 @@ describe('fail-closed認証(ADR-0013)', () => {
 describe('明示的な無認証(ADR-0044)', () => {
 	it('資格情報なしでAPIに到達できる', async () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const open = defineTsumugi({ performers: { REST: Noop }, auth: unsafeNoAuth() });
-		for (const path of ['/api/jobs', '/api/bindings']) {
-			const res = await call(open, 'GET', path);
-			expect([path, res.status]).toEqual([path, 200]);
+		try {
+			const open = defineTsumugi({ performers: { REST: Noop }, auth: unsafeNoAuth() });
+			for (const path of ['/api/jobs', '/api/bindings']) {
+				const res = await call(open, 'GET', path);
+				expect([path, res.status]).toEqual([path, 200]);
+			}
+		} finally {
+			warn.mockRestore();
 		}
-		warn.mockRestore();
 	});
 
 	it('警告はisolateごとに1回だけ出す', async () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const open = defineTsumugi({ performers: { REST: Noop }, auth: unsafeNoAuth() });
-		await call(open, 'GET', '/api/jobs');
-		await call(open, 'GET', '/api/jobs');
-		expect(warn).toHaveBeenCalledTimes(1);
-		warn.mockRestore();
+		try {
+			const open = defineTsumugi({ performers: { REST: Noop }, auth: unsafeNoAuth() });
+			await call(open, 'GET', '/api/jobs');
+			await call(open, 'GET', '/api/jobs');
+			expect(warn).toHaveBeenCalledTimes(1);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	it('渡さなければ従来どおり塞がる', async () => {
