@@ -3,16 +3,15 @@ import { ui } from 'tsumugi/ui';
 import type { SendMail } from '../../remote-performer/src/index.js';
 import * as local from './performers/index.js';
 
-// performerは`ctx.exports`から引かれるので, トップレベルでexportする(ADR-0037)
+// performerはトップレベルからexportする, export名がそのままbinding名になる
 export * from './performers/index.js';
 
-// binding名はexportした名前, MAILだけ別Workerなので型のためにremote()を置く(ADR-0026)
+// MAILだけ別Workerのperformer, 型を渡すためにremote()を置く
 const performers = { ...local, MAIL: remote<SendMail>() };
 
-// flowの定義口をperformersから作る, bindingもpayloadもここから型が決まる(ADR-0030)
 const flow = createFlow(performers);
 
-// 一覧を取り, 件数だけ実行時に決まる並列で挨拶し, 最後に要約を書く
+// 一覧を取得し, 件数が実行時に決まる並列処理を挟んで要約する
 const GREETINGS = flow<{ prefix: string }>((f) => {
 	const list = f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
 	const each = f.fanOut('greet', 'Greet', {
@@ -28,53 +27,51 @@ const GREETINGS = flow<{ prefix: string }>((f) => {
 
 const flows = {
 	GREETINGS,
-	// 子のrunとしてGREETINGSを起動し, その終端を待ってから要約する
+	// GREETINGSを子のRunとして起動し, 完了を待ってから要約する
 	PIPELINE: flow<{ prefix: string }>((f) => {
 		const greetings = f.subflow('greetings', GREETINGS, { input: (i) => ({ prefix: i.prefix }) });
 		f.node('summary', 'Report', { after: { greetings }, input: () => ({ total: 1, failed: 0 }) });
 	}),
-	// run全体の期限付き, 超過したrunは打ち切られてFAILEDになる(ADR-0039)
+	// Run全体の期限付き, 超過するとFAILEDになる
 	TIMED: flow<{ prefix: string }>(
 		(f) => {
 			f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
 		},
 		{ deadlineMs: 10 * 60 * 1000 },
 	),
-	// 失敗時の後始末と入力による経路の選択(ADR-0041)
+	// 失敗時の後始末と入力による経路の選択
 	BRANCHED: flow<{ prefix: string; verbose: boolean }>((f) => {
 		const list = f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
-		// 上流が失敗した場合だけ通る, 依存の戻り値は無いので受け取り口は未定義込み
+		// 依存が失敗した場合だけ実行する
 		f.node('cleanup', 'Report', { after: { list }, trigger: 'failure', input: () => ({ total: 0, failed: 1 }) });
-		// 入力で経路を選ぶ, falseならSKIPPEDになり下流も進まない
+		// falseを返すとSKIPPEDになり下流も実行されない
 		f.node('detail', 'Report', {
 			after: { list },
 			when: (i, d) => i.verbose && d.list.names.length > 0,
 			input: (_i, d) => ({ total: d.list.names.length, failed: 0 }),
 		});
-		// 成否を問わず必ず通過
+		// 依存の成否に関わらず実行する
 		f.node('audit', 'Report', { after: { list }, trigger: 'always', input: () => ({ total: 1, failed: 0 }) });
 	}),
 };
 
-// performersからbindingごとのpayload型とEnvを推論する, 明示の型引数は要らない(ADR-0010)
+// payloadの型もEnvもperformersから決まるので型引数の指定は不要
 const tsumugi = defineTsumugi({
 	performers,
 	flows,
-	// 失敗したジョブの知らせ先(#30), FailureNoticeを受け取れるperformerだけ指定できる
 	onFailure: 'NotifyFailure',
-	// 定期実行, binding名とflow名からpayloadとinputの型が決まる(ADR-0040)
 	schedules: {
-		// 固定間隔, 前回が終わっていなければ飛ばす
+		// 固定間隔, 前回が終わっていなければ発火しない
 		'poll-names': { binding: 'ListNames', payload: { prefix: 'poll' }, everyMs: 5 * 60 * 1000 },
-		// 前回の終了を待たずに重ねる, 実行が間隔より長引く場合に選ぶ
+		// 前回の終了を待たずに発火する
 		'ping-hello': { binding: 'Hello', payload: { name: 'ping' }, everyMs: 60_000, overlap: 'overlap' },
-		// cronはUTCの分精度, 発火の予定時刻を写像関数が受け取る
+		// cronはUTCの分精度, 引数は発火の予定時刻
 		nightly: { flow: 'GREETINGS', input: ({ scheduledAt }) => ({ prefix: `nightly-${scheduledAt}` }), cron: '0 3 * * *' },
 	},
-	// secretから引く,直書きするとリポジトリとバンドルの両方に残る
+	// トークンはsecretから取得する, 直書きするとリポジトリとバンドルの両方に残る
 	auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),
 	ui: ui({ tokenCookie: 'tsumugi_token' }),
-	// Analytics Engineを読むにはアカウントのAPIトークンが要る, secretから引く
+	// メトリクスの取得にはアカウントのAPIトークンが必要
 	metrics: (env: Env) =>
 		env.CF_ACCOUNT_ID && env.CF_API_TOKEN
 			? { accountId: env.CF_ACCOUNT_ID, apiToken: env.CF_API_TOKEN, dataset: 'tsumugi_jobs' }
@@ -82,10 +79,9 @@ const tsumugi = defineTsumugi({
 });
 
 export { TsumugiJobShard } from 'tsumugi';
-// flow定義を参照するクラスなのでパッケージからはエクスポートできない(ADR-0030)
-// クラス宣言にするのは`wrangler types`が型として参照できるようにするため
+// flowsを使う場合はこのクラスもexportしてwranglerに登録する
 export class TsumugiRun extends tsumugi.runClass {}
-// schedule定義を参照するクラス, 同上(ADR-0040)
+// schedulesを使う場合はこのクラスもexportしてwranglerに登録する
 export class TsumugiScheduler extends tsumugi.schedulerClass {}
 
 export default {
@@ -93,7 +89,7 @@ export default {
 	async fetch(request, env, ctx) {
 		const { pathname } = new URL(request.url);
 		if (pathname === '/enqueue') {
-			// bindingからpayloadの型が決まる, 取り違えはコンパイルエラー(ADR-0010)
+			// payloadの型はbindingから決まる, 取り違えはコンパイルエラー
 			const id = await tsumugi.enqueue(env, { binding: 'Hello', payload: { name: 'world' } });
 			return Response.json({ id });
 		}
@@ -102,10 +98,11 @@ export default {
 			return Response.json({ id });
 		}
 		if (pathname === '/start') {
-			// flowからinputの型が決まる, idを渡せば二重開始を弾ける(ADR-0029)
+			// inputの型はFlowの定義から決まる
 			const id = await tsumugi.start(env, 'GREETINGS', { prefix: 'hello' });
 			return Response.json({ id });
 		}
+		// 残りはダッシュボードとREST APIへ
 		return tsumugi.fetch!(request, env, ctx);
 	},
 } satisfies ExportedHandler<Env>;

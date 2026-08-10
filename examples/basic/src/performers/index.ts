@@ -1,5 +1,4 @@
-// performerのバレル, ここに並べた名前がそのままbinding名になる(ADR-0037)
-// 実行時の解決は`ctx.exports`が行うので, 追加するのはこの1行だけ
+// ここに並べた名前がそのままbinding名になる
 export { Hello } from './hello.js';
 export { Boom } from './boom.js';
 export { Slow } from './slow.js';
