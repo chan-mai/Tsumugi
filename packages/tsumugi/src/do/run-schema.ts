@@ -37,6 +37,8 @@ export const RUN_SCHEMA = [
 		parent TEXT,
 		origin TEXT NOT NULL,
 		after TEXT NOT NULL,
+		-- 依存の成否に対する発火条件(ADR-0041)
+		trigger TEXT NOT NULL DEFAULT 'success',
 		-- 実行時に増えたノードのpayloadと投入設定, 静的ノードはflow定義から作るのでnull
 		payload TEXT,
 		options TEXT,
@@ -74,6 +76,7 @@ export function applyRunSchema(sql: SqlStorage): void {
 		['run', 'deadline_ms', 'INTEGER'],
 		['run', 'deadline_at', 'INTEGER'],
 		['run', 'expired', 'INTEGER NOT NULL DEFAULT 0'],
+		['node', 'trigger', "TEXT NOT NULL DEFAULT 'success'"],
 		['node', 'subflow', 'TEXT'],
 		['node', 'child_run_id', 'TEXT'],
 	] as const) {
@@ -117,6 +120,7 @@ export type NodeRow = {
 	parent: string | null;
 	origin: string;
 	after: string;
+	trigger: string;
 	payload: string | null;
 	options: string | null;
 	subflow: string | null;

@@ -207,6 +207,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 					parent: null,
 					origin: 'static' as const,
 					after: node.after,
+					trigger: node.trigger,
 					seq: index,
 					...(node.subflow !== undefined ? { subflow: node.subflow } : {}),
 				})),
@@ -469,6 +470,12 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 			const row = this.repo.findNode(decision.id);
 			if (!row) return [];
 
+			// 起動する手前で判定する, 依存の戻り値が揃うのはこの時点(ADR-0041)
+			if (decision.type === 'start' || decision.type === 'startRun' || decision.type === 'expand') {
+				const gate = this.#gate(row, definitions, runInput, now);
+				if (gate !== null) return gate;
+			}
+
 			switch (decision.type) {
 				case 'start': {
 					const built = this.#buildJob(row, definitions, runInput);
@@ -520,7 +527,8 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				}
 
 				case 'skip':
-					this.repo.updateNode(row.id, { state: 'SKIPPED' }, now);
+					// なぜ実行されなかったかは状態からは分からない, 理由を残して画面から追えるようにする(ADR-0041)
+					this.repo.updateNode(row.id, { state: 'SKIPPED', error: decision.reason }, now);
 					return [row.id];
 
 				case 'cancel': {
@@ -633,6 +641,25 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 				...definition.job,
 				...(concurrencyKey === undefined ? {} : { concurrencyKey }),
 			};
+		}
+
+		/**
+		 * `when`の判定(ADR-0041)
+		 * 実行してよければnull, 実行しないなら触れたノードIDを返す
+		 */
+		#gate(row: NodeRow, definitions: Map<string, FlowNode>, runInput: unknown, now: number): string[] | null {
+			const definition = definitions.get(row.id);
+			if (!definition?.when) return null;
+
+			try {
+				if (definition.when(runInput, this.#depsOf(definition, runInput))) return null;
+			} catch (error) {
+				// 判定自体の失敗は握り潰さない, 実行の可否が決まらない
+				this.repo.updateNode(row.id, { state: 'FAILED', error: `when failed: ${messageOf(error)}` }, now);
+				return [row.id];
+			}
+			this.repo.updateNode(row.id, { state: 'SKIPPED', error: 'when returned false' }, now);
+			return [row.id];
 		}
 
 		/** 写像関数へ渡す受け取り口,`after`のキーをそのまま名前にする */

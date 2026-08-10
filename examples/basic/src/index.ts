@@ -40,6 +40,20 @@ const flows = {
 		},
 		{ deadlineMs: 10 * 60 * 1000 },
 	),
+	// 失敗時の後始末と入力による経路の選択(ADR-0041)
+	BRANCHED: flow<{ prefix: string; verbose: boolean }>((f) => {
+		const list = f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
+		// 上流が失敗した場合だけ通る, 依存の戻り値は無いので受け取り口は未定義込み
+		f.node('cleanup', 'Report', { after: { list }, trigger: 'failure', input: () => ({ total: 0, failed: 1 }) });
+		// 入力で経路を選ぶ, falseならSKIPPEDになり下流も進まない
+		f.node('detail', 'Report', {
+			after: { list },
+			when: (i, d) => i.verbose && d.list.names.length > 0,
+			input: (_i, d) => ({ total: d.list.names.length, failed: 0 }),
+		});
+		// 成否を問わず必ず通過
+		f.node('audit', 'Report', { after: { list }, trigger: 'always', input: () => ({ total: 1, failed: 0 }) });
+	}),
 };
 
 // performersからbindingごとのpayload型とEnvを推論する, 明示の型引数は要らない(ADR-0010)

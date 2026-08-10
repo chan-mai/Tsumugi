@@ -39,8 +39,8 @@ describe('flowの組み立て', () => {
 
 		const shape = shapeOf(built);
 		expect(shape).toEqual([
-			{ id: 'fetch', binding: 'FETCH', container: false, after: [] },
-			{ id: 'each', binding: 'WORK', container: true, after: ['fetch'] },
+			{ id: 'fetch', binding: 'FETCH', container: false, after: [], trigger: 'success' },
+			{ id: 'each', binding: 'WORK', container: true, after: ['fetch'], trigger: 'success' },
 		]);
 		// JSONへ載せてDOに渡すので関数が混ざっていないこと自体が要件
 		expect(JSON.parse(JSON.stringify(shape))).toEqual(shape);
@@ -81,6 +81,43 @@ describe('flowの組み立て', () => {
 				InvalidFlowError,
 			);
 		}
+	});
+
+	it('triggerとwhenを持つノードを組み立てる(ADR-0041)', () => {
+		const built = flow<void>((f) => {
+			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
+			f.node('cleanup', 'WORK', {
+				after: { fetched },
+				trigger: 'failure',
+				input: () => ({ id: 'x' }),
+			});
+			f.node('gated', 'WORK', {
+				after: { fetched },
+				when: (_i, d) => d.fetched.items.length > 0,
+				input: () => ({ id: 'y' }),
+			});
+		});
+
+		expect(built.nodes[1]?.trigger).toBe('failure');
+		expect(built.nodes[2]?.trigger).toBe('success');
+		expect(built.nodes[2]?.when?.(undefined, { fetched: { items: ['a'] } })).toBe(true);
+		expect(shapeOf(built)[1]?.trigger).toBe('failure');
+	});
+
+	it('依存の無いノードのtrigger指定を弾く', () => {
+		// 成否を問う相手がいない, 書けてしまうと意図が伝わらない
+		expect(() =>
+			flow<void>((f) => f.node('lonely', 'FETCH', { trigger: 'failure', input: () => ({ since: 0 }) }) as unknown as void),
+		).toThrow(InvalidFlowError);
+	});
+
+	it('不正なtriggerを弾く', () => {
+		expect(() =>
+			flow<void>((f) => {
+				const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
+				f.node('bad', 'WORK', { after: { fetched }, trigger: 'maybe' as never, input: () => ({ id: 'x' }) });
+			}),
+		).toThrow(InvalidFlowError);
 	});
 
 	it('別のflowのノードへの依存を弾く', () => {

@@ -43,3 +43,4 @@
 - [ADR-0038](0038-openapi-from-typespec.md) — OpenAPI定義はTypeSpecから生成する
 - [ADR-0039](0039-run-deadline.md) — run全体の期限で止まったrunを打ち切る
 - [ADR-0040](0040-schedules-in-code-state-in-do.md) — 定期実行の定義はコードに置き状態を専用DOが持つ
+- [ADR-0041](0041-node-trigger-and-when.md) — 発火条件はノード単位で持ち判定は写像関数に置く

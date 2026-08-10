@@ -46,6 +46,8 @@ export const node = sqliteTable(
 		origin: text('origin').notNull(),
 		/** 依存先のノードIDのJSON配列 */
 		after: text('after').notNull(),
+		/** 依存の成否に対する発火条件(ADR-0041) */
+		trigger: text('trigger').notNull().default('success'),
 		/** 実行時に増えたノードのpayloadと投入設定, 静的ノードはflow定義から作るのでnull */
 		payload: text('payload'),
 		options: text('options'),

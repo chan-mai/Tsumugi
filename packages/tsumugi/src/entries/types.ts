@@ -48,6 +48,7 @@ export type {
 	FlowShape,
 	FlowShapeNode,
 	InputOf,
+	NodeTrigger,
 	NodeJobOptions,
 	NodeOptions,
 	NodeRef,

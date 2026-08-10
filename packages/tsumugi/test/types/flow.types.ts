@@ -55,6 +55,27 @@ export const order = flow<{ orderId: string; since: number }>((f) => {
 	});
 });
 
+/** 発火条件で受け取り口の型が変わる(ADR-0041) */
+export const triggers = flow<{ orderId: string }>((f) => {
+	const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
+
+	// successでは依存の戻り値が揃う
+	f.node('ok', 'PROCESS', { after: { fetched }, input: (_i, d) => ({ id: d.fetched.items[0]!.id }) });
+
+	// failureとalwaysでは失敗した依存の戻り値が無い
+	f.node('cleanup', 'PROCESS', {
+		after: { fetched },
+		trigger: 'failure',
+		input: (_i, d) => ({ id: d.fetched?.items[0]?.id ?? 'none' }),
+	});
+	f.node('always', 'PROCESS', {
+		after: { fetched },
+		trigger: 'always',
+		when: (_i, d) => d.fetched !== undefined,
+		input: () => ({ id: 'x' }),
+	});
+});
+
 export const negatives = flow<{ orderId: string }>((f) => {
 	// @ts-expect-error uniqueKey必須のperformerはノードに指定できない(ADR-0033)
 	f.node('sync', 'SYNC', { input: () => ({ sku: 'x' }) });
@@ -76,5 +97,26 @@ export const negatives = flow<{ orderId: string }>((f) => {
 		after: { fetched },
 		// @ts-expect-error 宣言していない受け取り口
 		input: (_i, d) => ({ id: d.missing.items[0].id }),
+	});
+
+	f.node('bad-trigger', 'PROCESS', {
+		after: { fetched },
+		// @ts-expect-error 発火条件は3つのいずれか(ADR-0041)
+		trigger: 'maybe',
+		input: () => ({ id: 'x' }),
+	});
+
+	f.node('lenient-deps', 'PROCESS', {
+		after: { fetched },
+		trigger: 'always',
+		// @ts-expect-error 成功していない依存は戻り値を持たない
+		input: (_i, d) => ({ id: d.fetched.items[0].id }),
+	});
+
+	f.node('bad-when', 'PROCESS', {
+		after: { fetched },
+		// @ts-expect-error 判定はbooleanを返す
+		when: (_i, d) => d.fetched.items.length,
+		input: () => ({ id: 'x' }),
 	});
 });

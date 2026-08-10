@@ -58,6 +58,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 		parent: null,
 		origin: 'static',
 		after: node.after,
+		trigger: node.trigger,
 	}));
 	const byId = new Map(views.map((view) => [view.id, view]));
 	/** 実行時に確定した子ノードのpayloadと投入先 */
@@ -83,6 +84,15 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 			const view = byId.get(decision.id);
 			if (!view) continue;
 			const definition = definitions.get(decision.id);
+
+			// 判定がfalseなら実行しない, 下流は依存が成功していないので進まない(ADR-0041)
+			if ((decision.type === 'start' || decision.type === 'expand') && definition?.when) {
+				if (!definition.when(input, depsOf(definition))) {
+					const binding = children.get(view.id)?.binding ?? definition.binding;
+					settle(view, { id: view.id, binding, payload: undefined, parent: view.parent }, 'SKIPPED', undefined);
+					continue;
+				}
+			}
 
 			switch (decision.type) {
 				case 'start': {
@@ -112,6 +122,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 							parent: view.id,
 							origin: 'fanOut',
 							after: [],
+							trigger: 'success',
 						};
 						views.push(child);
 						byId.set(id, child);

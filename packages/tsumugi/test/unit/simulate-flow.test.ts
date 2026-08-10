@@ -31,6 +31,8 @@ const greetings = flow<{ prefix: string }>((f) => {
 
 const ids = (result: ReturnType<typeof simulateFlow>) => result.nodes.map((node) => node.id);
 
+const stateOf = (result: { nodes: { id: string; state: string }[] }, id: string) => result.nodes.find((node) => node.id === id)?.state;
+
 describe('flowの通し実行', () => {
 	it('依存の順にノードを実行する', () => {
 		const result = simulateFlow(greetings, { prefix: 'hello' }, { results: { list: { names: ['a', 'b'] } } });
@@ -82,6 +84,64 @@ describe('flowの通し実行', () => {
 	it('結果を関数で与えられる', () => {
 		const result = simulateFlow(greetings, { prefix: 'p' }, { results: (node) => (node.id === 'list' ? { names: ['z'] } : undefined) });
 		expect(result.nodes.find((node) => node.id === 'greet:0')?.payload).toEqual({ name: 'z' });
+	});
+
+	it('失敗時の後始末が通り成功時は飛ばされる(ADR-0041)', () => {
+		const withCleanup = flow<void>((f) => {
+			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
+			f.node('cleanup', 'REPORT', {
+				after: { list },
+				trigger: 'failure',
+				input: () => ({ total: 0, failed: 1 }),
+			});
+			f.node('done', 'REPORT', { after: { list }, input: () => ({ total: 1, failed: 0 }) });
+		});
+
+		const failed = simulateFlow(withCleanup, undefined, { fails: ['list'] });
+		expect(stateOf(failed, 'cleanup')).toBe('COMPLETED');
+		expect(stateOf(failed, 'done')).toBe('SKIPPED');
+		// 後始末が成功してもrunは失敗のまま
+		expect(failed.state).toBe('FAILED');
+
+		const ok = simulateFlow(withCleanup, undefined, { results: { list: { names: [] } } });
+		expect(stateOf(ok, 'cleanup')).toBe('SKIPPED');
+		expect(stateOf(ok, 'done')).toBe('COMPLETED');
+		expect(ok.state).toBe('COMPLETED');
+	});
+
+	it('alwaysは成否を問わず通る', () => {
+		const withAlways = flow<void>((f) => {
+			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
+			f.node('always', 'REPORT', { after: { list }, trigger: 'always', input: () => ({ total: 0, failed: 0 }) });
+		});
+
+		expect(stateOf(simulateFlow(withAlways, undefined, { fails: ['list'] }), 'always')).toBe('COMPLETED');
+		expect(stateOf(simulateFlow(withAlways, undefined, { results: { list: { names: [] } } }), 'always')).toBe('COMPLETED');
+	});
+
+	it('whenが経路を選ぶ(ADR-0041)', () => {
+		const branched = flow<{ big: boolean }>((f) => {
+			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
+			f.node('heavy', 'REPORT', {
+				after: { list },
+				when: (i, d) => i.big && d.list.names.length > 1,
+				input: () => ({ total: 2, failed: 0 }),
+			});
+			f.node('light', 'REPORT', {
+				after: { list },
+				when: (i) => !i.big,
+				input: () => ({ total: 1, failed: 0 }),
+			});
+		});
+
+		const results = { list: { names: ['a', 'b'] } };
+		const big = simulateFlow(branched, { big: true }, { results });
+		expect(stateOf(big, 'heavy')).toBe('COMPLETED');
+		expect(stateOf(big, 'light')).toBe('SKIPPED');
+
+		const small = simulateFlow(branched, { big: false }, { results });
+		expect(stateOf(small, 'heavy')).toBe('SKIPPED');
+		expect(stateOf(small, 'light')).toBe('COMPLETED');
 	});
 
 	it('子ノードIDの決め方をkeyで変えられる', () => {
