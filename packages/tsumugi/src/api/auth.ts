@@ -39,6 +39,25 @@ function readCookie(header: string | undefined, name: string): string | undefine
 	return undefined;
 }
 
+/**
+ * 認証を行わずREST APIとダッシュボードを開放する(ADR-0044)
+ *
+ * Workerへ到達できる全員が, ジョブの内容の閲覧と投入と取り消しを行える
+ * 手前で認証している構成と`wrangler dev`での確認に限って使う
+ * 未設定の場合のfail-closedは変わらない, 開放するには明示的にこれを渡す必要がある
+ */
+export function unsafeNoAuth(): AuthMiddleware {
+	let warned = false;
+	return async (_c, next) => {
+		// isolateごとに1回だけ, 毎リクエストのログを避ける
+		if (!warned) {
+			warned = true;
+			console.warn('tsumugi: unsafeNoAuth is enabled, anyone who can reach this Worker can read and control jobs');
+		}
+		await next();
+	};
+}
+
 /** `env`からトークンを引く関数, secretはモジュール初期化時に読めない */
 export type TokenResolver = (env: any) => string | undefined;
 

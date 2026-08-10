@@ -81,6 +81,7 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	/**
 	 * 認証ミドルウェア, 未設定ならREST APIもダッシュボードも無効(ADR-0013)
 	 * 同梱の`bearerAuth`でも任意のHonoミドルウェアでもよい
+	 * 認証なしで開放する場合は`unsafeNoAuth`を明示的に渡す(ADR-0044)
 	 */
 	auth?: AuthMiddleware;
 	/**
