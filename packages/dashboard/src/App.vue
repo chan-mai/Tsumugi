@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import BindingsView from './components/BindingsView.vue';
 import BulkActions from './components/BulkActions.vue';
 import CheckBox from './components/CheckBox.vue';
 import DateRangeMenu from './components/DateRangeMenu.vue';
@@ -64,7 +65,7 @@ const canPromptToken = tokenCookie() !== null;
 let timer: ReturnType<typeof setInterval> | undefined;
 
 /** flowsを設定していない利用者にはrunの画面自体を出さない */
-const tab = ref<'jobs' | 'runs' | 'schedules' | 'metrics'>('jobs');
+const tab = ref<'jobs' | 'runs' | 'schedules' | 'bindings' | 'metrics'>('jobs');
 /** Analytics Engineの設定がある構成でのみメトリクスのタブを出す */
 const hasMetrics = ref(false);
 /** schedulesを定義した構成でのみ定期実行のタブを出す */
@@ -76,6 +77,7 @@ const tabs = computed(
 			'jobs',
 			...(flows.value.length > 0 ? ['runs'] : []),
 			...(hasSchedules.value ? ['schedules'] : []),
+			'bindings',
 			...(hasMetrics.value ? ['metrics'] : []),
 		] as const,
 );
@@ -90,6 +92,8 @@ const startingRun = ref(false);
 const metricsView = ref<InstanceType<typeof MetricsView> | null>(null);
 /** 同じく定期実行の一覧を取り直すための参照 */
 const schedulesView = ref<InstanceType<typeof SchedulesView> | null>(null);
+/** 同じく流量の一覧を取り直すための参照 */
+const bindingsView = ref<InstanceType<typeof BindingsView> | null>(null);
 
 /** 選んだ対象だけをクエリに載せる, 対象を切り替えたときに前の条件が残らない */
 const searchParam = () => (search.value ? { [searchField.value]: search.value } : {});
@@ -113,6 +117,10 @@ async function load() {
 		}
 		if (requested === 'schedules') {
 			await schedulesView.value?.load();
+			return;
+		}
+		if (requested === 'bindings') {
+			await bindingsView.value?.load();
 			return;
 		}
 		if (requested === 'runs') {
@@ -170,7 +178,7 @@ async function load() {
 }
 
 /** 一覧が入れ替わるので絞り込みと頁は持ち越さない */
-function switchTab(next: 'jobs' | 'runs' | 'schedules' | 'metrics') {
+function switchTab(next: 'jobs' | 'runs' | 'schedules' | 'bindings' | 'metrics') {
 	if (tab.value === next) return;
 	tab.value = next;
 	resetFilters();
@@ -409,6 +417,8 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				@job="selected = $event"
 				@run="selectedRun = $event"
 			/>
+
+			<BindingsView v-else-if="tab === 'bindings'" ref="bindingsView" @unauthorized="unauthorized = true" />
 
 			<div v-else-if="tab === 'runs'" class="relative w-full overflow-x-auto rounded-card border border-border">
 				<table class="w-full caption-bottom text-sm">

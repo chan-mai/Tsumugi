@@ -85,7 +85,8 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 
 	// 4.同時実行数・トークン・キー単位上限を見ながら貪欲に投入
-	let slots = Math.max(0, policy.concurrency - inFlight);
+	// 一時停止中は投入しない, 回収とエージングは止めないので再開後に順序が保たれる(#27)
+	let slots = policy.paused ? 0 : Math.max(0, policy.concurrency - inFlight);
 	let blockedByCapacity = false;
 	let blockedByTokens = false;
 	let blockedByKey = false;
@@ -93,7 +94,8 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 
 	for (const { job } of ready) {
 		if (slots <= 0) {
-			blockedByCapacity = true;
+			// 停止と容量不足は原因が違う, 画面でどちらを緩めればよいか分かるよう分ける
+			if (!policy.paused) blockedByCapacity = true;
 			break;
 		}
 		if (bucket.tokens < 1) {
@@ -131,5 +133,10 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		// 上限待ちは完了報告が次のtickを起動するのでここでは予約しない(capacityのalarmは張らない)
 	]);
 
-	return { decisions, bucket, nextAlarmAt, blocked: { capacity: blockedByCapacity, tokens: blockedByTokens, perKey: blockedByKey } };
+	return {
+		decisions,
+		bucket,
+		nextAlarmAt,
+		blocked: { paused: policy.paused && ready.length > 0, capacity: blockedByCapacity, tokens: blockedByTokens, perKey: blockedByKey },
+	};
 }

@@ -95,6 +95,7 @@ const tsumugi = defineTsumugi<Env>({
 
 | 名前                | 既定    | 内容                                                         |
 | ------------------- | ------- | ------------------------------------------------------------ |
+| `paused`            | `false` | 投入の一時停止。実行中のジョブの回収とエージングは止まらない |
 | `concurrency`       | `100`   | 同時実行数の上限                                             |
 | `perKeyConcurrency` | `1`     | `concurrencyKey`単位の上限。キーがnullのジョブには適用しない |
 | `rate`              | `null`  | `{ tokens, intervalMs }`のトークンバケット                   |

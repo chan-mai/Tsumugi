@@ -307,7 +307,15 @@ bindingごとの滞留の診断情報を取得します
     "MAIL": {
       "active": 2,
       "outbox": 0,
-      "blocked": { "capacity": 0, "tokens": 5, "perKey": 1 }
+      "blocked": { "paused": false, "capacity": true, "tokens": false, "perKey": false },
+      "policy": {
+        "paused": false,
+        "concurrency": 100,
+        "perKeyConcurrency": 1,
+        "rate": null,
+        "agingIntervalMs": 60000,
+        "reaperGraceMs": 30000
+      }
     }
   }
 }
@@ -318,10 +326,50 @@ bindingごとの滞留の診断情報を取得します
 | `active`  | 実行中の件数                                     |
 | `outbox`  | 一覧への反映を待っている件数                     |
 | `blocked` | 実行待ちのジョブがどの制約で止まっているかの内訳 |
+| `policy`  | 今効いている流量の設定                           |
 
-`blocked`の内訳は、`capacity`が同時実行数、`tokens`がレート、`perKey`がキー単位の上限に対応します
+`blocked`の内訳は、`paused`が一時停止、`capacity`が同時実行数、`tokens`がレート、`perKey`がキー単位の上限に対応します
 
 対象はshard 0のみです。分割している場合、他のshardは含まれません
+
+## POST /api/bindings/:binding/policy
+
+流量の設定を実行時に変更します
+
+```json
+{ "paused": true, "concurrency": 5 }
+```
+
+| 項目                | 説明                                                   |
+| ------------------- | ------------------------------------------------------ |
+| `paused`            | 投入の一時停止。実行中のジョブの回収は止まりません     |
+| `concurrency`       | 同時実行数。0以上の整数                                |
+| `perKeyConcurrency` | キー単位の同時実行数。0以上の整数                      |
+| `rate`              | `{ tokens, intervalMs }`。`null`でレート制限を外します |
+| `agingIntervalMs`   | エージングの間隔。`null`で無効                         |
+| `reaperGraceMs`     | 無応答と判定するまでの猶予。0以上の整数                |
+
+明示した項目のみが変更されます。省略した項目は変更されません
+
+成功すると、変更後の設定と適用したshard数が返ります
+
+```json
+{ "binding": "MAIL", "shards": 1, "policy": { "paused": true, "concurrency": 5, "...": "..." } }
+```
+
+変更はbindingの全shardへ適用されます
+
+この変更は`bindings`の静的な設定より優先され、以降の投入では静的な設定が無視されます
+
+## POST /api/bindings/:binding/policy/reset
+
+実行時の変更を捨てて、静的な設定へ戻します
+
+```json
+{ "ok": true }
+```
+
+次の投入から`bindings`に書いた設定が再び有効となります
 
 ## GET /api/schedules
 

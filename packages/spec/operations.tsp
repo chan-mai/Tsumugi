@@ -176,6 +176,37 @@ op getDiagnostics(): {
 	};
 } | Unauthorized | Unavailable;
 
+@route("/api/bindings/{binding}/policy")
+@operationId("updatePolicy")
+@summary("Change the limits of a binding at runtime")
+@doc("Applies to every shard of the binding. The change outranks the static settings until it is reset.")
+@returnsDoc("Limits in effect after the change")
+@post
+op updatePolicy(@path binding: string, @body body: UpdatePolicyRequest): {
+	@statusCode statusCode: 200;
+
+	@body body: {
+		binding: string;
+
+		@doc("How many shards received the change")
+		shards: integer;
+
+		policy: Policy;
+	};
+} | BadBody | Unauthorized | NotFound | Unavailable;
+
+@route("/api/bindings/{binding}/policy/reset")
+@operationId("resetPolicy")
+@summary("Drop the runtime limits of a binding")
+@doc("Lets the static settings take effect again from the next enqueue.")
+@returnsDoc("Accepted")
+@post
+op resetPolicy(@path binding: string): {
+	@statusCode statusCode: 200;
+
+	@body body: Mutation;
+} | Unauthorized | NotFound | Unavailable;
+
 @route("/api/schedules")
 @operationId("listSchedules")
 @summary("List recurring schedules")
