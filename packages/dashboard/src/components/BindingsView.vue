@@ -76,7 +76,10 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 <template>
 	<div class="space-y-4">
 		<div class="flex flex-wrap items-center gap-2">
-			<p class="text-sm text-muted-foreground">The changes will be applied to all shards and take precedence over the static configuration. You can revert to the static configuration by clicking Reset.</p>
+			<p class="text-sm text-muted-foreground">
+				The changes will be applied to all shards and take precedence over the static configuration. You can revert to the static
+				configuration by clicking Reset.
+			</p>
 			<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 			<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
 		</div>
