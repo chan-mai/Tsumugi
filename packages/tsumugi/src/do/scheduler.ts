@@ -72,6 +72,8 @@ export type SchedulerOptions = {
 	bindings: Record<string, BindingConfig>;
 	/** 検証用の登録名, performersとflowsのキー */
 	targets: { bindings: readonly string[]; flows: readonly string[] };
+	/** 失敗を知らせる先のbinding(#30), 定期実行で投入するジョブにも同じ宛先が要る */
+	failureBinding?: string | null;
 };
 
 /** Job DOの非終端の状態, 前回がこのいずれかならskipする */
@@ -86,14 +88,14 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * 定義はコードのclosureから引き, DOは次回時刻と直近の観測だけを持つ
  * 発火は決定的IDで冪等にし, 二重発火を既存の重複排除(ADR-0029)に吸収させる
  */
-export function createSchedulerClass({ schedules, bindings, targets }: SchedulerOptions): SchedulerClass {
+export function createSchedulerClass({ schedules, bindings, targets, failureBinding }: SchedulerOptions): SchedulerClass {
 	// 定義の誤りはdefineTsumugiの時点で落とす, 発火まで気付けないと定期実行が黙って止まる
 	const { schedules: normalized, fingerprint } = normalizeSchedules(schedules, {
 		bindings: targets.bindings,
 		flows: targets.flows,
 		shardsOf: (binding) => bindings[binding]?.shards ?? 1,
 	});
-	const client = createClient<SchedulerEnv>(bindings);
+	const client = createClient<SchedulerEnv>(bindings, failureBinding === undefined ? {} : { failureBinding });
 
 	return class TsumugiScheduler extends DurableObject<SchedulerEnv> {
 		/** テストから差し替えるためpublicにしている */

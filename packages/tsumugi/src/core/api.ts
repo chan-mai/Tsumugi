@@ -1,5 +1,5 @@
 import type { SpawnRequest } from './run.js';
-import type { Backoff, DeliveryGuarantee } from './types.js';
+import type { Backoff, DeliveryGuarantee, FailureNotice } from './types.js';
 
 /** performerがキーの指定を必須と宣言するための印, ADR-0010 (ランタイムDSLではなく型で強制) */
 export type Requirements = { concurrencyKey?: true; uniqueKey?: true };
@@ -66,6 +66,15 @@ export function isRemoteRef(value: unknown): value is RemoteRef {
 }
 
 export type PayloadOf<P> = P extends PerformerLike<infer T, any, any> ? T : never;
+
+/**
+ * 失敗の通知先に使えるbinding(#30)
+ * `FailureNotice`を受け取れるperformerだけを許す, 取り違えると通知が必ず失敗する
+ */
+export type FailurePerformer<M extends Performers> = {
+	[K in keyof M]: FailureNotice extends PayloadOf<M[K]> ? K : never;
+}[keyof M] &
+	string;
 export type ReqOf<P> = P extends PerformerLike<any, any, infer R> ? R : {};
 /** performの戻り値, DAGのノードでは後段のpayloadの材料になる */
 export type ResultOf<P> = P extends PerformerLike<any, infer R, any> ? Awaited<R> : never;

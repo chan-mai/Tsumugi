@@ -2,9 +2,9 @@ import { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { assertTransition } from '../core/transitions.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
-import type { Backoff, DeliveryGuarantee, JobState, JobView, Retention } from '../core/types.js';
+import type { Backoff, DeliveryGuarantee, FailureNotice, JobState, JobView, Retention } from '../core/types.js';
 import { applySchema, type AttemptRow, type JobRow } from './schema.js';
-import { attempt, job, outbox, runNotify, setting, uniqueKey } from './tables.js';
+import { attempt, failureNotify, job, outbox, runNotify, setting, uniqueKey } from './tables.js';
 
 /**
  * 1試行あたりのエラー本文の上限
@@ -44,6 +44,9 @@ export type NewJob = {
 
 /** 終端に達した時にRun DOへ知らせる状態(ADR-0031) */
 const NOTIFIABLE: readonly JobState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
+
+/** 外部へ知らせる状態(#30), 再試行で回復する途中の失敗は含めない */
+const FAILURES: readonly JobState[] = ['FAILED', 'STALLED'];
 
 const toView = (row: JobRow): JobView => ({
 	id: row.id,
@@ -338,6 +341,7 @@ export class JobRepo {
 		const row = updated[0];
 		if (!row) return false;
 		this.#appendOutbox(id);
+		if (FAILURES.includes(to)) this.#appendFailure(id, to as FailureNotice['state'], patch.error ?? null, patch.now);
 		// 終端の捕捉を1箇所に集約する, 遷移の呼び出し側ごとに積むと必ずどこかで漏れる
 		if (row.runId !== null && row.nodeId !== null && NOTIFIABLE.includes(to)) {
 			this.appendNotify(row.runId, {
@@ -394,6 +398,53 @@ export class JobRepo {
 		if (updated.length === 0) return false;
 		this.#appendOutbox(id);
 		return true;
+	}
+
+	/**
+	 * 失敗の通知待ちに積む(#30)
+	 * 通知先が読む材料をここで揃える, 送る時にジョブを引き直すと掃除済みで消えている
+	 */
+	#appendFailure(id: string, state: FailureNotice['state'], error: string | null, now: number): void {
+		const row = this.find(id);
+		if (!row) return;
+		const notice: FailureNotice = {
+			jobId: id,
+			binding: row.binding,
+			state,
+			attempts: row.attempts,
+			maxAttempts: row.max_attempts,
+			// 遷移に理由が無ければ直近の試行から拾う, reaperの打ち切りは理由を持たない
+			error: error ?? this.attemptsOf(id)[0]?.error ?? null,
+			runId: row.run_id,
+			nodeId: row.node_id,
+			failedAt: now,
+		};
+		this.db
+			.insert(failureNotify)
+			.values({ jobId: id, payload: JSON.stringify(notice) })
+			.run();
+		this.writes++;
+	}
+
+	failureBatch(limit: number): { seq: number; payload: string }[] {
+		const rows = this.db.select().from(failureNotify).orderBy(asc(failureNotify.seq)).limit(limit).all();
+		this.reads++;
+		return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
+	}
+
+	/** 投入が成功してから呼ぶ, 失敗時はカーソルを進めない */
+	deleteFailureThrough(seq: number): void {
+		this.db.delete(failureNotify).where(lte(failureNotify.seq, seq)).run();
+		this.writes++;
+	}
+
+	countFailureNotify(): number {
+		const row = this.db
+			.select({ c: sql<number>`count(*)` })
+			.from(failureNotify)
+			.get();
+		this.reads++;
+		return row?.c ?? 0;
 	}
 
 	appendNotify(runId: string, event: NodeEvent): void {

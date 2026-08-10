@@ -6,3 +6,4 @@ export { Slow } from './slow.js';
 export { ListNames } from './list-names.js';
 export { Greet } from './greet.js';
 export { Report } from './report.js';
+export { NotifyFailure } from './notify-failure.js';

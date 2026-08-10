@@ -45,27 +45,43 @@ export type TsumugiClient<Env extends ClientEnv> = {
 	shardFor(env: Env, binding: string, partitionKey?: string): DurableObjectStub<JobShardStub>;
 };
 
-function settingsOf(config: BindingConfig | undefined): ShardSettings | undefined {
-	if (!config?.policy && config?.sweepAfterMs === undefined && config?.failedRetentionMs === undefined) return undefined;
+/** binding個別の設定と全体で共通の設定を1つにまとめる, DOへ渡る形は1つ */
+function settingsOf(config: BindingConfig | undefined, common: CommonSettings): ShardSettings | undefined {
+	const hasBinding = config?.policy || config?.sweepAfterMs !== undefined || config?.failedRetentionMs !== undefined;
+	if (!hasBinding && common.failureBinding === undefined) return undefined;
 	return {
-		...(config.policy ? { policy: config.policy } : {}),
-		...(config.sweepAfterMs !== undefined ? { sweepAfterMs: config.sweepAfterMs } : {}),
-		...(config.failedRetentionMs !== undefined ? { failedRetentionMs: config.failedRetentionMs } : {}),
+		...(config?.policy ? { policy: config.policy } : {}),
+		...(config?.sweepAfterMs !== undefined ? { sweepAfterMs: config.sweepAfterMs } : {}),
+		...(config?.failedRetentionMs !== undefined ? { failedRetentionMs: config.failedRetentionMs } : {}),
+		...(common.failureBinding !== undefined ? { failureBinding: common.failureBinding } : {}),
 	};
 }
+
+/** bindingを問わず同じ値を渡す設定, 投入のたびに同梱して届ける */
+export type CommonSettings = {
+	/**
+	 * 失敗を知らせる先のbinding(#30)
+	 * nullは解除, 省略はDOが今持つ宛先を変えない
+	 * 宛先を知り得ない経路から省略が届くので, 未指定と解除を区別する
+	 */
+	failureBinding?: string | null;
+};
 
 /**
  * 投入専用のクライアント
  * ジョブ管理Worker本体と別Workerからのenqueueで同一経路
  */
-export function createClient<Env extends ClientEnv>(bindings: Record<string, BindingConfig> = {}): TsumugiClient<Env> {
+export function createClient<Env extends ClientEnv>(
+	bindings: Record<string, BindingConfig> = {},
+	common: CommonSettings = {},
+): TsumugiClient<Env> {
 	const shardOf = (env: Env, binding: string, partitionKey: string | undefined) => {
 		const config = bindings[binding];
 		const shard = resolveShard(binding, config?.shards ?? 1, partitionKey);
 		const ns = env.JOB_SHARD as DurableObjectNamespace<JobShardStub>;
 		return {
 			stub: ns.get(ns.idFromName(shardName(binding, shard))),
-			settings: settingsOf(config),
+			settings: settingsOf(config, common),
 		};
 	};
 
