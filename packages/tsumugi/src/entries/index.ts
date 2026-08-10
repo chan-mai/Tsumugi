@@ -1,6 +1,6 @@
 // ジョブ管理Worker本体が使うエントリ
 export { defineTsumugi, enqueue, enqueueMany, shardFor } from '../worker.js';
-export { bearerAuth } from '../api/auth.js';
+export { bearerAuth, unsafeNoAuth } from '../api/auth.js';
 export type { AuthMiddleware, BearerOptions, TokenResolver } from '../api/auth.js';
 export { cloudflareAccess, clearJwksCache, verifyAccessJwt } from '../api/access.js';
 export type { AccessJwk, AccessOptions, Jwks } from '../api/access.js';

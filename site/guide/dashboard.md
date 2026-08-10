@@ -50,6 +50,30 @@ const tsumugi = defineTsumugi({
 
 `auth`には任意のHonoミドルウェアを指定します。独自の認証の組み込みも可能です。
 
+## 認証を行わない構成 {#unsafe-no-auth}
+
+::: danger
+`unsafeNoAuth`を指定すると、REST APIとダッシュボードが誰でも利用できる状態になります。
+Workerへ到達できる全員が、payloadを含むジョブの内容の閲覧、任意のジョブの投入、取り消しと再実行を行えます。
+:::
+
+Cloudflare Accessをルート全体へ適用している構成や、`wrangler dev`での確認のように、手前で認証している場合にのみ使用します。
+
+```ts
+import { defineTsumugi, unsafeNoAuth } from 'tsumugi';
+
+const tsumugi = defineTsumugi({
+  performers,
+  auth: unsafeNoAuth(),
+});
+```
+
+有効な間はisolate単位で警告がログへ出力されます。
+
+この構成では401が返らないため、`ui()`の`tokenCookie`は不要です。
+
+`auth`を省略した場合の動作は変わりません。無認証を許可するにはこれを明示的に指定する必要があります。
+
 ## ダッシュボード
 
 `tsumugi/ui`の`ui()`を`defineTsumugi`に渡すと有効になります。

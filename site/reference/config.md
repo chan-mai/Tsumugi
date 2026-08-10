@@ -25,7 +25,7 @@ const tsumugi = defineTsumugi({
 | `flows`      |      | Flow名と定義の対応。指定すると`RUN`のbindingが必要             |
 | `schedules`  |      | 定期実行の定義。指定すると`SCHEDULER`のbindingが必要           |
 | `runs`       |      | Runの上限と保持期間の設定                                      |
-| `bindings`   |      | binding単位の分割数、流量制御、保持期間                    |
+| `bindings`   |      | binding単位の分割数、流量制御、保持期間                        |
 | `auth`       |      | 認証ミドルウェア。未設定の場合はAPIもダッシュボードも無効      |
 | `ui`         |      | `tsumugi/ui`の`ui()`。未指定の場合はバンドルに含まれない       |
 | `retention`  |      | 一覧の保持設定                                                 |
@@ -50,6 +50,19 @@ const tsumugi = defineTsumugi({
 `flows`に無いFlow名を`start`へ渡した場合と、`RUN`のbindingが無い状態で`runFor`を呼び出した場合は例外が発生します。
 
 投入の3経路の違いは[ジョブの投入](/guide/enqueue#paths)を参照してください。
+
+## auth
+
+同梱の認証は3つです。任意のHonoミドルウェアも指定できます。
+
+| 関数               | 内容                             |
+| ------------------ | -------------------------------- |
+| `bearerAuth`       | トークン1つでの認証              |
+| `cloudflareAccess` | Cloudflare AccessのJWTを検証する |
+| `unsafeNoAuth`     | 認証を行わず開放する             |
+
+未設定の場合はREST APIもダッシュボードも無効で、`fetch`はすべて404を返します。
+`unsafeNoAuth`を指定した場合の影響は[ダッシュボードと認証](/guide/dashboard#unsafe-no-auth)を参照してください。
 
 ## metrics
 
@@ -103,7 +116,7 @@ const tsumugi = defineTsumugi({
 | 名前                | 既定 | 内容                                                        |
 | ------------------- | ---- | ----------------------------------------------------------- |
 | `shards`            | `1`  | 分割数。2以上にすると`partitionKey`が必須になる             |
-| `policy`            | 下記 | 流量制御とエージング                                    |
+| `policy`            | 下記 | 流量制御とエージング                                        |
 | `sweepAfterMs`      | 5分  | `COMPLETED`と`CANCELLED`を保持する時間                      |
 | `failedRetentionMs` | 7日  | `FAILED`と`STALLED`を保持する時間。リトライを受け付ける期間 |
 
