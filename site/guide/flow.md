@@ -131,10 +131,81 @@ const PIPELINE = flow<{ prefix: string }>((f) => {
 ノードは、自身と子孫のすべてが終わった時点で完了として扱われます
 `after`で親ノードを指定した後続のノードは、fan-outで展開された子ノードと`spawn`で追加された子孫の完了も待ちます
 
+## 発火条件 {#trigger}
+
+既定では、依存がすべて成功した場合にだけノードが実行されます
+`trigger`を指定すると、依存が失敗した場合の動作を変えられます
+
+| 値          | 実行される条件                                             |
+| ----------- | ---------------------------------------------------------- |
+| `'success'` | 依存がすべて成功。既定値です                               |
+| `'failure'` | 依存のうち1つ以上が`FAILED` `STALLED` `CANCELLED`のいずれか |
+| `'always'`  | 依存がすべて決着。成否は問いません                         |
+
+```ts
+const flows = {
+  BACKUP: flow<{ target: string }>((f) => {
+    const dump = f.node('dump', 'DUMP', { input: (i) => ({ target: i.target }) });
+
+    // 失敗したときだけ通る後始末
+    f.node('alert', 'ALERT', {
+      after: { dump },
+      trigger: 'failure',
+      input: (i) => ({ message: `backup failed: ${i.target}` }),
+    });
+
+    // 成否を問わず必ず通る
+    f.node('unlock', 'UNLOCK', { after: { dump }, trigger: 'always', input: (i) => ({ target: i.target }) });
+  }),
+};
+```
+
+`trigger`は依存を持つノードにのみ指定可能です。`after`が無いノードへの指定はエラーになります
+
+`'failure'`が数えるのは実際に失敗したノードだけです
+発火条件や`when`で実行されず`SKIPPED`になった依存は失敗として数えないため、後始末は通りません
+
+`'failure'`と`'always'`では、失敗した依存に戻り値がありません
+そのため受け取り口の型が`undefined`を含むようになり、値の欠落を扱う必要があります
+
+```ts
+f.node('alert', 'ALERT', {
+  after: { dump },
+  trigger: 'always',
+  // d.dumpはundefinedの可能性がある
+  input: (_i, d) => ({ size: d.dump?.size ?? 0 }),
+});
+```
+
+## 条件分岐 {#when}
+
+入力や前段の結果で経路を選ぶ場合は`when`を指定します
+`false`を返したノードは`SKIPPED`になり、それを待つ下流のノードも実行されません
+
+```ts
+f.node('detail', 'DETAIL', {
+  after: { list },
+  when: (i, d) => i.verbose && d.list.items.length > 0,
+  input: (_i, d) => ({ items: d.list.items }),
+});
+```
+
+`when`はRunの中で、ノードを起動する直前に評価されます
+`input`と同じくFlowの定義から呼ばれるため、外部への問い合わせではなく手元の値で判断してください
+
+`when`が例外を投げた場合、実行の可否が決まらないためノードは`FAILED`になります
+
 ## 失敗時の動作
 
-ノードが失敗した場合、その下流のノードのみが`SKIPPED`になります
+ノードが失敗した場合、それを`success`(既定)で待つ下流のノードが`SKIPPED`になります
+`trigger`に`'failure'`か`'always'`を指定した下流は実行されます
 依存関係のないノードは最後まで実行され、すべてのノードが終わった時点でRunが`FAILED`になります
+
+Runが`FAILED`になるのは、失敗したノードがある場合です
+発火条件や`when`で実行されなかっただけのノードは失敗として数えません
+`trigger: 'failure'`の後始末が成功しても、上流が失敗していればRunは`FAILED`のまま終わります
+
+`SKIPPED`になった理由はノードの`error`に残ります。ダッシュボードの詳細から確認できます
 
 `FAILED`のRunはダッシュボードとREST APIから再開可能です
 成功済みのノードの結果はそのまま使われ、それ以外のノードは未実行の状態に戻って改めて実行されます

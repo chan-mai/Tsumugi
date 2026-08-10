@@ -1,4 +1,4 @@
-import type { NodeJobOptions } from './flow.js';
+import type { NodeJobOptions, NodeTrigger } from './flow.js';
 import type { JobState } from './types.js';
 
 /**
@@ -35,6 +35,8 @@ export type NodeView = {
 	origin: NodeOrigin;
 	/** 静的な依存のノードID,実行時に増えたノードは持たない */
 	after: readonly string[];
+	/** 依存の成否に対する発火条件, 実行時に増えたノードは依存が無いので既定のまま(ADR-0041) */
+	trigger: NodeTrigger;
 };
 
 export type RunDecision =
@@ -46,8 +48,8 @@ export type RunDecision =
 	| { type: 'expand'; id: string }
 	/** fan-outノードの集約, 子孫が全て終端に達したので自身を終端へ進める */
 	| { type: 'aggregate'; id: string }
-	/** 上流が失敗したので実行しない */
-	| { type: 'skip'; id: string }
+	/** 発火条件を満たさないので実行しない, 理由はノードのerrorへ残す(ADR-0041) */
+	| { type: 'skip'; id: string; reason: string }
 	/** 取り消し,未起動はその場で終端に, SCHEDULEDはJob DOへ取り消しを送る */
 	| { type: 'cancel'; id: string };
 
@@ -84,6 +86,9 @@ export type NodeEvent = {
 };
 
 const TERMINAL: readonly NodeState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED', 'SKIPPED'];
+
+/** 実行しなかった理由, 画面から追えるようノードのerrorへ残す(ADR-0041) */
+const reasonOf = (trigger: NodeTrigger): string => (trigger === 'failure' ? 'no dependency failed' : 'a dependency did not succeed');
 
 export function isNodeTerminal(state: NodeState): boolean {
 	return TERMINAL.includes(state);
@@ -131,6 +136,17 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 		return value;
 	};
 
+	/**
+	 * 自身か子孫に失敗があるか(ADR-0041)
+	 * SKIPPEDは経路を選ばなかっただけなので数えない, 上流の失敗はその上流のノードに現れる
+	 * fanOutの子の失敗は要約で後段へ渡るので親の失敗にしない(ADR-0035)
+	 */
+	const failed = (node: NodeView): boolean =>
+		node.state === 'FAILED' ||
+		node.state === 'STALLED' ||
+		node.state === 'CANCELLED' ||
+		(children.get(node.id) ?? []).some((child) => child.origin !== 'fanOut' && failed(child));
+
 	// 期限超過も取り消しと同じ手を打つ, 未起動を止めて実行中の終端を待つ(ADR-0039)
 	const halting = cancelling || expired;
 
@@ -153,11 +169,18 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 
 		if (node.state === 'PENDING') {
 			const deps = node.after.map((id) => byId.get(id));
-			// 消えた依存は待っても解決しないので, 決着を待たずに打ち切る(ADR-0030)
+			// 消えた依存は成否が分からないので, どの発火条件でも打ち切る(ADR-0030)
 			const missing = deps.some((dep) => dep === undefined);
-			if (!missing && !deps.every((dep) => dep !== undefined && settled(dep))) continue;
-			const ready = !missing && deps.every((dep) => dep !== undefined && succeeded(dep));
-			if (!ready) decisions.push({ type: 'skip', id: node.id });
+			if (missing) {
+				decisions.push({ type: 'skip', id: node.id, reason: 'a dependency is missing from the flow' });
+				continue;
+			}
+			const settledDeps = deps.filter((dep) => dep !== undefined);
+			if (!settledDeps.every(settled)) continue;
+
+			// failureは1つ以上の失敗を求める, SKIPPEDは経路を選ばなかっただけなので後始末は要らない(ADR-0041)
+			const ready = node.trigger === 'always' ? true : node.trigger === 'failure' ? settledDeps.some(failed) : settledDeps.every(succeeded);
+			if (!ready) decisions.push({ type: 'skip', id: node.id, reason: reasonOf(node.trigger) });
 			else if (node.container) decisions.push({ type: 'expand', id: node.id });
 			else decisions.push({ type: node.subflow ? 'startRun' : 'start', id: node.id });
 		}
@@ -168,15 +191,7 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 	const done = roots.every(settled);
 	// 取り消しを優先する, 期限超過は残りが全て成功していてもFAILED
 	// fan-outの子の失敗は非致命(ADR-0035)なので, ノードの状態からは期限による打ち切りを区別できない(ADR-0039)
-	const state: RunState = !done
-		? 'RUNNING'
-		: cancelling
-			? 'CANCELLED'
-			: expired
-				? 'FAILED'
-				: roots.every(succeeded)
-					? 'COMPLETED'
-					: 'FAILED';
+	const state: RunState = !done ? 'RUNNING' : cancelling ? 'CANCELLED' : expired ? 'FAILED' : roots.some(failed) ? 'FAILED' : 'COMPLETED';
 
 	return { decisions, state };
 }

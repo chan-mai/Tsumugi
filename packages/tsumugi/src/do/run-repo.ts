@@ -1,6 +1,7 @@
 import { asc, eq, getTableColumns, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
+import type { NodeTrigger } from '../core/flow.js';
 import { applyRunSchema, type NodeRow, type RunRow } from './run-schema.js';
 import { node, run, runOutbox } from './run-tables.js';
 
@@ -28,6 +29,8 @@ export type NewNode = {
 	parent: string | null;
 	origin: NodeOrigin;
 	after: readonly string[];
+	/** 依存の成否に対する発火条件, 実行時に増えたノードは指定しない(ADR-0041) */
+	trigger?: NodeTrigger;
 	seq: number;
 	/** subflowノードのみ, 起動する子のflow名 */
 	subflow?: string;
@@ -181,6 +184,7 @@ export class RunRepo {
 					parent: n.parent,
 					origin: n.origin,
 					after: JSON.stringify(n.after),
+					trigger: n.trigger ?? 'success',
 					payload: n.payload ?? null,
 					options: n.options ?? null,
 					subflow: n.subflow ?? null,
@@ -212,6 +216,7 @@ export class RunRepo {
 				parent: node.parent,
 				origin: node.origin,
 				after: node.after,
+				trigger: node.trigger,
 			})
 			.from(node)
 			.orderBy(asc(node.seq), asc(node.id))
@@ -224,6 +229,7 @@ export class RunRepo {
 			parent: row.parent,
 			origin: row.origin as NodeOrigin,
 			after: JSON.parse(row.after) as string[],
+			trigger: row.trigger as NodeTrigger,
 		}));
 	}
 
@@ -428,6 +434,7 @@ export class RunRepo {
 			parent: row.parent,
 			origin: row.origin,
 			after: row.after,
+			trigger: row.trigger,
 			payload: row.payload,
 			options: row.options,
 			subflow: row.subflow,

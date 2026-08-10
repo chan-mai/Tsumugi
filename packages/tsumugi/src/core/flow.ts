@@ -34,6 +34,20 @@ type Refs = Record<string, NodeRef<any>>;
 /** `after`のキーをそのまま受け取り口の名前にする */
 type DepsOf<A extends Refs> = { [K in keyof A]: A[K] extends NodeRef<infer R> ? R : never };
 
+/**
+ * 依存が成功していない場合も進む指定では戻り値が無い依存を受ける(ADR-0041)
+ * 失敗したノードには戻り値が無いので, 受け取り口を未定義込みで見せる
+ */
+type PartialDepsOf<A extends Refs> = { [K in keyof A]: DepsOf<A>[K] | undefined };
+
+/**
+ * 依存の成否に対する発火条件(ADR-0041)
+ * successは全ての依存の成功, failureは1つ以上の失敗, alwaysは成否を問わない決着
+ */
+export type NodeTrigger = 'success' | 'failure' | 'always';
+
+export const NODE_TRIGGERS: readonly NodeTrigger[] = ['success', 'failure', 'always'];
+
 /** uniqueKeyを必須と宣言したperformerはノードに使えない(ADR-0033) */
 type NodeBindings<M extends Performers> = { [K in keyof M]: ReqOf<M[K]>['uniqueKey'] extends true ? never : K }[keyof M];
 
@@ -65,25 +79,42 @@ export function assertDeadlineMs(value: number): void {
 	}
 }
 
-export type NodeOptions<M extends Performers, K extends keyof M, Input, A extends Refs> = NodeJobOptions & {
-	after?: A;
-	input: (input: Input, deps: DepsOf<A>) => PayloadOf<M[K]>;
-} & ConcurrencyKeyOption<ReqOf<M[K]>, (input: Input, deps: DepsOf<A>) => string>;
+/**
+ * 発火条件ごとに受け取り口の型を分ける(ADR-0041)
+ * successの指定でだけ依存の戻り値が揃うので, 写像関数の引数を判別可能ユニオンで切り替える
+ * `when`はfalseを返すとSKIPPEDになり, 下流も依存が成功していないので進まない
+ */
+type NodeShape<M extends Performers, K extends keyof M, Input, Deps> = NodeJobOptions & {
+	input: (input: Input, deps: Deps) => PayloadOf<M[K]>;
+	when?: (input: Input, deps: Deps) => boolean;
+} & ConcurrencyKeyOption<ReqOf<M[K]>, (input: Input, deps: Deps) => string>;
 
-export type FanOutOptions<M extends Performers, K extends keyof M, Input, A extends Refs, Item> = NodeJobOptions & {
-	after?: A;
+export type NodeOptions<M extends Performers, K extends keyof M, Input, A extends Refs> =
+	| (NodeShape<M, K, Input, DepsOf<A>> & { after?: A; trigger?: 'success' })
+	| (NodeShape<M, K, Input, PartialDepsOf<A>> & { after?: A; trigger: 'failure' | 'always' });
+
+type FanOutShape<M extends Performers, K extends keyof M, Input, Item, Deps> = NodeJobOptions & {
 	/** 展開する対象,件数だけが実行時に決まる */
-	over: (input: Input, deps: DepsOf<A>) => readonly Item[];
+	over: (input: Input, deps: Deps) => readonly Item[];
 	input: (item: Item, input: Input, index: number) => PayloadOf<M[K]>;
 	/** 子ノードIDの決め方,既定は項番(ADR-0032) */
 	key?: (item: Item, index: number) => string;
+	when?: (input: Input, deps: Deps) => boolean;
 } & ConcurrencyKeyOption<ReqOf<M[K]>, (item: Item, index: number) => string>;
 
-/** 子のrunへ渡す入力を組み立てる, 戻り値の型は子のflowの入力に一致させる */
-export type SubflowOptions<Input, A extends Refs, ChildInput> = {
-	after?: A;
-	input: (input: Input, deps: DepsOf<A>) => ChildInput;
+export type FanOutOptions<M extends Performers, K extends keyof M, Input, A extends Refs, Item> =
+	| (FanOutShape<M, K, Input, Item, DepsOf<A>> & { after?: A; trigger?: 'success' })
+	| (FanOutShape<M, K, Input, Item, PartialDepsOf<A>> & { after?: A; trigger: 'failure' | 'always' });
+
+type SubflowShape<Input, ChildInput, Deps> = {
+	input: (input: Input, deps: Deps) => ChildInput;
+	when?: (input: Input, deps: Deps) => boolean;
 };
+
+/** 子のrunへ渡す入力を組み立てる, 戻り値の型は子のflowの入力に一致させる */
+export type SubflowOptions<Input, A extends Refs, ChildInput> =
+	| (SubflowShape<Input, ChildInput, DepsOf<A>> & { after?: A; trigger?: 'success' })
+	| (SubflowShape<Input, ChildInput, PartialDepsOf<A>> & { after?: A; trigger: 'failure' | 'always' });
 
 export type FlowBuilder<M extends Performers, Input> = {
 	node<K extends NodeBindings<M>, const A extends Refs = {}>(
@@ -113,6 +144,7 @@ export type OverFn = (input: unknown, deps: Record<string, unknown>) => readonly
 export type ItemFn = (item: unknown, input: unknown, index: number) => unknown;
 export type ChildKeyFn = (item: unknown, index: number) => string;
 export type ConcurrencyKeyFn = (input: unknown, deps: Record<string, unknown>) => string;
+export type WhenFn = (input: unknown, deps: Record<string, unknown>) => boolean;
 
 /** 組み立て済みのノード,関数はここにしか無い */
 export type FlowNode = {
@@ -122,8 +154,12 @@ export type FlowNode = {
 	container: boolean;
 	/** 受け取り口の名前から依存先のノードIDへ */
 	after: Readonly<Record<string, string>>;
+	/** 依存の成否に対する発火条件(ADR-0041) */
+	trigger: NodeTrigger;
 	job: NodeJobOptions;
 	input: InputFn;
+	/** 実行するかの判定, 省略時は常に実行する(ADR-0041) */
+	when?: WhenFn;
 	concurrencyKey?: string | ConcurrencyKeyFn;
 	/** fan-outノードのみ */
 	over?: OverFn;
@@ -154,7 +190,15 @@ export type Flows = Record<string, AnyFlow>;
 export type InputOf<F> = F extends Flow<infer I> ? I : never;
 
 /** Run DOへ保存するグラフの形(ADR-0030),関数は含まない */
-export type FlowShapeNode = { id: string; binding: string; container: boolean; after: readonly string[]; subflow?: string };
+export type FlowShapeNode = {
+	id: string;
+	binding: string;
+	container: boolean;
+	after: readonly string[];
+	/** 依存の成否に対する発火条件, 進行判断が毎tick読む(ADR-0041) */
+	trigger: NodeTrigger;
+	subflow?: string;
+};
 export type FlowShape = readonly FlowShapeNode[];
 
 /**
@@ -168,6 +212,7 @@ export function shapeOf(flow: AnyFlow, nameOf?: (child: AnyFlow) => string | und
 		container: node.container,
 		// 同じ依存先を複数の受け取り口で受けた場合に重複するので畳む, 依存の数を数える側がずれる
 		after: [...new Set(Object.values(node.after))],
+		trigger: node.trigger,
 		...(node.subflow ? { subflow: subflowNameOf(node.id, nameOf?.(node.subflow)) } : {}),
 	}));
 }
@@ -186,6 +231,12 @@ export function assertNodeId(id: string): void {
 
 const refIds = (after: Refs | undefined): Record<string, string> =>
 	Object.fromEntries(Object.entries(after ?? {}).map(([name, ref]) => [name, ref.id]));
+
+/** 発火条件と判定を取り出す, 3種のノードで同じ形(ADR-0041) */
+const gateOf = (options: Record<string, any>): { trigger: NodeTrigger; when?: WhenFn } => ({
+	trigger: (options.trigger as NodeTrigger | undefined) ?? 'success',
+	...(options.when !== undefined ? { when: options.when as WhenFn } : {}),
+});
 
 const jobOptionsOf = (options: NodeJobOptions): NodeJobOptions => ({
 	...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
@@ -211,6 +262,13 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 
 		const register = (node: FlowNode): NodeRef<any> => {
 			assertNodeId(node.id);
+			if (!NODE_TRIGGERS.includes(node.trigger)) {
+				throw new InvalidFlowError(`invalid trigger: ${node.id} -> ${JSON.stringify(node.trigger)}`);
+			}
+			// 依存が無ければ成否を問う相手がいない, 書けてしまうと意図が伝わらないので弾く
+			if (node.trigger !== 'success' && Object.keys(node.after).length === 0) {
+				throw new InvalidFlowError(`trigger requires at least one dependency: ${node.id}`);
+			}
 			if (seen.has(node.id)) throw new InvalidFlowError(`duplicate node id: ${node.id}`);
 			seen.add(node.id);
 			// 宣言済みのノードしか変数で参照できないので,循環は構文的に起きない
@@ -228,6 +286,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 					binding,
 					container: false,
 					after: refIds(options.after as Refs | undefined),
+					...gateOf(options),
 					job: jobOptionsOf(options as NodeJobOptions),
 					input: options.input as InputFn,
 					...(options.concurrencyKey !== undefined ? { concurrencyKey: options.concurrencyKey as string | ConcurrencyKeyFn } : {}),
@@ -240,6 +299,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 					binding: '',
 					container: false,
 					after: refIds(options.after as Refs | undefined),
+					...gateOf(options),
 					job: {},
 					input: options.input as InputFn,
 					subflow: child,
@@ -251,6 +311,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 					binding,
 					container: true,
 					after: refIds(options.after as Refs | undefined),
+					...gateOf(options),
 					job: jobOptionsOf(options as NodeJobOptions),
 					// fan-outノードはジョブを実行しないのでpayloadを組み立てない
 					input: () => undefined,

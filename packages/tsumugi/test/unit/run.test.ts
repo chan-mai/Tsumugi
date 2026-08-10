@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { NodeTrigger } from '../../src/core/flow.js';
 import { advance, type NodeState, type NodeView } from '../../src/core/run.js';
 
 type NodeSpec = {
@@ -9,6 +10,7 @@ type NodeSpec = {
 	origin?: NodeView['origin'];
 	container?: boolean;
 	subflow?: boolean;
+	trigger?: NodeTrigger;
 };
 
 const node = (n: NodeSpec): NodeView => ({
@@ -19,6 +21,7 @@ const node = (n: NodeSpec): NodeView => ({
 	parent: n.parent ?? null,
 	origin: n.origin ?? 'static',
 	after: n.after ?? [],
+	trigger: n.trigger ?? 'success',
 });
 
 const ids = (nodes: NodeView[], type: string) =>
@@ -50,7 +53,7 @@ describe('runの進行判断', () => {
 		];
 		const output = advance({ nodes, cancelling: false });
 		expect(output.decisions).toEqual([
-			{ type: 'skip', id: 'b' },
+			{ type: 'skip', id: 'b', reason: 'a dependency did not succeed' },
 			{ type: 'start', id: 'x' },
 		]);
 	});
@@ -147,12 +150,16 @@ describe('runの進行判断', () => {
 	it('依存が消えていれば待たずに打ち切る(ADR-0030)', () => {
 		// 定義から消えたノードは決着しないので, 待つと永久にRUNNINGのまま残る
 		const nodes = [node({ id: 'b', state: 'PENDING', after: ['gone'] })];
-		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b' }]);
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
+			{ type: 'skip', id: 'b', reason: 'a dependency is missing from the flow' },
+		]);
 	});
 
 	it('依存の一部が消えていても残りの決着を待たない', () => {
 		const nodes = [node({ id: 'a', state: 'RUNNING' }), node({ id: 'b', state: 'PENDING', after: ['a', 'gone'] })];
-		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b' }]);
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
+			{ type: 'skip', id: 'b', reason: 'a dependency is missing from the flow' },
+		]);
 	});
 });
 
@@ -185,6 +192,97 @@ describe('runの状態', () => {
 
 	it('取り消しは全て終端になった時点でCANCELLED', () => {
 		expect(stateOf([node({ id: 'a', state: 'CANCELLED' })], true)).toBe('CANCELLED');
+	});
+});
+
+describe('発火条件(ADR-0041)', () => {
+	it('successは依存が全て成功した場合だけ起動する', () => {
+		const ok = [node({ id: 'a', state: 'COMPLETED' }), node({ id: 'b', state: 'PENDING', after: ['a'] })];
+		expect(ids(ok, 'start')).toEqual(['b']);
+
+		const ng = [node({ id: 'a', state: 'FAILED' }), node({ id: 'b', state: 'PENDING', after: ['a'] })];
+		expect(ids(ng, 'start')).toEqual([]);
+	});
+
+	it('failureは依存が失敗した場合だけ起動する', () => {
+		const failed = [node({ id: 'a', state: 'FAILED' }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
+		expect(ids(failed, 'start')).toEqual(['b']);
+
+		// 全て成功したなら後始末は要らない
+		const ok = [node({ id: 'a', state: 'COMPLETED' }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
+		expect(advance({ nodes: ok, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b', reason: 'no dependency failed' }]);
+	});
+
+	it('failureはSKIPPEDの依存では起動しない', () => {
+		// 経路を選ばなかっただけのノードは失敗ではない, 後始末を走らせる理由がない(ADR-0041)
+		const nodes = [node({ id: 'a', state: 'SKIPPED' }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b', reason: 'no dependency failed' }]);
+	});
+
+	it('failureはSTALLEDとCANCELLEDでも起動する', () => {
+		for (const state of ['STALLED', 'CANCELLED'] as const) {
+			const nodes = [node({ id: 'a', state }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
+			expect(ids(nodes, 'start')).toEqual(['b']);
+		}
+	});
+
+	it('failureは子孫の失敗も数える', () => {
+		const nodes = [
+			node({ id: 'a', state: 'COMPLETED' }),
+			node({ id: 'a:1', state: 'FAILED', parent: 'a', origin: 'spawn' }),
+			node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' }),
+		];
+		expect(ids(nodes, 'start')).toEqual(['b']);
+	});
+
+	it('failureは依存の1つでも失敗すれば起動する', () => {
+		const nodes = [
+			node({ id: 'a', state: 'COMPLETED' }),
+			node({ id: 'b', state: 'FAILED' }),
+			node({ id: 'c', state: 'PENDING', after: ['a', 'b'], trigger: 'failure' }),
+		];
+		expect(ids(nodes, 'start')).toEqual(['c']);
+	});
+
+	it('alwaysは成否を問わず起動する', () => {
+		for (const state of ['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED'] as const) {
+			const nodes = [node({ id: 'a', state }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'always' })];
+			expect(ids(nodes, 'start')).toEqual(['b']);
+		}
+	});
+
+	it('決着していない依存はどの条件でも待つ', () => {
+		for (const trigger of ['success', 'failure', 'always'] as const) {
+			const nodes = [node({ id: 'a', state: 'RUNNING' }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger })];
+			expect(advance({ nodes, cancelling: false }).decisions).toEqual([]);
+		}
+	});
+
+	it('消えた依存はalwaysでも打ち切る', () => {
+		// 成否が分からないので待っても解決しない(ADR-0030)
+		const nodes = [node({ id: 'b', state: 'PENDING', after: ['gone'], trigger: 'always' })];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
+			{ type: 'skip', id: 'b', reason: 'a dependency is missing from the flow' },
+		]);
+	});
+
+	it('後始末が成功してもrunはFAILEDのまま', () => {
+		const nodes = [node({ id: 'a', state: 'FAILED' }), node({ id: 'cleanup', state: 'COMPLETED', after: ['a'], trigger: 'failure' })];
+		expect(advance({ nodes, cancelling: false }).state).toBe('FAILED');
+	});
+
+	it('fan-outノードとsubflowノードにも効く', () => {
+		const container = [
+			node({ id: 'a', state: 'FAILED' }),
+			node({ id: 'each', state: 'PENDING', after: ['a'], container: true, trigger: 'always' }),
+		];
+		expect(ids(container, 'expand')).toEqual(['each']);
+
+		const child = [
+			node({ id: 'a', state: 'FAILED' }),
+			node({ id: 'sub', state: 'PENDING', after: ['a'], subflow: true, trigger: 'failure' }),
+		];
+		expect(ids(child, 'startRun')).toEqual(['sub']);
 	});
 });
 
@@ -250,7 +348,9 @@ describe('subflowノード', () => {
 
 	it('子が失敗すると下流を打ち切る', () => {
 		const nodes = [node({ id: 'child', state: 'FAILED', subflow: true }), node({ id: 'after', state: 'PENDING', after: ['child'] })];
-		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'after' }]);
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
+			{ type: 'skip', id: 'after', reason: 'a dependency did not succeed' },
+		]);
 	});
 
 	it('取り消し中は実行中の子も止める', () => {
