@@ -156,16 +156,39 @@ describe('REST API', () => {
 			'guarantee',
 			'id',
 			'max_attempts',
+			'node_id',
 			'payload',
 			'priority',
 			'progress',
 			'result',
 			'retryable',
 			'run_after',
+			'run_id',
 			'state',
 			'unique_key',
 			'updated_at',
 		]);
+	});
+
+	it('runから投入したジョブは詳細で宛先を返す(ADR-0015)', async () => {
+		// 画面はここからrunの詳細へ辿る, 単発で投入したジョブはnullのまま
+		const runId = 'REST:link';
+		await env.TSUMUGI_DB.prepare(
+			`INSERT INTO job (id, binding, state, priority, attempts, max_attempts, guarantee, payload, created_at, updated_at, seq, run_id, node_id)
+			 VALUES (?, 'REST', 'COMPLETED', 0, 1, 3, 'at-least-once', '{}', 1, 1, 9001, ?, 'list')`,
+		)
+			.bind('REST#0:linked', runId)
+			.run();
+
+		const res = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent('REST#0:linked')}`, authorized);
+		const { job } = await res.json<{ job: { run_id: string | null; node_id: string | null } }>();
+		expect(job.run_id).toBe(runId);
+		expect(job.node_id).toBe('list');
+
+		const single = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent(await seedJob())}`, authorized);
+		const { job: plain } = await single.json<{ job: { run_id: string | null; node_id: string | null } }>();
+		expect(plain.run_id).toBeNull();
+		expect(plain.node_id).toBeNull();
 	});
 
 	it('statsが最古のSCHEDULEDの経過時間を返す(#10)', async () => {
