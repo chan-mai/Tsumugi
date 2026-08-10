@@ -87,9 +87,18 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 
 			// 判定がfalseなら実行しない, 下流は依存が成功していないので進まない(ADR-0041)
 			if ((decision.type === 'start' || decision.type === 'expand') && definition?.when) {
-				if (!definition.when(input, depsOf(definition))) {
-					const binding = children.get(view.id)?.binding ?? definition.binding;
-					settle(view, { id: view.id, binding, payload: undefined, parent: view.parent }, 'SKIPPED', undefined);
+				const binding = children.get(view.id)?.binding ?? definition.binding;
+				const base = { id: view.id, binding, payload: undefined, parent: view.parent };
+				let passed: boolean;
+				try {
+					passed = definition.when(input, depsOf(definition));
+				} catch {
+					// 判定自体の失敗は実行の可否が決まらない, Run DOと同じくFAILEDにする
+					settle(view, base, 'FAILED', undefined);
+					continue;
+				}
+				if (!passed) {
+					settle(view, base, 'SKIPPED', undefined);
 					continue;
 				}
 			}

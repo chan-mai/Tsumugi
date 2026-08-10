@@ -213,6 +213,28 @@ describe('発火条件(ADR-0041)', () => {
 		expect(advance({ nodes: ok, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b', reason: 'no dependency failed' }]);
 	});
 
+	it('failureはSKIPPEDの依存では起動しない', () => {
+		// 経路を選ばなかっただけのノードは失敗ではない, 後始末を走らせる理由がない(ADR-0041)
+		const nodes = [node({ id: 'a', state: 'SKIPPED' }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b', reason: 'no dependency failed' }]);
+	});
+
+	it('failureはSTALLEDとCANCELLEDでも起動する', () => {
+		for (const state of ['STALLED', 'CANCELLED'] as const) {
+			const nodes = [node({ id: 'a', state }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
+			expect(ids(nodes, 'start')).toEqual(['b']);
+		}
+	});
+
+	it('failureは子孫の失敗も数える', () => {
+		const nodes = [
+			node({ id: 'a', state: 'COMPLETED' }),
+			node({ id: 'a:1', state: 'FAILED', parent: 'a', origin: 'spawn' }),
+			node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' }),
+		];
+		expect(ids(nodes, 'start')).toEqual(['b']);
+	});
+
 	it('failureは依存の1つでも失敗すれば起動する', () => {
 		const nodes = [
 			node({ id: 'a', state: 'COMPLETED' }),

@@ -144,6 +144,40 @@ describe('flowの通し実行', () => {
 		expect(stateOf(small, 'light')).toBe('COMPLETED');
 	});
 
+	it('whenの例外はノードをFAILEDにする(ADR-0041)', () => {
+		const broken = flow<void>((f) => {
+			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
+			f.node('boom', 'REPORT', {
+				after: { list },
+				when: () => {
+					throw new Error('cannot decide');
+				},
+				input: () => ({ total: 0, failed: 0 }),
+			});
+			// 失敗しても後始末は通る
+			f.node('always', 'REPORT', { after: { list }, trigger: 'always', input: () => ({ total: 0, failed: 0 }) });
+		});
+
+		const result = simulateFlow(broken, undefined, { results: { list: { names: [] } } });
+		expect(stateOf(result, 'boom')).toBe('FAILED');
+		expect(stateOf(result, 'always')).toBe('COMPLETED');
+		expect(result.state).toBe('FAILED');
+	});
+
+	it('SKIPPEDの依存では後始末が通らない(ADR-0041)', () => {
+		const branched = flow<void>((f) => {
+			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
+			const gated = f.node('gated', 'REPORT', { after: { list }, when: () => false, input: () => ({ total: 0, failed: 0 }) });
+			f.node('cleanup', 'REPORT', { after: { gated }, trigger: 'failure', input: () => ({ total: 0, failed: 1 }) });
+		});
+
+		const result = simulateFlow(branched, undefined, { results: { list: { names: [] } } });
+		expect(stateOf(result, 'gated')).toBe('SKIPPED');
+		// 経路を選ばなかっただけなので後始末は要らない
+		expect(stateOf(result, 'cleanup')).toBe('SKIPPED');
+		expect(result.state).toBe('COMPLETED');
+	});
+
 	it('子ノードIDの決め方をkeyで変えられる', () => {
 		const keyed = flow<void>((f) => {
 			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });

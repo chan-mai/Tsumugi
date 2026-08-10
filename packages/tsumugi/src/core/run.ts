@@ -136,6 +136,17 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 		return value;
 	};
 
+	/**
+	 * 自身か子孫に失敗があるか(ADR-0041)
+	 * SKIPPEDは経路を選ばなかっただけなので数えない, 上流の失敗はその上流のノードに現れる
+	 * fanOutの子の失敗は要約で後段へ渡るので親の失敗にしない(ADR-0035)
+	 */
+	const failed = (node: NodeView): boolean =>
+		node.state === 'FAILED' ||
+		node.state === 'STALLED' ||
+		node.state === 'CANCELLED' ||
+		(children.get(node.id) ?? []).some((child) => child.origin !== 'fanOut' && failed(child));
+
 	// 期限超過も取り消しと同じ手を打つ, 未起動を止めて実行中の終端を待つ(ADR-0039)
 	const halting = cancelling || expired;
 
@@ -167,25 +178,13 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 			const settledDeps = deps.filter((dep) => dep !== undefined);
 			if (!settledDeps.every(settled)) continue;
 
-			const succeededAll = settledDeps.every(succeeded);
-			// failureは1つ以上の失敗を求める, 依存が全て成功したなら後始末は要らない(ADR-0041)
-			const ready = node.trigger === 'always' || (node.trigger === 'failure' ? !succeededAll : succeededAll);
+			// failureは1つ以上の失敗を求める, SKIPPEDは経路を選ばなかっただけなので後始末は要らない(ADR-0041)
+			const ready = node.trigger === 'always' ? true : node.trigger === 'failure' ? settledDeps.some(failed) : settledDeps.every(succeeded);
 			if (!ready) decisions.push({ type: 'skip', id: node.id, reason: reasonOf(node.trigger) });
 			else if (node.container) decisions.push({ type: 'expand', id: node.id });
 			else decisions.push({ type: node.subflow ? 'startRun' : 'start', id: node.id });
 		}
 	}
-
-	/**
-	 * 自身か子孫に失敗があるか(ADR-0041)
-	 * SKIPPEDは経路を選ばなかっただけなので数えない, 上流の失敗はその上流のノードに現れる
-	 * fanOutの子の失敗は要約で後段へ渡るので親の失敗にしない(ADR-0035)
-	 */
-	const failed = (node: NodeView): boolean =>
-		node.state === 'FAILED' ||
-		node.state === 'STALLED' ||
-		node.state === 'CANCELLED' ||
-		(children.get(node.id) ?? []).some((child) => child.origin !== 'fanOut' && failed(child));
 
 	const roots = nodes.filter((node) => node.parent === null);
 	// 全ノードは必ずいずれかの根に連なるので,根の決着で全体の決着が分かる
