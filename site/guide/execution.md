@@ -101,6 +101,8 @@ const tsumugi = defineTsumugi({
 ダッシュボードの`bindings`タブから、変更デプロイなしに同時実行数の変更と投入の一時停止が可能です。変更はすべてのshardへ適用されます。
 また、同様の操作を[POST /api/bindings/:binding/policy](/reference/rest-api#post-api-bindings-binding-policy)からも行えます。
 
+![bindingsタブ](/dashboard-bindings.jpg)
+
 ```bash
 curl -X POST -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"paused": true}' https://example.com/api/bindings/MAIL/policy
