@@ -130,6 +130,8 @@ export type RunOptions = {
 	flows: Flows;
 	bindings: Record<string, BindingConfig>;
 	settings?: RunSettings;
+	/** 失敗を知らせる先のbinding(#30), ノードとして投入するジョブにも同じ宛先が要る */
+	failureBinding?: string;
 };
 
 /**
@@ -138,7 +140,7 @@ export type RunOptions = {
  * 進行の判断は`core/run.ts`の純粋関数に委ね,ここはSQLiteとの橋渡しに徹する(ADR-0018)
  * flow定義は写像関数を含むのでDOには保存できず,クロージャで受けたコードから引く(ADR-0030)
  */
-export function createRunClass({ flows, bindings, settings = {} }: RunOptions): RunClass {
+export function createRunClass({ flows, bindings, settings = {}, failureBinding }: RunOptions): RunClass {
 	const maxNodes = settings.maxNodes ?? DEFAULT_MAX_NODES;
 	const maxDepth = settings.maxDepth ?? DEFAULT_MAX_DEPTH;
 	// flow定義から名前を引く, subflowノードは定義そのものを持つのでここで名前へ落とす
@@ -147,7 +149,7 @@ export function createRunClass({ flows, bindings, settings = {} }: RunOptions): 
 		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
 		failedMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 	};
-	const client = createClient<RunEnv>(bindings);
+	const client = createClient<RunEnv>(bindings, failureBinding ? { failureBinding } : {});
 
 	return class TsumugiRun extends DurableObject<RunEnv> {
 		/** テストから差し替えるためpublicにしている */

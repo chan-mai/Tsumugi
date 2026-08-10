@@ -7,7 +7,7 @@ import { createRunClass, type RunClass, type RunSettings, type StartResult } fro
 import { createSchedulerClass, SCHEDULER_DO_NAME, type SchedulerClass, type ScheduleView } from './do/scheduler.js';
 import type { AnySchedules, ScheduleDefs } from './core/recurring.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry, type PerformerSource } from './queue/consumer.js';
-import type { EnvOf, JobQueue, Performers, PerformersOf, TypedEnqueueInput } from './core/api.js';
+import type { EnvOf, FailurePerformer, JobQueue, Performers, PerformersOf, TypedEnqueueInput } from './core/api.js';
 import type { Flows, InputOf } from './core/flow.js';
 import type { AuthMiddleware } from './api/auth.js';
 import { createRest, type RestEnv } from './api/rest.js';
@@ -63,6 +63,12 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	 * 指定した場合のみRun DOのエクスポートとbindingが必要, 未指定なら設定の変更は不要
 	 */
 	flows?: Flows;
+	/**
+	 * 失敗したジョブを知らせる先のbinding(#30)
+	 * FAILEDとSTALLEDに達したジョブが`FailureNotice`をpayloadとして届く
+	 * 通知そのものの失敗は通知しない, 自分を呼び続ける循環になる
+	 */
+	onFailure?: string;
 	/**
 	 * 定期実行の定義(ADR-0040)
 	 * 指定した場合のみScheduler DOのエクスポートとbindingが必要
@@ -144,13 +150,16 @@ export async function enqueueMany<Env extends ConsumerEnv>(env: Env, inputs: rea
  */
 export function defineTsumugi<const R extends PerformerRegistry<any>, const F extends Flows = {}>(
 	// schedulesはR/Fの型を参照するのでOmit経由にできない, NoInferで推論源にはしない
-	config: { performers: R; flows?: F; schedules?: ScheduleDefs<NoInfer<PerformersOf<R>>, NoInfer<F>> } & Omit<
-		TsumugiConfig<any>,
-		'performers' | 'flows' | 'schedules'
-	>,
+	config: {
+		performers: R;
+		flows?: F;
+		schedules?: ScheduleDefs<NoInfer<PerformersOf<R>>, NoInfer<F>>;
+		onFailure?: FailurePerformer<NoInfer<PerformersOf<R>>>;
+	} & Omit<TsumugiConfig<any>, 'performers' | 'flows' | 'schedules' | 'onFailure'>,
 ): Tsumugi<EnvOf<R>, PerformersOf<R>, F> {
 	type Env = ConsumerEnv & RestEnv & RunNamespaceEnv & SchedulerNamespaceEnv;
-	const client = createClient<Env>(config.bindings ?? {});
+	// 失敗の通知先は投入のたびにDOへ届ける, bindingを問わず同じ値になる(#30)
+	const client = createClient<Env>(config.bindings ?? {}, config.onFailure ? { failureBinding: config.onFailure } : {});
 	// 公開の型はperformersから推論する, 実行時はEnvを問わないので内部でだけ緩める
 	const performers = config.performers as unknown as PerformerRegistry<Env>;
 	const flows: Flows = config.flows ?? {};
@@ -170,6 +179,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		schedules,
 		bindings: config.bindings ?? {},
 		targets: { bindings: Object.keys(performers), flows: Object.keys(flows) },
+		...(config.onFailure ? { failureBinding: config.onFailure } : {}),
 	});
 
 	// Workersに起動フックが無いので, 最初の呼び出しを起動とみなして検証する(ADR-0036)
@@ -304,7 +314,12 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		start,
 		runFor,
 		// flow定義を参照するクラスをここで作る, パッケージから直接エクスポートできない理由(ADR-0030)
-		runClass: createRunClass({ flows, bindings: config.bindings ?? {}, ...(config.runs ? { settings: config.runs } : {}) }),
+		runClass: createRunClass({
+			flows,
+			bindings: config.bindings ?? {},
+			...(config.runs ? { settings: config.runs } : {}),
+			...(config.onFailure ? { failureBinding: config.onFailure } : {}),
+		}),
 		// schedule定義を参照するクラス, 同上(ADR-0040)
 		schedulerClass,
 	};

@@ -60,6 +60,8 @@ const flows = {
 const tsumugi = defineTsumugi({
 	performers,
 	flows,
+	// 失敗したジョブの知らせ先(#30), FailureNoticeを受け取れるperformerだけ指定できる
+	onFailure: 'NotifyFailure',
 	// 定期実行, binding名とflow名からpayloadとinputの型が決まる(ADR-0040)
 	schedules: {
 		// 固定間隔, 前回が終わっていなければ飛ばす

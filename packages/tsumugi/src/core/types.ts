@@ -48,6 +48,25 @@ export type Policy = {
 	reaperGraceMs: number;
 };
 
+/**
+ * 失敗したジョブの知らせ(#30)
+ * 通知先のperformerが受け取るpayload, ジョブの明細は読み取りモデルから引ける
+ */
+export type FailureNotice = {
+	jobId: string;
+	binding: string;
+	/** FAILEDかSTALLED, 再試行で回復する途中の失敗は届かない */
+	state: 'FAILED' | 'STALLED';
+	attempts: number;
+	maxAttempts: number;
+	/** 最後の試行の理由, 記録が無ければnull */
+	error: string | null;
+	/** 投入元のrun, 単発で投入したジョブはnull */
+	runId: string | null;
+	nodeId: string | null;
+	failedAt: number;
+};
+
 export type Bucket = { tokens: number; refilledAt: number };
 
 export type Decision =

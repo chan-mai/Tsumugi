@@ -67,6 +67,13 @@ export const SCHEMA = [
 		run_id TEXT NOT NULL,
 		event TEXT NOT NULL
 	)`,
+	// 失敗の通知待ち(#30), 投入が成功するまで消さないので落としても次のtickで追いつく
+	// Run DOへの通知と分ける, 宛先も対象も違うので相乗りさせると片方の失敗がもう片方を止める
+	`CREATE TABLE IF NOT EXISTS failure_notify (
+		seq INTEGER PRIMARY KEY AUTOINCREMENT,
+		job_id TEXT NOT NULL,
+		payload TEXT NOT NULL
+	)`,
 	// D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
 	// D1書き込みが成功するまで削除しないので,失敗してもカーソルが進まず次回で追いつく
 	`CREATE TABLE IF NOT EXISTS outbox (

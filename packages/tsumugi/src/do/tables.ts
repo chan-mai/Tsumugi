@@ -88,6 +88,16 @@ export const attempt = sqliteTable(
  * Run DOへの通知待ち(ADR-0031)
  * D1への投影とは宛先もまとめ方も違うので別の表にする
  */
+/**
+ * 失敗の通知待ち(#30)
+ * Run DOへの通知とは宛先も対象も違うので別の表にする
+ */
+export const failureNotify = sqliteTable('failure_notify', {
+	seq: integer('seq').primaryKey({ autoIncrement: true }),
+	jobId: text('job_id').notNull(),
+	payload: text('payload').notNull(),
+});
+
 export const runNotify = sqliteTable(
 	'run_notify',
 	{

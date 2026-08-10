@@ -13,6 +13,7 @@ const tsumugi = defineTsumugi({
   ui,
   retention,
   metrics,
+  onFailure,
 });
 ```
 
@@ -29,6 +30,7 @@ const tsumugi = defineTsumugi({
 | `ui`         |      | `tsumugi/ui`の`ui()`。未指定の場合はバンドルに含まれない        |
 | `retention`  |      | 一覧の保持設定                                                  |
 | `metrics`    |      | Analytics Engineの読み取り設定。未設定の場合はメトリクスが無効   |
+| `onFailure`  |      | 失敗したジョブを知らせるbinding名。未設定の場合は通知しない      |
 
 ### 戻り値
 
@@ -68,6 +70,20 @@ const tsumugi = defineTsumugi<Env>({
 `dataset`はwranglerの`analytics_engine_datasets`に書いた名前と揃えます
 
 指定しない場合、メトリクスのタブとAPIは無効です
+
+## onFailure
+
+失敗したジョブを知らせるperformerのbinding名を指定します
+
+```ts
+const tsumugi = defineTsumugi({
+  performers,
+  onFailure: 'NotifyFailure',
+});
+```
+
+指定できるのは`FailureNotice`を受け取れるperformerのみです
+通知される条件と`FailureNotice`の内容は[失敗の通知](/guide/execution#failure-notification)を参照してください
 
 ## RunSettings
 

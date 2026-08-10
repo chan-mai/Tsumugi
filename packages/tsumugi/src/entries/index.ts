@@ -25,7 +25,7 @@ export type {
 	TsumugiConfig,
 } from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
-export type { DispatchMessage, EnqueueInput, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
+export type { DispatchMessage, EnqueueInput, FailureNotifyStub, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
 // createRunClassは公開しない, `defineTsumugi().runClass`を迂回すると設定が二重管理になる
 export { DEFAULT_MAX_NODES } from '../do/run.js';
 export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } from '../do/run.js';
@@ -39,7 +39,7 @@ export type { Clock } from '../do/clock.js';
 export { TsumugiTimeoutError } from '../queue/consumer.js';
 export type { ConsumerEnv, PerformerCtor, PerformerRegistry, PerformerService, PerformerSource } from '../queue/consumer.js';
 export { createClient } from '../client/enqueue.js';
-export type { ClientEnv, JobShardStub, TsumugiClient } from '../client/enqueue.js';
+export type { ClientEnv, CommonSettings, JobShardStub, TsumugiClient } from '../client/enqueue.js';
 export { remote, isRemoteRef } from '../core/api.js';
 export { Performer } from '../performer/entrypoint.js';
 export type {

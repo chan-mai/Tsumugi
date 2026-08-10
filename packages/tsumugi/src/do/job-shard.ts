@@ -1,10 +1,10 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createId } from '@paralleldrive/cuid2';
-import { formatJobId } from '../core/ids.js';
+import { formatJobId, parseJobId, shardName } from '../core/ids.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
-import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, Policy, Retention } from '../core/types.js';
+import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, FailureNotice, Policy, Retention } from '../core/types.js';
 import type { RunStub } from './run.js';
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
@@ -47,7 +47,14 @@ export type ShardEnv = {
 	TSUMUGI_METRICS?: AnalyticsEngineDataset;
 	/** 任意, flowsを使う場合のみ必要な完了通知の宛先(ADR-0031) */
 	RUN?: DurableObjectNamespace<RunStub>;
+	/** 失敗の通知先へ投入するために自分自身を引く(#30) */
+	JOB_SHARD?: DurableObjectNamespace<FailureNotifyStub>;
 };
+
+/** 失敗の通知先へ投入する面, DO本体の型を通すと型の展開が深くなりすぎる(#30) */
+export interface FailureNotifyStub extends Rpc.DurableObjectBranded {
+	enqueueMany(inputs: readonly EnqueueInput[]): Promise<string[]>;
+}
 
 /**
  * retry / cancelの結果
@@ -69,6 +76,8 @@ export type ShardSettings = {
 	 * 手動リトライを受け付ける期間, 短くすると一覧に見えるのに再開できないジョブが出る(ADR-0027)
 	 */
 	failedRetentionMs?: number;
+	/** 失敗を知らせる先のbinding(#30), 未設定なら通知しない */
+	failureBinding?: string;
 };
 
 export type EnqueueInput = {
@@ -140,6 +149,9 @@ const SEND_BATCH_LIMIT = 100;
 /** 1 tickで落とす終端ジョブの上限, tickを有界に保つ */
 const SWEEP_LIMIT = 200;
 
+/** 1回のtickで投入する失敗の通知の上限(#30) */
+const FAILURE_NOTIFY_LIMIT = 200;
+
 /** 済んだジョブをDOに残す時間,投影が追いつく余裕を見て既定5分 */
 const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
 
@@ -166,6 +178,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/** テストから差し替えるためpublicにしている */
 	clock: Clock = systemClock;
 	policy: Policy = DEFAULT_POLICY;
+	/** 失敗を知らせる先, 設定から届く(#30) */
+	#failureBinding: string | null = null;
 	retention: Retention = { doneMs: DEFAULT_SWEEP_AFTER_MS, failedMs: DEFAULT_FAILED_RETENTION_MS };
 
 	#repo: JobRepo | undefined;
@@ -198,6 +212,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			const settings = JSON.parse(raw) as ShardSettings;
 			this.policy = { ...DEFAULT_POLICY, ...settings.policy };
 			this.retention = retentionOf(settings);
+			this.#failureBinding = settings.failureBinding ?? null;
 		}
 		this.#policyLoaded = true;
 	}
@@ -285,9 +300,16 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 */
 	#applySettings(settings: ShardSettings, pinned: boolean): void {
 		if (!pinned && this.repo.readSetting('settings_pinned') === '1') return;
-		const encoded = JSON.stringify(settings);
-		this.policy = { ...DEFAULT_POLICY, ...settings.policy };
-		this.retention = retentionOf(settings);
+		this.#loadPolicy();
+		// 宛先を持たない投入元の設定で今の宛先を消さない, 投入の経路ごとに宛先の有無が違う(#30)
+		const merged =
+			settings.failureBinding === undefined && this.#failureBinding !== null
+				? { ...settings, failureBinding: this.#failureBinding }
+				: settings;
+		const encoded = JSON.stringify(merged);
+		this.policy = { ...DEFAULT_POLICY, ...merged.policy };
+		this.retention = retentionOf(merged);
+		this.#failureBinding = merged.failureBinding ?? null;
 		this.#policyLoaded = true;
 		if (pinned && this.repo.readSetting('settings_pinned') !== '1') this.repo.writeSetting('settings_pinned', '1');
 		if (this.repo.readSetting('settings') === encoded) return;
@@ -589,6 +611,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 		const projected = await this.#project();
 		const notified = await this.#notifyRuns();
+		const notifiedFailures = await this.#notifyFailures();
 		const { deleted, retryAt } = this.#sweep(now);
 
 		// 上限まで読んだなら残りがある可能性が高いので即座に自分を起こし直す
@@ -599,6 +622,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			projected >= PROJECTION_LIMIT ||
 			deleted >= SWEEP_LIMIT ||
 			notified >= NOTIFY_LIMIT ||
+			notifiedFailures >= FAILURE_NOTIFY_LIMIT ||
 			this.repo.countOutbox() > 0;
 		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt].filter((v): v is number => v !== null);
 		const next = candidates.length > 0 ? Math.min(...candidates) : null;
@@ -660,6 +684,53 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 		await Promise.all([...groups].map(([runId, events]) => namespace.get(namespace.idFromName(runId)).notify(events)));
 		this.repo.deleteNotifyThrough(rows[rows.length - 1]!.seq);
+		return rows.length;
+	}
+
+	/**
+	 * 溜まった失敗を通知先のperformerへ投入する(#30)
+	 *
+	 * 投入が成功してから消す, 失敗すればカーソルは進まず次のtickで再送する
+	 * 通知そのものの失敗は通知しない, 自分を呼び続ける循環になる
+	 */
+	async #notifyFailures(): Promise<number> {
+		const rows = this.repo.failureBatch(FAILURE_NOTIFY_LIMIT);
+		if (rows.length === 0) return 0;
+
+		const target = this.#failureBinding;
+		if (target === null) {
+			// 宛先が無いうちに積んだぶんは捨てる, 残すと設定後に古い失敗がまとめて届く
+			this.repo.deleteFailureThrough(rows[rows.length - 1]!.seq);
+			return rows.length;
+		}
+
+		const notices = rows.map((row) => JSON.parse(row.payload) as FailureNotice);
+		const inputs: EnqueueInput[] = notices
+			// 通知そのものの失敗は通知しない, 自分を呼び続ける循環になる(#30)
+			.filter((notice) => notice.binding !== target)
+			.map((notice) => ({
+				binding: target,
+				payload: notice,
+				// 同じ失敗を二度投入しない, 再送しても同じIDなので既存が返る(ADR-0029)
+				// 元のIDはbindingとshardを含み区切り文字が使えないため、ローカル部だけを使う
+				id: formatJobId({
+					binding: target,
+					shard: 0,
+					localId: `failure-${parseJobId(notice.jobId).localId}-${notice.attempts}`,
+				}),
+			}));
+
+		if (inputs.length > 0) {
+			// 通知先は分割しない前提でshard 0へ送る, 宛先を分けても順序も流量も変わらない
+			const namespace = this.env.JOB_SHARD;
+			if (!namespace) {
+				// 自分自身のbindingが無い構成, 消さずに残して設定後に届くようにする(ADR-0013)
+				console.error('tsumugi: cannot notify the failure, JOB_SHARD binding is not configured');
+				return 0;
+			}
+			await namespace.get(namespace.idFromName(shardName(target, 0))).enqueueMany(inputs);
+		}
+		this.repo.deleteFailureThrough(rows[rows.length - 1]!.seq);
 		return rows.length;
 	}
 

@@ -5,6 +5,7 @@ export type {
 	Bucket,
 	Decision,
 	DeliveryGuarantee,
+	FailureNotice,
 	JobState,
 	JobView,
 	Policy,
@@ -56,6 +57,7 @@ export type {
 export type {
 	BaseOptions,
 	EnqueueItem,
+	FailurePerformer,
 	EnqueueOptions,
 	EnvOf,
 	JobContext,

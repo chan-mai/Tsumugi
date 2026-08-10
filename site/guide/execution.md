@@ -204,3 +204,51 @@ cronトリガーを設定すると、期間を過ぎた終了済みのジョブ�
 
 既定では両者の期間が揃っているため、一覧に表示されているジョブはリトライが可能です
 片方だけ変えると、一覧に表示されていてもリトライを受け付けないジョブが出ます
+
+## 失敗の通知 {#failure-notification}
+
+`onFailure`に通知先のbinding名を指定することで、リトライを使い切ったジョブ(`FAILED`)と、応答が無いまま回収されたジョブ(`STALLED`)を任意のperformerへ知らせられます
+
+```ts
+const tsumugi = defineTsumugi({
+  performers,
+  onFailure: 'NotifyFailure',
+});
+```
+
+通知先のperformerは`FailureNotice`を受け取ります
+
+```ts
+import { Performer } from 'tsumugi/performer';
+import type { FailureNotice } from 'tsumugi';
+
+export class NotifyFailure extends Performer<FailureNotice, void, {}, Env> {
+  async perform(notice: FailureNotice): Promise<void> {
+    await fetch(this.env.SLACK_WEBHOOK, {
+      method: 'POST',
+      body: JSON.stringify({ text: `${notice.binding} が失敗しました: ${notice.error}` }),
+    });
+  }
+}
+```
+
+`FailureNotice`が持つ値は次の通りです
+
+| 名前          | 内容                                                     |
+| ------------- | -------------------------------------------------------- |
+| `jobId`       | 失敗したジョブのID                                       |
+| `binding`     | 失敗したジョブのbinding                                  |
+| `state`       | `FAILED`または`STALLED`                                  |
+| `attempts`    | 実行した回数                                             |
+| `maxAttempts` | 試行回数の上限                                           |
+| `error`       | 最後の試行が残した理由。記録が無い場合は`null`           |
+| `runId`       | 投入元のRun。単発で投入したジョブは`null`                |
+| `nodeId`      | 投入元のノード。単発で投入したジョブは`null`             |
+| `failedAt`    | 失敗した時刻。epoch ms                                   |
+
+通知は全てのbindingが対象です
+
+通知そのものもジョブなので、送信に失敗すれば一覧に残り、リトライも可能です
+ただし通知先のbinding自身の失敗は通知されません。これは循環参照を避けるための意図的な仕様です
+
+`onFailure`を指定する前に発生した失敗は通知されません
