@@ -131,7 +131,7 @@ export type RunOptions = {
 	bindings: Record<string, BindingConfig>;
 	settings?: RunSettings;
 	/** 失敗を知らせる先のbinding(#30), ノードとして投入するジョブにも同じ宛先が要る */
-	failureBinding?: string;
+	failureBinding?: string | null;
 };
 
 /**
@@ -149,7 +149,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
 		failedMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 	};
-	const client = createClient<RunEnv>(bindings, failureBinding ? { failureBinding } : {});
+	const client = createClient<RunEnv>(bindings, failureBinding === undefined ? {} : { failureBinding });
 
 	return class TsumugiRun extends DurableObject<RunEnv> {
 		/** テストから差し替えるためpublicにしている */

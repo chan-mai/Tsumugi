@@ -159,7 +159,8 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 ): Tsumugi<EnvOf<R>, PerformersOf<R>, F> {
 	type Env = ConsumerEnv & RestEnv & RunNamespaceEnv & SchedulerNamespaceEnv;
 	// 失敗の通知先は投入のたびにDOへ届ける, bindingを問わず同じ値になる(#30)
-	const client = createClient<Env>(config.bindings ?? {}, config.onFailure ? { failureBinding: config.onFailure } : {});
+	// 宛先は常に渡す, onFailureを外した時に既存のshardが古い宛先へ送り続けないようにする(#30)
+	const client = createClient<Env>(config.bindings ?? {}, { failureBinding: config.onFailure ?? null });
 	// 公開の型はperformersから推論する, 実行時はEnvを問わないので内部でだけ緩める
 	const performers = config.performers as unknown as PerformerRegistry<Env>;
 	const flows: Flows = config.flows ?? {};
@@ -179,7 +180,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		schedules,
 		bindings: config.bindings ?? {},
 		targets: { bindings: Object.keys(performers), flows: Object.keys(flows) },
-		...(config.onFailure ? { failureBinding: config.onFailure } : {}),
+		failureBinding: config.onFailure ?? null,
 	});
 
 	// Workersに起動フックが無いので, 最初の呼び出しを起動とみなして検証する(ADR-0036)
@@ -318,7 +319,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 			flows,
 			bindings: config.bindings ?? {},
 			...(config.runs ? { settings: config.runs } : {}),
-			...(config.onFailure ? { failureBinding: config.onFailure } : {}),
+			failureBinding: config.onFailure ?? null,
 		}),
 		// schedule定義を参照するクラス, 同上(ADR-0040)
 		schedulerClass,

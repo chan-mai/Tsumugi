@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createId } from '@paralleldrive/cuid2';
-import { formatJobId, parseJobId, shardName } from '../core/ids.js';
+import { embedJobId, formatJobId, shardName } from '../core/ids.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
@@ -76,8 +76,8 @@ export type ShardSettings = {
 	 * 手動リトライを受け付ける期間, 短くすると一覧に見えるのに再開できないジョブが出る(ADR-0027)
 	 */
 	failedRetentionMs?: number;
-	/** 失敗を知らせる先のbinding(#30), 未設定なら通知しない */
-	failureBinding?: string;
+	/** 失敗を知らせる先のbinding(#30), nullは解除, 省略は今の宛先を変えない */
+	failureBinding?: string | null;
 };
 
 export type EnqueueInput = {
@@ -152,6 +152,9 @@ const SWEEP_LIMIT = 200;
 /** 1回のtickで投入する失敗の通知の上限(#30) */
 const FAILURE_NOTIFY_LIMIT = 200;
 
+/** 宛先を置く設定のキー(#30) */
+const FAILURE_BINDING_KEY = 'failure_binding';
+
 /** 済んだジョブをDOに残す時間,投影が追いつく余裕を見て既定5分 */
 const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
 
@@ -212,8 +215,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			const settings = JSON.parse(raw) as ShardSettings;
 			this.policy = { ...DEFAULT_POLICY, ...settings.policy };
 			this.retention = retentionOf(settings);
-			this.#failureBinding = settings.failureBinding ?? null;
 		}
+		this.#failureBinding = this.repo.readSetting(FAILURE_BINDING_KEY) ?? null;
 		this.#policyLoaded = true;
 	}
 
@@ -299,21 +302,29 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 静的設定へ戻すには再度configure()する
 	 */
 	#applySettings(settings: ShardSettings, pinned: boolean): void {
-		if (!pinned && this.repo.readSetting('settings_pinned') === '1') return;
 		this.#loadPolicy();
-		// 宛先を持たない投入元の設定で今の宛先を消さない, 投入の経路ごとに宛先の有無が違う(#30)
-		const merged =
-			settings.failureBinding === undefined && this.#failureBinding !== null
-				? { ...settings, failureBinding: this.#failureBinding }
-				: settings;
-		const encoded = JSON.stringify(merged);
-		this.policy = { ...DEFAULT_POLICY, ...merged.policy };
-		this.retention = retentionOf(merged);
-		this.#failureBinding = merged.failureBinding ?? null;
-		this.#policyLoaded = true;
+		// 宛先はpolicyのpinと切り離す, 流量を固定したshardにも後から足した宛先が届く(#30)
+		// 省略された場合は今の宛先を保つ, 投入の経路ごとに宛先を持つものと持たないものがある
+		if (settings.failureBinding !== undefined) this.#writeFailureBinding(settings.failureBinding);
+		if (!pinned && this.repo.readSetting('settings_pinned') === '1') return;
+		const { failureBinding: _ignored, ...rest } = settings;
+		const encoded = JSON.stringify(rest);
+		this.policy = { ...DEFAULT_POLICY, ...rest.policy };
+		this.retention = retentionOf(rest);
 		if (pinned && this.repo.readSetting('settings_pinned') !== '1') this.repo.writeSetting('settings_pinned', '1');
 		if (this.repo.readSetting('settings') === encoded) return;
 		this.repo.writeSetting('settings', encoded);
+	}
+
+	/** 宛先はpolicyと寿命が違うので別のキーに置く(#30) */
+	#writeFailureBinding(value: string | null): void {
+		this.#failureBinding = value;
+		const stored = this.repo.readSetting(FAILURE_BINDING_KEY);
+		if (value === null) {
+			if (stored !== undefined) this.repo.deleteSetting(FAILURE_BINDING_KEY);
+			return;
+		}
+		if (stored !== value) this.repo.writeSetting(FAILURE_BINDING_KEY, value);
 	}
 
 	async enqueue(input: EnqueueInput): Promise<string> {
@@ -712,11 +723,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				binding: target,
 				payload: notice,
 				// 同じ失敗を二度投入しない, 再送しても同じIDなので既存が返る(ADR-0029)
-				// 元のIDはbindingとshardを含み区切り文字が使えないため、ローカル部だけを使う
+				// 元のIDはそのまま使えないので埋め込める形にする, ローカル部だけではbindingを跨いで衝突する
 				id: formatJobId({
 					binding: target,
 					shard: 0,
-					localId: `failure-${parseJobId(notice.jobId).localId}-${notice.attempts}`,
+					localId: `failure-${embedJobId(notice.jobId)}-${notice.attempts}`,
 				}),
 			}));
 

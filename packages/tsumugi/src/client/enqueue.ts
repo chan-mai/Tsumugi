@@ -57,10 +57,14 @@ function settingsOf(config: BindingConfig | undefined, common: CommonSettings): 
 	};
 }
 
-/** bindingを問わず同じ値を配る設定, 投入のたびに同梱して届ける */
+/** bindingを問わず同じ値を渡す設定, 投入のたびに同梱して届ける */
 export type CommonSettings = {
-	/** 失敗を知らせる先のbinding(#30) */
-	failureBinding?: string;
+	/**
+	 * 失敗を知らせる先のbinding(#30)
+	 * nullは解除, 省略はDOが今持つ宛先を変えない
+	 * 宛先を知り得ない経路から省略が届くので, 未指定と解除を区別する
+	 */
+	failureBinding?: string | null;
 };
 
 /**

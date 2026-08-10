@@ -224,10 +224,11 @@ import type { FailureNotice } from 'tsumugi';
 
 export class NotifyFailure extends Performer<FailureNotice, void, {}, Env> {
   async perform(notice: FailureNotice): Promise<void> {
-    await fetch(this.env.SLACK_WEBHOOK, {
+    const res = await fetch(this.env.SLACK_WEBHOOK, {
       method: 'POST',
       body: JSON.stringify({ text: `${notice.binding} が失敗しました: ${notice.error}` }),
     });
+    if (!res.ok) throw new Error(`notification failed: ${res.status}`);
   }
 }
 ```

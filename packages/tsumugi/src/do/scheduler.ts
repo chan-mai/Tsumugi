@@ -73,7 +73,7 @@ export type SchedulerOptions = {
 	/** 検証用の登録名, performersとflowsのキー */
 	targets: { bindings: readonly string[]; flows: readonly string[] };
 	/** 失敗を知らせる先のbinding(#30), 定期実行で投入するジョブにも同じ宛先が要る */
-	failureBinding?: string;
+	failureBinding?: string | null;
 };
 
 /** Job DOの非終端の状態, 前回がこのいずれかならskipする */
@@ -95,7 +95,7 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 		flows: targets.flows,
 		shardsOf: (binding) => bindings[binding]?.shards ?? 1,
 	});
-	const client = createClient<SchedulerEnv>(bindings, failureBinding ? { failureBinding } : {});
+	const client = createClient<SchedulerEnv>(bindings, failureBinding === undefined ? {} : { failureBinding });
 
 	return class TsumugiScheduler extends DurableObject<SchedulerEnv> {
 		/** テストから差し替えるためpublicにしている */
