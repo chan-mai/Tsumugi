@@ -10,6 +10,9 @@ import type {
 	RunSummary,
 	ScheduleSummary,
 	StartRunRequest,
+	DiagnosticsResponse,
+	PolicyView,
+	UpdatePolicyRequest,
 } from '../../tsumugi/src/api/types.js';
 
 /** 一覧と詳細を同じ型で扱う, 詳細でだけ返る列は任意にする */
@@ -227,6 +230,23 @@ export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): 
 	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
 	return { ok: body.ok ?? [], failed: body.failed ?? [], remaining: body.remaining ?? 0 };
 };
+
+export type Policy = PolicyView;
+export type BindingDiagnostics = DiagnosticsResponse['bindings'][string];
+
+export const getDiagnostics = () => call<DiagnosticsResponse>('/api/diagnostics');
+
+/** 渡した項目だけを重ねる, 省略した項目は変わらない(#27) */
+export const updatePolicy = (binding: string, patch: UpdatePolicyRequest) =>
+	call<{ binding: string; shards: number; policy: Policy }>(`/api/bindings/${encodeURIComponent(binding)}/policy`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(patch),
+	});
+
+/** 実行時の設定を捨てて静的設定へ戻す(#27) */
+export const resetPolicy = (binding: string) =>
+	call<{ ok: true }>(`/api/bindings/${encodeURIComponent(binding)}/policy/reset`, { method: 'POST' });
 
 export const getStats = () => call<{ byState: Record<string, number> }>('/api/stats');
 export const getBindings = () => call<{ bindings: string[] }>('/api/bindings');

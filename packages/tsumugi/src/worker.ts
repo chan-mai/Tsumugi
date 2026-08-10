@@ -234,6 +234,8 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		? createRest<Env>(config.auth, {
 				...(config.ui ? { dashboard: config.ui } : {}),
 				bindings: Object.keys(performers),
+				// 流量の変更を全shardへ配るために必要(#27)
+				shardsOf: (binding) => config.bindings?.[binding]?.shards ?? 1,
 				enqueue: (env, input) => client.enqueue(env, input),
 				// 一覧のretryable判定に使う, UI側が押す前に可否を出せるようにする(ADR-0027)
 				failedRetentionMs: (binding) => config.bindings?.[binding]?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,

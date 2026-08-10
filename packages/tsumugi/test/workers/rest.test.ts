@@ -28,6 +28,8 @@ const ROUTES: [method: string, path: string][] = [
 	['POST', '/api/jobs/bulk-cancel'],
 	['GET', '/api/metrics'],
 	['GET', '/api/schedules'],
+	['POST', '/api/bindings/REST/policy'],
+	['POST', '/api/bindings/REST/policy/reset'],
 	['GET', '/'],
 	['GET', '/api/unknown'],
 ];
@@ -189,6 +191,117 @@ describe('REST API', () => {
 		const { job: plain } = await single.json<{ job: { run_id: string | null; node_id: string | null } }>();
 		expect(plain.run_id).toBeNull();
 		expect(plain.node_id).toBeNull();
+	});
+
+	it('流量を実行時に変えられる(#27)', async () => {
+		await seedJob();
+		const post = (body: unknown, path = '/api/bindings/REST/policy') =>
+			withAuth.fetch!(
+				new Request(`https://example.com${path}`, {
+					method: 'POST',
+					headers: { ...authorized, 'content-type': 'application/json' },
+					body: JSON.stringify(body),
+				}),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+
+		const res = await post({ paused: true, concurrency: 5 });
+		expect(res.status).toBe(200);
+		const body = await res.json<{ binding: string; shards: number; policy: { paused: boolean; concurrency: number } }>();
+		expect(body).toMatchObject({ binding: 'REST', shards: 1, policy: { paused: true, concurrency: 5 } });
+
+		// 渡さなかった項目は変わらない
+		const next = await (await post({ paused: false })).json<{ policy: { paused: boolean; concurrency: number } }>();
+		expect(next.policy).toMatchObject({ paused: false, concurrency: 5 });
+
+		// 診断が今効いている値を返す
+		const diag = await call(withAuth, 'GET', '/api/diagnostics', authorized);
+		const seen = await diag.json<{ bindings: Record<string, { policy: { concurrency: number }; blocked: { paused: boolean } }> }>();
+		expect(seen.bindings.REST?.policy.concurrency).toBe(5);
+		expect(typeof seen.bindings.REST?.blocked.paused).toBe('boolean');
+
+		// 実行時の設定を捨てると既定へ戻る
+		expect((await post({}, '/api/bindings/REST/policy/reset')).status).toBe(200);
+		const reset = await call(withAuth, 'GET', '/api/diagnostics', authorized);
+		const after = await reset.json<{ bindings: Record<string, { policy: { concurrency: number } }> }>();
+		expect(after.bindings.REST?.policy.concurrency).toBe(100);
+	});
+
+	it('流量の指定を検証する(#27)', async () => {
+		const post = (body: unknown, binding = 'REST') =>
+			withAuth.fetch!(
+				new Request(`https://example.com/api/bindings/${binding}/policy`, {
+					method: 'POST',
+					headers: { ...authorized, 'content-type': 'application/json' },
+					body: JSON.stringify(body),
+				}),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+
+		expect((await post({ concurrency: -1 })).status).toBe(400);
+		expect((await post({ paused: 'yes' })).status).toBe(400);
+		expect((await post({ rate: { tokens: 1, intervalMs: 0 } })).status).toBe(400);
+		expect((await post({ agingIntervalMs: 0 })).status).toBe(400);
+		// 変更する項目が無い要求は取り違えの元
+		expect((await post({})).status).toBe(400);
+		// 未登録のbindingは404
+		expect((await post({ paused: true }, 'NOPE')).status).toBe(404);
+		// 0は投入を止める指定として通す
+		expect((await post({ concurrency: 0 })).status).toBe(200);
+		expect((await post({ rate: null, agingIntervalMs: null })).status).toBe(200);
+
+		// 変更はshardに残るので, 後続のテストのために捨てておく
+		await withAuth.fetch!(
+			new Request('https://example.com/api/bindings/REST/policy/reset', { method: 'POST', headers: authorized }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+	});
+
+	it('一部のshardへ届かなければ500と対象を返す(#27)', async () => {
+		// 分割している構成で片方だけ落ちる状況, 成功として返すと止まっていない投入を止まったものとして扱う
+		const sharded = defineTsumugi({
+			performers: { REST: Noop },
+			auth: bearerAuth(TOKEN),
+			bindings: { REST: { shards: 2 } },
+		});
+		// shard 1だけが失敗するJOB_SHARDへ差し替える
+		const broken = {
+			...env,
+			JOB_SHARD: {
+				idFromName: (name: string) => ({ name }),
+				get: (id: { name: string }) => ({
+					updatePolicy: async () => {
+						if (id.name.endsWith('#1')) throw new Error('unreachable');
+						return { paused: true };
+					},
+					resetPolicy: async () => {
+						if (id.name.endsWith('#1')) throw new Error('unreachable');
+					},
+				}),
+			},
+		} as unknown as RestEnv;
+
+		const call = (path: string) =>
+			sharded.fetch!(
+				new Request(`https://example.com${path}`, {
+					method: 'POST',
+					headers: { ...authorized, 'content-type': 'application/json' },
+					body: JSON.stringify({ paused: true }),
+				}),
+				broken,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+
+		const res = await call('/api/bindings/REST/policy');
+		expect(res.status).toBe(500);
+		const body = await res.json<{ binding: string; shards: number; failed: number[] }>();
+		expect(body).toMatchObject({ binding: 'REST', shards: 2, failed: [1] });
+
+		// resetも同じ扱い, 片方だけ静的設定へ戻ると設定が食い違う
+		expect((await call('/api/bindings/REST/policy/reset')).status).toBe(500);
 	});
 
 	it('statsが最古のSCHEDULEDの経過時間を返す(#10)', async () => {

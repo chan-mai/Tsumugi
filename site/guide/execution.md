@@ -98,14 +98,25 @@ const tsumugi = defineTsumugi({
 
 ### 実行時の上書き
 
-`tsumugi.shardFor`で取得したstubの`configure`で、デプロイなしに`policy`と保持期間を変更できます
+ダッシュボードの`bindings`タブから、変更デプロイなしに同時実行数の変更と投入の一時停止が可能です。変更は全shardへ配布されます
+また、同様の操作を[POST /api/bindings/:binding/policy](/reference/rest-api#post-api-bindings-binding-policy)からも行えます
+
+```bash
+curl -X POST -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"paused": true}' https://example.com/api/bindings/MAIL/policy
+```
+
+一時停止は同時実行数とは別に状態管理されており、停止中も実行中のジョブの回収とエージングは継続します。
+再開後の投入順は通常と同じく実効優先度順です。停止中も待ち時間は伸び続けるため、低優先度のジョブほど順位が上がります
+
+コードから変更する場合は`tsumugi.shardFor`で取得したstubの`configure`を使います。保持期間もあわせて変更可能です
 
 ```ts
 await tsumugi.shardFor(env, 'MAIL').configure({ policy: { concurrency: 5 } });
 ```
 
-一度`configure`を実行すると、以降は`bindings`の静的な設定より`configure`の内容が優先されます
-静的な設定へ戻す場合は、改めて`configure`で同じ内容を指定します
+実行時に変更すると、以降は`bindings`の静的な設定が無視されます
+静的な設定へ戻す場合は[POST /api/bindings/:binding/policy/reset](/reference/rest-api#post-api-bindings-binding-policy-reset)を使うか、改めて`configure`で同じ内容を指定する必要があります
 
 ## エージング
 

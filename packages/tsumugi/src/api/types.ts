@@ -73,9 +73,32 @@ export type StatsResponse = {
 
 export type BindingsResponse = { bindings: string[] };
 
-/** binding単位の運用診断(#10) */
-export type DiagnosticsEntry = { active: number; outbox: number; blocked: BlockedBy };
+/** binding単位の運用診断(#10)と今効いている流量設定(#27) */
+export type DiagnosticsEntry = { active: number; outbox: number; blocked: BlockedBy; policy: PolicyView };
 export type DiagnosticsResponse = { shard: number; bindings: Record<string, DiagnosticsEntry> };
+
+/** 流量設定, DOのPolicyをそのまま運ぶ(#27) */
+export type PolicyView = {
+	paused: boolean;
+	concurrency: number;
+	perKeyConcurrency: number;
+	rate: { tokens: number; intervalMs: number } | null;
+	agingIntervalMs: number | null;
+	reaperGraceMs: number;
+};
+
+/**
+ * 流量の変更(#27)
+ * 渡した項目だけを今の設定へ重ねる, 省略した項目は変わらない
+ */
+export type UpdatePolicyRequest = Partial<PolicyView>;
+export type UpdatePolicyResponse = { binding: string; shards: number; policy: PolicyView };
+
+/**
+ * 一部のshardにだけ届いた場合の応答(#27)
+ * 同じ要求を送り直せば残りへ届く, 反映は冪等
+ */
+export type PartialPolicyResponse = { error: string; binding: string; shards: number; failed: number[] };
 
 export type RunSummary = {
 	id: string;

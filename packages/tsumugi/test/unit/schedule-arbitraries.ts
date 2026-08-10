@@ -53,6 +53,8 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 }
 
 const policy: fc.Arbitrary<Policy> = fc.record({
+	// 停止中は投入しない, 性質はどちらの状態でも成り立つ(#27)
+	paused: fc.boolean(),
 	concurrency: fc.integer({ min: 0, max: 8 }),
 	// 1件も無かった穴, 明示的に2以上を含める
 	perKeyConcurrency: fc.integer({ min: 0, max: 3 }),

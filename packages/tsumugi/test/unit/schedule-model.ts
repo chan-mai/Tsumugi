@@ -30,7 +30,8 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 		.map((j) => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 
-	let slots = Math.max(0, policy.concurrency - inFlight.length);
+	// 停止中は1件も投入しない(#27)
+	let slots = policy.paused ? 0 : Math.max(0, policy.concurrency - inFlight.length);
 	// rate無しはトークン無限, 有りは補充後の残量から始める
 	let tokens = policy.rate === null ? Number.POSITIVE_INFINITY : refilledTokens(input);
 

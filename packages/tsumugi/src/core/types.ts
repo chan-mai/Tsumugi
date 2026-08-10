@@ -36,6 +36,8 @@ export type RateLimit = { tokens: number; intervalMs: number };
 
 /** ADR-0009の3軸+ ADR-0020のエージング */
 export type Policy = {
+	/** 投入の一時停止(#27), 実行中の回収とエージングは止めない */
+	paused: boolean;
 	concurrency: number;
 	/** concurrencyKey単位の同時実行上限,キーがnullのジョブには非適用 */
 	perKeyConcurrency: number;
@@ -67,6 +69,8 @@ export type ScheduleInput = {
 
 /** 投入が止まった制約, ADR-0009の3軸のどれで詰まったか(#10) */
 export type BlockedBy = {
+	/** paused: 一時停止中なので投入しない(#27) */
+	paused: boolean;
 	/** concurrency: 同時実行の上限に達した */
 	capacity: boolean;
 	/** rate: トークンが足りない */

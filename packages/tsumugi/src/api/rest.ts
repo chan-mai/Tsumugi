@@ -29,6 +29,9 @@ import type {
 	RunListResponse,
 	StartRunRequest,
 	StartRunResponse,
+	PartialPolicyResponse,
+	UpdatePolicyRequest,
+	UpdatePolicyResponse,
 	SchedulesResponse,
 	StatsResponse,
 } from './types.js';
@@ -46,6 +49,8 @@ export type RestOptions<Env extends RestEnv> = {
 	dashboard?: Ui;
 	/** 登録済みperformerの名前,投入先の検証と選択肢に使う */
 	bindings?: readonly string[];
+	/** bindingの分割数, 流量の変更は全shardへ配る(#27) */
+	shardsOf?: (binding: string) => number;
 	enqueue?: (env: Env, input: CreateJobInput) => Promise<string>;
 	/**
 	 * bindingごとの失敗ジョブの保持期間
@@ -148,6 +153,60 @@ export function validateStartRun(body: unknown, flows: readonly string[]): { inp
 	const input: StartRunInput = { flow: raw.flow, input: raw.input };
 	if (typeof raw.id === 'string' && raw.id) input.id = raw.id;
 	if (typeof raw.deadlineMs === 'number') input.deadlineMs = raw.deadlineMs;
+	return { input };
+}
+
+export type UpdatePolicyInput = UpdatePolicyRequest;
+
+/**
+ * 流量の変更内容の検証, 通らなければ理由を返す(#27)
+ * 渡した項目だけを重ねるので, 省略と明示的なnullを区別する
+ */
+export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { error: string } {
+	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
+	const raw = body as Record<string, unknown>;
+
+	const input: UpdatePolicyInput = {};
+
+	if ('paused' in raw) {
+		if (typeof raw.paused !== 'boolean') return { error: 'paused must be a boolean' };
+		input.paused = raw.paused;
+	}
+
+	// 0は投入を止める指定として有効, 負数と小数だけを弾く
+	for (const name of ['concurrency', 'perKeyConcurrency', 'reaperGraceMs'] as const) {
+		if (!(name in raw)) continue;
+		const value = raw[name];
+		if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return { error: `${name} must be a non-negative integer` };
+		input[name] = value;
+	}
+
+	// エージングはnullで無効, 有効にする場合は正の整数(ADR-0020)
+	if ('agingIntervalMs' in raw) {
+		const value = raw.agingIntervalMs;
+		if (value !== null && (typeof value !== 'number' || !Number.isInteger(value) || value <= 0)) {
+			return { error: 'agingIntervalMs must be a positive integer or null' };
+		}
+		input.agingIntervalMs = value as number | null;
+	}
+
+	if ('rate' in raw) {
+		const value = raw.rate;
+		if (value === null) input.rate = null;
+		else {
+			if (typeof value !== 'object') return { error: 'rate must be an object or null' };
+			const { tokens, intervalMs } = value as Record<string, unknown>;
+			if (typeof tokens !== 'number' || !Number.isInteger(tokens) || tokens < 0) {
+				return { error: 'rate.tokens must be a non-negative integer' };
+			}
+			if (typeof intervalMs !== 'number' || !Number.isInteger(intervalMs) || intervalMs <= 0) {
+				return { error: 'rate.intervalMs must be a positive integer' };
+			}
+			input.rate = { tokens, intervalMs };
+		}
+	}
+
+	if (Object.keys(input).length === 0) return { error: 'no policy field to update' };
 	return { input };
 }
 
@@ -363,7 +422,7 @@ export type { SortColumn };
  * 稼働中も投影済みなのでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings = [], enqueue, failedRetentionMs, flows = [], start, runFor, schedulerFor, metrics } = options;
+	const { dashboard, bindings = [], shardsOf, enqueue, failedRetentionMs, flows = [], start, runFor, schedulerFor, metrics } = options;
 
 	/**
 	 * 一覧の1行にretryの可否を載せる
@@ -606,6 +665,65 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		);
 		const body: DiagnosticsResponse = { shard: 0, bindings: Object.fromEntries(perBinding) };
 		return c.json(body);
+	});
+
+	/**
+	 * 実行時の流量変更(#27)
+	 * 分割している場合は全shardへ同じ設定を配る, 1つでも残ると投入が止まらない(ADR-0011)
+	 * 途中で止めずに全shardへ試す, 届かなかったshardは呼び出し側へ返して再試行に委ねる
+	 */
+	const eachShard = async <T>(env: RestEnv, binding: string, run: (stub: DurableObjectStub<TsumugiJobShard>) => Promise<T>) => {
+		const shards = Math.max(1, shardsOf?.(binding) ?? 1);
+		const stubs = Array.from({ length: shards }, (_, shard) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardName(binding, shard))));
+		const settled = await Promise.allSettled(stubs.map(run));
+		const failed = settled.flatMap((result, shard) => (result.status === 'rejected' ? [shard] : []));
+		for (const [shard, result] of settled.entries()) {
+			if (result.status === 'rejected') console.error(`tsumugi: policy update failed on ${shardName(binding, shard)}`, result.reason);
+		}
+		const applied = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+		return { shards, failed, applied };
+	};
+
+	/** 一部のshardにしか届かなかった要求, 成功として返すと止まっていない投入を止まったものとして扱う(#27) */
+	const partial = (binding: string, shards: number, failed: number[]) =>
+		({
+			error: `the change reached ${shards - failed.length} of ${shards} shards, send the same request again`,
+			binding,
+			shards,
+			failed,
+		}) satisfies PartialPolicyResponse;
+
+	app.post('/api/bindings/:binding/policy', async (c) => {
+		const binding = c.req.param('binding');
+		if (bindings.length > 0 && !bindings.includes(binding))
+			return c.json({ error: `unknown binding: ${binding}` } satisfies ErrorResponse, 404);
+
+		let body: unknown;
+		try {
+			body = await c.req.json();
+		} catch {
+			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
+		}
+
+		const parsed = validatePolicy(body);
+		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
+
+		const { shards, failed, applied } = await eachShard(c.env, binding, (stub) => stub.updatePolicy(parsed.input));
+		if (failed.length > 0) return c.json(partial(binding, shards, failed), 500);
+		// 全shardへ同じ内容を配るので, 代表として先頭の結果を返す
+		const policy = applied[0] as UpdatePolicyResponse['policy'];
+		return c.json({ binding, shards, policy } satisfies UpdatePolicyResponse);
+	});
+
+	/** 実行時の設定を捨てて静的設定へ戻す(#27), 次の投入に同梱された設定が再び有効(#6) */
+	app.post('/api/bindings/:binding/policy/reset', async (c) => {
+		const binding = c.req.param('binding');
+		if (bindings.length > 0 && !bindings.includes(binding))
+			return c.json({ error: `unknown binding: ${binding}` } satisfies ErrorResponse, 404);
+
+		const { shards, failed } = await eachShard(c.env, binding, (stub) => stub.resetPolicy());
+		if (failed.length > 0) return c.json(partial(binding, shards, failed), 500);
+		return c.json({ ok: true } satisfies MutationResponse);
 	});
 
 	// 定期実行の一覧, 定義と状態はScheduler DOが正なので直接聞く(ADR-0040)

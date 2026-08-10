@@ -536,4 +536,10 @@ export class JobRepo {
 		this.db.insert(setting).values({ key, value }).onConflictDoUpdate({ target: setting.key, set: { value } }).run();
 		this.writes++;
 	}
+
+	/** 実行時の設定を捨てて静的設定へ戻すために使う(#27) */
+	deleteSetting(key: string): void {
+		this.db.delete(setting).where(eq(setting.key, key)).run();
+		this.writes++;
+	}
 }

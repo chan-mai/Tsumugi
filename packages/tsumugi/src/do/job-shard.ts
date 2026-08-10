@@ -98,6 +98,7 @@ export type EnqueueInput = {
 };
 
 export const DEFAULT_POLICY: Policy = {
+	paused: false,
 	concurrency: 100,
 	perKeyConcurrency: 1,
 	rate: null,
@@ -171,7 +172,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
 	#policyLoaded = false;
 	/** 直近tickで投入が止まった制約, 診断で外へ出す(#10) */
-	#lastBlocked: BlockedBy = { capacity: false, tokens: false, perKey: false };
+	#lastBlocked: BlockedBy = { paused: false, capacity: false, tokens: false, perKey: false };
 	#blockedLoaded = false;
 
 	get repo(): JobRepo {
@@ -207,13 +208,48 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
+	 * 実行時の流量変更(#27)
+	 * 渡した項目だけを今の設定へ重ね, 残りは触らない
+	 * 変更は静的設定より優先されるのでconfigure()と同じくpinする(#6)
+	 */
+	async updatePolicy(patch: Partial<Policy>): Promise<Policy> {
+		this.#loadPolicy();
+		const settings = this.#currentSettings();
+		this.#applySettings({ ...settings, policy: { ...settings.policy, ...patch } }, true);
+		// 止めた場合も予定は張り直す, 回収の予定まで消すと実行中のジョブが取り残される
+		await this.#armAlarm(this.clock.now());
+		return this.policy;
+	}
+
+	/**
+	 * 実行時の設定を捨てて静的設定へ戻す(#27)
+	 * pinを外すだけで既定へは戻さない, 次の投入に同梱された設定がそのまま効く(#6)
+	 */
+	async resetPolicy(): Promise<void> {
+		this.repo.deleteSetting('settings_pinned');
+		this.repo.deleteSetting('settings');
+		this.policy = DEFAULT_POLICY;
+		this.retention = { doneMs: DEFAULT_SWEEP_AFTER_MS, failedMs: DEFAULT_FAILED_RETENTION_MS };
+		this.#policyLoaded = true;
+		await this.#armAlarm(this.clock.now());
+	}
+
+	/** 今の設定, 保存が無ければ既定から組み立てる */
+	#currentSettings(): ShardSettings {
+		const raw = this.repo.readSetting('settings');
+		return raw ? (JSON.parse(raw) as ShardSettings) : { policy: this.policy };
+	}
+
+	/**
 	 * 運用診断(#10)
 	 * activeは稼働中ジョブのバックログの深さ, outboxは投影の滞留, blockedは直近tickで投入が止まった制約
 	 * どれを緩めればよいか外から判断できるようにする(ADR-0009)
 	 */
-	async diagnostics(): Promise<{ active: number; outbox: number; blocked: BlockedBy }> {
+	async diagnostics(): Promise<{ active: number; outbox: number; blocked: BlockedBy; policy: Policy }> {
+		this.#loadPolicy();
 		this.#loadBlocked();
-		return { active: this.repo.countActive(), outbox: this.repo.countOutbox(), blocked: this.#lastBlocked };
+		// 今効いている値を返す, 画面は変更の前後をこれで確かめる(#27)
+		return { active: this.repo.countActive(), outbox: this.repo.countOutbox(), blocked: this.#lastBlocked, policy: this.policy };
 	}
 
 	/** scheduleのskip判定のための読み取り, 掃除済みはnull(ADR-0040) */
@@ -221,11 +257,14 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return this.repo.find(jobId)?.state ?? null;
 	}
 
-	/** 永続化した直近blockedを一度だけ読み戻す,無ければfalse既定のまま(#10) */
+	/**
+	 * 永続化した直近blockedを一度だけ読み戻す,無ければfalse既定のまま(#10)
+	 * 軸を足した後の起動では古い記録に新しい軸が無いので, 既定へ重ねてから使う(#27)
+	 */
 	#loadBlocked(): void {
 		if (this.#blockedLoaded) return;
 		const raw = this.repo.readSetting('last_blocked');
-		if (raw) this.#lastBlocked = JSON.parse(raw) as BlockedBy;
+		if (raw) this.#lastBlocked = { ...this.#lastBlocked, ...(JSON.parse(raw) as Partial<BlockedBy>) };
 		this.#blockedLoaded = true;
 	}
 

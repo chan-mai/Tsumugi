@@ -258,6 +258,51 @@ model MetricsPoint {
 	avgDurationMs: numeric;
 }
 
+model Policy {
+	@doc("Dispatching is paused. Reaping and aging keep running.")
+	paused: boolean;
+
+	concurrency: integer;
+	perKeyConcurrency: integer;
+
+	@doc("Token bucket. Null when no rate limit applies.")
+	rate: {
+		tokens: integer;
+		intervalMs: integer;
+	} | null;
+
+	@doc("Null disables aging.")
+	agingIntervalMs: integer | null;
+
+	@doc("Extra wait after timeoutMs before a silent job is reaped")
+	reaperGraceMs: integer;
+}
+
+@doc("Fields left out keep their current value.")
+model UpdatePolicyRequest {
+	paused?: boolean;
+
+	@minValue(0)
+	concurrency?: integer;
+
+	@minValue(0)
+	perKeyConcurrency?: integer;
+
+	rate?: {
+		@minValue(0)
+		tokens: integer;
+
+		@minValue(1)
+		intervalMs: integer;
+	} | null;
+
+	@minValue(1)
+	agingIntervalMs?: integer | null;
+
+	@minValue(0)
+	reaperGraceMs?: integer;
+}
+
 model Diagnostics {
 	@doc("Number of jobs in a non-terminal state")
 	active: integer;
@@ -267,6 +312,9 @@ model Diagnostics {
 
 	@doc("Which limit stopped dispatching on the last tick")
 	blocked: {
+		@doc("Dispatching is paused")
+		paused: boolean;
+
 		@doc("Concurrency limit reached")
 		capacity: boolean;
 
@@ -276,6 +324,9 @@ model Diagnostics {
 		@doc("Candidates skipped by the per-key concurrency limit")
 		perKey: boolean;
 	};
+
+	@doc("Limits in effect right now")
+	policy: Policy;
 }
 
 model Schedule {
@@ -338,6 +389,22 @@ model NotFound {
 model Unavailable {
 	@statusCode statusCode: 503;
 	@body body: Error;
+}
+
+@doc("The change reached only some of the shards. Sending the same request again is safe and covers the rest.")
+model PartiallyApplied {
+	@statusCode statusCode: 500;
+
+	@body body: {
+		error: string;
+		binding: string;
+
+		@doc("How many shards the binding has")
+		shards: integer;
+
+		@doc("Shards the change did not reach")
+		failed: integer[];
+	};
 }
 
 @doc("Not available in this deployment")
