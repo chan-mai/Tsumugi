@@ -9,8 +9,14 @@ const error = ref<string | null>(null);
 const message = ref<string | null>(null);
 /** 操作中のbinding, 二度押しを防ぐ */
 const busy = ref<string | null>(null);
-/** 入力中の同時実行数, 反映するまでは画面の値だけを持つ */
-const draft = ref<Record<string, number>>({});
+/** 入力中の同時実行数, 反映するまでは画面の値だけを持つ. 空欄では数値にならない */
+const draft = ref<Record<string, number | string>>({});
+
+/** 入力が0以上の整数の時だけ送る, 空欄のまま送るとサーバに断られる */
+const draftValue = (binding: string): number | null => {
+	const value = draft.value[binding];
+	return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+};
 
 /** 遅れて届いた古い応答で最新の結果を上書きしないための連番 */
 let generation = 0;
@@ -22,7 +28,8 @@ async function load() {
 		if (requested !== generation) return;
 		entries.value = Object.entries(loaded.bindings).sort(([a], [b]) => (a < b ? -1 : 1));
 		for (const [binding, entry] of entries.value) {
-			if (busy.value !== binding) draft.value[binding] = entry.policy.concurrency;
+			// 入力中の値は上書きしない, 定期更新のたびに戻ると入力できない
+			if (draft.value[binding] === undefined) draft.value[binding] = entry.policy.concurrency;
 		}
 		error.value = null;
 	} catch (e) {
@@ -47,6 +54,8 @@ async function act(binding: string, run: () => Promise<unknown>, done: string) {
 		message.value = e instanceof Error ? e.message : String(e);
 	} finally {
 		busy.value = null;
+		// 操作の後はサーバの値へ引き直す, resetで戻った値が入力欄に残らないようにする
+		delete draft.value[binding];
 		await load();
 	}
 }
@@ -54,8 +63,11 @@ async function act(binding: string, run: () => Promise<unknown>, done: string) {
 const setPaused = (binding: string, paused: boolean) =>
 	act(binding, () => updatePolicy(binding, { paused }), paused ? 'paused' : 'resumed');
 
-const applyConcurrency = (binding: string) =>
-	act(binding, () => updatePolicy(binding, { concurrency: draft.value[binding] ?? 0 }), 'concurrency updated');
+function applyConcurrency(binding: string) {
+	const concurrency = draftValue(binding);
+	if (concurrency === null) return;
+	return act(binding, () => updatePolicy(binding, { concurrency }), 'concurrency updated');
+}
 
 const reset = (binding: string) => act(binding, () => resetPolicy(binding), 'reset to the static settings');
 
@@ -77,7 +89,7 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 	<div class="space-y-4">
 		<div class="flex flex-wrap items-center gap-2">
 			<p class="text-sm text-muted-foreground">
-				The changes will be applied to all shards and take precedence over the static configuration. You can revert to the static
+				* The changes will be applied to all shards and take precedence over the static configuration. You can revert to the static
 				configuration by clicking Reset.
 			</p>
 			<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
@@ -118,7 +130,7 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 								<button
 									type="button"
 									:class="BTN"
-									:disabled="busy === binding || draft[binding] === entry.policy.concurrency"
+									:disabled="busy === binding || draftValue(binding) === null || draft[binding] === entry.policy.concurrency"
 									@click="applyConcurrency(binding)"
 								>
 									Apply

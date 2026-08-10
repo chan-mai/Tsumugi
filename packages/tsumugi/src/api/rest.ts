@@ -29,6 +29,7 @@ import type {
 	RunListResponse,
 	StartRunRequest,
 	StartRunResponse,
+	PartialPolicyResponse,
 	UpdatePolicyRequest,
 	UpdatePolicyResponse,
 	SchedulesResponse,
@@ -669,13 +670,28 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	/**
 	 * 実行時の流量変更(#27)
 	 * 分割している場合は全shardへ同じ設定を配る, 1つでも残ると投入が止まらない(ADR-0011)
+	 * 途中で止めずに全shardへ試す, 届かなかったshardは呼び出し側へ返して再試行に委ねる
 	 */
 	const eachShard = async <T>(env: RestEnv, binding: string, run: (stub: DurableObjectStub<TsumugiJobShard>) => Promise<T>) => {
-		const shards = shardsOf?.(binding) ?? 1;
+		const shards = Math.max(1, shardsOf?.(binding) ?? 1);
 		const stubs = Array.from({ length: shards }, (_, shard) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardName(binding, shard))));
-		const results = await Promise.all(stubs.map(run));
-		return { shards, results };
+		const settled = await Promise.allSettled(stubs.map(run));
+		const failed = settled.flatMap((result, shard) => (result.status === 'rejected' ? [shard] : []));
+		for (const [shard, result] of settled.entries()) {
+			if (result.status === 'rejected') console.error(`tsumugi: policy update failed on ${shardName(binding, shard)}`, result.reason);
+		}
+		const applied = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+		return { shards, failed, applied };
 	};
+
+	/** 一部のshardにしか届かなかった要求, 成功として返すと止まっていない投入を止まったものとして扱う(#27) */
+	const partial = (binding: string, shards: number, failed: number[]) =>
+		({
+			error: `the change reached ${shards - failed.length} of ${shards} shards, send the same request again`,
+			binding,
+			shards,
+			failed,
+		}) satisfies PartialPolicyResponse;
 
 	app.post('/api/bindings/:binding/policy', async (c) => {
 		const binding = c.req.param('binding');
@@ -692,9 +708,10 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const parsed = validatePolicy(body);
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
-		const { shards, results } = await eachShard(c.env, binding, (stub) => stub.updatePolicy(parsed.input));
-		// 全shardへ同じ内容を配るので, 代表としてshard 0の結果を返す
-		const policy = results[0] as UpdatePolicyResponse['policy'];
+		const { shards, failed, applied } = await eachShard(c.env, binding, (stub) => stub.updatePolicy(parsed.input));
+		if (failed.length > 0) return c.json(partial(binding, shards, failed), 500);
+		// 全shardへ同じ内容を配るので, 代表として先頭の結果を返す
+		const policy = applied[0] as UpdatePolicyResponse['policy'];
 		return c.json({ binding, shards, policy } satisfies UpdatePolicyResponse);
 	});
 
@@ -704,7 +721,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		if (bindings.length > 0 && !bindings.includes(binding))
 			return c.json({ error: `unknown binding: ${binding}` } satisfies ErrorResponse, 404);
 
-		await eachShard(c.env, binding, (stub) => stub.resetPolicy());
+		const { shards, failed } = await eachShard(c.env, binding, (stub) => stub.resetPolicy());
+		if (failed.length > 0) return c.json(partial(binding, shards, failed), 500);
 		return c.json({ ok: true } satisfies MutationResponse);
 	});
 

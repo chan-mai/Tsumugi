@@ -193,7 +193,7 @@ op updatePolicy(@path binding: string, @body body: UpdatePolicyRequest): {
 
 		policy: Policy;
 	};
-} | BadBody | Unauthorized | NotFound | Unavailable;
+} | BadBody | Unauthorized | NotFound | PartiallyApplied | Unavailable;
 
 @route("/api/bindings/{binding}/policy/reset")
 @operationId("resetPolicy")
@@ -205,7 +205,7 @@ op resetPolicy(@path binding: string): {
 	@statusCode statusCode: 200;
 
 	@body body: Mutation;
-} | Unauthorized | NotFound | Unavailable;
+} | Unauthorized | NotFound | PartiallyApplied | Unavailable;
 
 @route("/api/schedules")
 @operationId("listSchedules")

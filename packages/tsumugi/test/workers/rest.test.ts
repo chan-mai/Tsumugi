@@ -260,6 +260,50 @@ describe('REST API', () => {
 		);
 	});
 
+	it('一部のshardへ届かなければ500と対象を返す(#27)', async () => {
+		// 分割している構成で片方だけ落ちる状況, 成功として返すと止まっていない投入を止まったものとして扱う
+		const sharded = defineTsumugi({
+			performers: { REST: Noop },
+			auth: bearerAuth(TOKEN),
+			bindings: { REST: { shards: 2 } },
+		});
+		// shard 1だけが失敗するJOB_SHARDへ差し替える
+		const broken = {
+			...env,
+			JOB_SHARD: {
+				idFromName: (name: string) => ({ name }),
+				get: (id: { name: string }) => ({
+					updatePolicy: async () => {
+						if (id.name.endsWith('#1')) throw new Error('unreachable');
+						return { paused: true };
+					},
+					resetPolicy: async () => {
+						if (id.name.endsWith('#1')) throw new Error('unreachable');
+					},
+				}),
+			},
+		} as unknown as RestEnv;
+
+		const call = (path: string) =>
+			sharded.fetch!(
+				new Request(`https://example.com${path}`, {
+					method: 'POST',
+					headers: { ...authorized, 'content-type': 'application/json' },
+					body: JSON.stringify({ paused: true }),
+				}),
+				broken,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+
+		const res = await call('/api/bindings/REST/policy');
+		expect(res.status).toBe(500);
+		const body = await res.json<{ binding: string; shards: number; failed: number[] }>();
+		expect(body).toMatchObject({ binding: 'REST', shards: 2, failed: [1] });
+
+		// resetも同じ扱い, 片方だけ静的設定へ戻ると設定が食い違う
+		expect((await call('/api/bindings/REST/policy/reset')).status).toBe(500);
+	});
+
 	it('statsが最古のSCHEDULEDの経過時間を返す(#10)', async () => {
 		await seedJob();
 		const res = await call(withAuth, 'GET', '/api/stats', authorized);

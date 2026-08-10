@@ -257,11 +257,14 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return this.repo.find(jobId)?.state ?? null;
 	}
 
-	/** 永続化した直近blockedを一度だけ読み戻す,無ければfalse既定のまま(#10) */
+	/**
+	 * 永続化した直近blockedを一度だけ読み戻す,無ければfalse既定のまま(#10)
+	 * 軸を足した後の起動では古い記録に新しい軸が無いので, 既定へ重ねてから使う(#27)
+	 */
 	#loadBlocked(): void {
 		if (this.#blockedLoaded) return;
 		const raw = this.repo.readSetting('last_blocked');
-		if (raw) this.#lastBlocked = JSON.parse(raw) as BlockedBy;
+		if (raw) this.#lastBlocked = { ...this.#lastBlocked, ...(JSON.parse(raw) as Partial<BlockedBy>) };
 		this.#blockedLoaded = true;
 	}
 

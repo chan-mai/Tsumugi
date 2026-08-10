@@ -296,6 +296,7 @@ model UpdatePolicyRequest {
 		intervalMs: integer;
 	} | null;
 
+	@minValue(1)
 	agingIntervalMs?: integer | null;
 
 	@minValue(0)
@@ -388,6 +389,22 @@ model NotFound {
 model Unavailable {
 	@statusCode statusCode: 503;
 	@body body: Error;
+}
+
+@doc("The change reached only some of the shards. Sending the same request again is safe and covers the rest.")
+model PartiallyApplied {
+	@statusCode statusCode: 500;
+
+	@body body: {
+		error: string;
+		binding: string;
+
+		@doc("How many shards the binding has")
+		shards: integer;
+
+		@doc("Shards the change did not reach")
+		failed: integer[];
+	};
 }
 
 @doc("Not available in this deployment")

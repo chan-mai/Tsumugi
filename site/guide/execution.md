@@ -106,7 +106,8 @@ curl -X POST -H "authorization: Bearer $TOKEN" -H 'content-type: application/jso
   -d '{"paused": true}' https://example.com/api/bindings/MAIL/policy
 ```
 
-一時停止は同時実行数とは別に状態管理されており、停止中も実行中のジョブの回収とエージングは動くため、再開すると待機順に実行されます
+一時停止は同時実行数とは別に状態管理されており、停止中も実行中のジョブの回収とエージングは継続します。
+再開後の投入順は通常と同じく実効優先度順です。停止中も待ち時間は伸び続けるため、低優先度のジョブほど順位が上がります
 
 コードから変更する場合は`tsumugi.shardFor`で取得したstubの`configure`を使います。保持期間もあわせて変更可能です
 

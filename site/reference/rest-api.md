@@ -354,10 +354,30 @@ bindingごとの滞留の診断情報を取得します
 成功すると、変更後の設定と適用したshard数が返ります
 
 ```json
-{ "binding": "MAIL", "shards": 1, "policy": { "paused": true, "concurrency": 5, "...": "..." } }
+{
+  "binding": "MAIL",
+  "shards": 1,
+  "policy": {
+    "paused": true,
+    "concurrency": 5,
+    "perKeyConcurrency": 1,
+    "rate": null,
+    "agingIntervalMs": 60000,
+    "reaperGraceMs": 30000
+  }
+}
 ```
 
 変更はbindingの全shardへ適用されます
+
+分割している場合、一部のshardにしか届かないことがあります
+その場合は500になり、届かなかったshardの番号がレスポンスされます
+
+```json
+{ "error": "the change reached 3 of 4 shards, send the same request again", "binding": "MAIL", "shards": 4, "failed": [2] }
+```
+
+反映は冪等です
 
 この変更は`bindings`の静的な設定より優先され、以降の投入では静的な設定が無視されます
 
@@ -370,6 +390,8 @@ bindingごとの滞留の診断情報を取得します
 ```
 
 次の投入から`bindings`に書いた設定が再び有効となります
+
+一部のshardにしか届かなかった場合は、変更と同じく500と`failed`が返ります
 
 ## GET /api/schedules
 

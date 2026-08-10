@@ -94,6 +94,12 @@ export type PolicyView = {
 export type UpdatePolicyRequest = Partial<PolicyView>;
 export type UpdatePolicyResponse = { binding: string; shards: number; policy: PolicyView };
 
+/**
+ * 一部のshardにだけ届いた場合の応答(#27)
+ * 同じ要求を送り直せば残りへ届く, 反映は冪等
+ */
+export type PartialPolicyResponse = { error: string; binding: string; shards: number; failed: number[] };
+
 export type RunSummary = {
 	id: string;
 	flow: string;
