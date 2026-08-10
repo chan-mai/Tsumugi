@@ -7,7 +7,7 @@ import { getJob, type Attempt, type Job } from '../api';
 import { useJobActions } from '../useJobActions';
 
 const props = defineProps<{ jobId: string | null }>();
-const emit = defineEmits<{ close: []; changed: [] }>();
+const emit = defineEmits<{ close: []; changed: []; run: [string] }>();
 
 const job = ref<Job | null>(null);
 const attempts = ref<Attempt[]>([]);
@@ -111,6 +111,19 @@ const pretty = (payload: string | undefined) => {
 								<dd class="font-mono text-xs break-all">{{ job.id }}</dd>
 								<dt class="text-muted-foreground">Binding</dt>
 								<dd>{{ job.binding }}</dd>
+								<template v-if="job.run_id">
+									<dt class="text-muted-foreground">Run</dt>
+									<dd>
+										<button
+											type="button"
+											class="border-none font-mono text-xs break-all underline underline-offset-2 hover:text-foreground"
+											@click="emit('run', job.run_id)"
+										>
+											{{ job.run_id }}
+										</button>
+										<span v-if="job.node_id" class="ml-1 text-xs text-muted-foreground">{{ job.node_id }}</span>
+									</dd>
+								</template>
 								<dt class="text-muted-foreground">Attempts</dt>
 								<dd class="tabular-nums">{{ job.attempts }} / {{ job.max_attempts }}</dd>
 								<!-- 報告するperformerでのみ埋まる -->

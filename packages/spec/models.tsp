@@ -66,6 +66,12 @@ model JobDetail {
 	@doc("JSON-encoded return value of perform. Present only on success.")
 	result: string | null;
 
+	@doc("Run that enqueued this job. Null for a job enqueued on its own.")
+	run_id: string | null;
+
+	@doc("Node that enqueued this job. Set together with run_id.")
+	node_id: string | null;
+
 	@doc("Newest attempt first")
 	attempts_log: AttemptRecord[];
 }

@@ -42,6 +42,10 @@ export type JobDetail = JobSummary & {
 	payload: string;
 	/** performの戻り値, 成功時のみ入る(#9) */
 	result: string | null;
+	/** 投入元のrun, 単発で投入したジョブはnull(ADR-0015) */
+	run_id: string | null;
+	/** 投入元のノード, runと対で入る */
+	node_id: string | null;
 	/** 新しい試行から順に入る */
 	attempts_log: AttemptRecord[];
 };
