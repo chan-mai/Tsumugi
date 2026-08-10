@@ -1,12 +1,12 @@
 # Flow
 
-複数のジョブを依存関係付きで実行する場合はFlowを定義します
+複数のジョブを依存関係付きで実行する場合はFlowを定義します。
 Flowは有向非巡回グラフ(DAG)の定義であり、実行単位はRunです。
 
 ## 定義
 
-`createFlow`に`performers`を渡すと、Flowを定義する関数が返ります
-binding名とpayloadの型は単発のジョブと同じように検査されます
+`createFlow`に`performers`を渡すと、Flowを定義する関数が返ります。
+binding名とpayloadの型は単発のジョブと同じように検査されます。
 
 ```ts
 import { createFlow, defineTsumugi } from 'tsumugi';
@@ -36,16 +36,16 @@ const flows = {
 const tsumugi = defineTsumugi({ performers, flows, auth: /* ... */ });
 ```
 
-binding名は[exportした名前](/guide/performer)で解決されるため、`performers`のキーはexport名と一致させます
+binding名は[exportした名前](/guide/performer)で解決されるため、`performers`のキーはexport名と一致させます。
 
-`f.node`の第1引数はノードID、第2引数はbinding、`input`は前段の戻り値からpayloadを組み立てる関数です
-`after`に渡したオブジェクトのキーが、`input`の第2引数のプロパティ名になります
+`f.node`の第1引数はノードID、第2引数はbinding、`input`は前段の戻り値からpayloadを組み立てる関数です。
+`after`に渡したオブジェクトのキーが、`input`の第2引数のプロパティ名になります。
 
-ノードIDに使用できる文字は英数字とハイフンとアンダースコアです
+ノードIDに使用できる文字は英数字とハイフンとアンダースコアです。
 
-依存は変数で指定します。宣言済みのノードしか参照しないので、循環する定義にはなりません
+依存は変数で指定します。宣言済みのノードしか参照しないので、循環する定義にはなりません。
 
-ノードには`maxAttempts`、`backoff`、`timeoutMs`、`priority`、`concurrencyKey`など、投入時と同じオプションの指定が可能です
+ノードには`maxAttempts`、`backoff`、`timeoutMs`、`priority`、`concurrencyKey`など、投入時と同じオプションの指定が可能です。
 
 ## 開始
 
@@ -53,32 +53,32 @@ binding名は[exportした名前](/guide/performer)で解決されるため、`p
 const runId = await tsumugi.start(env, 'GREETINGS', { prefix: 'hello' });
 ```
 
-`input`の型はFlowの型引数から決まります
+`input`の型はFlowの型引数から決まります。
 
-`start`の第4引数に`{ id }`を指定するとrunIdが`<flow>:<id>`に固定され、同じIDでの2回目の開始は既存のrunIdを返します
-リトライを行うHTTPハンドラから呼び出してもRunは増えません
+`start`の第4引数に`{ id }`を指定するとrunIdが`<flow>:<id>`に固定され、同じIDでの2回目の開始は既存のrunIdを返します。
+リトライを行うHTTPハンドラから呼び出してもRunは増えません。
 
-同じく第4引数の`{ deadlineMs }`でRun全体の[期限](#deadline)を指定できます
+同じく第4引数の`{ deadlineMs }`でRun全体の[期限](#deadline)を指定できます。
 
 ## fan-out
 
-実行時に件数が決まる並列処理は`f.fanOut`で定義します
-`over`が返した配列の要素ごとに子ノードが1つ作成され、子のノードIDには要素の添字が使われます(`greet:0`, `greet:1`)
-`key`を指定した場合は添字の代わりにその戻り値を使います。使用できる文字はノードIDと同じです
+実行時に件数が決まる並列処理は`f.fanOut`で定義します。
+`over`が返した配列の要素ごとに子ノードが1つ作成され、子のノードIDには要素の添字が使われます(`greet:0`, `greet:1`)。
+`key`を指定した場合は添字の代わりにその戻り値を使います。使用できる文字はノードIDと同じです。
 
-後続のノードが受け取るのは集計値です
+後続のノードが受け取るのは集計値です。
 
 ```ts
 { total: 3, succeeded: 2, failed: 1 }
 ```
 
-子ノードごとの戻り値は渡りません。個別の結果が必要な場合は、performerからR2やD1へ書き込み、参照を戻り値としてください
+子ノードごとの戻り値は後続のノードへ渡されません。個別の結果が必要な場合は、performerからR2やD1へ書き込み、参照を戻り値としてください。
 
-子ノードの失敗は親ノードの失敗として扱いません。後続のノードは`failed`を見て判断します
+子ノードの失敗は親ノードの失敗として扱いません。後続のノードは`failed`の値で判断されます。
 
 ## perform内からの追加
 
-`ctx.spawn`は、実行中のノードの下に子ノードを追加します
+`ctx.spawn`は、実行中のノードの下に子ノードを追加します。
 
 ```ts
 class Crawl extends Performer<{ url: string }, void, {}, Env> {
@@ -90,17 +90,17 @@ class Crawl extends Performer<{ url: string }, void, {}, Env> {
 }
 ```
 
-第1引数のIDは必須です。同じIDで二度要求しても子ノードは1つだけ作成されます
-使用できる文字はノードIDと同じで、子のノードIDは`<親のノードID>:<指定したID>`になります
+第1引数のIDは必須です。同じIDで二度要求しても子ノードは1つだけ作成されます。
+使用できる文字はノードIDと同じで、子のノードIDは`<親のノードID>:<指定したID>`になります。
 
-`spawn`には型検査が適用されません。binding名もpayloadも実行時の値として渡します
+`spawn`には型検査が適用されません。binding名もpayloadも実行時の値として渡します。
 
-`perform`が失敗した場合、その試行で要求した子ノードは作成されません。再実行時に改めて要求してください
-service binding越しのリモートperformerからも`spawn`を呼び出せますが、[`await`が必要です](/guide/performer#remote-constraints)
+`perform`が失敗した場合、その試行で要求した子ノードは作成されません。再実行時に改めて要求してください。
+service binding越しのリモートperformerからも`spawn`を呼び出せますが、[`await`が必要です](/guide/performer#remote-constraints)。
 
 ## 別のFlowの起動
 
-`f.subflow`は、別のFlowをRunとして起動し、その終端を待ちます
+`f.subflow`は、別のFlowをRunとして起動し、その終端を待ちます。
 
 ```ts
 const REPORTING = flow<{ ids: string[] }>((f) => {
@@ -114,59 +114,59 @@ const PIPELINE = flow<{ prefix: string }>((f) => {
 });
 ```
 
-第2引数にはFlowの定義そのものを渡します。`input`の型は渡したFlowの型引数から決まります
-起動先は`flows`に登録されている必要があります。登録されていない場合は起動時にエラーになります
+第2引数にはFlowの定義そのものを渡します。`input`の型は渡したFlowの型引数から決まります。
+起動先は`flows`に登録されている必要があります。登録されていない場合は起動時にエラーになります。
 
-子のrunIdは`<子のFlow名>:<親のrunIdのローカル部>-<ノードID>`です
+子のrunIdは`<子のFlow名>:<親のrunIdのローカル部>-<ノードID>`です。
 
-子の状態がそのままノードの状態になります。`COMPLETED`、`FAILED`、`CANCELLED`のいずれかです
-子の戻り値は受け取りません。結果が必要な場合は、performerからR2やD1へ書き込んでください
+子の状態がそのままノードの状態になります。`COMPLETED`、`FAILED`、`CANCELLED`のいずれかです。
+子の戻り値は受け取りません。結果が必要な場合は、performerからR2やD1へ書き込んでください。
 
-親を取り消すと子も取り消されます
+親を取り消すと子も取り消されます。
 
-入れ子は既定で3段までです。`defineTsumugi`の`runs.maxDepth`で変更可能です
+入れ子は既定で3段までです。`defineTsumugi`の`runs.maxDepth`で変更可能です。
 
 ## 待ち合わせ
 
-ノードは、自身と子孫のすべてが終わった時点で完了として扱われます
-`after`で親ノードを指定した後続のノードは、fan-outで展開された子ノードと`spawn`で追加された子孫の完了も待ちます
+ノードは、自身と子孫のすべてが終わった時点で完了として扱われます。
+`after`で親ノードを指定した後続のノードは、fan-outで展開された子ノードと`spawn`で追加された子孫の完了も待ちます。
 
 ## 発火条件 {#trigger}
 
-既定では、依存がすべて成功した場合にだけノードが実行されます
-`trigger`を指定すると、依存が失敗した場合の動作を変えられます
+既定では、依存がすべて成功した場合にだけノードが実行されます。
+`trigger`を指定すると、依存が失敗した場合の動作を変えられます。
 
-| 値          | 実行される条件                                             |
-| ----------- | ---------------------------------------------------------- |
-| `'success'` | 依存がすべて成功。既定値です                               |
+| 値          | 実行される条件                                              |
+| ----------- | ----------------------------------------------------------- |
+| `'success'` | 依存がすべて成功。既定値です                                |
 | `'failure'` | 依存のうち1つ以上が`FAILED` `STALLED` `CANCELLED`のいずれか |
-| `'always'`  | 依存がすべて決着。成否は問いません                         |
+| `'always'`  | 依存がすべて終了。成否は問いません                          |
 
 ```ts
 const flows = {
   BACKUP: flow<{ target: string }>((f) => {
     const dump = f.node('dump', 'DUMP', { input: (i) => ({ target: i.target }) });
 
-    // 失敗したときだけ通る後始末
+    // 失敗したときだけ実行する後始末
     f.node('alert', 'ALERT', {
       after: { dump },
       trigger: 'failure',
       input: (i) => ({ message: `backup failed: ${i.target}` }),
     });
 
-    // 成否を問わず必ず通る
+    // 成否に関わらず必ず実行する
     f.node('unlock', 'UNLOCK', { after: { dump }, trigger: 'always', input: (i) => ({ target: i.target }) });
   }),
 };
 ```
 
-`trigger`は依存を持つノードにのみ指定可能です。`after`が無いノードへの指定はエラーになります
+`trigger`は依存を持つノードにのみ指定可能です。`after`が無いノードへの指定はエラーになります。
 
-`'failure'`が数えるのは実際に失敗したノードだけです
-発火条件や`when`で実行されず`SKIPPED`になった依存は失敗として数えないため、後始末は通りません
+`'failure'`が数えるのは実際に失敗したノードだけです。
+発火条件や`when`で実行されず`SKIPPED`になった依存は失敗として数えないため、後始末のノードも実行されません。
 
-`'failure'`と`'always'`では、失敗した依存に戻り値がありません
-そのため受け取り口の型が`undefined`を含むようになり、値の欠落を扱う必要があります
+`'failure'`と`'always'`では、失敗した依存に戻り値がありません。
+そのため受け取り口の型が`undefined`を含むようになり、値の欠落を扱う必要があります。
 
 ```ts
 f.node('alert', 'ALERT', {
@@ -179,8 +179,8 @@ f.node('alert', 'ALERT', {
 
 ## 条件分岐 {#when}
 
-入力や前段の結果で経路を選ぶ場合は`when`を指定します
-`false`を返したノードは`SKIPPED`になり、それを待つ下流のノードも実行されません
+入力や前段の結果で経路を選ぶ場合は`when`を指定します。
+`false`を返したノードは`SKIPPED`になり、それを待つ下流のノードも実行されません。
 
 ```ts
 f.node('detail', 'DETAIL', {
@@ -190,34 +190,34 @@ f.node('detail', 'DETAIL', {
 });
 ```
 
-`when`はRunの中で、ノードを起動する直前に評価されます
-`input`と同じくFlowの定義から呼ばれるため、外部への問い合わせではなく手元の値で判断してください
+`when`はノードを起動する直前に評価されます。
+`input`と同じくFlowの定義から呼び出されるため、外部への問い合わせを行わず、渡された値だけで判断してください。
 
-`when`が例外を投げた場合、実行の可否が決まらないためノードは`FAILED`になります
+`when`で例外が発生した場合、実行の可否が決まらないためノードは`FAILED`になります。
 
 ## 失敗時の動作
 
-ノードが失敗した場合、それを`success`(既定)で待つ下流のノードが`SKIPPED`になります
-`trigger`に`'failure'`か`'always'`を指定した下流は実行されます
-依存関係のないノードは最後まで実行され、すべてのノードが終わった時点でRunが`FAILED`になります
+ノードが失敗した場合、それを`success`(既定)で待つ下流のノードが`SKIPPED`になります。
+`trigger`に`'failure'`か`'always'`を指定した下流は実行されます。
+依存関係のないノードは最後まで実行され、すべてのノードが終わった時点でRunが`FAILED`になります。
 
-Runが`FAILED`になるのは、失敗したノードがある場合です
-発火条件や`when`で実行されなかっただけのノードは失敗として数えません
-`trigger: 'failure'`の後始末が成功しても、上流が失敗していればRunは`FAILED`のまま終わります
+Runが`FAILED`になるのは、失敗したノードがある場合です。
+発火条件や`when`で実行されなかっただけのノードは失敗として数えません。
+`trigger: 'failure'`の後始末が成功しても、上流が失敗していればRunは`FAILED`のまま終わります。
 
-`SKIPPED`になった理由はノードの`error`に残ります。ダッシュボードの詳細から確認できます
+`SKIPPED`になった理由はノードの`error`に残ります。ダッシュボードの詳細から確認できます。
 
-`FAILED`のRunはダッシュボードとREST APIから再開可能です
-成功済みのノードの結果はそのまま使われ、それ以外のノードは未実行の状態に戻って改めて実行されます
+`FAILED`のRunはダッシュボードとREST APIから再開可能です。
+成功済みのノードの結果はそのまま使われ、それ以外のノードは未実行の状態に戻って改めて実行されます。
 
 ## 取り消し
 
-`cancel`は未実行のノードを停止します
-実行中のジョブは停止しないので、それらが終わった時点でRunが`CANCELLED`になります
+`cancel`は未実行のノードを停止します。
+実行中のジョブは停止しないので、それらが終わった時点でRunが`CANCELLED`になります。
 
 ## 期限 {#deadline}
 
-Run全体の期限は、Flowの定義の第2引数で指定します
+Run全体の期限は、Flowの定義の第2引数で指定します。
 
 ```ts
 const GREETINGS = flow<{ prefix: string }>(
@@ -228,25 +228,25 @@ const GREETINGS = flow<{ prefix: string }>(
 );
 ```
 
-`deadlineMs`は正の整数(ミリ秒)です
-`start`の第4引数の`{ deadlineMs }`を指定した場合はそちらが優先されます
+`deadlineMs`は正の整数(ミリ秒)です。
+`start`の第4引数の`{ deadlineMs }`を指定した場合はそちらが優先されます。
 
-期限を超過したRunは取り消しと同じ流れで打ち切られます
-未実行のノードは`run deadline exceeded`のエラーで`FAILED`になり、実行中のジョブは停止しないので、それらが終わった時点でRunが`FAILED`になります
-実行中の子のRunは取り消されます
+期限を超過したRunは取り消しと同じ手順で中断されます。
+未実行のノードは`run deadline exceeded`のエラーで`FAILED`になり、実行中のジョブは停止しないので、それらが終わった時点でRunが`FAILED`になります。
+実行中の子のRunは取り消されます。
 
-期限の時点で終わっていなかったRunは、残りのノードがすべて成功しても`FAILED`になります
+期限の時点で終わっていなかったRunは、残りのノードがすべて成功しても`FAILED`になります。
 
-`FAILED`になったRunは通常の失敗と同じように再開可能です。期限は再開の時点から引き直されます
+`FAILED`になったRunは通常の失敗と同じように再開可能です。期限は再開の時点から再計算されます。
 
 ## 保持期間
 
-終了したRunは`runs.sweepAfterMs`(既定5分)、`FAILED`のRunは`runs.failedRetentionMs`(既定7日)の経過後に削除されます
-再開を受け付けるのはこの期間内のみで、経過後の再開の要求は410になります。[RunSettings](/reference/config#runsettings)を参照してください
+終了したRunは`runs.sweepAfterMs`(既定5分)、`FAILED`のRunは`runs.failedRetentionMs`(既定7日)の経過後に削除されます。
+再開を受け付けるのはこの期間内のみで、経過後の再開の要求は410になります。[RunSettings](/reference/config#runsettings)を参照してください。
 
 ## テスト
 
-`simulateFlow`は、ある入力に対してノードがどの順序で実行され、各ノードにどのpayloadが渡るかを返します
+`simulateFlow`は、ある入力に対してノードがどの順序で実行され、各ノードにどのpayloadが渡るかを返します。
 
 ```ts
 import { simulateFlow } from 'tsumugi/testing';
@@ -257,12 +257,12 @@ expect(result.nodes.map((node) => node.id)).toEqual(['list', 'greet:0', 'greet:1
 expect(result.nodes[1].payload).toEqual({ name: 'a' });
 ```
 
-performerは実行しません。各ノードの戻り値は`results`にノードIDとの対応で指定します
-関数も指定可能です。指定の無いノードの戻り値は`undefined`です
+performerは実行しません。各ノードの戻り値は`results`にノードIDとの対応で指定します。
+関数も指定可能です。指定の無いノードの戻り値は`undefined`です。
 
-`fails`に渡したノードは失敗します。下流は`SKIPPED`、Runは`FAILED`になります
+`fails`に渡したノードは失敗します。下流は`SKIPPED`、Runは`FAILED`になります。
 
-fan-outは`over`の結果に従って展開されます。`ctx.spawn`による追加は含まれません
+fan-outは`over`の結果に従って展開されます。`ctx.spawn`による追加は含まれません。
 
 ## 制約
 
@@ -273,7 +273,7 @@ fan-outは`over`の結果に従って展開されます。`ctx.spawn`による�
 
 ## 設定
 
-`flows`を指定する場合、wranglerの設定に2箇所追記します
+`flows`を指定する場合、wranglerの設定に2箇所追記します。
 
 ```jsonc
 {
@@ -290,25 +290,25 @@ fan-outは`over`の結果に従って展開されます。`ctx.spawn`による�
 }
 ```
 
-`TsumugiRun`は`defineTsumugi`の戻り値から取り出してエクスポートします
+`TsumugiRun`は`defineTsumugi`の戻り値から取り出してエクスポートします。
 
 ```ts
 export { TsumugiJobShard } from 'tsumugi';
 export class TsumugiRun extends tsumugi.runClass {}
 ```
 
-読み取りモデルのマイグレーションも適用し直してください
+D1のマイグレーションも適用し直してください。
 
 ```bash
 pnpm wrangler d1 migrations apply my-jobs --remote
 ```
 
-`flows`を指定しない構成では、どちらも不要です
+`flows`を指定しない構成では、どちらも不要です。
 
 ## デプロイと実行中のRun
 
-実行中のRunは開始時の構造のまま進みます
-`input`などの関数を修正した場合、次に実行されるノードから反映されます
+実行中のRunは開始時の構造のまま進みます。
+`input`などの関数を修正した場合、次に実行されるノードから反映されます。
 
-定義からノードを削除すると、実行中のRunはそのノードで失敗します
-構造を変更する場合は、実行中のRunがすべて終わってから削除してください
+定義からノードを削除すると、実行中のRunはそのノードで失敗します。
+構造を変更する場合は、実行中のRunがすべて終わってから削除してください。

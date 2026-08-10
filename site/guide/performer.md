@@ -1,6 +1,6 @@
 # Performer
 
-ジョブの処理内容は`Performer`を継承したクラスとして記述します
+ジョブの処理内容は`Performer`を継承したクラスとして記述します。
 
 ## 基本形
 
@@ -20,21 +20,21 @@ export class SendMail extends Performer<{ to: string; subject: string }, void, {
 }
 ```
 
-型引数は順に、ペイロード、戻り値、必須キーの宣言、`Env`です
+型引数は順に、ペイロード、戻り値、必須キーの宣言、`Env`です。
 
-bindingは`WorkerEntrypoint`と同様にコンストラクタで受け取るため、`this.env`から参照可能です
+bindingは`WorkerEntrypoint`と同様にコンストラクタで受け取るため、`this.env`から参照可能です。
 
 ## binding名
 
-binding名はWorkerのエントリからexportした名前で解決され、`export class SendMail`と書けばbinding名は`SendMail`になり、別途の登録は不要です
+binding名はWorkerのエントリからexportした名前で解決され、`export class SendMail`と書けばbinding名は`SendMail`になり、別途の登録は不要です。
 
 ```ts
 // src/index.ts
 export { SendMail } from './performers/send-mail.js';
 ```
 
-`defineTsumugi`の`performers`には、performerをまとめたモジュールをそのまま渡します
-これはペイロードと必須キーの型を引くためのもので、実行時の解決には使いません
+`defineTsumugi`の`performers`には、performerをまとめたモジュールをそのまま渡します。
+これはペイロードと必須キーの型を導出するためのもので、実行時の解決には使いません。
 
 ```ts
 import * as performers from './performers/index.js';
@@ -44,15 +44,15 @@ export * from './performers/index.js';
 const tsumugi = defineTsumugi({ performers, /* ... */ });
 ```
 
-別名を付ける場合はバレルのexportで変えます
-実行時の解決先と`performers`のキーが同じ1箇所から決まるため、両者がずれません
+別名を付ける場合はバレルのexportで変えます。
+実行時の解決先と`performers`のキーが同じ1箇所から決まるため、両者が一致します。
 
 ```ts
 // src/performers/index.ts
 export { SendMail as MAIL } from './send-mail.js';
 ```
 
-Workerのエントリでのみ別名を付けると、実行時は`MAIL`で解決される一方で`performers`のキーは`SendMail`のまま残り、型の上のbinding名と一致しなくなります
+Workerのエントリでのみ別名を付けると、実行時は`MAIL`で解決される一方で`performers`のキーは`SendMail`のまま残り、型の上のbinding名と一致しなくなります。
 
 ```ts
 // src/index.ts
@@ -62,23 +62,23 @@ export { SendMail as MAIL } from './performers/send-mail.js';
 
 ## 実行文脈
 
-`perform`の第2引数に`JobContext`が渡されます
+`perform`の第2引数に`JobContext`が渡されます。
 
-| フィールド       | 内容                                                 |
-| ---------------- | ---------------------------------------------------- |
-| `jobId`          | `<binding>#<shard>:<localId>`形式のジョブID          |
-| `attempt`        | 1始まりの試行回数                                    |
-| `idempotencyKey` | ジョブ単位で一定の値、再実行でも同じ値               |
-| `deadlineAt`     | タイムアウトが切れる時刻、epochミリ秒               |
-| `heartbeat`      | 実行中であることを報告する関数                       |
-| `spawn`          | Flowのノードとして実行中に子ノードを追加する関数     |
+| フィールド       | 内容                                             |
+| ---------------- | ------------------------------------------------ |
+| `jobId`          | `<binding>#<shard>:<localId>`形式のジョブID      |
+| `attempt`        | 1始まりの試行回数                                |
+| `idempotencyKey` | ジョブ単位で一定の値、再実行でも同じ値           |
+| `deadlineAt`     | タイムアウトが切れる時刻、epochミリ秒            |
+| `heartbeat`      | 実行中であることを報告する関数                   |
+| `spawn`          | Flowのノードとして実行中に子ノードを追加する関数 |
 
-at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください
+at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください。
 
-中断が必要な処理には`deadlineAt`から`AbortSignal`を組み立てて渡します
-`AbortSignal`はRPCの引数として渡せない制約があるため、Tsumugiが渡すのは時刻のみです
+中断が必要な処理には`deadlineAt`から`AbortSignal`を組み立てて渡します。
+`AbortSignal`はRPCの引数として渡せない制約があるため、Tsumugiが渡すのは時刻のみです。
 
-`AbortSignal.timeout`は負の値を受け付けないため、期限を過ぎている場合は`AbortSignal.abort()`を使います
+`AbortSignal.timeout`は負の値を受け付けないため、期限を過ぎている場合は`AbortSignal.abort()`を使います。
 
 ```ts
 const remaining = ctx.deadlineAt - Date.now();
@@ -87,15 +87,15 @@ const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abor
 
 中断は協調的な要求であり、応じないperformerは期限を過ぎても実行を継続する可能性があります。
 
-`spawn`の使用方法は[Flow](/guide/flow)を参照してください
+`spawn`の使用方法は[Flow](/guide/flow)を参照してください。
 
 ### heartbeat
 
-所要時間が入力によって大きく変わる処理では、`timeoutMs`を最長の場合に合わせる必要があります
-その場合、実際に停止したジョブの回収も同じだけ遅れてしまいます
+所要時間が入力によって大きく変わる処理では、`timeoutMs`を最長の場合に合わせる必要があります。
+その場合、実際に停止したジョブを無応答と判定するまでの時間も同じだけ長くなります。
 
-`ctx.heartbeat()`を実行すると、無応答とみなす判定の起点が最後の報告時刻に移ります
-`timeoutMs`は1回の報告間隔に対して設定してください
+`ctx.heartbeat()`を実行すると、無応答の判定が最後の報告時刻を起点として行われます。
+`timeoutMs`は1回の報告間隔に対して設定してください。
 
 ```ts
 class Import extends Performer<{ rows: string[] }, void, {}, Env> {
@@ -108,17 +108,17 @@ class Import extends Performer<{ rows: string[] }, void, {}, Env> {
 }
 ```
 
-引数の進捗は0以上1以下です。範囲外の値は0以上1以下へ丸められ、数値以外は進捗なしの報告として扱われます
-報告した進捗はジョブの詳細画面に表示されます
+引数の進捗は0以上1以下です。範囲外の値は0以上1以下へ丸められ、数値以外は進捗なしの報告として扱われます。
+報告した進捗はジョブの詳細画面に表示されます。
 
-実行間隔には5秒の下限があります。これより短い間隔で実行しても、報告は5秒に1回までです
-報告に失敗しても例外にはなりません。その場合は報告が無いジョブと同様に扱われます
+実行間隔には5秒の下限があります。これより短い間隔で実行しても、報告は5秒に1回までです。
+報告に失敗しても例外にはなりません。その場合は報告が無いジョブと同様に扱われます。
 
 ## 失敗の通知
 
-例外をthrowすると失敗として扱われ、試行回数が残っていればリトライされます
-例外が発生せずに完了した場合は成功で、戻り値は保存されて[REST API](/reference/rest-api#get-api-jobs-id)から取得できます
-8,192文字を超える戻り値と直列化できない値は保存されません。Flowのノードでの扱いは[Flow](/guide/flow)を参照してください
+例外をthrowすると失敗として扱われ、試行回数が残っていればリトライされます。
+例外が発生せずに完了した場合は成功で、戻り値は保存されて[REST API](/reference/rest-api#get-api-jobs-id)から取得できます。
+8,192文字を超える戻り値と直列化できない値は保存されません。Flowのノードでの扱いは[Flow](/guide/flow)を参照してください。
 
 ```ts
 class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, void, { concurrencyKey: true }, Env> {
@@ -129,20 +129,20 @@ class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, vo
 }
 ```
 
-発生した例外のメッセージは試行履歴に保存され、ダッシュボードの詳細画面に表示されます
-本文は2,000文字で打ち切られ、1ジョブあたり20件まで保持されます
+発生した例外のメッセージは試行履歴に保存され、ダッシュボードの詳細画面に表示されます。
+本文は2,000文字で打ち切られ、1ジョブあたり20件まで保持されます。
 
 ## キーを必須にする {#required-keys}
 
-第3型引数に`{ concurrencyKey: true }`または`{ uniqueKey: true }`を指定すると、そのperformerへの投入時にキーの指定が必須になります
+第3型引数に`{ concurrencyKey: true }`または`{ uniqueKey: true }`を指定すると、そのperformerへの投入時にキーの指定が必須になります。
 
 ```ts
 class ChargeCard extends Performer<Payload, void, { concurrencyKey: true }, Env> {}
 ```
 
-キーは投入時に文字列として渡します。performer側の関数で導出する形は取りません
+キーは投入時に文字列として渡します。performer側の関数で導出する形は取りません。
 
-必須化は`tsumugi.enqueue`と`tsumugi.jobs(env)`で適用され、渡し忘れはコンパイルエラーになります
+必須化は`tsumugi.enqueue`と`tsumugi.jobs(env)`で適用され、渡し忘れはコンパイルエラーになります。
 
 ```ts
 await tsumugi.enqueue(env, { binding: 'CHARGE', payload, concurrencyKey: 'customer:c1' });
@@ -150,13 +150,13 @@ await tsumugi.jobs(env).enqueue('CHARGE', payload, { concurrencyKey: 'customer:c
 ```
 
 ::: warning
-トップレベルの`enqueue(env, input)`と`createClient()`では必須化が適用されず、キーの渡し忘れも型エラーになりません
-[投入経路](/guide/enqueue#paths)を参照してください
+トップレベルの`enqueue(env, input)`と`createClient()`では必須化が適用されず、キーの渡し忘れも型エラーになりません。
+[投入経路](/guide/enqueue#paths)を参照してください。
 :::
 
 ## 別Workerへの配置
 
-performerはservice binding越しに別のWorkerへの配置が可能です
+performerはservice binding越しに別のWorkerへの配置が可能です。
 
 ```ts
 // 相手側のWorker
@@ -176,7 +176,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-wrangler.jsoncのservice bindingで、binding名とentrypointを対応させます
+wrangler.jsoncのservice bindingで、binding名とentrypointを対応させます。
 
 ```jsonc
 "services": [
@@ -184,8 +184,8 @@ wrangler.jsoncのservice bindingで、binding名とentrypointを対応させま�
 ],
 ```
 
-呼び出し側の`performers`には、クラスの代わりに`remote()`を置きます
-相手のクラスは別Workerにあるためimportできず、型を運ぶためだけに指定します
+呼び出し側の`performers`には、クラスの代わりに`remote()`を置きます。
+相手のクラスは別Workerにあるためimportできず、型を運ぶためだけに指定します。
 
 ```ts
 import { remote } from 'tsumugi';
@@ -194,23 +194,23 @@ import type { SendMail } from 'my-mailer';
 const performers = { ...local, MAIL: remote<SendMail>() };
 ```
 
-同一Workerのperformerと別Workerのperformerは混在可能です
+同一Workerのperformerと別Workerのperformerは混在可能です。
 
 ### 別Worker時の制約 {#remote-constraints}
 
-`spawn`が要求した子ノードは`perform`の完了報告に同梱されてから処理されます。呼び出した時点では実行は始まりません
+`spawn`で要求した子ノードは`perform`が完了してから作成されます。呼び出した時点では実行が始まりません。
 
-別Workerでは`ctx.spawn`がRPCの呼び出しになるため、`await`が必要になります。`await`せずに`perform`が終わると、要求が完了報告に載らないまま失われます
+別Workerでは`ctx.spawn`が非同期の呼び出しになるため、`await`が必要になります。`await`せずに`perform`が終わると、その要求は失われます。
 
 ```ts
 await ctx.spawn('child', 'MAIL', payload);
 ```
 
-`ctx.heartbeat`もRPCの呼び出しになりますが、こちらは元から`await`を前提としています
+`ctx.heartbeat`も同様ですが、こちらは元から`await`して使います。
 
 ## テスト
 
-`tsumugi/testing`はDurable ObjectとQueuesを起動せずにperformerを呼び出します
+`tsumugi/testing`はDurable ObjectとQueuesを起動せずにperformerを呼び出します。
 
 ```ts
 import { createTestContext, runPerformer } from 'tsumugi/testing';
@@ -224,10 +224,10 @@ if (result.ok) console.log(result.value);
 else console.error(result.error);
 ```
 
-`Performer`のコンストラクタは`WorkerEntrypoint`と同じ`(ctx, env)`の2引数です
-`runPerformer`が要求するのは`perform`のみのため、`this.env`を使わないperformerは`perform`を持つ通常のオブジェクトでも検証できます
+`Performer`のコンストラクタは`WorkerEntrypoint`と同じ`(ctx, env)`の2引数です。
+`runPerformer`が要求するのは`perform`のみのため、`this.env`を使わないperformerは`perform`を持つ通常のオブジェクトでも検証できます。
 
-`runPerformer`は例外を再送出せず、成功と失敗を同じ形式で返します
+`runPerformer`は例外を再送出せず、成功と失敗を同じ形式で返します。
 
 ### 実行文脈を差し替える
 
@@ -236,7 +236,7 @@ const ctx = createTestContext({ attempt: 3 });
 await runPerformer(performer, payload, ctx);
 ```
 
-`deadlineAt`を過去や近い将来に置くと、期限に対する振る舞いを検証できます
+`deadlineAt`を過去や近い将来に置くと、期限に対する振る舞いを検証できます。
 
 ```ts
 const ctx = createTestContext({ deadlineAt: Date.now() + 50 });
@@ -245,7 +245,7 @@ await runPerformer(performer, payload, ctx);
 
 ### スケジューラとバックオフ
 
-時刻と乱数は引数で渡すため、fake timersは不要です
+時刻と乱数は引数で渡すため、fake timersは不要です。
 
 ```ts
 import { fixedClock, nextAttempt, schedule } from 'tsumugi/testing';
@@ -259,5 +259,5 @@ schedule({ now, jobs, policy, bucket });
 
 ### Durable Objectを経由するテスト
 
-Durable ObjectとQueuesを経由した動作を検証する場合は`@cloudflare/vitest-pool-workers`が必要です
-`tsumugi/testing`はこの範囲を扱いません
+Durable ObjectとQueuesを経由した動作を検証する場合は`@cloudflare/vitest-pool-workers`が必要です。
+`tsumugi/testing`はこの範囲を扱いません。
