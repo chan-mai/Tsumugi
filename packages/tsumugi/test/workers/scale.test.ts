@@ -309,4 +309,18 @@ describe('トークンバケットの永続化(ADR-0009)', () => {
 
 		expect(await bucketOf('BUCKET3#0')).toBeUndefined();
 	});
+
+	it('保存した残りを読み戻して投入を抑える', async () => {
+		// DOの退避は再現できない, 初回tickの前にSQLiteへ直接書いて同じ状態にする
+		const { queue, sent } = captureQueue();
+		await install('BUCKET4#0', T0, queue);
+		await runInDurableObject(shard('BUCKET4#0'), (instance) =>
+			(instance as any).repo.writeSetting('rate_bucket', JSON.stringify({ tokens: 0, refilledAt: T0 })),
+		);
+		await shard('BUCKET4#0').configure({ policy: { rate: { tokens: 2, intervalMs: 60_000 } } });
+		for (let i = 0; i < 3; i++) await shard('BUCKET4#0').enqueue({ binding: 'BUCKET4', payload: { i } });
+		await runDurableObjectAlarm(shard('BUCKET4#0'));
+
+		expect(sent).toHaveLength(0);
+	});
 });
