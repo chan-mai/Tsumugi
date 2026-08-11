@@ -155,7 +155,6 @@ const FAILURE_NOTIFY_LIMIT = 200;
 /** 宛先を置く設定のキー(#30) */
 const FAILURE_BINDING_KEY = 'failure_binding';
 
-/** 残りトークンを置く設定のキー(ADR-0009) */
 const BUCKET_KEY = 'rate_bucket';
 
 /** 済んだジョブをDOに残す時間,投影が追いつく余裕を見て既定5分 */
@@ -290,10 +289,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#blockedLoaded = true;
 	}
 
-	/**
-	 * 残りトークンを一度だけ読み戻す(ADR-0009)
-	 * メモリだけで持つとDOの退避で満タンに戻り、設定した流量を超えて投入される
-	 */
+	// メモリだけで持つとDOの退避で満タンに戻り、設定した流量を超えて投入される
 	#loadBucket(): void {
 		if (this.#bucketLoaded) return;
 		const raw = this.repo.readSetting(BUCKET_KEY);
@@ -304,10 +300,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#bucketLoaded = true;
 	}
 
-	/**
-	 * 残りトークンを保存する
-	 * 満タンの状態は書かない, 読み戻す時のrefillで同じ値になるので毎tickの書き込みだけが増える
-	 */
+	// 満タンの状態は書かない, 読み戻す時のrefillで同じ値になるので毎tickの書き込みだけが増える
 	#persistBucket(bucket: Bucket): void {
 		const rate = this.policy.rate;
 		if (rate === null || bucket.tokens >= rate.tokens) return;
