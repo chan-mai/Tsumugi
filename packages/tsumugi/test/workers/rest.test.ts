@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
-import { SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
+import { createRest, SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
 
 const T0 = 2_200_000_000_000;
@@ -809,6 +809,50 @@ describe('一括リトライと一括取り消し', () => {
 		const { job } = await res.json<{ job: { state: string } }>();
 		return job.state;
 	};
+
+	const shardsFailing = (unreachable: readonly string[]) => ({
+		idFromName: (name: string) => name,
+		get: (name: string) => ({
+			mutateMany: async (_action: string, ids: string[]) => {
+				if (unreachable.includes(name)) throw new Error('shard is unreachable');
+				return { ok: ids, failed: [] };
+			},
+		}),
+	});
+
+	const bulkWith = (shards: unknown, ids: string[]) =>
+		createRest(bearerAuth(TOKEN), { bindings: ['REST'] }).request(
+			'/api/jobs/bulk-retry',
+			{ method: 'POST', headers: authorized, body: JSON.stringify({ ids }) },
+			{ ...env, JOB_SHARD: shards } as unknown as RestEnv,
+		);
+
+	it('応答しないshardの対象をunreachableとして返す', async () => {
+		// 1つのshardが応答しなくても200で返す, 500にすると成功した分まで再送される
+		const res = await bulkWith(shardsFailing(['REST#0']), ['REST#0:a', 'REST#0:b']);
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			ok: [],
+			failed: [
+				{ id: 'REST#0:a', reason: 'unreachable' },
+				{ id: 'REST#0:b', reason: 'unreachable' },
+			],
+			remaining: 0,
+		});
+	});
+
+	it('応答したshardの結果は残す', async () => {
+		// 成功した分を結果に含めないと呼び出し側が再送し、同じ操作を二度実行する
+		const res = await bulkWith(shardsFailing(['REST#1']), ['REST#0:a', 'REST#1:b']);
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			ok: ['REST#0:a'],
+			failed: [{ id: 'REST#1:b', reason: 'unreachable' }],
+			remaining: 0,
+		});
+	});
 
 	it('選択したIDをまとめてリトライする', async () => {
 		const jobId = await failedJob();
