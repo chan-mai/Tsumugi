@@ -45,7 +45,6 @@ export type TsumugiClient<Env extends ClientEnv> = {
 	shardFor(env: Env, binding: string, partitionKey?: string): DurableObjectStub<JobShardStub>;
 };
 
-/** 自身のキーだけを見る,`bindings[binding]`はconstructor等でObject.prototypeまで辿る */
 export const configOf = (bindings: Record<string, BindingConfig>, binding: string): BindingConfig | undefined =>
 	Object.hasOwn(bindings, binding) ? bindings[binding] : undefined;
 
