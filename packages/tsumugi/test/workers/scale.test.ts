@@ -279,7 +279,7 @@ describe('トークンバケットの永続化(ADR-0009)', () => {
 		runInDurableObject(shard(name), (instance) => (instance as any).repo.readSetting('rate_bucket') as string | undefined);
 
 	it('消費した残りをSQLiteへ保存する', async () => {
-		// メモリだけで持つとDOの退避で満タンに戻り, 設定した流量を超えて投入される
+		// メモリだけで持つとDOの退避で満タンに戻り、設定した流量を超えて投入される
 		const { queue, sent } = captureQueue();
 		await install('BUCKET1#0', T0, queue);
 		await shard('BUCKET1#0').configure({ policy: { rate: { tokens: 2, intervalMs: 60_000 } } });
@@ -292,7 +292,7 @@ describe('トークンバケットの永続化(ADR-0009)', () => {
 	});
 
 	it('満タンなら保存しない', async () => {
-		// 読み戻す時のrefillで同じ値になるので, 書き込みだけが増える
+		// 読み戻す時のrefillで同じ値になるので、書き込みだけが増える
 		const { queue } = captureQueue();
 		await install('BUCKET2#0', T0, queue);
 		await shard('BUCKET2#0').configure({ policy: { rate: { tokens: 10, intervalMs: 60_000 } } });

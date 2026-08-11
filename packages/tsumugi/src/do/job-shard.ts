@@ -292,7 +292,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	/**
 	 * 残りトークンを一度だけ読み戻す(ADR-0009)
-	 * メモリだけで持つとDOの退避で満タンに戻り, 設定した流量を超えて投入される
+	 * メモリだけで持つとDOの退避で満タンに戻り、設定した流量を超えて投入される
 	 */
 	#loadBucket(): void {
 		if (this.#bucketLoaded) return;
