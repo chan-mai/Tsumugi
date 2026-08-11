@@ -810,7 +810,6 @@ describe('一括リトライと一括取り消し', () => {
 		return job.state;
 	};
 
-	/** 名前で応答を切り替えるJOB_SHARD, shard単位の失敗だけを作る */
 	const shardsFailing = (unreachable: readonly string[]) => ({
 		idFromName: (name: string) => name,
 		get: (name: string) => ({
