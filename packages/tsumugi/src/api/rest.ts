@@ -47,7 +47,7 @@ function stubOf(env: RestEnv, jobId: string): DurableObjectStub<TsumugiJobShard>
 
 export type RestOptions<Env extends RestEnv> = {
 	dashboard?: Ui;
-	/** 登録済みperformerの名前,投入先の検証と選択肢に使う */
+	/** 登録済みperformerの名前,投入先の検証と選択肢に使う, 省略すると検証しない */
 	bindings?: readonly string[];
 	/** bindingの分割数, 流量の変更は全shardへ配る(#27) */
 	shardsOf?: (binding: string) => number;
@@ -72,13 +72,14 @@ export type RestOptions<Env extends RestEnv> = {
 export type CreateJobInput = CreateJobRequest;
 
 /** 投入内容の検証,通らなければ理由を返す */
-export function validateCreateJob(body: unknown, bindings: readonly string[]): { input: CreateJobInput } | { error: string } {
+export function validateCreateJob(body: unknown, bindings: readonly string[] | undefined): { input: CreateJobInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
 	const raw = body as Record<string, unknown>;
 
 	if (typeof raw.binding !== 'string' || raw.binding.length === 0) return { error: 'binding is required' };
-	// 未登録のbindingを許すと投入はできるが実行時に必ず失敗する,入口で弾く
-	if (bindings.length > 0 && !bindings.includes(raw.binding)) return { error: `unknown binding: ${raw.binding}` };
+	// 未登録のbindingを許すと投入はできるが実行時に必ず失敗する,入口で拒否する
+	// 空配列は登録が1件も無い状態, 省略が検証しない指定
+	if (bindings !== undefined && !bindings.includes(raw.binding)) return { error: `unknown binding: ${raw.binding}` };
 	if (!('payload' in raw)) return { error: 'payload is required' };
 
 	const numbers: [keyof CreateJobInput, unknown][] = [
@@ -431,7 +432,7 @@ export type { SortColumn };
  * 稼働中も投影済みなのでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings = [], shardsOf, enqueue, failedRetentionMs, flows = [], start, runFor, schedulerFor, metrics } = options;
+	const { dashboard, bindings, shardsOf, enqueue, failedRetentionMs, flows = [], start, runFor, schedulerFor, metrics } = options;
 
 	/**
 	 * 一覧の1行にretryの可否を載せる
@@ -530,7 +531,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	 * 登録済みperformerを返す,投影済みのbindingだけだと一度も動いていないものが選べない
 	 */
 	app.get('/api/bindings', async (c) => {
-		if (bindings.length > 0) return c.json({ bindings: [...bindings].sort() } satisfies BindingsResponse);
+		if (bindings !== undefined) return c.json({ bindings: [...bindings].sort() } satisfies BindingsResponse);
 		const rows = await drizzle(c.env.TSUMUGI_DB)
 			.selectDistinct({ binding: readModel.binding })
 			.from(readModel)
@@ -667,7 +668,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	// 既定はshards=1なのでshard 0を代表として引く, 分割時はshard 0のみになる(ADR-0011)
 	app.get('/api/diagnostics', async (c) => {
 		const perBinding = await Promise.all(
-			bindings.map(async (binding) => {
+			(bindings ?? []).map(async (binding) => {
 				const stub = c.env.JOB_SHARD.get(c.env.JOB_SHARD.idFromName(shardName(binding, 0)));
 				return [binding, await stub.diagnostics()] as const;
 			}),
@@ -704,7 +705,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	app.post('/api/bindings/:binding/policy', async (c) => {
 		const binding = c.req.param('binding');
-		if (bindings.length > 0 && !bindings.includes(binding))
+		if (bindings !== undefined && !bindings.includes(binding))
 			return c.json({ error: `unknown binding: ${binding}` } satisfies ErrorResponse, 404);
 
 		let body: unknown;
@@ -727,7 +728,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	/** 実行時の設定を捨てて静的設定へ戻す(#27), 次の投入に同梱された設定が再び有効(#6) */
 	app.post('/api/bindings/:binding/policy/reset', async (c) => {
 		const binding = c.req.param('binding');
-		if (bindings.length > 0 && !bindings.includes(binding))
+		if (bindings !== undefined && !bindings.includes(binding))
 			return c.json({ error: `unknown binding: ${binding}` } satisfies ErrorResponse, 404);
 
 		const { shards, failed } = await eachShard(c.env, binding, (stub) => stub.resetPolicy());
