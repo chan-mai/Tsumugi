@@ -74,17 +74,22 @@ export async function verifyAccessJwt(token: string, options: AccessOptions, now
 	const jwk = jwks.keys.find((key) => key.kid === header.kid);
 	if (!jwk) return null;
 
-	const key = await crypto.subtle.importKey(
-		'jwk',
-		{ ...jwk, alg: 'RS256', ext: true },
-		{ name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-		false,
-		['verify'],
-	);
-	const signed = new TextEncoder().encode(`${headerSegment}.${payloadSegment}`);
-	const signature = base64UrlToBytes(signatureSegment);
-	const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature, signed);
-	return ok ? claims : null;
+	// 署名部の復号と鍵の取り込みの失敗も検証の失敗として扱う, 例外のままでは401ではなく500になる
+	try {
+		const key = await crypto.subtle.importKey(
+			'jwk',
+			{ ...jwk, alg: 'RS256', ext: true },
+			{ name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+			false,
+			['verify'],
+		);
+		const signed = new TextEncoder().encode(`${headerSegment}.${payloadSegment}`);
+		const signature = base64UrlToBytes(signatureSegment);
+		const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature, signed);
+		return ok ? claims : null;
+	} catch {
+		return null;
+	}
 }
 
 const jwksCache = new Map<string, { jwks: Jwks; expiresAt: number }>();

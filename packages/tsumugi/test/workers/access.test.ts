@@ -134,6 +134,18 @@ describe('Access JWTの検証', () => {
 		}
 	});
 
+	it('署名部がbase64でなければ拒否する', async () => {
+		const token = await makeJwt(validClaims());
+		const [header, payload] = token.split('.') as [string, string, string];
+		expect(await verifyAccessJwt(`${header}.${payload}.not base64!`, options(), Date.now())).toBeNull();
+	});
+
+	it('JWKSの鍵が壊れていれば拒否する', async () => {
+		const token = await makeJwt(validClaims());
+		const broken = { ...options(), fetchJwks: async () => ({ keys: [{ kty: 'RSA', kid: KID, n: '!!', e: 'AQAB' }] }) };
+		expect(await verifyAccessJwt(token, broken, Date.now())).toBeNull();
+	});
+
 	it('audが配列でも一致すれば通る', async () => {
 		const token = await makeJwt(validClaims({ aud: ['other', AUD] }));
 		expect(await verifyAccessJwt(token, options(), Date.now())).not.toBeNull();
