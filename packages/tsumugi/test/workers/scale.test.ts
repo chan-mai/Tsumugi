@@ -273,3 +273,40 @@ describe('投入候補の読み取り範囲(ADR-0019 / ADR-0020, #4)', () => {
 		expect(await stateOf('WIN#0', late)).toBe('QUEUED');
 	});
 });
+
+describe('トークンバケットの永続化(ADR-0009)', () => {
+	const bucketOf = (name: string) =>
+		runInDurableObject(shard(name), (instance) => (instance as any).repo.readSetting('rate_bucket') as string | undefined);
+
+	it('消費した残りをSQLiteへ保存する', async () => {
+		// メモリだけで持つとDOの退避で満タンに戻り, 設定した流量を超えて投入される
+		const { queue, sent } = captureQueue();
+		await install('BUCKET1#0', T0, queue);
+		await shard('BUCKET1#0').configure({ policy: { rate: { tokens: 2, intervalMs: 60_000 } } });
+		for (let i = 0; i < 5; i++) await shard('BUCKET1#0').enqueue({ binding: 'BUCKET1', payload: { i } });
+		await runDurableObjectAlarm(shard('BUCKET1#0'));
+
+		// 上限まで投入したので残りは0
+		expect(sent).toHaveLength(2);
+		expect(JSON.parse((await bucketOf('BUCKET1#0')) as string)).toEqual({ tokens: 0, refilledAt: T0 });
+	});
+
+	it('満タンなら保存しない', async () => {
+		// 読み戻す時のrefillで同じ値になるので, 書き込みだけが増える
+		const { queue } = captureQueue();
+		await install('BUCKET2#0', T0, queue);
+		await shard('BUCKET2#0').configure({ policy: { rate: { tokens: 10, intervalMs: 60_000 } } });
+		await runDurableObjectAlarm(shard('BUCKET2#0'));
+
+		expect(await bucketOf('BUCKET2#0')).toBeUndefined();
+	});
+
+	it('流量制限が無ければ保存しない', async () => {
+		const { queue } = captureQueue();
+		await install('BUCKET3#0', T0, queue);
+		await shard('BUCKET3#0').enqueue({ binding: 'BUCKET3', payload: {} });
+		await runDurableObjectAlarm(shard('BUCKET3#0'));
+
+		expect(await bucketOf('BUCKET3#0')).toBeUndefined();
+	});
+});

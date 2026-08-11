@@ -155,6 +155,9 @@ const FAILURE_NOTIFY_LIMIT = 200;
 /** 宛先を置く設定のキー(#30) */
 const FAILURE_BINDING_KEY = 'failure_binding';
 
+/** 残りトークンを置く設定のキー(ADR-0009) */
+const BUCKET_KEY = 'rate_bucket';
+
 /** 済んだジョブをDOに残す時間,投影が追いつく余裕を見て既定5分 */
 const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
 
@@ -187,6 +190,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
+	#bucketLoaded = false;
 	#policyLoaded = false;
 	/** 直近tickで投入が止まった制約, 診断で外へ出す(#10) */
 	#lastBlocked: BlockedBy = { paused: false, capacity: false, tokens: false, perKey: false };
@@ -284,6 +288,30 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const raw = this.repo.readSetting('last_blocked');
 		if (raw) this.#lastBlocked = { ...this.#lastBlocked, ...(JSON.parse(raw) as Partial<BlockedBy>) };
 		this.#blockedLoaded = true;
+	}
+
+	/**
+	 * 残りトークンを一度だけ読み戻す(ADR-0009)
+	 * メモリだけで持つとDOの退避で満タンに戻り, 設定した流量を超えて投入される
+	 */
+	#loadBucket(): void {
+		if (this.#bucketLoaded) return;
+		const raw = this.repo.readSetting(BUCKET_KEY);
+		if (raw) {
+			const stored = JSON.parse(raw) as Bucket;
+			if (Number.isFinite(stored.tokens) && Number.isFinite(stored.refilledAt)) this.#bucket = stored;
+		}
+		this.#bucketLoaded = true;
+	}
+
+	/**
+	 * 残りトークンを保存する
+	 * 満タンの状態は書かない, 読み戻す時のrefillで同じ値になるので毎tickの書き込みだけが増える
+	 */
+	#persistBucket(bucket: Bucket): void {
+		const rate = this.policy.rate;
+		if (rate === null || bucket.tokens >= rate.tokens) return;
+		this.repo.writeSetting(BUCKET_KEY, JSON.stringify(bucket));
 	}
 
 	/** blockedを保存する,変化した時だけ書いて毎tickの書き込みを避ける(#10) */
@@ -573,9 +601,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async #tick(): Promise<void> {
 		const now = this.clock.now();
 		this.#loadPolicy();
+		this.#loadBucket();
 		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT);
 		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket });
 		this.#bucket = output.bucket;
+		this.#persistBucket(output.bucket);
 		// どの制約で投入が止まったかを診断で外へ出す,DO退避後も残す(#10)
 		this.#persistBlocked(output.blocked);
 
