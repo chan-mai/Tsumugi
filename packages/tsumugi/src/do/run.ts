@@ -5,6 +5,7 @@ import { createClient } from '../client/enqueue.js';
 import {
 	assertDeadlineMs,
 	assertNodeId,
+	isNodeId,
 	type AnyFlow,
 	type FlowNode,
 	type Flows,
@@ -244,9 +245,16 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 
 				// 子を先に作る, 親が決着してから作ると下流が子を待たずに実行される(ADR-0032)
 				const spawned = this.#applySpawns(event.nodeId, event.spawns ?? [], now);
-				touched.push(...spawned);
+				touched.push(...spawned.ids);
 
-				this.repo.updateNode(event.nodeId, { state: event.state, result: event.result, error: event.error }, now);
+				// 子を作れない場合は親を成功にしない, 成功にすると下流が子を待たずに実行される
+				this.repo.updateNode(
+					event.nodeId,
+					spawned.error === null
+						? { state: event.state, result: event.result, error: event.error }
+						: { state: 'FAILED', error: spawned.error },
+					now,
+				);
 				touched.push(event.nodeId);
 			}
 
@@ -595,17 +603,20 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 			return [row.id, ...children.map((child) => child.id)];
 		}
 
-		/** performの中で要求された子を作る, 同じIDの再要求は既存を残す(ADR-0032) */
-		#applySpawns(parentId: string, spawns: readonly SpawnRequest[], now: number): string[] {
-			if (spawns.length === 0) return [];
+		/**
+		 * performの中で要求された子を作る, 同じIDの再要求は既存を残す(ADR-0032)
+		 * 作成できない場合は例外ではなく理由を返す, 例外にすると通知が滞留する
+		 */
+		#applySpawns(parentId: string, spawns: readonly SpawnRequest[], now: number): { ids: string[]; error: string | null } {
+			if (spawns.length === 0) return { ids: [], error: null };
 			if (this.repo.countNodes() + spawns.length > maxNodes) {
-				this.repo.updateNode(parentId, { state: 'FAILED', error: `node count exceeded the limit: ${maxNodes}` }, now);
-				return [parentId];
+				return { ids: [], error: `node count exceeded the limit: ${maxNodes}` };
 			}
+			const invalid = spawns.find((spawn) => !isNodeId(spawn.id));
+			if (invalid) return { ids: [], error: `invalid spawn id: ${JSON.stringify(invalid.id)}` };
 
 			let seq = this.repo.nextSeq();
 			const children = spawns.map((spawn) => {
-				assertNodeId(spawn.id);
 				const { concurrencyKey, ...job } = spawn.options ?? {};
 				return {
 					id: `${parentId}:${spawn.id}`,
@@ -621,7 +632,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 			});
 
 			this.repo.insertNodes(children, now);
-			return children.map((child) => child.id);
+			return { ids: children.map((child) => child.id), error: null };
 		}
 
 		/**

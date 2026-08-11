@@ -1,4 +1,5 @@
 import type { JobContext, PerformerLike, Requirements } from '../core/api.js';
+import { assertNodeId } from '../core/flow.js';
 import type { SpawnRequest } from '../core/run.js';
 
 /**
@@ -43,6 +44,8 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 			heartbeats.push(progress);
 		},
 		spawn: (id, binding, payload, options) => {
+			// consumerと同じID検証
+			assertNodeId(id);
 			spawns.push({ id, binding, payload, ...(options ? { options } : {}) });
 		},
 	};

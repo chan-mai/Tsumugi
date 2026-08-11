@@ -68,6 +68,13 @@ describe('performerのハーネス', () => {
 		const result = await runPerformer(new Charge(), { customerId: 'c1' });
 		expect(result).toEqual({ ok: true, value: 'c1' });
 	});
+
+	it('spawnのIDを本番と同じ条件で検証する', () => {
+		const ctx = createTestContext();
+		ctx.spawn('child', 'Greet', {});
+		expect(ctx.spawns).toEqual([{ id: 'child', binding: 'Greet', payload: {} }]);
+		expect(() => ctx.spawn('bad id', 'Greet', {})).toThrow(/invalid node id/);
+	});
 });
 
 describe('公開している純粋関数', () => {

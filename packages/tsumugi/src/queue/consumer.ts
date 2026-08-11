@@ -1,4 +1,5 @@
 import type { JobContext, PerformerLike, RemoteRef } from '../core/api.js';
+import { assertNodeId } from '../core/flow.js';
 import { shardNameOf } from '../core/ids.js';
 import type { SpawnRequest } from '../core/run.js';
 import type { DispatchMessage, TsumugiJobShard } from '../do/job-shard.js';
@@ -173,6 +174,8 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		// 要求は溜めるだけ, 送るのは完了報告と同じ便(ADR-0031)
 		// 関数はRPCのstubとして越えるので, 別Workerのperformerからも呼べる(ADR-0037)
 		const spawn = (id: string, target: string, childPayload: unknown, options?: SpawnRequest['options']) => {
+			// IDの形式検証, 不正な値はRun DOで受理できず通知が滞留する
+			assertNodeId(id);
 			spawns.push({ id, binding: target, payload: childPayload, ...(options ? { options } : {}) });
 		};
 		const stableId = jobId;

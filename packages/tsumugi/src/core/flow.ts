@@ -223,8 +223,12 @@ function subflowNameOf(nodeId: string, name: string | undefined): string {
 	return name;
 }
 
+export function isNodeId(id: string): boolean {
+	return NODE_ID_PATTERN.test(id);
+}
+
 export function assertNodeId(id: string): void {
-	if (!NODE_ID_PATTERN.test(id)) {
+	if (!isNodeId(id)) {
 		throw new InvalidFlowError(`invalid node id: ${JSON.stringify(id)} (alphanumeric, hyphen and underscore only)`);
 	}
 }
