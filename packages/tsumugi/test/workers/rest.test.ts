@@ -810,22 +810,27 @@ describe('一括リトライと一括取り消し', () => {
 		return job.state;
 	};
 
+	/** 名前で応答を切り替えるJOB_SHARD, shard単位の失敗だけを作る */
+	const shardsFailing = (unreachable: readonly string[]) => ({
+		idFromName: (name: string) => name,
+		get: (name: string) => ({
+			mutateMany: async (_action: string, ids: string[]) => {
+				if (unreachable.includes(name)) throw new Error('shard is unreachable');
+				return { ok: ids, failed: [] };
+			},
+		}),
+	});
+
+	const bulkWith = (shards: unknown, ids: string[]) =>
+		createRest(bearerAuth(TOKEN), { bindings: ['REST'] }).request(
+			'/api/jobs/bulk-retry',
+			{ method: 'POST', headers: authorized, body: JSON.stringify({ ids }) },
+			{ ...env, JOB_SHARD: shards } as unknown as RestEnv,
+		);
+
 	it('応答しないshardの対象をunreachableとして返す', async () => {
 		// 1つのshardが応答しなくても200で返す, 500にすると成功した分まで再送される
-		const app = createRest(bearerAuth(TOKEN), { bindings: ['REST'] });
-		const broken = {
-			idFromName: (name: string) => name,
-			get: () => ({
-				mutateMany: async () => {
-					throw new Error('shard is unreachable');
-				},
-			}),
-		};
-		const res = await app.request(
-			'/api/jobs/bulk-retry',
-			{ method: 'POST', headers: authorized, body: JSON.stringify({ ids: ['REST#0:a', 'REST#0:b'] }) },
-			{ ...env, JOB_SHARD: broken } as unknown as RestEnv,
-		);
+		const res = await bulkWith(shardsFailing(['REST#0']), ['REST#0:a', 'REST#0:b']);
 
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({
@@ -834,6 +839,18 @@ describe('一括リトライと一括取り消し', () => {
 				{ id: 'REST#0:a', reason: 'unreachable' },
 				{ id: 'REST#0:b', reason: 'unreachable' },
 			],
+			remaining: 0,
+		});
+	});
+
+	it('応答したshardの結果は残す', async () => {
+		// 成功した分を結果に含めないと呼び出し側が再送し、同じ操作を二度実行する
+		const res = await bulkWith(shardsFailing(['REST#1']), ['REST#0:a', 'REST#1:b']);
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			ok: ['REST#0:a'],
+			failed: [{ id: 'REST#1:b', reason: 'unreachable' }],
 			remaining: 0,
 		});
 	});
