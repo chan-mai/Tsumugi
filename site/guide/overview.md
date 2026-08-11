@@ -71,6 +71,8 @@ const id = await enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.c
 
 ## 構成要素
 
+![Tsumugiの構成](/architecture.png)
+
 | リソース         | 役割                               |
 | ---------------- | ---------------------------------- |
 | Durable Object   | ジョブの状態管理と実行順序の決定   |

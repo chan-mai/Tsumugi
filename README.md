@@ -20,8 +20,6 @@ See documentation at [https://tsumugi.mq1.dev](https://tsumugi.mq1.dev).
 
 ドキュメントは[https://tsumugi.mq1.dev](https://tsumugi.mq1.dev)にあります。
 
-![Tsumugi dashboard](https://tsumugi.mq1.dev/dashboard-jobs.jpg)
-
 ## Requirements
 
 - A **paid Workers plan**. SQLite-backed Durable Objects and Queues both require it.
@@ -54,6 +52,12 @@ See [Getting Started](https://tsumugi.mq1.dev/guide/getting-started) for what is
 生成される内容と既存の設定がある場合の扱いは[Getting Started](https://tsumugi.mq1.dev/guide/getting-started)を参照してください。
 
 ## Usage
+
+Enqueue from any Worker, and Tsumugi orders and dispatches the jobs to your performers.
+
+投入側のWorkerからenqueueを呼び出すと、Tsumugiが実行順序を決めてperformerへ配送します。
+
+![Tsumugi architecture](https://tsumugi.mq1.dev/architecture.png)
 
 ### 1. Define a performer
 
