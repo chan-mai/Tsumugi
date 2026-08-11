@@ -48,10 +48,13 @@ export function isUnauthorized(error: unknown): boolean {
 	return typeof error === 'object' && error !== null && (error as { unauthorized?: unknown }).unauthorized === true;
 }
 
+/** httpsの時だけSecureを付ける, wrangler devはhttpで動くので常時付けると開発時に保存できない */
+export const cookieAttributes = (protocol: string): string => `path=/; SameSite=Strict${protocol === 'https:' ? '; Secure' : ''}`;
+
 export function saveToken(value: string): void {
 	const name = tokenCookie();
 	if (!name) return;
-	document.cookie = `${name}=${encodeURIComponent(value)}; path=/; SameSite=Strict`;
+	document.cookie = `${name}=${encodeURIComponent(value)}; ${cookieAttributes(location.protocol)}`;
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
