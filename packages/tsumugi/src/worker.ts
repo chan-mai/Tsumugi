@@ -1,6 +1,6 @@
 import { createId } from '@paralleldrive/cuid2';
 import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
-import { createClient, type BindingConfig, type ClientEnv } from './client/enqueue.js';
+import { configOf, createClient, type BindingConfig, type ClientEnv } from './client/enqueue.js';
 import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
 import { createRunClass, type RunClass, type RunSettings, type StartResult } from './do/run.js';
@@ -232,7 +232,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 
 	const start = async (env: Env, flow: string, input: unknown, options?: StartOptions): Promise<string> => {
 		assertConfigured(env);
-		if (!flows[flow]) throw new Error(`flow is not registered: ${flow}`);
+		if (!Object.hasOwn(flows, flow)) throw new Error(`flow is not registered: ${flow}`);
 		const runId = formatRunId({ flow, localId: options?.id ?? createId() });
 		const result = await runFor(env, runId).start({
 			flow,
@@ -247,10 +247,10 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 				...(config.ui ? { dashboard: config.ui } : {}),
 				bindings: Object.keys(performers),
 				// 流量の変更を全shardへ配るために必要(#27)
-				shardsOf: (binding) => config.bindings?.[binding]?.shards ?? 1,
+				shardsOf: (binding) => configOf(config.bindings ?? {}, binding)?.shards ?? 1,
 				enqueue: (env, input) => client.enqueue(env, input),
 				// 一覧のretryable判定に使う, UI側が押す前に可否を出せるようにする(ADR-0027)
-				failedRetentionMs: (binding) => config.bindings?.[binding]?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
+				failedRetentionMs: (binding) => configOf(config.bindings ?? {}, binding)?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 				flows: Object.keys(flows),
 				// 未設定なら渡さない, `/api/metrics`は501を返す
 				...(config.metrics ? { metrics: config.metrics as MetricsResolver<Env> } : {}),

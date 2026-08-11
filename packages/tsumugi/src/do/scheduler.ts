@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createClient, type BindingConfig, type ClientEnv } from '../client/enqueue.js';
+import { configOf, createClient, type BindingConfig, type ClientEnv } from '../client/enqueue.js';
 import { formatJobId, formatRunId, shardNameOf } from '../core/ids.js';
 import { normalizeSchedules, nextOccurrence, type AnyScheduleDef, type AnySchedules, type ScheduleContext } from '../core/recurring.js';
 import { resolveShard } from '../core/shard.js';
@@ -93,7 +93,7 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 	const { schedules: normalized, fingerprint } = normalizeSchedules(schedules, {
 		bindings: targets.bindings,
 		flows: targets.flows,
-		shardsOf: (binding) => bindings[binding]?.shards ?? 1,
+		shardsOf: (binding) => configOf(bindings, binding)?.shards ?? 1,
 	});
 	const client = createClient<SchedulerEnv>(bindings, failureBinding === undefined ? {} : { failureBinding });
 
@@ -158,7 +158,7 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 				this.#reconcile(now);
 
 				for (const row of this.repo.due(now, TICK_LIMIT)) {
-					const def = schedules[row.name];
+					const def = Object.hasOwn(schedules, row.name) ? schedules[row.name] : undefined;
 					if (!def) {
 						// reconcileで消えているはずの防御, 定義の無い行は発火できない
 						this.repo.remove([row.name]);
@@ -213,7 +213,7 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 				if (row.kind === 'job') {
 					const binding = def.binding as string;
 					// 決定的IDにする, 再発火しても同じIDの再投入は既存を返す(ADR-0029)
-					const shard = resolveShard(binding, bindings[binding]?.shards ?? 1, def.partitionKey);
+					const shard = resolveShard(binding, configOf(bindings, binding)?.shards ?? 1, def.partitionKey);
 					const jobId = formatJobId({ binding, shard, localId: `${row.name}-${occurrence}` });
 					await client.enqueue(this.env, {
 						binding,

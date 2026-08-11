@@ -988,4 +988,10 @@ describe('runの開始', () => {
 		const res = await post({ flow: 'UNKNOWN', input: {} });
 		expect(res.status).toBe(400);
 	});
+
+	it('Object.prototypeの名前を登録済みとして扱わない', async () => {
+		// `flows[flow]`のままだとconstructorやtoStringが真の値として返る
+		await expect(withFlows.start(env as never, 'constructor' as never, {} as never)).rejects.toThrow(/flow is not registered/);
+		await expect(withFlows.start(env as never, 'toString' as never, {} as never)).rejects.toThrow(/flow is not registered/);
+	});
 });

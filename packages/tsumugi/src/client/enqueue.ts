@@ -45,6 +45,10 @@ export type TsumugiClient<Env extends ClientEnv> = {
 	shardFor(env: Env, binding: string, partitionKey?: string): DurableObjectStub<JobShardStub>;
 };
 
+/** 自身のキーだけを見る,`bindings[binding]`はconstructor等でObject.prototypeまで辿る */
+export const configOf = (bindings: Record<string, BindingConfig>, binding: string): BindingConfig | undefined =>
+	Object.hasOwn(bindings, binding) ? bindings[binding] : undefined;
+
 /** binding個別の設定と全体で共通の設定を1つにまとめる, DOへ渡る形は1つ */
 function settingsOf(config: BindingConfig | undefined, common: CommonSettings): ShardSettings | undefined {
 	const hasBinding = config?.policy || config?.sweepAfterMs !== undefined || config?.failedRetentionMs !== undefined;
@@ -76,7 +80,7 @@ export function createClient<Env extends ClientEnv>(
 	common: CommonSettings = {},
 ): TsumugiClient<Env> {
 	const shardOf = (env: Env, binding: string, partitionKey: string | undefined) => {
-		const config = bindings[binding];
+		const config = configOf(bindings, binding);
 		const shard = resolveShard(binding, config?.shards ?? 1, partitionKey);
 		const ns = env.JOB_SHARD as DurableObjectNamespace<JobShardStub>;
 		return {
