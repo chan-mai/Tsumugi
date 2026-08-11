@@ -662,10 +662,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 			};
 		}
 
-		/**
-		 * flow定義の写像関数を実行する(ADR-0030)
-		 * 失敗はノードのFAILEDにする, 例外のままではtickが毎回同じ位置で停止する
-		 */
+		// 失敗はノードのFAILEDにする, 例外のままではtickが毎回同じ位置で停止する
 		#evaluate<T>(row: NodeRow, label: string, now: number, run: () => T): { ok: true; value: T } | { ok: false } {
 			try {
 				return { ok: true, value: run() };
