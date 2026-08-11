@@ -311,11 +311,20 @@ export function groupByShard(jobIds: readonly string[]): { groups: Map<string, s
 	return { groups, invalid };
 }
 
+const LIST_LIMIT_DEFAULT = 20;
+
+// 範囲外と非整数は既定値, 負のlimitはSQLiteでは無制限
+function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
+	const value = Number(raw);
+	if (raw === null || raw === '' || !Number.isSafeInteger(value) || value < min) return fallback;
+	return Math.min(value, max);
+}
+
 /** 一覧のページング, 上限の変更漏れを避けるため両方の一覧で共有する */
 export function parsePaging(url: URL): { limit: number; offset: number } {
 	return {
-		limit: Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, LIST_LIMIT_MAX),
-		offset: Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0),
+		limit: boundedInt(url.searchParams.get('limit'), LIST_LIMIT_DEFAULT, 1, LIST_LIMIT_MAX),
+		offset: boundedInt(url.searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER),
 	};
 }
 
