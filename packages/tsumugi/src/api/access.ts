@@ -1,4 +1,4 @@
-import type { AuthMiddleware } from './auth.js';
+import { readCookie, type AuthMiddleware } from './auth.js';
 
 /**
  * Cloudflare AccessのJWT検証
@@ -121,13 +121,4 @@ export function cloudflareAccess(options: AccessOptions): AuthMiddleware {
 		c.set('accessClaims', claims);
 		await next();
 	};
-}
-
-function readCookie(header: string | undefined, name: string): string | undefined {
-	if (!header) return undefined;
-	for (const part of header.split(';')) {
-		const [key, ...rest] = part.trim().split('=');
-		if (key === name) return rest.join('=');
-	}
-	return undefined;
 }

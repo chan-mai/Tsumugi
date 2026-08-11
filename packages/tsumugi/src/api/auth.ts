@@ -30,11 +30,19 @@ export type BearerOptions = {
 	cookie?: string;
 };
 
-function readCookie(header: string | undefined, name: string): string | undefined {
+export function readCookie(header: string | undefined, name: string): string | undefined {
 	if (!header) return undefined;
 	for (const part of header.split(';')) {
 		const [key, ...rest] = part.trim().split('=');
-		if (key === name) return rest.join('=');
+		if (key !== name) continue;
+		const value = rest.join('=');
+		// 書き出し側のencodeURIComponentを戻す, 復号しないとbase64の`+ / =`が一致しない
+		try {
+			return decodeURIComponent(value);
+		} catch {
+			// 不正な%列は素の値で比較する, 例外にすると401ではなく500になる
+			return value;
+		}
 	}
 	return undefined;
 }
