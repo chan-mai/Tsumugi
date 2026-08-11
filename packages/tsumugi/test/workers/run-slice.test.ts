@@ -187,6 +187,34 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(performed.filter((p) => p.binding === 'Greet')).toHaveLength(6);
 	});
 
+	it('不正なspawnのIDはノードのFAILEDになりtickを止めない', async () => {
+		// consumerが手前で検証するので, ここへ届くのは検証を入れる前に積まれた通知だけ
+		const runId = 'GREETINGS:spawnbad';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'sb' } });
+
+		await settleRun(runId);
+		sent.length = 0;
+		const jobId = await jobIdOf(runId, 'list');
+		if (jobId === null) throw new Error('the first node has no job id');
+		await stub.notify([
+			{
+				nodeId: 'list',
+				jobId,
+				state: 'COMPLETED',
+				result: JSON.stringify({ names: ['a'] }),
+				error: null,
+				spawns: [{ id: 'bad id', binding: 'Greet', payload: {} }],
+			},
+		]);
+		await settleRun(runId);
+
+		const nodes = Object.fromEntries(await nodesOf(runId));
+		expect(nodes['list']).toBe('FAILED');
+		expect(await stateOf(runId)).toBe('FAILED');
+	});
+
 	it('ノードの失敗で下流が打ち切られrunがFAILEDになる', async () => {
 		const runId = 'GREETINGS:fail1';
 		const stub = runStub(runId);
