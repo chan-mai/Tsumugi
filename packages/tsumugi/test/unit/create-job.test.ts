@@ -82,9 +82,14 @@ describe('投入内容の検証', () => {
 		});
 	});
 
-	it('登録一覧が空ならbindingの照合をしない', () => {
+	it('登録一覧を渡さなければbindingの照合をしない', () => {
 		// createRestに登録名を渡していない構成でも動くようにする
-		expect(validateCreateJob({ binding: 'ANY', payload: {} }, [])).toHaveProperty('input');
+		expect(validateCreateJob({ binding: 'ANY', payload: {} }, undefined)).toHaveProperty('input');
+	});
+
+	it('登録一覧が空なら何も通さない', () => {
+		// 空はperformerが1件も無い状態, 投入できても実行時に必ず失敗する
+		expect(validateCreateJob({ binding: 'ANY', payload: {} }, [])).toEqual({ error: 'unknown binding: ANY' });
 	});
 });
 
