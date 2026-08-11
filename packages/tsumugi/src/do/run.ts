@@ -488,7 +488,9 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 
 			switch (decision.type) {
 				case 'start': {
-					const built = this.#buildJob(row, definitions, runInput);
+					const evaluated = this.#evaluate(row, 'input', now, () => this.#buildJob(row, definitions, runInput));
+					if (!evaluated.ok) return [row.id];
+					const built = evaluated.value;
 					if (!built) {
 						this.repo.updateNode(row.id, { state: 'FAILED', error: `node definition is missing: ${row.id}` }, now);
 						return [row.id];
@@ -516,14 +518,13 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 						this.repo.updateNode(row.id, { state: 'FAILED', error: `invalid child run id: ${messageOf(error)}` }, now);
 						return [row.id];
 					}
+					// 子の入力は状態を書き換える前に組み立てる, 失敗した場合に起動中のノードを残さない
+					const input = this.#evaluate(row, 'input', now, () => definition.input(runInput, this.#depsOf(definition, runInput)));
+					if (!input.ok) return [row.id];
+
 					if (row.child_run_id === null) this.repo.updateNode(row.id, { childRunId }, now);
 					starting.push(row.id);
-					subflows.push({
-						nodeId: row.id,
-						childRunId,
-						flow: row.subflow,
-						input: definition.input(runInput, this.#depsOf(definition, runInput)),
-					});
+					subflows.push({ nodeId: row.id, childRunId, flow: row.subflow, input: input.value });
 					return [row.id];
 				}
 
@@ -571,32 +572,37 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 				return [row.id];
 			}
 
-			const items = definition.over(runInput, this.#depsOf(definition, runInput));
-			if (this.repo.countNodes() + items.length > maxNodes) {
+			const items = this.#evaluate(row, 'over', now, () => definition.over!(runInput, this.#depsOf(definition, runInput)));
+			if (!items.ok) return [row.id];
+			if (this.repo.countNodes() + items.value.length > maxNodes) {
 				this.repo.updateNode(row.id, { state: 'FAILED', error: `node count exceeded the limit: ${maxNodes}` }, now);
 				return [row.id];
 			}
 
 			let seq = this.repo.nextSeq();
-			const children = items.map((item, index) => {
-				const key = definition.key ? definition.key(item, index) : String(index);
-				assertNodeId(key);
-				const concurrencyKey =
-					typeof definition.childConcurrencyKey === 'function'
-						? definition.childConcurrencyKey(item, index)
-						: definition.childConcurrencyKey;
-				return {
-					id: `${row.id}:${key}`,
-					binding: definition.binding,
-					container: false,
-					parent: row.id,
-					origin: 'fanOut' as const,
-					after: [],
-					seq: seq++,
-					payload: JSON.stringify(definition.item?.(item, runInput, index) ?? null),
-					options: JSON.stringify({ ...definition.job, ...(concurrencyKey === undefined ? {} : { concurrencyKey }) }),
-				};
-			});
+			const built = this.#evaluate(row, 'fan-out', now, () =>
+				items.value.map((item, index) => {
+					const key = definition.key ? definition.key(item, index) : String(index);
+					assertNodeId(key);
+					const concurrencyKey =
+						typeof definition.childConcurrencyKey === 'function'
+							? definition.childConcurrencyKey(item, index)
+							: definition.childConcurrencyKey;
+					return {
+						id: `${row.id}:${key}`,
+						binding: definition.binding,
+						container: false,
+						parent: row.id,
+						origin: 'fanOut' as const,
+						after: [],
+						seq: seq++,
+						payload: JSON.stringify(definition.item?.(item, runInput, index) ?? null),
+						options: JSON.stringify({ ...definition.job, ...(concurrencyKey === undefined ? {} : { concurrencyKey }) }),
+					};
+				}),
+			);
+			if (!built.ok) return [row.id];
+			const children = built.value;
 
 			this.repo.insertNodes(children, now);
 			this.repo.updateNode(row.id, { state: 'RUNNING' }, now);
@@ -657,6 +663,19 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 		}
 
 		/**
+		 * flow定義の写像関数を実行する(ADR-0030)
+		 * 失敗はノードのFAILEDにする, 例外のままではtickが毎回同じ位置で停止する
+		 */
+		#evaluate<T>(row: NodeRow, label: string, now: number, run: () => T): { ok: true; value: T } | { ok: false } {
+			try {
+				return { ok: true, value: run() };
+			} catch (error) {
+				this.repo.updateNode(row.id, { state: 'FAILED', error: `${label} failed: ${messageOf(error)}` }, now);
+				return { ok: false };
+			}
+		}
+
+		/**
 		 * `when`の判定(ADR-0041)
 		 * 実行してよければnull, 実行しないなら触れたノードIDを返す
 		 */
@@ -664,13 +683,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 			const definition = definitions.get(row.id);
 			if (!definition?.when) return null;
 
-			try {
-				if (definition.when(runInput, this.#depsOf(definition, runInput))) return null;
-			} catch (error) {
-				// 判定自体の失敗は握り潰さない, 実行の可否が決まらない
-				this.repo.updateNode(row.id, { state: 'FAILED', error: `when failed: ${messageOf(error)}` }, now);
-				return [row.id];
-			}
+			const passed = this.#evaluate(row, 'when', now, () => definition.when!(runInput, this.#depsOf(definition, runInput)));
+			if (!passed.ok) return [row.id];
+			if (passed.value) return null;
+
 			this.repo.updateNode(row.id, { state: 'SKIPPED', error: 'when returned false' }, now);
 			return [row.id];
 		}

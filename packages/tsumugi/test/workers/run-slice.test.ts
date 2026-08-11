@@ -135,6 +135,9 @@ async function settleRun(runId: string, rounds = 8): Promise<void> {
 const stateOf = (runId: string) =>
 	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun()?.state as string | undefined);
 
+const errorOf = (runId: string, nodeId: string) =>
+	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.error as string | null);
+
 describe('縦串: runの開始から完了まで', () => {
 	it('fan-outを含むflowが最後まで進む', async () => {
 		performed.length = 0;
@@ -212,6 +215,19 @@ describe('縦串: runの開始から完了まで', () => {
 
 		const nodes = Object.fromEntries(await nodesOf(runId));
 		expect(nodes['list']).toBe('FAILED');
+		expect(await stateOf(runId)).toBe('FAILED');
+	});
+
+	it('写像関数の例外はノードのFAILEDになる', async () => {
+		const runId = 'GREETINGS:mapfail';
+		const stub = runStub(runId);
+		await installQueues();
+		// inputがnullなので`list`のinputがTypeErrorになる
+		await stub.start({ flow: 'GREETINGS', input: null });
+		await settleRun(runId);
+
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
+		expect(await errorOf(runId, 'list')).toMatch(/^input failed:/);
 		expect(await stateOf(runId)).toBe('FAILED');
 	});
 
