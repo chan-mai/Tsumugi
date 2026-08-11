@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { bearerAuth, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
-import { SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
+import { createRest, SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
 
 const T0 = 2_200_000_000_000;
@@ -809,6 +809,34 @@ describe('一括リトライと一括取り消し', () => {
 		const { job } = await res.json<{ job: { state: string } }>();
 		return job.state;
 	};
+
+	it('応答しないshardの対象をunreachableとして返す', async () => {
+		// 1つのshardが応答しなくても200で返す, 500にすると成功した分まで再送される
+		const app = createRest(bearerAuth(TOKEN), { bindings: ['REST'] });
+		const broken = {
+			idFromName: (name: string) => name,
+			get: () => ({
+				mutateMany: async () => {
+					throw new Error('shard is unreachable');
+				},
+			}),
+		};
+		const res = await app.request(
+			'/api/jobs/bulk-retry',
+			{ method: 'POST', headers: authorized, body: JSON.stringify({ ids: ['REST#0:a', 'REST#0:b'] }) },
+			{ ...env, JOB_SHARD: broken } as unknown as RestEnv,
+		);
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			ok: [],
+			failed: [
+				{ id: 'REST#0:a', reason: 'unreachable' },
+				{ id: 'REST#0:b', reason: 'unreachable' },
+			],
+			remaining: 0,
+		});
+	});
 
 	it('選択したIDをまとめてリトライする', async () => {
 		const jobId = await failedJob();

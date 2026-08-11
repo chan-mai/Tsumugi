@@ -610,15 +610,26 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		}
 
 		const { groups, invalid } = groupByShard(targets);
-		const results = await Promise.all(
-			[...groups].map(([name, ids]) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)).mutateMany(action, ids)),
+		const entries = [...groups];
+		// 届かなかったshardも個別の失敗として返す, 全体を500にすると成功した分まで再送される
+		const settled = await Promise.allSettled(
+			entries.map(([name, ids]) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)).mutateMany(action, ids)),
+		);
+		for (const [index, result] of settled.entries()) {
+			if (result.status === 'rejected') console.error(`tsumugi: bulk ${action} failed on ${entries[index]?.[0]}`, result.reason);
+		}
+
+		const applied = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+		const unreachable = settled.flatMap((result, index) =>
+			result.status === 'rejected' ? (entries[index]?.[1] ?? []).map((id) => ({ id, reason: 'unreachable' as const })) : [],
 		);
 
-		const failed: (BulkFailure | { id: string; reason: 'invalid-id' })[] = [
-			...results.flatMap((result) => result.failed),
+		const failed: (BulkFailure | { id: string; reason: 'invalid-id' | 'unreachable' })[] = [
+			...applied.flatMap((result) => result.failed),
 			...invalid.map((id) => ({ id, reason: 'invalid-id' as const })),
+			...unreachable,
 		];
-		return { body: { ok: results.flatMap((result) => result.ok), failed, remaining }, status: 200 } as const;
+		return { body: { ok: applied.flatMap((result) => result.ok), failed, remaining }, status: 200 } as const;
 	};
 
 	for (const action of ['retry', 'cancel'] as const) {
