@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createId } from '@paralleldrive/cuid2';
 import type { BindingConfig, ClientEnv } from '../client/enqueue.js';
-import { createClient } from '../client/enqueue.js';
+import { configOf, createClient } from '../client/enqueue.js';
 import {
 	assertDeadlineMs,
 	assertNodeId,
@@ -180,7 +180,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 			const existing = this.repo.findRun();
 			if (existing) return { id: runId, created: false };
 
-			const flow = flows[input.flow];
+			const flow = Object.hasOwn(flows, input.flow) ? flows[input.flow] : undefined;
 			if (!flow) throw new Error(`flow is not registered: ${input.flow}`);
 
 			const depth = input.depth ?? 0;
@@ -349,7 +349,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 			const runRow = this.repo.findRun();
 			if (!runRow) return;
 
-			const flow = flows[runRow.flow];
+			const flow = Object.hasOwn(flows, runRow.flow) ? flows[runRow.flow] : undefined;
 			if (!flow) {
 				// 定義ごと消えた, 待っても解決しないので理由を残して落とす(ADR-0030)
 				this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
@@ -697,7 +697,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 
 		#shardOf(binding: string, runId: string): number {
 			// runIdをpartitionKeyにする, run内のノードが同じshardに集まりRun DO側でIDを決められる(ADR-0011)
-			return resolveShard(binding, bindings[binding]?.shards ?? 1, runId);
+			return resolveShard(binding, configOf(bindings, binding)?.shards ?? 1, runId);
 		}
 
 		/**
