@@ -21,7 +21,8 @@ function inject(tokenCookie: string | undefined): string {
 	const cached = rendered.get(key);
 	if (cached !== undefined) return cached;
 
-	const config = JSON.stringify({ tokenCookie: tokenCookie ?? null });
+	// JSON.stringifyは`/`をエスケープしないので, `</script>`を含む値でタグが閉じる
+	const config = JSON.stringify({ tokenCookie: tokenCookie ?? null }).replace(/</g, '\\u003c');
 	const html = DASHBOARD_HTML.replace('<head>', `<head><script>window.__TSUMUGI__=${config}</script>`);
 	rendered.set(key, html);
 	return html;

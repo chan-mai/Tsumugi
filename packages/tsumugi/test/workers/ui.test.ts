@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
 import type { RestEnv } from '../../src/api/rest.js';
 import { Performer } from '../../src/performer/entrypoint.js';
+import { DASHBOARD_HTML } from '@tsumugi/dashboard';
 import { clearUiCache, ui } from '../../src/ui/serve.js';
 import { defineTsumugi } from '../../src/worker.js';
 
@@ -87,6 +88,14 @@ describe('ダッシュボードの配信(ADR-0025)', () => {
 		});
 		const html = await (await call(h, '/')).text();
 		expect(html).toContain('"tokenCookie":"tsumugi_token"');
+	});
+
+	it('注入する値がscriptタグを閉じない', () => {
+		const closings = (source: string) => (source.match(/<\/script>/g) ?? []).length;
+		const html = ui({ tokenCookie: '</script><script>alert(1)</script>' }).render();
+		// 増えるのは設定を包む1つだけ, 値の中の`</script>`はエスケープされる
+		expect(closings(html)).toBe(closings(DASHBOARD_HTML) + 1);
+		expect(html).toContain('\\u003c/script>');
 	});
 
 	it('tokenCookie未指定ならnullを注入する', async () => {
