@@ -898,11 +898,17 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
 		const { flow, input, id, deadlineMs } = parsed.input;
-		const started = await start(c.env, flow, input, {
-			...(id !== undefined ? { id } : {}),
-			...(deadlineMs !== undefined ? { deadlineMs } : {}),
-		});
-		return c.json({ id: started } satisfies StartRunResponse, 201);
+		try {
+			const started = await start(c.env, flow, input, {
+				...(id !== undefined ? { id } : {}),
+				...(deadlineMs !== undefined ? { deadlineMs } : {}),
+			});
+			return c.json({ id: started } satisfies StartRunResponse, 201);
+		} catch (error) {
+			// runIdのローカル部として使えないidは要求側の誤り, ジョブ側の経路と同じ扱いにする
+			if (error instanceof InvalidRunIdError) return c.json({ error: 'invalid run id' } satisfies ErrorResponse, 400);
+			throw error;
+		}
 	});
 
 	// グラフは1回のクエリで返す, 段組みの描画に全ノードが必要

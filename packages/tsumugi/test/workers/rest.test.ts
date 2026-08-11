@@ -1,7 +1,7 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 // 公開エントリ経由で読む, 再エクスポートが壊れた場合も検出する
-import { bearerAuth, unsafeNoAuth } from '../../src/entries/index.js';
+import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
 import { SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
@@ -947,6 +947,45 @@ describe('予約済みジョブの実行時刻の変更', () => {
 
 	it('不正な形式のジョブIDは400', async () => {
 		const res = await post('/api/jobs/not-a-job-id/reschedule', { runAt: T0 });
+		expect(res.status).toBe(400);
+	});
+});
+
+describe('runの開始', () => {
+	// Run DOはexamples/basicの定義を持つので, 実際に開始できるのはそこにある名前だけ
+	const flow = createFlow({ REST: Noop });
+	const withFlows = defineTsumugi({
+		performers: { REST: Noop },
+		flows: { GREETINGS: flow<{ prefix: string }>((f) => void f.node('only', 'REST', { input: (i) => i })) },
+		auth: bearerAuth(TOKEN),
+	});
+
+	const post = (body: unknown) =>
+		withFlows.fetch!(
+			new Request('https://example.com/api/runs', {
+				method: 'POST',
+				headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+				body: JSON.stringify(body),
+			}),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+
+	it('idを指定して開始できる', async () => {
+		const res = await post({ flow: 'GREETINGS', input: { prefix: 'rest' }, id: 'rest-start-1' });
+		expect(res.status).toBe(201);
+		expect(await res.json()).toEqual({ id: 'GREETINGS:rest-start-1' });
+	});
+
+	it('runIdのローカル部に使えないidは400', async () => {
+		// 区切り文字を含むidはrunIdへ往復できない
+		const res = await post({ flow: 'GREETINGS', input: { prefix: 'rest' }, id: 'a/b' });
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'invalid run id' });
+	});
+
+	it('未登録のflowは400', async () => {
+		const res = await post({ flow: 'UNKNOWN', input: {} });
 		expect(res.status).toBe(400);
 	});
 });
