@@ -11,12 +11,12 @@ const emit = defineEmits<{
 	(event: 'measure', id: string, height: number): void;
 }>();
 
-// dataは組み直しのたびに別のオブジェクトになるので, 都度引き直す
+// dataは再構築のたびに別のオブジェクト, 都度再取得
 const node = computed(() => props.data.node);
 
 /**
  * 中身の実寸を返す
- * 箱の高さはレイアウトが決めるので, 文字の折り返しで中身が伸びた分は測って返すしかない
+ * 箱の高さはレイアウトが決める, 文字の折り返しで伸びた分は計測して返すしかない
  */
 const content = ref<HTMLElement | null>(null);
 let observer: ResizeObserver | undefined;

@@ -39,7 +39,7 @@ describe('performerのハーネス', () => {
 	});
 
 	it('例外は投げずに結果として返る', async () => {
-		// 本番では例外がリトライの判断になるので, 投げたか否かを同じ形で扱えるようにする
+		// 本番では例外がそのままリトライの判断材料, 投げたか否かを同じ形で確認可能
 		const result = await runPerformer(boom, {});
 		expect(result.ok).toBe(false);
 		expect(result.ok === false && result.error).toBeInstanceOf(Error);
@@ -47,13 +47,13 @@ describe('performerのハーネス', () => {
 
 	it('文脈の既定値が実装と揃っている', () => {
 		const ctx = createTestContext();
-		// idempotencyKeyはジョブID, 再試行を跨いで同値になる
+		// idempotencyKeyはジョブID, 再試行を跨いで同値
 		expect(ctx.idempotencyKey).toBe(ctx.jobId);
 		expect(ctx.attempt).toBe(1);
 		expect(ctx.deadlineAt).toBeGreaterThan(Date.now());
 	});
 
-	it('deadlineAtから中断を組み立てられる', async () => {
+	it('deadlineAtから中断を構築できる', async () => {
 		const ctx = createTestContext({ deadlineAt: Date.now() + 20 });
 		await expect(runPerformer(interruptible, {}, ctx)).resolves.toEqual({ ok: true, value: 'expired' });
 	});
@@ -95,7 +95,7 @@ describe('公開している純粋関数', () => {
 		expect(next).toEqual({ kind: 'retry', runAfter: 2_000, delayMs: 2_000 });
 	});
 
-	it('ポリシーの効き方を利用者が試せる', () => {
+	it('ポリシーの挙動を利用者が試せる', () => {
 		const out = schedule({
 			now: 0,
 			jobs: [
@@ -131,7 +131,7 @@ describe('公開している純粋関数', () => {
 
 describe('testingサブパスの公開API', () => {
 	it('ハーネスと純粋関数の入口を公開する', async () => {
-		// 依存遮断はsize-check.mjsがdist成果物で担保,ここは公開面を固定する
+		// 依存遮断はsize-check.mjsがdist成果物で担保, ここは公開面の固定
 		const loaded = await import('../../src/entries/testing.js');
 		expect(Object.keys(loaded)).toEqual(
 			expect.arrayContaining(['createTestContext', 'runPerformer', 'fixedClock', 'nextAttempt', 'schedule']),

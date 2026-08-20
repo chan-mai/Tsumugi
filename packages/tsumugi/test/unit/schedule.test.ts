@@ -88,9 +88,9 @@ describe('concurrencyKey単位の上限(ADR-0009)', () => {
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
 	});
 
-	it('埋まったキーが他のキーを巻き添えにしない', () => {
+	it('上限に達したキーが他のキーの投入を止めない', () => {
 		// 実装がcontinueではなくbreakしていると'c'が投入されず,
-		// 1テナントが全体を止める事故になる
+		// 1テナントが全体を止める事故につながる
 		const jobs = [
 			job({ id: 'a', concurrencyKey: 'cust-1' }),
 			job({ id: 'b', concurrencyKey: 'cust-1' }),
@@ -117,7 +117,7 @@ describe('concurrencyKey単位の上限(ADR-0009)', () => {
 });
 
 describe('レート制限(ADR-0009)', () => {
-	it('トークンが尽きたら止まる', () => {
+	it('トークンが枯渇したら止まる', () => {
 		const jobs = [job({ id: 'a' }), job({ id: 'b' }), job({ id: 'c' })];
 		const out = schedule({
 			now: T0,
@@ -152,7 +152,7 @@ describe('レート制限(ADR-0009)', () => {
 		expect(out.bucket.tokens).toBeCloseTo(4, 5);
 	});
 
-	it('上限を超えて溜まらない', () => {
+	it('上限を超えて補充されない', () => {
 		const out = schedule({
 			now: T0 + 3_600_000,
 			jobs: [],
@@ -341,7 +341,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('投入より前の生存報告では期限を縮めない', () => {
-		// 再投入で報告が消えなかった場合でも, 判定が早まってはならない
+		// 再投入で報告が消えなかった場合でも, 判定の前倒しは禁止
 		const out = schedule({
 			now: T0 + 90_000 - 1,
 			jobs: [dispatched({ id: 'a', heartbeatAt: T0 - 60_000 })],
@@ -352,7 +352,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('at-most-onceは再投入せずSTALLEDにする', () => {
-		// Queues自体がat-least-onceなので,再投入すると二重実行になり得る
+		// Queues自体がat-least-onceで、再投入すると二重実行になり得る
 		const out = schedule({
 			now: T0 + 90_000,
 			jobs: [dispatched({ id: 'a', guarantee: 'at-most-once' })],
@@ -394,7 +394,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('RUNNING中に落ちたジョブが滞留しない', () => {
-		// 待ち状態しか見ない実装ではisolateが落ちたジョブが永久に放置される
+		// 待ち状態しか読まない実装ではisolateが停止したジョブが永久に未処理
 		const out = schedule({
 			now: T0 + 10_000_000,
 			jobs: [dispatched({ id: 'zombie', state: 'RUNNING' })],
@@ -407,8 +407,8 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 
 describe('nextAlarmAt', () => {
 	it('投入したジョブの無応答判定時刻を含める', () => {
-		// 入力のスナップショットでは投入対象はまだSCHEDULEDなので, nextSilenceには現れない
-		// ここを取りこぼすと投入後にDOを起動する予定が立たず,応答が無いジョブが永久に回収されない
+		// 入力のスナップショットでは投入対象はまだSCHEDULEDで, nextSilenceには現れない
+		// この予定が無いと投入後のDO起動の予定が立たず、応答が無いジョブは永久に未回収
 		const out = schedule({
 			now: T0,
 			jobs: [job({ id: 'a', timeoutMs: 60_000 })],
@@ -461,7 +461,7 @@ describe('投入が止まった制約の報告(ADR-0009, #10)', () => {
 		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: true, perKey: false, perKeyTokens: false });
 	});
 
-	it('キー単位の上限で候補を飛ばすとperKey', () => {
+	it('キー単位の上限で候補を除外するとperKey', () => {
 		const jobs = [job({ id: 'a', concurrencyKey: 'k' }), job({ id: 'b', concurrencyKey: 'k' })];
 		const out = schedule({ now: T0, jobs, policy: policy({ perKeyConcurrency: 1 }), bucket: unlimited });
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);

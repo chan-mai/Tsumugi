@@ -2,18 +2,18 @@ import { assertNodeId, shapeOf, type AnyFlow, type FlowNode, type InputOf } from
 import { advance, type NodeState, type NodeView } from '../core/run.js';
 
 /**
- * flow定義を通しで動かす
+ * flow定義の通し実行
  *
- * Durable ObjectもQueuesも起動せず, 進行の判断は本番と同じ`advance`に委ねる
- * performは実行しないので, 各ノードの結果は呼び出し側が与える
- * spawnはperformの実行時にしか決まらないため扱わない
+ * Durable ObjectもQueuesも起動せず、進行の判断は本番と同じ`advance`が担当
+ * performは実行せず、各ノードの結果は呼び出し側が与える
+ * spawnはperformの実行時にしか確定せず対象外
  */
 
 /** 実行されたノード1件ぶんの記録 */
 export type SimulatedNode = {
 	id: string;
 	binding: string;
-	/** fan-outノードは子を展開するだけなのでundefined */
+	/** fan-outノードは子の展開のみでundefined */
 	payload: unknown;
 	state: NodeState;
 	/** fan-outノードは子の集計値, それ以外は`results`が返した値 */
@@ -22,12 +22,12 @@ export type SimulatedNode = {
 	parent: string | null;
 };
 
-/** ノードの結果を決める, 指定が無いノードはundefinedを返したものとして扱う */
+/** ノードの結果の決定, 指定が無いノードはundefinedを返した扱い */
 export type ResultSource = Record<string, unknown> | ((node: { id: string; binding: string; payload: unknown }) => unknown);
 
 export type SimulateOptions = {
 	results?: ResultSource;
-	/** 失敗させるノードID, 下流はSKIPPEDになる */
+	/** 失敗させるノードID, 下流はSKIPPEDへ */
 	fails?: readonly string[];
 };
 
@@ -37,7 +37,7 @@ export type SimulationResult = {
 	state: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 };
 
-/** 進行が止まるまで回す上限, グラフの深さぶん回れば足りる */
+/** 進行が止まるまでの反復上限, グラフの深さぶんの反復で十分 */
 const ROUNDS = 1_000;
 
 const resultOf = (source: ResultSource | undefined, node: { id: string; binding: string; payload: unknown }): unknown => {
@@ -53,7 +53,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 		id: node.id,
 		state: 'PENDING',
 		container: node.container,
-		// subflowノードは子のrunを起こすので、ここでは扱わない
+		// 子のrunを起動するsubflowノードは対象外
 		subflow: false,
 		parent: null,
 		origin: 'static',
@@ -66,7 +66,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 	const results = new Map<string, unknown>();
 	const executed: SimulatedNode[] = [];
 
-	/** 写像関数へ渡す受け取り口, `after`のキーをそのまま名前にする */
+	/** 写像関数へ渡す受け取り口, `after`のキーがそのまま名前 */
 	const depsOf = (definition: FlowNode) =>
 		Object.fromEntries(Object.entries(definition.after).map(([name, id]) => [name, results.get(id)]));
 
@@ -85,7 +85,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 			if (!view) continue;
 			const definition = definitions.get(decision.id);
 
-			// 判定がfalseなら実行しない, 下流は依存が成功していないので進まない(ADR-0041)
+			// 判定がfalseなら不実行, 下流は依存が未成功で進まない(ADR-0041)
 			if ((decision.type === 'start' || decision.type === 'expand') && definition?.when) {
 				const binding = children.get(view.id)?.binding ?? definition.binding;
 				const base = { id: view.id, binding, payload: undefined, parent: view.parent };
@@ -93,7 +93,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 				try {
 					passed = definition.when(input, depsOf(definition));
 				} catch {
-					// 判定自体の失敗は実行の可否が決まらない, Run DOと同じくFAILEDにする
+					// 判定自体の失敗は実行の可否が決まらない, Run DOと同じくFAILEDへ
 					settle(view, base, 'FAILED', undefined);
 					continue;
 				}
@@ -115,7 +115,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 				}
 
 				case 'expand': {
-					// 件数だけが実行時に決まる, 子のpayloadはここで確定する(ADR-0032)
+					// 件数だけが実行時に確定, 子のpayloadはここで決定(ADR-0032)
 					if (!definition?.over || !definition.item) break;
 					const items = definition.over(input, depsOf(definition));
 					items.forEach((item, index) => {
@@ -141,7 +141,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 				}
 
 				case 'aggregate': {
-					// fan-outノードはジョブを実行しないので, 子の成否の集計値が戻り値になる(ADR-0035)
+					// fan-outノード自体はジョブを実行せず、子の成否の集計値が戻り値(ADR-0035)
 					const kids = views.filter((node) => node.parent === view.id);
 					const succeeded = kids.filter((node) => node.state === 'COMPLETED').length;
 					const summary = { total: kids.length, succeeded, failed: kids.length - succeeded };

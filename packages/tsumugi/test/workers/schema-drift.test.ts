@@ -6,10 +6,10 @@ import { schedule, schedulerSetting } from '../../src/do/scheduler-tables.js';
 import { job as readModel } from '../../src/projection/tables.js';
 
 /**
- * DDLとDrizzleの定義がずれたら落とす
+ * DDLとDrizzleの定義のずれの検出
  *
- * DOのテーブルは`schema.ts`の`CREATE TABLE`が作り, クエリは`tables.ts`の定義で組み立てる
- * 片方だけ直すと,型は通るのに実行時に列が無いという壊れ方をする
+ * DOのテーブルは`schema.ts`の`CREATE TABLE`が作り、クエリは`tables.ts`の定義で構築
+ * 片方だけの修正では、型検査は成功するのに実行時に列が無い状態が発生
  */
 describe('DDLとDrizzle定義の一致', () => {
 	const shard = env.JOB_SHARD.get(env.JOB_SHARD.idFromName('DRIFT#0'));
@@ -40,7 +40,7 @@ describe('DDLとDrizzle定義の一致', () => {
 
 /** Scheduler DOも`scheduler-schema.ts`と`scheduler-tables.ts`の二重管理(ADR-0040) */
 describe('Scheduler DOのDDLとDrizzle定義の一致', () => {
-	// 面をそのまま通すと型の展開が深くなりTS2589に触れる, ここでは呼ばないので空で受ける
+	// 面をそのまま使うと型の展開が深くなりTS2589に抵触, ここでは呼ばず空で受ける
 	interface SchedulerFace extends Rpc.DurableObjectBranded {}
 	const namespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 	const stub = namespace.get(namespace.idFromName('scheduler'));
@@ -67,7 +67,7 @@ describe('Scheduler DOのDDLとDrizzle定義の一致', () => {
 
 /**
  * D1の読み取りモデルも同じ問題を持つ
- * DDLは`migrations/`のSQLが作り, クエリは`projection/tables.ts`の定義で組み立てる
+ * DDLは`migrations/`のSQLが作り、クエリは`projection/tables.ts`の定義で構築
  */
 describe('D1のDDLとDrizzle定義の一致', () => {
 	it('jobの列が一致する', async () => {

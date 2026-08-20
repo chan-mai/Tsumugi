@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { main } from '../../src/cli/index.js';
 import { makeDeps } from './cli-harness.js';
 
-// 引数の解釈はCLIの入口, 誤った起動で書き込みが走らないことをここで保証する
+// 引数の解釈はCLIの入口, 誤った起動で書き込みが発生しないことをここで保証
 
 describe('引数の解釈', () => {
 	it('引数なしはusageを出して失敗する', () => {
@@ -36,7 +36,7 @@ describe('引数の解釈', () => {
 		expect(errors.join('\n')).toContain('usage: tsumugi');
 	});
 
-	it('initのformatはjsoncとtoml以外を弾く', () => {
+	it('initのformatはjsoncとtoml以外を拒否する', () => {
 		const { deps, errors, fs } = makeDeps();
 		expect(main(['init', '--format', 'yaml'], deps)).toBe(1);
 		expect(errors.join('\n')).toContain('unknown format');

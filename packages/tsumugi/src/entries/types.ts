@@ -1,4 +1,4 @@
-// 型のみのエントリ,ランタイムコードを含まない
+// 型のみのエントリ, ランタイムコードなし
 export type {
 	ActiveState,
 	Backoff,

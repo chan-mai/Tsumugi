@@ -66,7 +66,7 @@ beforeEach(() => {
 });
 
 describe('Access JWTの検証', () => {
-	it('正しい署名とクレームなら通る', async () => {
+	it('正しい署名とクレームなら成功する', async () => {
 		const token = await makeJwt(validClaims());
 		const claims = await verifyAccessJwt(token, options(), Date.now());
 		expect(claims).toMatchObject({ aud: AUD, iss: ISSUER, email: 'someone@example.com' });
@@ -116,8 +116,8 @@ describe('Access JWTの検証', () => {
 		expect(await verifyAccessJwt(token, options(), Date.now())).toBeNull();
 	});
 
-	it('algをnoneに差し替えても通さない', async () => {
-		// ヘッダのalgを信じると署名検証を迂回される
+	it('algをnoneに差し替えても拒否する', async () => {
+		// ヘッダのalgをそのまま採用すると署名検証の迂回が可能
 		const header = encodeSegment({ alg: 'none', kid: KID, typ: 'JWT' });
 		const payload = encodeSegment(validClaims());
 		expect(await verifyAccessJwt(`${header}.${payload}.`, options(), Date.now())).toBeNull();
@@ -146,7 +146,7 @@ describe('Access JWTの検証', () => {
 		expect(await verifyAccessJwt(token, broken, Date.now())).toBeNull();
 	});
 
-	it('audが配列でも一致すれば通る', async () => {
+	it('audが配列でも一致すれば成功する', async () => {
 		const token = await makeJwt(validClaims({ aud: ['other', AUD] }));
 		expect(await verifyAccessJwt(token, options(), Date.now())).not.toBeNull();
 	});
@@ -181,7 +181,7 @@ describe('cloudflareAccessミドルウェア', () => {
 		expect((await call({})).status).toBe(401);
 	});
 
-	it('正しいJWTがヘッダにあれば通る', async () => {
+	it('正しいJWTがヘッダにあれば成功する', async () => {
 		const token = await makeJwt(validClaims());
 		expect((await call({ 'cf-access-jwt-assertion': token })).status).toBe(200);
 	});

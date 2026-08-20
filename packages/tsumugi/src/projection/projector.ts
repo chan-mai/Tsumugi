@@ -11,12 +11,12 @@ export type JobSnapshot = JobRow & { attempts_log?: AttemptRow[] };
 /**
  * 衝突時に更新しない列
  *
- * `id`と`created_at`はジョブの同一性そのもので書き換えてはならない
- * `binding`と`guarantee`は投入時に決まりその後変わらないので, 更新対象に入れる意味がない
+ * `id`と`created_at`はジョブの同一性そのもので書き換えは禁止
+ * `binding`と`guarantee`は投入時に確定しその後不変で、更新対象に入れる意味が無い
  */
 const IMMUTABLE = ['id', 'createdAt', 'binding', 'guarantee'] as const;
 
-/** スナップショットを読み取りモデルの行に写す */
+/** スナップショットを読み取りモデルの行へ変換 */
 function toValues(snapshot: JobSnapshot, seq: number): typeof job.$inferInsert {
 	return {
 		id: snapshot.id,
@@ -32,28 +32,28 @@ function toValues(snapshot: JobSnapshot, seq: number): typeof job.$inferInsert {
 		createdAt: snapshot.created_at,
 		updatedAt: snapshot.updated_at,
 		dispatchedAt: snapshot.dispatched_at,
-		// 古いスナップショットにはrun_afterが無いのでnullに揃える
+		// 古いスナップショットにはrun_afterが無くnullへ統一
 		runAfter: snapshot.run_after ?? null,
-		// 古いスナップショットにはprogressが無いのでnullに揃える
+		// 古いスナップショットにはprogressが無くnullへ統一
 		progress: snapshot.progress ?? null,
 		payload: snapshot.payload,
-		// 古いスナップショットにはresultが無いのでnullに揃える(#9)
+		// 古いスナップショットにはresultが無くnullへ統一(#9)
 		result: snapshot.result ?? null,
 		runId: snapshot.run_id,
 		nodeId: snapshot.node_id,
-		// 履歴が無いジョブでnullを入れる, 空配列にすると「取れなかった」と区別できない
+		// 履歴が無いジョブはnull, 空配列では「取得できなかった」と区別不能
 		attemptsLog: snapshot.attempts_log && snapshot.attempts_log.length > 0 ? JSON.stringify(snapshot.attempts_log) : null,
 	};
 }
 
-/** batchへ渡す文の型, 手で書くとdrizzleの内部型に依存するので推論から取る */
+/** batchへ渡す文の型, 手書きではdrizzleの内部型に依存し推論から取得 */
 type Upsert = ReturnType<typeof toStatements>[number];
 
 /**
  * D1への投影(ADR-0008)
  *
- * `setWhere`の`excluded.seq > job.seq`で古い状態の上書きを弾く,同じ範囲を何度流しても結果は不変
- * 再送や順序の入れ替わりでも古い状態が新しい状態を上書きしない
+ * `setWhere`の`excluded.seq > job.seq`で古い状態の上書きを防止, 同じ範囲を何度処理しても結果は不変
+ * 再送や順序の入れ替わりでも古い状態による新しい状態の上書きなし
  */
 export function toStatements(db: D1Database, rows: readonly OutboxRow[]) {
 	const d = drizzle(db);
@@ -77,6 +77,6 @@ export function toStatements(db: D1Database, rows: readonly OutboxRow[]) {
 export async function project(db: D1Database, rows: readonly OutboxRow[]): Promise<void> {
 	if (rows.length === 0) return;
 	const statements = toStatements(db, rows);
-	// batchは空でないタプルを要求する, 呼び出し前に長さを確かめている
+	// batchは空でないタプルを要求, 長さは呼び出し前に確認済み
 	await drizzle(db).batch(statements as [Upsert, ...Upsert[]]);
 }

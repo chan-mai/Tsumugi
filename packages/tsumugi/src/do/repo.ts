@@ -8,18 +8,18 @@ import { attempt, failureNotify, job, keyBucket, outbox, runNotify, setting, uni
 
 /**
  * 1試行あたりのエラー本文の上限
- * performerの例外はHTMLページ丸ごとのこともあり,無制限だとDOとD1の両方を圧迫する
+ * performerの例外はHTMLページ丸ごとのこともあり、無制限だとDOとD1の両方を圧迫
  */
 export const ERROR_MAX_CHARS = 2_000;
 
 /**
  * performの戻り値の保存上限(#9)
- * 戻り値はアウトボックスのスナップショットに乗り毎回の投影で運ばれるので, 無制限だとDOとD1を圧迫する
- * 超える結果はR2/KV/D1へ自分で書く運用にし, ここではnullに落とす
+ * 戻り値はアウトボックスのスナップショットに含まれ毎回の投影で転送され、無制限だとDOとD1を圧迫
+ * 超える結果はR2/KV/D1へ自分で書く運用とし、ここではnullを保存
  */
 export const RESULT_MAX_CHARS = 8_192;
 
-/** 1ジョブあたりに残す試行の数, maxAttemptsを大きくしてもスナップショットが膨らまないようにする */
+/** 1ジョブあたりに残す試行の数, maxAttemptsを大きくした場合のスナップショットの肥大を防止 */
 export const ATTEMPT_KEEP = 20;
 
 const ACTIVE = ['SCHEDULED', 'QUEUED', 'RUNNING'] as const;
@@ -45,7 +45,7 @@ export type NewJob = {
 /** 終端に達した時にRun DOへ知らせる状態(ADR-0031) */
 const NOTIFIABLE: readonly JobState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 
-/** 外部へ知らせる状態(#30), 再試行で回復する途中の失敗は含めない */
+/** 外部へ知らせる状態(#30), 再試行で回復する途中の失敗は対象外 */
 const FAILURES: readonly JobState[] = ['FAILED', 'STALLED'];
 
 const toView = (row: JobRow): JobView => ({
@@ -64,8 +64,8 @@ const toView = (row: JobRow): JobView => ({
 });
 
 /**
- * 掃除の対象条件
- * 削除と判定で同じ式を使う, 片方だけ直すと削除の条件とalarmを設定する条件がずれる
+ * 削除の対象条件
+ * 削除と判定で同じ式を使用, 片方だけの修正は削除の条件とalarm設定の条件がずれる
  */
 const sweepable = (now: number, retention: Retention) =>
 	or(
@@ -76,14 +76,14 @@ const sweepable = (now: number, retention: Retention) =>
 /**
  * SQLiteとJobViewの間の射影
  *
- * 状態遷移は必ず条件付きUPDATEで行い,読んでから書くことをしない
- * 更新できた行を`returning`で受けて成否を判定するので競合に強く,書き込み回数も抑えられる
+ * 状態遷移は必ず条件付きUPDATEで行い、読んでから書く方式は不使用
+ * 更新できた行を`returning`で受けて成否を判定, 競合に強く書き込み回数も削減
  */
 export class JobRepo {
 	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
-	/** 集計を含む読み取りなど, クエリビルダで表現できないものに使う */
+	/** 集計を含む読み取りなど, クエリビルダで表現できないものに使用 */
 	readonly sql: SqlStorage;
-	/** 書き込みを行うクエリの回数, 1ジョブあたりの予算をテストで固定するために測る */
+	/** 書き込みを行うクエリの回数, 1ジョブあたりの予算のテスト固定用 */
 	writes = 0;
 	/** 読み取りを行うクエリの回数 */
 	reads = 0;
@@ -126,13 +126,13 @@ export class JobRepo {
 	}
 
 	/**
-	 * D1への投影待ちに積む(ADR-0008)
-	 * D1へUPSERTする内容そのものを持たせ,投影側が追加の読み取りをしなくて済むようにする
+	 * D1への投影待ちへ追加(ADR-0008)
+	 * D1へUPSERTする内容そのものを持たせ、投影側の追加の読み取りを不要化
 	 */
 	#appendOutbox(id: string): void {
 		const row = this.find(id);
 		if (!row) return;
-		// 試行履歴も同梱する, 別経路にすると冪等性の判定をもう1つ作ることになる(ADR-0028)
+		// 試行履歴も同梱, 別経路では冪等性の判定がもう1つ必要(ADR-0028)
 		this.db
 			.insert(outbox)
 			.values({ jobId: id, snapshot: JSON.stringify({ ...row, attempts_log: this.attemptsOf(id) }) })
@@ -140,7 +140,7 @@ export class JobRepo {
 		this.writes++;
 	}
 
-	/** 新しい試行から順に返す, 打ち切りは古い方から */
+	/** 新しい試行から順に返す, 削除は古い方から */
 	attemptsOf(jobId: string): AttemptRow[] {
 		const rows = this.db.select().from(attempt).where(eq(attempt.jobId, jobId)).orderBy(desc(attempt.attempt)).limit(ATTEMPT_KEEP).all();
 		this.reads++;
@@ -155,8 +155,8 @@ export class JobRepo {
 	}
 
 	/**
-	 * 試行1回ぶんを記録する
-	 * 同じ試行番号で二重に報告が来ても内容を置き換えるだけにする, 重複配送で行が増えない
+	 * 試行1回ぶんの記録
+	 * 同じ試行番号の二重報告は内容の置換のみ, 重複配送で行は増えない
 	 */
 	recordAttempt(record: AttemptRow): void {
 		const values = {
@@ -184,7 +184,7 @@ export class JobRepo {
 		return rows.map((r) => ({ seq: r.seq, job_id: r.jobId, snapshot: r.snapshot }));
 	}
 
-	/** D1への書き込みが成功してから呼ぶ,失敗時はカーソルを進めない */
+	/** D1への書き込みが成功してから呼ぶ, 失敗時はカーソルを維持 */
 	deleteOutboxThrough(seq: number): void {
 		this.db.delete(outbox).where(lte(outbox.seq, seq)).run();
 		this.writes++;
@@ -199,7 +199,7 @@ export class JobRepo {
 		return row?.c ?? 0;
 	}
 
-	/** スケジューラに渡す稼働中ジョブ,有界にするためlimitを必須にする */
+	/** スケジューラに渡す稼働中ジョブ, 有界化のためlimitは必須 */
 	activeJobs(limit: number): JobView[] {
 		const rows = this.db
 			.select()
@@ -215,11 +215,11 @@ export class JobRepo {
 	/**
 	 * schedule()へ渡す読み取り範囲, 役割ごとに分けて読む(ADR-0019 / ADR-0020, #4)
 	 *
-	 * 作成順の単一の読み取り範囲では実行中と未到来のジョブが範囲を占有し, 後から入った実行可能ジョブが選考に入らない
-	 * 実行可能な候補を独立した範囲で読むことで, 実行中がlimitを超えても投入候補が範囲に残る
-	 * 実行可能ジョブ自体がlimitを超える滞留は解けない, 作成順の範囲を超えた分は次tick以降で処理する
+	 * 作成順の単一の読み取り範囲では実行中と未到来のジョブが範囲を占有し、後から入った実行可能ジョブが選考に入らない
+	 * 実行可能な候補を独立した範囲で読むことで、実行中がlimitを超えても投入候補が範囲に残る
+	 * 実行可能ジョブ自体がlimitを超える滞留は解消不能, 作成順の範囲を超えた分は次tick以降で処理
 	 *
-	 * readyCountを返すのは有界判定のため, 満杯なら残りがある可能性が高く即座に再実行する
+	 * readyCountは有界判定用, limit到達なら残りがある可能性が高く即座に再実行
 	 */
 	scheduleWindow(now: number, limit: number): { jobs: JobView[]; readyCount: number } {
 		// 実行中(QUEUED/RUNNING): reaperの無応答判定と実行中件数の集計に必要
@@ -230,7 +230,7 @@ export class JobRepo {
 			.orderBy(asc(job.createdAt), asc(job.id))
 			.limit(limit)
 			.all();
-		// 実行可能(SCHEDULED且つrun_after<=now): 投入候補, 実行中と未到来のジョブに範囲を占有されない
+		// 実行可能(SCHEDULED且つrun_after<=now): 投入候補, 実行中と未到来のジョブによる範囲の占有なし
 		const ready = this.db
 			.select()
 			.from(job)
@@ -238,7 +238,7 @@ export class JobRepo {
 			.orderBy(asc(job.createdAt), asc(job.id))
 			.limit(limit)
 			.all();
-		// 未到来(run_after>now)の最も早い1件: futureRunAfterでalarmを張るため, 全件は要らない
+		// 未到来(run_after>now)の最も早い1件: futureRunAfterのalarm設定用, 全件は不要
 		const future = this.db
 			.select()
 			.from(job)
@@ -247,7 +247,7 @@ export class JobRepo {
 			.limit(1)
 			.all();
 		this.reads += 3;
-		// 3つは状態/run_afterで互いに素なので重複しない
+		// 3つは状態/run_afterで互いに素, 重複なし
 		const jobs = [...inFlight, ...ready, ...future].map((r) => toView(this.#toJobRow(r)));
 		return { jobs, readyCount: ready.length };
 	}
@@ -268,7 +268,7 @@ export class JobRepo {
 		return row ? this.#toJobRow(row) : undefined;
 	}
 
-	/** drizzleのキャメルケースを, 投影とテストが読むスネークケースの行に戻す */
+	/** drizzleのキャメルケースを、投影とテストが読むスネークケースの行へ変換 */
 	#toJobRow(r: typeof job.$inferSelect): JobRow {
 		return {
 			id: r.id,
@@ -296,9 +296,9 @@ export class JobRepo {
 	}
 
 	/**
-	 * 条件付きの状態遷移,現在の状態がfromのいずれかと一致する時だけ書き換える
+	 * 条件付きの状態遷移, 現在の状態がfromのいずれかと一致する時だけ更新
 	 * 一致しなければfalseを返す(重複配送や競合で既に進んでいた場合)
-	 * 読んでから書かないので競合に強く,書き込みも1回で済む
+	 * 読んでから書く方式ではなく競合に強い, 書き込みも1回
 	 */
 	compareAndSet(
 		id: string,
@@ -311,7 +311,7 @@ export class JobRepo {
 			runAfter?: number;
 			countAttempt?: boolean;
 			result?: string | null;
-			/** ジョブ行には残さずRun DOへの通知にだけ載せる失敗の理由(ADR-0031) */
+			/** ジョブ行には残さずRun DOへの通知にだけ含める失敗の理由(ADR-0031) */
 			error?: string | null;
 			/** performの中で要求された子(ADR-0032) */
 			spawns?: readonly SpawnRequest[];
@@ -319,18 +319,18 @@ export class JobRepo {
 	): boolean {
 		for (const state of from) assertTransition(state, to);
 
-		// 遷移のたびに生存報告を落とす, 残すと前の試行の報告でreaperの期限が延びる
+		// 遷移のたびに生存報告を消去, 残すと前の試行の報告でreaperの期限が延長
 		const set: Record<string, unknown> = { state: to, updatedAt: patch.now, heartbeatAt: null, progress: null };
 		if (patch.dispatchedAt !== undefined) set.dispatchedAt = patch.dispatchedAt;
 		if (patch.attempts !== undefined) set.attempts = patch.attempts;
 		if (patch.runAfter !== undefined) set.runAfter = patch.runAfter;
-		// 成功報告と同じ遷移で結果も入れる, 書き込みを増やさないため別UPDATEにしない(#9)
+		// 成功報告と同じ遷移で結果も更新, 書き込み削減で別UPDATEは不使用(#9)
 		if (patch.result !== undefined) set.result = patch.result;
-		// 現在値を読まずに加算する,成功報告の経路で読み取りを増やさないため
+		// 現在値を読まずに加算, 成功報告の経路での読み取り増加の回避
 		if (patch.countAttempt) set.attempts = sql`${job.attempts} + 1`;
 
-		// 更新できた行を受け取って成否を判定する, drizzleのrunは影響行数を返さない
-		// 宛先も同じreturningで受ける, 遷移のたびに読み直さずに通知の要否が分かる(ADR-0031)
+		// 更新できた行を受け取って成否を判定, drizzleのrunに影響行数の返却は無い
+		// 宛先も同じreturningで受ける, 遷移のたびの再読なしで通知の要否を判定可能(ADR-0031)
 		const updated = this.db
 			.update(job)
 			.set(set)
@@ -342,7 +342,7 @@ export class JobRepo {
 		if (!row) return false;
 		this.#appendOutbox(id);
 		if (FAILURES.includes(to)) this.#appendFailure(id, to as FailureNotice['state'], patch.error ?? null, patch.now);
-		// 終端の捕捉を1箇所に集約する, 遷移の呼び出し側ごとに積むと必ずどこかで漏れる
+		// 終端の捕捉を1箇所に集約, 遷移の呼び出し側ごとの実装は必ずどこかで漏れる
 		if (row.runId !== null && row.nodeId !== null && NOTIFIABLE.includes(to)) {
 			this.appendNotify(row.runId, {
 				nodeId: row.nodeId,
@@ -358,8 +358,8 @@ export class JobRepo {
 
 	/**
 	 * performerからの生存報告
-	 * 実行中のジョブにだけ効く, 終端に達した後の遅れた報告は当たらない
-	 * 進捗も同じUPDATEで入れる, 別文にすると書き込みが1回増える
+	 * 実行中のジョブにのみ適用, 終端に達した後の遅れた報告は対象外
+	 * 進捗も同じUPDATEで更新, 別文では書き込みが1回増加
 	 */
 	heartbeat(id: string, now: number, progress: number | null): boolean {
 		const set: Record<string, unknown> = { heartbeatAt: now };
@@ -373,16 +373,16 @@ export class JobRepo {
 			.all();
 		this.writes++;
 		if (updated.length === 0) return false;
-		// 進捗を画面へ出すには投影が要る, 書き込みが増えるぶんは報告側の間引きで抑える
+		// 進捗の画面表示には投影が必要, 書き込みの増加は報告側の間隔制限で削減
 		this.#appendOutbox(id);
 		return true;
 	}
 
 	/**
-	 * 予約済みジョブの実行時刻と優先度を差し替える
+	 * 予約済みジョブの実行時刻と優先度の差し替え
 	 *
-	 * 状態を変えないので`compareAndSet`は使えない, 遷移表はSCHEDULED->SCHEDULEDを許さない(ADR-0012)
-	 * 条件付きUPDATEである点は同様で, SCHEDULED以外なら更新行が無いので失敗と判定できる
+	 * 状態を変えず`compareAndSet`は使用不可, 遷移表にSCHEDULED->SCHEDULEDは無い(ADR-0012)
+	 * 条件付きUPDATEである点は同様で、SCHEDULED以外なら更新行が無く失敗と判定可能
 	 */
 	reschedule(id: string, runAfter: number, priority: number | undefined, now: number): boolean {
 		const set: Record<string, unknown> = { runAfter, updatedAt: now };
@@ -401,8 +401,8 @@ export class JobRepo {
 	}
 
 	/**
-	 * 失敗の通知待ちに積む(#30)
-	 * 通知先が読む材料をここで揃える, 送る時にジョブを引き直すと掃除済みで消えている
+	 * 失敗の通知待ちへ追加(#30)
+	 * 通知先が読む材料をここで確定, 送信時のジョブの再取得は削除済みで不可
 	 */
 	#appendFailure(id: string, state: FailureNotice['state'], error: string | null, now: number): void {
 		const row = this.find(id);
@@ -413,7 +413,7 @@ export class JobRepo {
 			state,
 			attempts: row.attempts,
 			maxAttempts: row.max_attempts,
-			// 遷移に理由が無ければ直近の試行から拾う, reaperの打ち切りは理由を持たない
+			// 遷移に理由が無ければ直近の試行から取得, reaperの中断は理由を持たない
 			error: error ?? this.attemptsOf(id)[0]?.error ?? null,
 			runId: row.run_id,
 			nodeId: row.node_id,
@@ -432,7 +432,7 @@ export class JobRepo {
 		return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
 	}
 
-	/** 投入が成功してから呼ぶ, 失敗時はカーソルを進めない */
+	/** 投入が成功してから呼ぶ, 失敗時はカーソルを維持 */
 	deleteFailureThrough(seq: number): void {
 		this.db.delete(failureNotify).where(lte(failureNotify.seq, seq)).run();
 		this.writes++;
@@ -461,7 +461,7 @@ export class JobRepo {
 		return rows.map((row) => ({ seq: row.seq, run_id: row.runId, event: row.event }));
 	}
 
-	/** 送信が成功してから呼ぶ,失敗時はカーソルを進めない */
+	/** 送信が成功してから呼ぶ, 失敗時はカーソルを維持 */
 	deleteNotifyThrough(seq: number): void {
 		this.db.delete(runNotify).where(lte(runNotify.seq, seq)).run();
 		this.writes++;
@@ -481,13 +481,13 @@ export class JobRepo {
 	}
 
 	/**
-	 * 終端に達した古いジョブをDOから落とす
+	 * 終端に達した古いジョブをDOから削除
 	 *
-	 * DOのSQLiteは1インスタンス10GBが上限で,行数が増えるとtickのクエリも重くなる
-	 * 明細はD1の読み取りモデルに投影済みなので, DO側に残し続ける理由がない
+	 * DOのSQLiteは1インスタンス10GBが上限で、行数が増えるとtickのクエリも重くなる
+	 * 明細はD1の読み取りモデルに投影済みで、DO側に残し続ける理由が無い
 	 *
-	 * 投影が滞っていても消して構わない
-	 * アウトボックスはD1へUPSERTする内容そのものを持っており,ジョブ行を参照しないため
+	 * 投影が滞っていても削除可能
+	 * アウトボックスはD1へUPSERTする内容そのものを持ち、ジョブ行への参照なし
 	 *
 	 * 保持期間は役割の違う2つを別の数字で持つ(ADR-0027)
 	 * doneMsは済んだジョブ, failedMsは人手で再開する余地のあるジョブ
@@ -495,11 +495,11 @@ export class JobRepo {
 	sweepTerminal(now: number, retention: Retention, limit: number): number {
 		const targets = this.db.select({ id: job.id }).from(job).where(sweepable(now, retention)).limit(limit);
 
-		// 先に履歴を落とす, ジョブ行を消してから引くと対象が引けなくなり孤児が残る
+		// 先に履歴を削除, ジョブ行を消した後では対象を特定できず参照先の無い行が残る
 		this.db.delete(attempt).where(inArray(attempt.jobId, targets)).run();
 		this.writes++;
 
-		// 件数はカーソルから取る, returningだと削除した行を全件持ち帰ることになる
+		// 件数はカーソルから取得, returningでは削除した行を全件転送
 		const { sql: text, params } = this.db.delete(job).where(inArray(job.id, targets)).toSQL();
 		const cursor = this.sql.exec(text, ...(params as SqlStorageValue[]));
 		this.writes++;
@@ -507,13 +507,13 @@ export class JobRepo {
 	}
 
 	/**
-	 * 掃除する対象と次に対象が出る時刻を1回の読み取りで見る
-	 * 対象が無くてもDELETEを撃つと書き込みが増える,読み取りは書き込みより桁で安価
+	 * 削除する対象と次に対象が出る時刻を1回の読み取りで取得
+	 * 対象が無いDELETEの実行も書き込みが増加, 読み取りは書き込みより桁で安価
 	 *
-	 * nextDueAtを返すのは無駄な起床を避けるため
-	 * 失敗ジョブだけが残る状態で短い間隔のalarmを張り続けると,何もしない書き込みが延々と積まれる
+	 * nextDueAtの返却は無駄な起動の回避用
+	 * 失敗ジョブだけが残る状態で短い間隔のalarm設定を続けると、無意味な書き込みが増え続ける
 	 *
-	 * 3つの集計を1文にまとめているためクエリビルダでは表現できず, 生SQLのまま残す
+	 * 3つの集計を1文へまとめた形はクエリビルダで表現できず、生SQLのまま維持
 	 */
 	sweepState(now: number, retention: Retention): { jobs: boolean; uniqueKeys: boolean; nextDueAt: number | null } {
 		const row = this.sql
@@ -537,8 +537,8 @@ export class JobRepo {
 	}
 
 	/**
-	 * 期限切れの重複排除キー, enqueueが途絶えても溜まらないようtickでも掃除する
-	 * 件数を返さない, 上限が無いので数えると期限切れの全件を持ち帰ることになる
+	 * 期限切れの重複排除キー, enqueueが途絶えても残らないようtickでも削除
+	 * 件数は非返却, 上限が無く集計すると期限切れの全件を転送
 	 */
 	sweepExpiredUniqueKeys(now: number): void {
 		this.db.delete(uniqueKey).where(lte(uniqueKey.expiresAt, now)).run();
@@ -557,7 +557,7 @@ export class JobRepo {
 	/**
 	 * 重複排除の予約(ADR-0021 / ADR-0022)
 	 * 取れたらnull,既に取られていれば先行するジョブIDを返す
-	 * DOはシングルスレッドなので検査と挿入が何もせずとも不可分になる
+	 * DOはシングルスレッドで検査と挿入が追加処理なしで不可分
 	 */
 	reserveUniqueKey(key: string, jobId: string, expiresAt: number, now: number): string | null {
 		this.db.delete(uniqueKey).where(lte(uniqueKey.expiresAt, now)).run();
@@ -588,7 +588,7 @@ export class JobRepo {
 		this.writes++;
 	}
 
-	/** 実行時の設定を捨てて静的設定へ戻すために使う(#27) */
+	/** 実行時の設定を破棄して静的設定へ戻す用途(#27) */
 	deleteSetting(key: string): void {
 		this.db.delete(setting).where(eq(setting.key, key)).run();
 		this.writes++;

@@ -6,11 +6,11 @@ import type { NodeEvent } from '../../src/core/run.js';
 /**
  * 投入と完了通知の競合(#33)
  *
- * ジョブの投入はRPCなので, awaitの間にJob DOからの完了通知が割り込む
- * 投入後の状態更新が終端のノードを起動中へ戻すと, 通知は二度と来ずrunが永久にRUNNINGになる
+ * ジョブの投入はRPCで、awaitの間にJob DOからの完了通知が割り込む
+ * 投入後の状態更新が終端のノードを起動中へ戻すと、通知は二度と届かずrunが永久にRUNNINGのまま
  */
 
-/** 面をそのまま通すと型の展開が深くなりTS2589に触れる, 使う分だけを宣言する */
+/** 面をそのまま使うと型の展開が深くなりTS2589に抵触, 使う分だけを宣言 */
 interface RunFace extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown }): Promise<{ id: string; created: boolean }>;
 }
@@ -28,8 +28,8 @@ const stateOf = (runId: string) =>
 
 /**
  * 投入の最中に完了通知を届けるJob DOの替え玉を仕込む
- * 実際のJob DOでも, 投入したジョブが即座に走り終えれば同じ順序になる
- * DOのストレージはテストを跨いで残るので, 前回の行も落としてから始める
+ * 実際のJob DOでも、投入したジョブが即座に完了すれば同じ順序
+ * DOのストレージはテストを跨いで残り、前回の行も削除してから開始
  */
 async function installEagerShard(runId: string): Promise<void> {
 	await runInDurableObject(runStub(runId), (instance) => {
@@ -62,20 +62,20 @@ describe('投入と完了通知の競合(#33)', () => {
 	it('投入を待つ間に完了したノードを起動中へ戻さない', async () => {
 		const runId = 'GREETINGS:race1';
 		const stub = runStub(runId);
-		// 開始より先に仕込む, リセットが開始した行を消さないようにする
+		// 開始より先に設定, リセットによる開始済みの行の削除を防止
 		await installEagerShard(runId);
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'race' } });
 
 		await runDurableObjectAlarm(stub);
 
-		// 巻き戻すとJob DO側は終端なので通知が二度と来ず, ノードがSCHEDULEDで固まる
+		// 起動前へ戻すとJob DO側は終端のため通知が二度と届かず, ノードがSCHEDULEDのまま残る
 		expect((await nodesOf(runId))['list']).toBe('COMPLETED');
 	});
 
 	it('通知を追い越さずにrunが決着する', async () => {
 		const runId = 'GREETINGS:race2';
 		const stub = runStub(runId);
-		// 開始より先に仕込む, リセットが開始した行を消さないようにする
+		// 開始より先に設定, リセットによる開始済みの行の削除を防止
 		await installEagerShard(runId);
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'race' } });
 

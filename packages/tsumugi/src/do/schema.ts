@@ -2,7 +2,7 @@
  * Job DOのSQLiteスキーマ
  *
  * 稼働中ジョブについて正となるデータ(ADR-0002)
- * 終端に達したジョブもアウトボックスの投影が済むまでは残り, sweepで削除される
+ * 終端に達したジョブもアウトボックスの投影が済むまでは残り、sweepで削除
  */
 export const SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS job (
@@ -28,23 +28,23 @@ export const SCHEMA = [
 		payload TEXT NOT NULL,
 		-- performの戻り値, 成功時にJSON文字列で入る(#9), 上限超過や非直列化はnull
 		result TEXT,
-		-- v2のDAG用の予約席(ADR-0015),後からスキーマを書き換えずに済むよう最初から置く
+		-- v2のDAG用の予約列(ADR-0015), 後からのスキーマ変更が不要なよう最初から配置
 		run_id TEXT,
 		node_id TEXT
 	)`,
-	// tickが最初に引くクエリ,実行可能なジョブの絞り込みに使う
+	// tickが最初に実行するクエリ, 実行可能なジョブの抽出に使用
 	`CREATE INDEX IF NOT EXISTS job_active ON job (state, run_after)`,
 	`CREATE INDEX IF NOT EXISTS job_concurrency_key ON job (concurrency_key, state)`,
 	`CREATE INDEX IF NOT EXISTS job_run ON job (run_id, node_id)`,
-	// 重複排除(ADR-0021 / ADR-0022),ジョブ本体ではなくキーだけを一定期間残す
-	// KVには条件付き書き込みが無く「無ければ入れる」を不可分に実行できないためDO内に置く
+	// 重複排除(ADR-0021 / ADR-0022), ジョブ本体ではなくキーだけを一定期間保持
+	// KVには条件付き書き込みが無く「無ければ挿入」の不可分な実行が不能, DO内に配置
 	`CREATE TABLE IF NOT EXISTS unique_key (
 		key TEXT PRIMARY KEY,
 		job_id TEXT NOT NULL,
 		expires_at INTEGER NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS unique_key_expiry ON unique_key (expires_at)`,
-	// binding単位のポリシー, tickが同期で読めるようSQLiteに置く
+	// binding単位のポリシー, tickの同期読み取り用にSQLiteへ配置
 	`CREATE TABLE IF NOT EXISTS setting (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
@@ -58,7 +58,7 @@ export const SCHEMA = [
 	// 上限到達行の削除用
 	`CREATE INDEX IF NOT EXISTS key_bucket_refilled ON key_bucket (refilled_at)`,
 	// 試行ごとの記録(ADR-0028), 失敗の事後調査に必要
-	// ジョブ行は最新の状態しか持たず,何回目がいつ何で落ちたかは残らない
+	// ジョブ行は最新の状態しか持たず、何回目がいつ何で失敗したかは残らない
 	`CREATE TABLE IF NOT EXISTS attempt (
 		job_id TEXT NOT NULL,
 		attempt INTEGER NOT NULL,
@@ -68,22 +68,22 @@ export const SCHEMA = [
 		error TEXT,
 		PRIMARY KEY (job_id, attempt)
 	)`,
-	// Run DOへの通知待ち(ADR-0031), 送信が成功するまで消さないので落としても次のtickで追いつく
-	// D1への投影とは宛先もまとめ方も違うので別の表にする, 相乗りさせると片方の失敗がもう片方を止める
+	// Run DOへの通知待ち(ADR-0031), 送信の成功まで削除せず中断しても次のtickで追いつく
+	// D1への投影とは宛先もまとめ方も別で表も分離, 共用は片方の失敗がもう片方を停止
 	`CREATE TABLE IF NOT EXISTS run_notify (
 		seq INTEGER PRIMARY KEY AUTOINCREMENT,
 		run_id TEXT NOT NULL,
 		event TEXT NOT NULL
 	)`,
-	// 失敗の通知待ち(#30), 投入が成功するまで消さないので落としても次のtickで追いつく
-	// Run DOへの通知と分ける, 宛先も対象も違うので相乗りさせると片方の失敗がもう片方を止める
+	// 失敗の通知待ち(#30), 投入の成功まで削除せず中断しても次のtickで追いつく
+	// Run DOへの通知と分離, 宛先も対象も別で共用は片方の失敗がもう片方を停止
 	`CREATE TABLE IF NOT EXISTS failure_notify (
 		seq INTEGER PRIMARY KEY AUTOINCREMENT,
 		job_id TEXT NOT NULL,
 		payload TEXT NOT NULL
 	)`,
 	// D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
-	// D1書き込みが成功するまで削除しないので,失敗してもカーソルが進まず次回で追いつく
+	// D1書き込みの成功まで削除せず、失敗時もカーソルが進まず次回で追いつく
 	`CREATE TABLE IF NOT EXISTS outbox (
 		seq INTEGER PRIMARY KEY AUTOINCREMENT,
 		job_id TEXT NOT NULL,
@@ -93,14 +93,14 @@ export const SCHEMA = [
 
 export function applySchema(sql: SqlStorage): void {
 	for (const statement of SCHEMA) sql.exec(statement);
-	// CREATE TABLE IF NOT EXISTSは既存テーブルを変更しない, 後から足した列を既存DOへ補う(#9)
+	// CREATE TABLE IF NOT EXISTSは既存テーブルを変更しない, 後から追加した列を既存DOへ反映(#9)
 	ensureColumn(sql, 'job', 'result', 'TEXT');
 	ensureColumn(sql, 'job', 'heartbeat_at', 'INTEGER');
 	ensureColumn(sql, 'job', 'progress', 'REAL');
 	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
 }
 
-/** 既存の表に列が無ければ足す, 冪等にするため先に有無を確かめる */
+/** 既存の表に無い列の追加, 冪等化のため先に有無を確認 */
 function ensureColumn(sql: SqlStorage, table: string, column: string, type: string): void {
 	const exists = sql
 		.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
@@ -119,7 +119,7 @@ export type AttemptRow = {
 	error: string | null;
 };
 
-/** SQLiteの行そのまま,射影はrepo.tsが担う */
+/** SQLiteの行そのまま, 射影はrepo.tsが担当 */
 export type JobRow = {
 	id: string;
 	binding: string;

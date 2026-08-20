@@ -1,4 +1,4 @@
-// 応答の型はtsumugi側が持つ, 二重に書くとREST APIの変更に画面が追随できない
+// 応答の型はtsumugi側が持つ, 二重に書くとREST APIの変更に画面が追随不能
 // 型のみの取り込みなのでビルド時には消える
 import type {
 	AttemptRecord,
@@ -15,7 +15,7 @@ import type {
 	UpdatePolicyRequest,
 } from '../../tsumugi/src/api/types.js';
 
-/** 一覧と詳細を同じ型で扱う, 詳細でだけ返る列は任意にする */
+/** 一覧と詳細を同じ型で扱う, 詳細でだけ返る列は任意 */
 export type Job = JobSummary & Partial<JobDetail>;
 export type Attempt = AttemptRecord;
 export type Run = RunSummary & Partial<RunDetail>;
@@ -28,12 +28,12 @@ declare global {
 	}
 }
 
-/** 設定されていればトークン入力を出せる, Cloudflare Access等では不要なのでnull */
+/** 設定されていればトークン入力を表示可能, Cloudflare Access等では不要でnull */
 export const tokenCookie = () => window.__TSUMUGI__?.tokenCookie ?? null;
 
 /**
  * 401の判別
- * instanceofはミニファイやバンドル境界で壊れやすいので値で持つ
+ * instanceofはミニファイやバンドル境界で壊れやすく値で保持
  */
 export class UnauthorizedError extends Error {
 	readonly unauthorized = true;
@@ -48,7 +48,7 @@ export function isUnauthorized(error: unknown): boolean {
 	return typeof error === 'object' && error !== null && (error as { unauthorized?: unknown }).unauthorized === true;
 }
 
-/** httpsの時だけSecureを付ける, wrangler devはhttpで動くので常時付けると開発時に保存できない */
+/** httpsの時だけSecureを付与, wrangler devはhttpで動作し常時付与では開発時に保存不能 */
 export const cookieAttributes = (protocol: string): string => `path=/; SameSite=Strict${protocol === 'https:' ? '; Secure' : ''}`;
 
 export function saveToken(value: string): void {
@@ -61,7 +61,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 	const res = await fetch(path, { ...init, credentials: 'same-origin' });
 	if (res.status === 401) throw new UnauthorizedError();
 	if (!res.ok) {
-		// サーバが理由を返す場合はそのまま見せる, 数字だけでは何をすればよいか分からない
+		// サーバが理由を返す場合はそのまま表示, 数字だけでは対処が不明
 		const body = (await res.json().catch(() => ({}))) as { error?: string };
 		throw new Error(body.error ?? `${res.status}`);
 	}
@@ -72,7 +72,7 @@ export type MutationOutcome = { ok: boolean; gone: boolean; message: string };
 
 /**
  * retry / cancelの結果
- * 410は保持期間を過ぎてDOから消えた状態, 一覧には残るので押しても二度と通らない
+ * 410は保持期間を過ぎてDOから消えた状態, 一覧には残るが操作の成功は二度と無い
  */
 async function mutate(path: string): Promise<MutationOutcome> {
 	const res = await fetch(path, { method: 'POST', credentials: 'same-origin' });
@@ -128,7 +128,7 @@ export const createJob = async (input: CreateJobInput) => {
 	});
 	if (res.status === 401) throw new UnauthorizedError();
 	const body = (await res.json()) as { id?: string; error?: string };
-	// 検証に落ちた理由はサーバが返すので,そのまま見せる
+	// 検証に失敗した理由はサーバが返し、そのまま表示
 	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
 	return { id: body.id as string };
 };
@@ -178,7 +178,7 @@ export type BindingMetrics = {
 export type MetricsPoint = { at: number; total: number; failed: number; avgDurationMs: number };
 export type Metrics = { hours: number; bindings: BindingMetrics[]; series: MetricsPoint[] };
 
-/** 未設定の構成では501が返る, 画面はそれを受けてタブを出さない */
+/** 未設定の構成では501が返る, 画面はそれを受けてタブを非表示 */
 export class MetricsUnavailableError extends Error {
 	readonly unavailable = true;
 }
@@ -197,7 +197,7 @@ export const getMetrics = async (params: { hours: number; binding?: string }): P
 export const isMetricsUnavailable = (error: unknown): boolean =>
 	typeof error === 'object' && error !== null && (error as { unavailable?: unknown }).unavailable === true;
 
-/** schedulesを定義していない構成では501が返る, 画面はそれを受けてタブを出さない */
+/** schedulesを定義していない構成では501が返る, 画面はそれを受けてタブを非表示 */
 export class SchedulesUnavailableError extends Error {
 	readonly unavailable = true;
 }
@@ -216,11 +216,11 @@ export type BulkInput = { ids: string[] };
 export type BulkOutcome = {
 	ok: string[];
 	failed: { id: string; reason: string }[];
-	/** 上限で切った残りの見積り、0になるまで繰り返す */
+	/** 上限で除外した残りの見積り, 0になるまで反復 */
 	remaining: number;
 };
 
-/** 選択したジョブをまとめて処理する、状態の判定はサーバ側が行う */
+/** 選択したジョブの一括処理, 状態の判定はサーバ側が担当 */
 export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): Promise<BulkOutcome> => {
 	const res = await fetch(`/api/jobs/bulk-${action}`, {
 		method: 'POST',
@@ -247,7 +247,7 @@ export const updatePolicy = (binding: string, patch: UpdatePolicyRequest) =>
 		body: JSON.stringify(patch),
 	});
 
-/** 実行時の設定を捨てて静的設定へ戻す(#27) */
+/** 実行時の設定を破棄して静的設定へ復帰(#27) */
 export const resetPolicy = (binding: string) =>
 	call<{ ok: true }>(`/api/bindings/${encodeURIComponent(binding)}/policy/reset`, { method: 'POST' });
 

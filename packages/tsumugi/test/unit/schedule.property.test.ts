@@ -10,7 +10,7 @@ import { expectedDispatchIds } from './schedule-model.js';
  * schedule()の不変条件をproperty-based testで固める
  *
  * テーブル駆動は境界を突くが組み合わせの隙間が空く
- * perKeyConcurrency > 1やreaperとレート制限の同時発火は, ここで初めて広く踏まれる
+ * perKeyConcurrency > 1やreaperとレート制限の同時発火の検査はここが初めて
  */
 
 const RUNS = 500;
@@ -57,7 +57,7 @@ describe('schedule()の不変条件', () => {
 				}
 
 				for (const [key, count] of after) {
-					// 既にスナップショットが上限を超えていてもdispatchで増やさなければ許容する
+					// 既にスナップショットが上限を超えていてもdispatchで増やさなければ許容
 					const ceiling = Math.max(input.policy.perKeyConcurrency, existing.get(key) ?? 0);
 					expect(count, `key ${key}`).toBeLessThanOrEqual(ceiling);
 				}

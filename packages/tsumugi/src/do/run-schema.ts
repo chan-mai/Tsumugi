@@ -2,7 +2,7 @@
  * Run DOのSQLiteスキーマ(ADR-0029)
  *
  * run 1件につき1インスタンスなので`run`は常に1行
- * 終端に達したrunも投影が済むまで残り, 保持期間の経過後にDOごと削除する(ADR-0034)
+ * 終端に達したrunも投影が済むまで残り、保持期間の経過後にDOごと削除(ADR-0034)
  */
 export const RUN_SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS run (
@@ -13,18 +13,18 @@ export const RUN_SCHEMA = [
 		-- 開始時に固定したグラフの形(ADR-0030)
 		shape TEXT NOT NULL,
 		cancelling INTEGER NOT NULL DEFAULT 0,
-		-- subflowとして起動された場合の親, 終端に達した時点で親へ知らせる
+		-- subflowとして起動された場合の親, 終端に達した時点で親へ通知
 		parent_run_id TEXT,
 		parent_node_id TEXT,
-		-- 入れ子の深さ, 上限を超える起動を弾く
+		-- 入れ子の深さ, 上限を超える起動は拒否
 		depth INTEGER NOT NULL DEFAULT 0,
-		-- 親へ終端を伝え終えたか, 失敗しても次のtickで再送する
+		-- 親へ終端を伝え終えたか, 失敗しても次のtickで再送
 		parent_notified INTEGER NOT NULL DEFAULT 0,
-		-- run全体の期限(ms), 再開時にdeadline_atを引き直す材料(ADR-0039)
+		-- run全体の期限(ms), 再開時にdeadline_atを再計算する材料(ADR-0039)
 		deadline_ms INTEGER,
-		-- 期限の時刻, 超過したrunは打ち切られてFAILEDになる
+		-- 期限の時刻, 超過したrunは中断されFAILEDへ
 		deadline_at INTEGER,
-		-- 超過の印, RUNNINGの間に一度だけ立てる(ADR-0039)
+		-- 超過の印, RUNNINGの間に一度だけ設定(ADR-0039)
 		expired INTEGER NOT NULL DEFAULT 0,
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
@@ -39,7 +39,7 @@ export const RUN_SCHEMA = [
 		after TEXT NOT NULL,
 		-- 依存の成否に対する発火条件(ADR-0041)
 		trigger TEXT NOT NULL DEFAULT 'success',
-		-- 実行時に増えたノードのpayloadと投入設定, 静的ノードはflow定義から作るのでnull
+		-- 実行時に増えたノードのpayloadと投入設定, 静的ノードはflow定義由来でnull
 		payload TEXT,
 		options TEXT,
 		job_id TEXT,
@@ -55,7 +55,7 @@ export const RUN_SCHEMA = [
 	)`,
 	`CREATE INDEX IF NOT EXISTS node_parent ON node (parent)`,
 	`CREATE INDEX IF NOT EXISTS node_state ON node (state)`,
-	// 進行判断は毎tickで並び順に全件読む, 先頭列がseqの索引が要る
+	// 進行判断は毎tickで並び順に全件読む, 先頭列がseqの索引が必要
 	`CREATE INDEX IF NOT EXISTS node_seq ON node (seq, id)`,
 	`CREATE TABLE IF NOT EXISTS run_outbox (
 		seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +67,7 @@ export const RUN_SCHEMA = [
 
 export function applyRunSchema(sql: SqlStorage): void {
 	for (const statement of RUN_SCHEMA) sql.exec(statement);
-	// CREATE TABLE IF NOT EXISTSは既存テーブルを変更しない, 後から足した列を既存DOへ補う
+	// CREATE TABLE IF NOT EXISTSは既存テーブルを変更しない, 後から追加した列を既存DOへ反映
 	for (const [table, column, type] of [
 		['run', 'parent_run_id', 'TEXT'],
 		['run', 'parent_node_id', 'TEXT'],
@@ -84,7 +84,7 @@ export function applyRunSchema(sql: SqlStorage): void {
 	}
 }
 
-/** 既存の表に列が無ければ足す, 冪等にするため先に有無を確かめる */
+/** 既存の表に無い列の追加, 冪等化のため先に有無を確認 */
 function ensureColumn(sql: SqlStorage, table: string, column: string, type: string): void {
 	const exists = sql
 		.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
@@ -93,7 +93,7 @@ function ensureColumn(sql: SqlStorage, table: string, column: string, type: stri
 	if (!exists) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
-/** SQLiteの行そのまま, 射影はrun-repo.tsが担う */
+/** SQLiteの行そのまま, 射影はrun-repo.tsが担当 */
 export type RunRow = {
 	id: string;
 	flow: string;

@@ -18,7 +18,7 @@ describe('投入内容の検証', () => {
 	});
 
 	it('未登録のbindingを拒否する', () => {
-		// 投入はできても実行時に必ず失敗するので入口で弾く
+		// 投入はできても実行時に必ず失敗し, 入口で拒否
 		expect(ok({ binding: 'NOPE', payload: {} })).toEqual({ error: 'unknown binding: NOPE' });
 	});
 
@@ -83,12 +83,12 @@ describe('投入内容の検証', () => {
 	});
 
 	it('登録一覧を渡さなければbindingの照合をしない', () => {
-		// createRestに登録名を渡していない構成でも動くようにする
+		// createRestに登録名を渡していない構成でも動作
 		expect(validateCreateJob({ binding: 'ANY', payload: {} }, undefined)).toHaveProperty('input');
 	});
 
-	it('登録一覧が空なら何も通さない', () => {
-		// 空はperformerが1件も無い状態, 投入できても実行時に必ず失敗する
+	it('登録一覧が空なら何も受け付けない', () => {
+		// 空はperformerが1件も無い状態, 投入できても実行時に必ず失敗
 		expect(validateCreateJob({ binding: 'ANY', payload: {} }, [])).toEqual({ error: 'unknown binding: ANY' });
 	});
 });

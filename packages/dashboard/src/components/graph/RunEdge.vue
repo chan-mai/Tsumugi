@@ -5,7 +5,7 @@ import type { Point } from './runLayout';
 
 /**
  * 直交の辺
- * 水平と垂直だけで走り, 角は円弧で丸める
+ * 水平と垂直の区間のみで、角は円弧で丸める
  */
 const props = defineProps<{
 	id: string;
@@ -13,7 +13,7 @@ const props = defineProps<{
 	data: { route: Point[] };
 }>();
 
-/** 角の丸め, 短い区間では半分までに抑える */
+/** 角の丸め, 短い区間では半分までに制限 */
 const RADIUS = 8;
 
 const path = computed(() => {

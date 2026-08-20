@@ -6,7 +6,7 @@ const T0 = 2_400_000_000_000;
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
-/** QUEUEDまで進めたジョブを1件用意する */
+/** QUEUEDまで進めたジョブを1件用意 */
 async function queued(name: string): Promise<string> {
 	const stub = shard(name);
 	await runInDurableObject(stub, (instance) => {
@@ -48,7 +48,7 @@ describe('生存報告(#35)', () => {
 	});
 
 	it('報告のあいだreaperが回収しない', async () => {
-		// timeoutMsは60秒だが, 報告が続く限り無応答とは判定しない
+		// timeoutMsは60秒だが、報告が続く限り無応答とは判定されない状態の確認
 		const stub = shard('HBC#0');
 		const jobId = await queued('HBC#0');
 
@@ -61,7 +61,7 @@ describe('生存報告(#35)', () => {
 		}
 		expect((await rowOf(stub, jobId)).state).toBe('QUEUED');
 
-		// 報告が途絶えるとtimeoutMs + reaperGraceMsで回収される
+		// 報告が途絶えるとtimeoutMs + reaperGraceMsで回収
 		await runInDurableObject(stub, (instance) => {
 			(instance as any).clock = { now: () => T0 + 180_000 + 90_000 };
 		});
@@ -78,7 +78,7 @@ describe('生存報告(#35)', () => {
 		expect((await rowOf(stub, jobId)).progress).toBeNull();
 	});
 
-	it('遷移で前の試行の報告を落とす', async () => {
+	it('遷移で前の試行の報告を消去する', async () => {
 		// 残すと再実行後のreaperの期限が前の試行の報告で延びる
 		const stub = shard('HBE#0');
 		const jobId = await queued('HBE#0');
@@ -92,7 +92,7 @@ describe('生存報告(#35)', () => {
 	});
 
 	it('実行中の進捗が読み取りモデルへ投影される', async () => {
-		// 画面から進行中か止まっているかを見分けるために要る
+		// 画面で進行中か停止かを判別するために必要
 		const stub = shard('HBF#0');
 		const jobId = await queued('HBF#0');
 		await stub.heartbeat(jobId, 0.25);

@@ -9,8 +9,8 @@ import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
 /**
  * OpenAPI定義の網羅
  *
- * 他言語の利用者はこの定義からクライアントを生成するので, 経路が欠けると存在しないことと同じになる
- * 実装との突き合わせを自動にしないと, 経路を足した時に定義だけ古いまま残る
+ * 他言語の利用者はこの定義からクライアントを生成し、経路が欠けると存在しないことと同義
+ * 実装との突き合わせを自動にしないと、経路を追加した時に定義だけ古いまま残る
  */
 
 const packageJson = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
@@ -23,7 +23,7 @@ function registeredRoutes(): string[] {
 	const noop = async (_c: unknown, next: () => Promise<void>) => {
 		await next();
 	};
-	// 任意の経路を全て有効にする, 渡さないと501を返す経路が登録されない
+	// 任意の経路を全て有効化, 渡さないと501を返す経路が未登録
 	const app = createRest(noop as never, {
 		bindings: ['MAIL'],
 		enqueue: async () => 'MAIL#0:x',
@@ -48,11 +48,11 @@ function documentedRoutes(): string[] {
 }
 
 describe('OpenAPI定義', () => {
-	it('実装した経路を全て載せている', () => {
+	it('実装した経路を全て含んでいる', () => {
 		expect(documentedRoutes()).toEqual(registeredRoutes());
 	});
 
-	it('D1を読む経路が全て503を載せている', () => {
+	it('D1を読む経路が全て503を含んでいる', () => {
 		// マイグレーション未適用とD1障害はcheckSchemaが返す, 記載漏れは生成物に現れない
 		const missing = Object.entries(openapiDocument().paths)
 			.filter(([path]) => path !== '/api/openapi.json')
@@ -66,7 +66,7 @@ describe('OpenAPI定義', () => {
 	});
 
 	it('参照した名前が全てcomponentsに在る', () => {
-		// $refの綴り違いは生成時に初めて落ちる, ここで拾う
+		// $refの綴り違いは生成時に初めて失敗する, ここで検出
 		const document = openapiDocument();
 		const names = new Set(Object.keys(document.components.schemas));
 		const referenced = [...JSON.stringify(document).matchAll(/#\/components\/schemas\/([A-Za-z]+)/g)].map((m) => m[1] as string);
@@ -90,7 +90,7 @@ describe('OpenAPI定義', () => {
 
 	it('生成器の表現差が正規化されている', () => {
 		// 畳み損ねは利用者のクライアント生成物を変える(ADR-0038)
-		// 意図してこれらの表現を使う時は, emit-module.mjsの正規化とこのテストをあわせて更新する
+		// 意図してこれらの表現を使う時は、emit-module.mjsの正規化とこのテストをあわせて更新
 		const text = JSON.stringify(openapiDocument());
 		expect(text).not.toContain('"unevaluatedProperties"');
 		expect(text).not.toContain('"anyOf"');

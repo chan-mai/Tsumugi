@@ -24,33 +24,33 @@ describe('scheduleの正規化', () => {
 		expect(a.fingerprint).toBe(b.fingerprint);
 	});
 
-	it('名前の文字種と長さを弾く', () => {
+	it('名前の文字種と長さを拒否する', () => {
 		expect(() => normalize({ 'a:b': { binding: 'Greet', payload: {}, everyMs: 60_000 } })).toThrow(InvalidScheduleError);
 		expect(() => normalize({ ['a'.repeat(65)]: { binding: 'Greet', payload: {}, everyMs: 60_000 } })).toThrow(InvalidScheduleError);
 	});
 
-	it('uniqueKeyとdelayMsとrunAtの混入を弾く', () => {
+	it('uniqueKeyとdelayMsとrunAtの混入を拒否する', () => {
 		for (const key of ['uniqueKey', 'delayMs', 'runAt']) {
 			expect(() => normalize({ x: { binding: 'Greet', payload: {}, everyMs: 60_000, [key]: 1 } })).toThrow(InvalidScheduleError);
 		}
 	});
 
-	it('everyMsとcronの排他を弾く', () => {
+	it('everyMsとcronの排他を検査する', () => {
 		expect(() => normalize({ x: { binding: 'Greet', payload: {} } })).toThrow(InvalidScheduleError);
 		expect(() => normalize({ x: { binding: 'Greet', payload: {}, everyMs: 60_000, cron: '* * * * *' } })).toThrow(InvalidScheduleError);
 	});
 
-	it('短すぎるeveryMsと小数を弾く', () => {
+	it('短すぎるeveryMsと小数を拒否する', () => {
 		expect(() => normalize({ x: { binding: 'Greet', payload: {}, everyMs: 999 } })).toThrow(InvalidScheduleError);
 		expect(() => normalize({ x: { binding: 'Greet', payload: {}, everyMs: 1000.5 } })).toThrow(InvalidScheduleError);
 	});
 
-	it('不正なcronと到達し得ないcronを弾く', () => {
+	it('不正なcronと到達し得ないcronを拒否する', () => {
 		expect(() => normalize({ x: { binding: 'Greet', payload: {}, cron: '* * *' } })).toThrow(InvalidScheduleError);
 		expect(() => normalize({ x: { binding: 'Greet', payload: {}, cron: '0 0 31 2 *' } })).toThrow(InvalidScheduleError);
 	});
 
-	it('bindingとflowの排他と未登録を弾く', () => {
+	it('bindingとflowの排他と未登録を拒否する', () => {
 		expect(() => normalize({ x: { everyMs: 60_000 } })).toThrow(InvalidScheduleError);
 		expect(() => normalize({ x: { binding: 'Greet', flow: 'GREETINGS', payload: {}, input: {}, everyMs: 60_000 } })).toThrow(
 			InvalidScheduleError,
@@ -59,18 +59,18 @@ describe('scheduleの正規化', () => {
 		expect(() => normalize({ x: { flow: 'Nope', input: {}, everyMs: 60_000 } })).toThrow(InvalidScheduleError);
 	});
 
-	it('payloadとinputの欠落を弾く', () => {
+	it('payloadとinputの欠落を拒否する', () => {
 		expect(() => normalize({ x: { binding: 'Greet', everyMs: 60_000 } })).toThrow(InvalidScheduleError);
 		expect(() => normalize({ x: { flow: 'GREETINGS', everyMs: 60_000 } })).toThrow(InvalidScheduleError);
 	});
 
-	it('overlapの不正値を弾く', () => {
+	it('overlapの不正値を拒否する', () => {
 		expect(() => normalize({ x: { binding: 'Greet', payload: {}, everyMs: 60_000, overlap: 'wait' as never } })).toThrow(
 			InvalidScheduleError,
 		);
 	});
 
-	it('分割されたbindingはpartitionKeyが要る', () => {
+	it('分割されたbindingはpartitionKeyが必要', () => {
 		expect(() => normalize({ x: { binding: 'Wide', payload: {}, everyMs: 60_000 } })).toThrow(InvalidScheduleError);
 		expect(() => normalize({ x: { binding: 'Wide', payload: {}, everyMs: 60_000, partitionKey: 'x' } })).not.toThrow();
 	});
@@ -88,7 +88,7 @@ describe('次回時刻の前進', () => {
 		expect(nextOccurrence(every, 1_000_000, 1_005_000)).toBe(1_060_000);
 	});
 
-	it('取り逃した分は発火せず飛ばす', () => {
+	it('経過済みの分は発火せず省略する', () => {
 		// 3周期半が経過, 次はceil側の境界1つだけ
 		expect(nextOccurrence(every, 1_000_000, 1_210_000)).toBe(1_240_000);
 	});

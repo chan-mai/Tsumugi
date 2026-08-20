@@ -43,7 +43,7 @@ describe('遷移表(ADR-0012)', () => {
 		expect(new Set(actual)).toEqual(ALLOWED);
 	});
 
-	it('自己遷移はどの状態でも許さない', () => {
+	it('自己遷移はどの状態でも不許可', () => {
 		for (const state of ALL) expect(canTransition(state, state)).toBe(false);
 	});
 
@@ -62,7 +62,7 @@ describe('遷移表(ADR-0012)', () => {
 		}
 	});
 
-	it('cancelはSCHEDULEDからのみ, QUEUED以降は実行済みかもしれないので成功を返さない', () => {
+	it('cancelはSCHEDULEDからのみ, QUEUED以降は実行済みの可能性があり成功を返さない', () => {
 		expect(canTransition('SCHEDULED', 'CANCELLED')).toBe(true);
 		expect(canTransition('QUEUED', 'CANCELLED')).toBe(false);
 		expect(canTransition('RUNNING', 'CANCELLED')).toBe(false);
@@ -70,7 +70,7 @@ describe('遷移表(ADR-0012)', () => {
 });
 
 describe('assertTransition', () => {
-	it('許可された遷移は通す', () => {
+	it('許可された遷移は受け付ける', () => {
 		expect(() => assertTransition('SCHEDULED', 'QUEUED')).not.toThrow();
 	});
 

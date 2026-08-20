@@ -9,7 +9,7 @@ import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
  * run全体の期限(ADR-0039)
  *
  * flowの定義はexamples/basicが持つ, GREETINGSはstart時の期限, TIMEDはflow定義の期限を見る
- * Job DOの流量を0に絞ることで, ジョブがSCHEDULEDのまま期限を迎える状況を作る
+ * Job DOの流量を0に制限することで、ジョブがSCHEDULEDのまま期限を迎える状況を作る
  */
 
 const performed: { binding: string; payload: unknown }[] = [];
@@ -45,7 +45,7 @@ const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`$
 const runNamespace = env.RUN as unknown as DurableObjectNamespace<TsumugiRunInstance>;
 const runStub = (runId: string) => runNamespace.get(runNamespace.idFromName(runId));
 
-/** DOが送ったメッセージを溜めてconsumerへ手で渡す, Queuesの配送自体はここでの関心ではない */
+/** DOが送ったメッセージを保持してconsumerへ手で渡す, Queuesの配送自体はここでの関心ではない */
 const sent: DispatchMessage[] = [];
 const queue = {
 	send: async (body: DispatchMessage) => {
@@ -70,7 +70,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;
 }
 
-/** Job DOの投入先を差し替える, 実キューへ出すとconsumerが自動で走り手で作った状況が壊れる */
+/** Job DOの投入先を差し替える, 実キューへ送るとconsumerが自動で実行され手で作った状況が壊れる */
 async function installQueues(): Promise<void> {
 	for (const binding of BINDINGS) {
 		await runInDurableObject(shard(binding), (instance) => {
@@ -131,9 +131,9 @@ const nodeErrorOf = (runId: string, nodeId: string) =>
 	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.error as string | null);
 
 describe('run全体の期限(ADR-0039)', () => {
-	it('期限超過で待機中のノードが打ち切られrunがFAILEDになる', async () => {
+	it('期限超過で待機中のノードが中断されrunがFAILEDになる', async () => {
 		await installQueues();
-		// 流量を0に絞る, ジョブがSCHEDULEDのまま動かない状況を作る
+		// 流量を0に制限, ジョブがSCHEDULEDのまま動かない状況を作る
 		await shard('ListNames').configure({ policy: { concurrency: 0 } });
 
 		const runId = 'GREETINGS:deadline1';
@@ -143,7 +143,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		await settleRun(runId);
 
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'SCHEDULED', greet: 'PENDING', report: 'PENDING' });
-		// 静かなrunでも超過を判定できるよう, 期限の時刻にalarmが張られる
+		// 動きが無いrunでも超過を判定できるよう、期限の時刻にalarmを設定
 		expect(await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.getAlarm())).toBe(T0 + DEADLINE);
 
 		await setClock(runId, T0 + DEADLINE);
@@ -174,7 +174,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		const jobId = await jobIdOf(runId, 'list');
 		if (jobId === null) throw new Error('the first node has no job id');
 
-		// 投入まで進めてQUEUEDにする, メッセージは配送しない
+		// 投入まで進めてQUEUEDへ, メッセージは未配送
 		const jobStateOf = () =>
 			runInDurableObject(shard('ListNames'), (instance) => (instance as any).repo.find(jobId)?.state as string | undefined);
 		for (let i = 0; i < 5 && (await jobStateOf()) === 'SCHEDULED'; i++) {
@@ -187,7 +187,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		await runDurableObjectAlarm(stub);
 		await settleRun(runId);
 
-		// QUEUED以降の取り消しは断られる(ADR-0012), 終端が届くまでrunはRUNNINGのまま
+		// QUEUED以降の取り消しは拒否される(ADR-0012), 終端が届くまでrunはRUNNINGのまま
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'SCHEDULED', greet: 'FAILED', report: 'FAILED' });
 		expect(await stateOf(runId)).toBe('RUNNING');
 
@@ -198,7 +198,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(await stateOf(runId)).toBe('FAILED');
 	});
 
-	it('再開で期限が引き直される(ADR-0034)', async () => {
+	it('再開で期限が再計算される(ADR-0034)', async () => {
 		await installQueues();
 		await shard('ListNames').configure({ policy: { concurrency: 0 } });
 
@@ -212,7 +212,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		await settleRun(runId);
 		expect(await stateOf(runId)).toBe('FAILED');
 
-		// 詰まりを解消してから再開する
+		// 停止の原因を解消してから再開
 		await shard('ListNames').configure({ policy: { concurrency: 100 } });
 		await setClock(runId, T0 + 60_000);
 		expect(await stub.retry()).toEqual({ ok: true });
@@ -220,10 +220,10 @@ describe('run全体の期限(ADR-0039)', () => {
 		const row = await runRowOf(runId);
 		expect(row?.deadline_ms).toBe(DEADLINE);
 		expect(row?.deadline_at).toBe(T0 + 60_000 + DEADLINE);
-		// 超過の印が残ると再開直後の決着が再びFAILEDになる
+		// 超過の印が残ると再開直後の決着が再びFAILED
 		expect(row?.expired).toBe(0);
 
-		// 期限のalarmも新しい時刻へ張り直される
+		// 期限のalarmも新しい時刻へ再設定
 		await settleRun(runId);
 		expect(await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.getAlarm())).toBe(T0 + 60_000 + DEADLINE);
 
@@ -241,7 +241,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		await settle(runId);
 		expect(await stateOf(runId)).toBe('COMPLETED');
 
-		// 掃除のtickは期限を過ぎた時刻に走る, 決着済みのrunをFAILEDへ倒さない
+		// 削除のtickは期限を過ぎた時刻に実行される, 決着済みのrunをFAILEDへ変えない
 		await setClock(runId, T0 + DEADLINE + 1);
 		await runDurableObjectAlarm(stub);
 		expect(await stateOf(runId)).toBe('COMPLETED');
@@ -263,7 +263,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(overridden?.deadline_ms).toBe(5_000);
 		expect(overridden?.deadline_at).toBe(T0 + 5_000);
 
-		// 正の整数でない期限は開始ごと弾く
+		// 正の整数でない期限は開始ごと拒否
 		// RPC越しの例外はvitest-pool-workersが未処理rejectionとして報告するためDO内で実行
 		await expect(
 			runInDurableObject(runStub('TIMED:invalid'), (instance) =>
@@ -286,7 +286,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(await stateOf(childId)).toBe('RUNNING');
 
 		await setClock(parentId, T0 + DEADLINE);
-		// 親の打ち切りと子の取り消しはtickを跨いで進む, 交互に発火させて決着させる
+		// 親の中断と子の取り消しはtickを跨いで進み、交互の発火で決着
 		for (let i = 0; i < 6; i++) {
 			await runDurableObjectAlarm(stub);
 			await runDurableObjectAlarm(runStub(childId));

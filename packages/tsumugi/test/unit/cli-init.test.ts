@@ -4,7 +4,7 @@ import { extractDatabaseId, init } from '../../src/cli/init.js';
 import { makeDeps, fail, ok } from './cli-harness.js';
 
 // initは唯一ユーザーのファイルとCloudflareのリソースへ触れる
-// 壊す方向の誤り(上書き, 転記漏れ)をここで検出する
+// 破壊方向の誤り(上書き, 転記漏れ)をここで検出
 
 const DATABASE_ID = '9945ba53-b1cb-45a2-8f01-c650518c2f2a';
 
@@ -24,7 +24,7 @@ const D1_CREATE_STDOUT = `✅ Successfully created DB 'my-jobs'
 
 const d1Script = (args: readonly string[]) => (args[0] === 'd1' && args[1] === 'create' ? ok(D1_CREATE_STDOUT) : ok());
 
-/** コメントと末尾カンマを落としてJSONとして読む, 生成物の構文の妥当性を確かめる */
+/** コメントと末尾カンマを除去してJSONとして読む, 生成物の構文の妥当性を確認 */
 const parseJsonc = (source: string): unknown => JSON.parse(source.replace(/^\s*\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1'));
 
 describe('initの新規生成', () => {
@@ -46,7 +46,7 @@ describe('initの新規生成', () => {
 	});
 
 	it('生成したwrangler.jsoncは構文として妥当', () => {
-		// 部分一致の検査では構文の破れを検出できないため, パースまで通す
+		// 部分一致の検査では構文の破れを検出できず、パースまで実施
 		const { deps, fs } = makeDeps(d1Script);
 		expect(init({ name: 'my-jobs' }, deps)).toBe(0);
 		const parsed = parseJsonc(fs.read('/proj/wrangler.jsonc')) as { name?: string; d1_databases?: unknown[] };
@@ -113,7 +113,7 @@ describe('initと既存ファイル', () => {
 		expect(fs.read('/proj/wrangler.jsonc')).toBe(original);
 		expect(logs.join('\n')).toContain(`"database_id": "${DATABASE_ID}"`);
 		expect(calls[1]).toEqual(['queues', 'create', 'existing-app']);
-		// TSUMUGI_DBが設定へ書かれた保証が無いので適用とtypesは実行しない
+		// TSUMUGI_DBが設定へ書かれた保証が無く、適用とtypesは非実行
 		expect(calls.some((args) => args.includes('migrations'))).toBe(false);
 		expect(calls.some((args) => args[0] === 'types')).toBe(false);
 	});
@@ -199,15 +199,15 @@ describe('Worker名の読み取り', () => {
 });
 
 describe('database_idの抽出', () => {
-	it('JSONC断片の形から拾う', () => {
+	it('JSONC断片の形から抽出する', () => {
 		expect(extractDatabaseId(D1_CREATE_STDOUT)).toBe(DATABASE_ID);
 	});
 
-	it('TOMLの形から拾う', () => {
+	it('TOMLの形から抽出する', () => {
 		expect(extractDatabaseId(`[[d1_databases]]\ndatabase_id = "${DATABASE_ID}"\n`)).toBe(DATABASE_ID);
 	});
 
-	it('素のUUIDでも拾う', () => {
+	it('素のUUIDでも抽出する', () => {
 		expect(extractDatabaseId(`created: ${DATABASE_ID}`)).toBe(DATABASE_ID);
 	});
 

@@ -26,7 +26,7 @@ export type {
 } from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
 export type { DispatchMessage, EnqueueInput, FailureNotifyStub, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
-// createRunClassは公開しない, `defineTsumugi().runClass`を迂回すると設定が二重管理になる
+// createRunClassは非公開, `defineTsumugi().runClass`の迂回は設定の二重管理につながる
 export { DEFAULT_MAX_NODES } from '../do/run.js';
 export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } from '../do/run.js';
 // createSchedulerClassはschedules定義を参照するので出さない, runClassと同じ理由(ADR-0040)

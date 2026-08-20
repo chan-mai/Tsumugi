@@ -21,7 +21,7 @@ const emit = defineEmits<{ sort: [column: string] }>();
 			stroke-linejoin="round"
 			aria-hidden="true"
 		>
-			<!-- 未選択時は両向きを薄く表示,押下可能なことのみ示す -->
+			<!-- 未選択時は両向きを薄く表示, 押下可能なことのみ提示 -->
 			<path v-if="sort !== column" d="M5 6.5L8 3.5l3 3M5 9.5l3 3 3-3" />
 			<path v-else-if="desc" d="M4.5 9l3.5 3.5L11.5 9M8 12V3.5" />
 			<path v-else d="M4.5 7L8 3.5 11.5 7M8 4v8.5" />

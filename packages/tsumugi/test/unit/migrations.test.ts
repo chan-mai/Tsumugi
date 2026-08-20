@@ -4,12 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { EXPECTED_MIGRATIONS, migrationErrorMessage } from '../../src/projection/migrations.js';
 
-// workers環境のURL型と衝突するので, URLオブジェクトを経由せず文字列で解決する
+// workers環境のURL型と衝突し、URLオブジェクトを経由せず文字列で解決
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
 
 describe('マイグレーションの宣言(ADR-0008)', () => {
 	it('EXPECTED_MIGRATIONSが実ファイルと一致する', () => {
-		// ずれると検査が素通りし,適用漏れを検出できなくなる
+		// ずれると検査が機能せず、適用漏れを検出できなくなる
 		const actual = readdirSync(dir)
 			.filter((name) => name.endsWith('.sql'))
 			.sort();

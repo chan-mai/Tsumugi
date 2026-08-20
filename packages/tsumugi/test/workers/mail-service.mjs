@@ -1,5 +1,5 @@
 // examples/basicのMAILに対応する補助Worker
-// 相手不在ではworkerdが起動しないため,テスト側にも実体が要る
+// 相手不在ではworkerdが起動せず、テスト側にも実体が必要
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
 export class SendMail extends WorkerEntrypoint {

@@ -8,8 +8,8 @@ export type RunOutboxRow = { seq: number; kind: string; target: string; snapshot
 /**
  * runの読み取りモデルへの投影(ADR-0008)
  *
- * ジョブ側と同じく`excluded.seq > seq`で古い状態の上書きを弾く
- * 同じ範囲を何度流しても結果は不変なので, 送信の再試行が安全になる
+ * ジョブ側と同じく`excluded.seq > seq`で古い状態の上書きを防止
+ * 同じ範囲を何度処理しても結果は不変で、送信の再試行が安全
  */
 function toRunValues(snapshot: RunSnapshot, seq: number): typeof run.$inferInsert {
 	return {
@@ -86,12 +86,12 @@ export async function projectRun(db: D1Database, rows: readonly RunOutboxRow[]):
 	await drizzle(db).batch(statements as [Upsert, ...Upsert[]]);
 }
 
-/** 画面の詳細で使う, 1つのrunのノードを並び順で引く */
+/** 画面の詳細で使用, 1つのrunのノードを並び順で取得 */
 export function nodesOf(db: D1Database, runId: string) {
 	return drizzle(db).select().from(runNode).where(eq(runNode.runId, runId)).orderBy(runNode.position);
 }
 
-/** ジョブから辿る用, runIdとnodeIdの組で1件引く */
+/** ジョブからの参照用, runIdとnodeIdの組で1件取得 */
 export function nodeOf(db: D1Database, runId: string, nodeId: string) {
 	return drizzle(db)
 		.select()

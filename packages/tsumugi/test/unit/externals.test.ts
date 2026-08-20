@@ -5,13 +5,13 @@ import { externalsIn } from '../../scripts/externals.mjs';
 /**
  * バンドルに残る外部依存の検出
  *
- * 誤検出はリリース前の検査を落とすので, import文の形に限ることを固定する
+ * 誤検出はリリース前の検査の失敗につながり、import文の形に限ることを固定
  */
 
 const scan = (source: string) => [...(externalsIn(source) as Set<string>)].sort();
 
 describe('外部依存の検出', () => {
-	it('import文とexport文を拾う', () => {
+	it('import文とexport文を検出する', () => {
 		expect(scan(`import { a } from "hono";`)).toEqual(['hono']);
 		expect(scan(`import "side-effect";`)).toEqual(['side-effect']);
 		expect(scan(`export { b } from 'drizzle-orm';`)).toEqual(['drizzle-orm']);

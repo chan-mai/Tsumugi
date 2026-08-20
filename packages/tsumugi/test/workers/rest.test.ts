@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
-// 公開エントリ経由で読む, 再エクスポートが壊れた場合も検出する
+// 公開エントリ経由で読む, 再エクスポートが壊れた場合も検出
 import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
@@ -17,7 +17,7 @@ class Noop extends Performer<unknown, void, {}, RestEnv> {
 const withAuth = defineTsumugi({ performers: { REST: Noop }, auth: bearerAuth(TOKEN) });
 const withoutAuth = defineTsumugi({ performers: { REST: Noop } });
 
-/** 認証未設定で塞がっていることを機械的に保証するため,ルートを列挙して総当たりする */
+/** 認証未設定で無効なことの機械的な保証, ルートを列挙して総当たり */
 const ROUTES: [method: string, path: string][] = [
 	['GET', '/api/jobs'],
 	['GET', '/api/stats'],
@@ -149,8 +149,8 @@ describe('secretからのトークン解決', () => {
 		expect(res.status).toBe(401);
 	});
 
-	it('secret未設定なら誰も通さない', async () => {
-		// 解決できない場合に素通りさせると,設定漏れがそのまま公開になる
+	it('secret未設定なら全て拒否する', async () => {
+		// 解決できない場合の通過は、設定漏れがそのまま公開になる事故
 		const res = await get({ TSUMUGI_TOKEN: undefined }, { authorization: 'Bearer anything' });
 		expect(res.status).toBe(401);
 	});
@@ -176,7 +176,7 @@ describe('REST API', () => {
 	});
 
 	it('詳細が返す列を固定する', async () => {
-		// 展開すると投影の内部列(seq)やcamelCaseの重複まで公開される
+		// 展開では投影の内部列(seq)やcamelCaseの重複まで公開
 		const jobId = await seedJob();
 		const res = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`, authorized);
 		const { job } = await res.json<{ job: Record<string, unknown> }>();
@@ -252,7 +252,7 @@ describe('REST API', () => {
 		const next = await (await post({ paused: false })).json<{ policy: { paused: boolean; concurrency: number } }>();
 		expect(next.policy).toMatchObject({ paused: false, concurrency: 5 });
 
-		// 診断が今効いている値を返す
+		// 診断が現在適用中の値を返す
 		const diag = await call(withAuth, 'GET', '/api/diagnostics', authorized);
 		const seen = await diag.json<{
 			bindings: Record<string, { policy: { concurrency: number }; blocked: { paused: boolean; perKeyTokens: boolean } }>;
@@ -261,7 +261,7 @@ describe('REST API', () => {
 		expect(typeof seen.bindings.REST?.blocked.paused).toBe('boolean');
 		expect(typeof seen.bindings.REST?.blocked.perKeyTokens).toBe('boolean');
 
-		// 実行時の設定を捨てると既定へ戻る
+		// 実行時の設定を破棄すると既定へ戻る
 		expect((await post({}, '/api/bindings/REST/policy/reset')).status).toBe(200);
 		const reset = await call(withAuth, 'GET', '/api/diagnostics', authorized);
 		const after = await reset.json<{ bindings: Record<string, { policy: { concurrency: number } }> }>();
@@ -291,12 +291,12 @@ describe('REST API', () => {
 		expect((await post({})).status).toBe(400);
 		// 未登録のbindingは404
 		expect((await post({ paused: true }, 'NOPE')).status).toBe(404);
-		// 0は投入を止める指定として通す
+		// 0は投入を止める指定として受け付ける
 		expect((await post({ concurrency: 0 })).status).toBe(200);
 		expect((await post({ rate: null, agingIntervalMs: null })).status).toBe(200);
 		expect((await post({ perKeyRate: null })).status).toBe(200);
 
-		// 変更はshardに残るので, 後続のテストのために捨てておく
+		// 変更はshardに残る, 後続のテストの前に破棄
 		await withAuth.fetch!(
 			new Request('https://example.com/api/bindings/REST/policy/reset', { method: 'POST', headers: authorized }),
 			env as RestEnv,
@@ -386,7 +386,7 @@ describe('REST API', () => {
 
 	it('取り消せない状態のcancelは409を返す', async () => {
 		const jobId = await seedJob();
-		// QUEUED以降は実行済みかもしれないので取り消せない
+		// QUEUED以降は実行済みの可能性があり取り消し不可
 		const res = await call(withAuth, 'POST', `/api/jobs/${encodeURIComponent(jobId)}/cancel`, authorized);
 		expect(res.status).toBe(409);
 	});
@@ -444,7 +444,7 @@ describe('ジョブの投入', () => {
 });
 
 describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
-	// 一覧はD1から引くのでDOから消えても行は残る, 押す前と押した後の両方で分かる必要がある
+	// 一覧はD1由来でDOから消えても行は残る, 操作の前後の両方で判別できる必要がある
 	const shortLived = defineTsumugi({
 		performers: { GONE: Noop },
 		auth: bearerAuth(TOKEN),
@@ -488,7 +488,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 	});
 
 	it('保持期間を過ぎた行はretryable=falseで返る', async () => {
-		// retryableは実時刻で判定するのでT0(未来の固定値)は使えない
+		// retryableは実時刻で判定し、T0(未来の固定値)は使えない
 		await orphan('GONE#0:old', 'FAILED', Date.now() - 10 * 60 * 1000);
 		const res = await shortLived.fetch!(
 			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
@@ -530,7 +530,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 describe('一覧の並べ替え', () => {
 	const list = (query: string) => call(withAuth, 'GET', `/api/jobs?${query}`, { authorization: `Bearer ${TOKEN}` });
 
-	/** 時刻をずらした投入,全て同時刻だと並び順の検証が素通りする */
+	/** 時刻をずらした投入, 全て同時刻では並び順の検証が不成立 */
 	async function seedAt(now: number): Promise<void> {
 		await runInDurableObject(shard('SORT#0'), (instance) => {
 			(instance as any).clock = { now: () => now };
@@ -555,7 +555,7 @@ describe('一覧の並べ替え', () => {
 		expect(res.status).toBe(200);
 	});
 
-	it('向きの指定が結果に効く', async () => {
+	it('向きの指定が結果に適用される', async () => {
 		for (const offset of [0, 60_000, 120_000]) await seedAt(T0 + offset);
 
 		const times = async (order: string) => {
@@ -604,7 +604,7 @@ describe('試行履歴(ADR-0028)', () => {
 	});
 
 	it('試行回数の数値を上書きしない', async () => {
-		// 履歴を`attempts`という名前で返すと画面の n/m が壊れる
+		// 履歴を`attempts`という名前で返すと画面のn/mの表示が壊れる
 		const jobId = await runFailing('LOG2#0', 'LOG2', 1);
 		const { job } = await detail(jobId);
 		expect(typeof job.attempts).toBe('number');
@@ -623,7 +623,7 @@ describe('試行履歴(ADR-0028)', () => {
 		await runDurableObjectAlarm(shard('LOG3#0'));
 
 		const { job } = await detail(jobId);
-		// 保存はしないが表示はする, ジョブ行から組み立てて返す
+		// 保存はしないが表示はする, ジョブ行から構築して返す
 		expect(job.attempts_log).toHaveLength(1);
 		expect(job.attempts_log[0]).toMatchObject({ attempt: 1, state: 'COMPLETED', error: null });
 		expect(job.attempts).toBe(1);
@@ -639,7 +639,7 @@ describe('試行履歴(ADR-0028)', () => {
 		await runDurableObjectAlarm(shard('LOG6#0'));
 		await shard('LOG6#0').report(jobId, { ok: false, error: 'first failure' });
 
-		// リトライ待ちを越えて再投入させる
+		// リトライ待ちを越えた再投入の状況
 		await runInDurableObject(shard('LOG6#0'), (instance) => {
 			(instance as any).clock = { now: () => T0 + 10 * 60 * 1000 };
 		});
@@ -654,8 +654,8 @@ describe('試行履歴(ADR-0028)', () => {
 		]);
 	});
 
-	it('エラー本文を打ち切る', async () => {
-		// performerの例外はHTMLページ丸ごとのこともある, 無制限だとDOとD1を圧迫する
+	it('エラー本文を上限で切り詰める', async () => {
+		// performerの例外はHTMLページ丸ごとのこともある, 無制限だとDOとD1を圧迫
 		await runInDurableObject(shard('LOG4#0'), (instance) => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = q;
@@ -669,7 +669,7 @@ describe('試行履歴(ADR-0028)', () => {
 		expect(job.attempts_log[0]?.error?.length).toBe(ERROR_MAX_CHARS);
 	});
 
-	it('一覧には履歴を載せない', async () => {
+	it('一覧には履歴を含めない', async () => {
 		// 1画面ぶんの履歴は数百KBになり得る
 		const jobId = await runFailing('LOG5#0', 'LOG5', 1);
 		const res = await call(withAuth, 'GET', '/api/jobs?binding=LOG5', authorized);
@@ -684,7 +684,7 @@ describe('メトリクスの参照', () => {
 	const authorized = { authorization: `Bearer ${TOKEN}` };
 
 	it('未設定なら501', async () => {
-		// Analytics Engineの読み取りにはアカウントのAPIトークンが要る
+		// Analytics Engineの読み取りにはアカウントのAPIトークンが必要
 		const res = await call(withAuth, 'GET', '/api/metrics', authorized);
 		expect(res.status).toBe(501);
 	});
@@ -724,7 +724,7 @@ describe('メトリクスの参照', () => {
 		expect(res.status).toBe(400);
 	});
 
-	it('上流が断ると502', async () => {
+	it('上流が拒否すると502', async () => {
 		// 設定の誤りと上流の不調を500で混ぜない
 		const configured = defineTsumugi({
 			performers: { REST: Noop },
@@ -743,7 +743,7 @@ describe('メトリクスの参照', () => {
 	});
 });
 
-describe('一覧の絞り込み', () => {
+describe('一覧の抽出条件', () => {
 	const authorized = { authorization: `Bearer ${TOKEN}` };
 
 	/** 読み取りモデルへ直接入れる, DOを経由せず条件だけを試す */
@@ -762,7 +762,7 @@ describe('一覧の絞り込み', () => {
 		return jobs.map((job) => job.id).sort();
 	};
 
-	it('ID, キー, 期間で絞り込める', async () => {
+	it('ID, キー, 期間で抽出できる', async () => {
 		await seed({ id: 'FILTER#0:one', uniqueKey: 'u-one', concurrencyKey: 'group-a', createdAt: 1_000 });
 		await seed({ id: 'FILTER#0:two', uniqueKey: 'u-two', concurrencyKey: 'group-a', createdAt: 2_000 });
 		await seed({ id: 'FILTER#0:three', uniqueKey: 'u-three', concurrencyKey: 'group-b', createdAt: 3_000 });
@@ -801,7 +801,7 @@ describe('一括リトライと一括取り消し', () => {
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 		);
 
-	/** 実際にFAILEDのジョブを作る、DO側の状態判定まで通す */
+	/** 実際にFAILEDのジョブを作る, DO側の状態判定まで実施 */
 	async function failedJob(): Promise<string> {
 		const stub = shard('REST#0');
 		await runInDurableObject(stub, (instance) => {
@@ -839,7 +839,7 @@ describe('一括リトライと一括取り消し', () => {
 		);
 
 	it('応答しないshardの対象をunreachableとして返す', async () => {
-		// 1つのshardが応答しなくても200で返す, 500にすると成功した分まで再送される
+		// 1つのshardが応答しなくても200で返す, 500では成功した分まで再送が発生
 		const res = await bulkWith(shardsFailing(['REST#0']), ['REST#0:a', 'REST#0:b']);
 
 		expect(res.status).toBe(200);
@@ -854,7 +854,7 @@ describe('一括リトライと一括取り消し', () => {
 	});
 
 	it('応答したshardの結果は残す', async () => {
-		// 成功した分を結果に含めないと呼び出し側が再送し、同じ操作を二度実行する
+		// 成功した分を結果に含めないと呼び出し側が再送し、同じ操作が二度実行される事故
 		const res = await bulkWith(shardsFailing(['REST#1']), ['REST#0:a', 'REST#1:b']);
 
 		expect(res.status).toBe(200);
@@ -903,8 +903,8 @@ describe('一括リトライと一括取り消し', () => {
 		expect(body.remaining).toBeGreaterThanOrEqual(1);
 	});
 
-	it('DOに無いジョブは理由付きで断る', async () => {
-		// 読み取りモデルにだけ残っている行、全体を失敗にはしない
+	it('DOに無いジョブは理由付きで拒否する', async () => {
+		// 読み取りモデルにだけ残っている行, 全体は成功の扱い
 		await env.TSUMUGI_DB.prepare(
 			`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, created_at, updated_at, payload)
 			 VALUES ('BULKGONE#0:x', 1, 'BULKGONE', 'FAILED', 0, 3, 3, 'at-least-once', 1, 1, '{}')`,
@@ -969,7 +969,7 @@ describe('予約済みジョブの実行時刻の変更', () => {
 
 		const job = await detailOf(jobId);
 		expect(job.run_after).toBe(T0 + 60_000);
-		// 取り消して再投入する場合と異なり同じジョブIDのまま変更される
+		// 取り消しと再投入の場合と異なり同じジョブIDのまま変更
 		expect(job.state).toBe('SCHEDULED');
 	});
 
@@ -983,7 +983,7 @@ describe('予約済みジョブの実行時刻の変更', () => {
 	});
 
 	it('SCHEDULED以外は409', async () => {
-		// QUEUED以降は投入済みなので予定を変えても実行は止まらない
+		// QUEUED以降は投入済みで予定を変えても実行は止まらない
 		const jobId = await seedJob();
 		const res = await post(`/api/jobs/${encodeURIComponent(jobId)}/reschedule`, { runAt: T0 + 60_000 });
 		expect(res.status).toBe(409);
@@ -1007,7 +1007,7 @@ describe('予約済みジョブの実行時刻の変更', () => {
 });
 
 describe('runの開始', () => {
-	// Run DOはexamples/basicの定義を持つので, 実際に開始できるのはそこにある名前だけ
+	// Run DOはexamples/basicの定義を持ち、実際に開始できるのはそこにある名前だけ
 	const flow = createFlow({ REST: Noop });
 	const withFlows = defineTsumugi({
 		performers: { REST: Noop },
@@ -1033,7 +1033,7 @@ describe('runの開始', () => {
 	});
 
 	it('runIdのローカル部に使えないidは400', async () => {
-		// 区切り文字を含むidはrunIdへ往復できない
+		// 区切り文字を含むidはrunIdへ往復不能
 		const res = await post({ flow: 'GREETINGS', input: { prefix: 'rest' }, id: 'a/b' });
 		expect(res.status).toBe(400);
 		expect(await res.json()).toEqual({ error: 'invalid run id' });

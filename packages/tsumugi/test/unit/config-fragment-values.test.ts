@@ -3,13 +3,13 @@ import { requiredAsMissing } from '../../src/config/validate.js';
 import { configFragment, configFragmentToml, DEFAULT_MIGRATIONS_DIR } from '../../src/config/fragment.js';
 
 // 断片は起動時検証とCLIの2経路から使われる(ADR-0036)
-// 値の埋め込みがプレースホルダ経路を壊すと検証側のメッセージが崩れるので, 両方の出力を検査する
+// 値の埋め込みがプレースホルダ経路を破損すると検証側のメッセージが崩れ、両方の出力を検査
 
 /** initの新規生成が渡す実測値 */
 const values = { databaseId: '9945ba53-b1cb-45a2-8f01-c650518c2f2a', databaseName: 'my-jobs', queueName: 'my-jobs', migrationTag: 'v1' };
 
 describe('必須bindingの不足化', () => {
-	it('常に要る3つを不足として返す', () => {
+	it('常に必要な3つを不足として返す', () => {
 		expect(requiredAsMissing()).toEqual([
 			{ kind: 'durable-object', name: 'JOB_SHARD', reason: 'absent', className: 'TsumugiJobShard' },
 			{ kind: 'd1', name: 'TSUMUGI_DB', reason: 'absent' },
@@ -54,7 +54,7 @@ describe('実測値の埋め込み', () => {
 	});
 
 	it('省略した項目はプレースホルダと指示コメントのまま', () => {
-		// 起動時検証は値を持たないので, 従来の出力が変わらないことを保証する
+		// 起動時検証は値を持たず、従来の出力が変わらないことを保証
 		const fragment = configFragment(requiredAsMissing());
 		expect(fragment).toContain('"database_id": "<id>"');
 		expect(fragment).toContain('paste database_id');

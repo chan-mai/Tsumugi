@@ -3,7 +3,7 @@ import { parseJobFilters } from '../../src/api/rest.js';
 
 const parse = (query: string) => parseJobFilters(new URL(`https://example.com/api/jobs${query}`));
 
-describe('一覧の絞り込み条件', () => {
+describe('一覧の抽出条件', () => {
 	it('指定が無ければ何も返さない', () => {
 		expect(parse('')).toEqual({});
 	});

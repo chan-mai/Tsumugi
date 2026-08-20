@@ -11,7 +11,7 @@ export const job = sqliteTable(
 	'job',
 	{
 		id: text('id').primaryKey(),
-		// 投影元のアウトボックス連番, 古い投影が新しい状態を上書きするのを弾く
+		// 投影元のアウトボックス連番, 古い投影による新しい状態の上書きを防止
 		seq: integer('seq').notNull(),
 		binding: text('binding').notNull(),
 		state: text('state').notNull(),
@@ -24,12 +24,12 @@ export const job = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 		dispatchedAt: integer('dispatched_at'),
-		/** SCHEDULEDが実行可能になる時刻, 後から変更できるので投影する */
+		/** SCHEDULEDが実行可能になる時刻, 後から変更可能で投影対象 */
 		runAfter: integer('run_after'),
 		/** 実行中のジョブが報告した進捗, 0以上1以下 */
 		progress: real('progress'),
 		payload: text('payload').notNull(),
-		// performの戻り値, DOのjob.resultをそのまま投影する(#9)
+		// performの戻り値, DOのjob.resultをそのまま投影(#9)
 		result: text('result'),
 		runId: text('run_id'),
 		nodeId: text('node_id'),
@@ -39,7 +39,7 @@ export const job = sqliteTable(
 		index('job_state').on(t.state, t.updatedAt),
 		index('job_binding').on(t.binding, t.updatedAt),
 		index('job_created').on(t.createdAt),
-		// 障害の調査はキーから入ることが多い, 索引が無いと全表走査になる
+		// 障害の調査はキーから入ることが多い, 索引が無いと全表走査
 		index('job_unique_key').on(t.uniqueKey, t.updatedAt),
 		index('job_concurrency_key').on(t.concurrencyKey, t.updatedAt),
 	],

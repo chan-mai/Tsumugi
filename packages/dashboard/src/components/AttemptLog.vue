@@ -9,12 +9,12 @@ const at = (value: number | null) => (value ? new Date(value).toLocaleString() :
 /** 開始が取れていない試行では所要も出せない */
 const durationOf = (a: Attempt) => (a.started_at === null ? '-' : `${a.finished_at - a.started_at} ms`);
 
-/** 古い順に並べる, 1回目から読むほうが経過を追いやすい */
+/** 古い順に整列, 1回目から読むほうが経過を追いやすい */
 const ordered = () => [...props.attempts].sort((x, y) => x.attempt - y.attempt);
 </script>
 
 <template>
-	<!-- 1回で成功したジョブは履歴を持たない, 節ごと出さないと欠落に見える -->
+	<!-- 1回で成功したジョブは履歴を持たない, 節ごと非表示にしないと欠落に見える -->
 	<div v-if="attempts.length > 0">
 		<p class="mb-1 text-muted-foreground">Result</p>
 		<div class="space-y-3">

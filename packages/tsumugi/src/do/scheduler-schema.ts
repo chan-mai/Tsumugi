@@ -1,8 +1,8 @@
 /**
  * Scheduler DOのSQLiteスキーマ(ADR-0040)
  *
- * インスタンスは1つで, 全scheduleの状態を1枚の表に持つ
- * 定義そのものはコードにあり, ここには次回時刻と直近の観測だけを置く
+ * インスタンスは1つで、全scheduleの状態を1枚の表に持つ
+ * 定義そのものはコードにあり、ここには次回時刻と直近の観測だけを配置
  */
 export const SCHEDULER_SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS schedule (
@@ -19,9 +19,9 @@ export const SCHEDULER_SCHEMA = [
 		next_run_at INTEGER NOT NULL,
 		-- 直近発火の予定時刻
 		last_run_at INTEGER,
-		-- 実際に発火した時刻, 予定との差で遅延を観測する
+		-- 実際に発火した時刻, 予定との差で遅延を観測
 		last_fired_at INTEGER,
-		-- skip判定の照会先, 画面から詳細へ辿る足がかりでもある
+		-- skip判定の照会先, 画面から詳細への参照にも使用
 		last_job_id TEXT,
 		last_run_id TEXT,
 		last_skipped_at INTEGER,
@@ -42,7 +42,7 @@ export function applySchedulerSchema(sql: SqlStorage): void {
 	for (const statement of SCHEDULER_SCHEMA) sql.exec(statement);
 }
 
-/** SQLiteの行そのまま, 射影はscheduler-repo.tsが担う */
+/** SQLiteの行そのまま, 射影はscheduler-repo.tsが担当 */
 export type ScheduleRow = {
 	name: string;
 	kind: string;

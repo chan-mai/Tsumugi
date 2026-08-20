@@ -27,7 +27,7 @@ const setClauseOf = () => {
 
 describe('投影のUPSERTが更新する列', () => {
 	it('不変の列を更新しない', () => {
-		// 移行前のSQLもこの4列を外していた, 分割代入で漏らすと気付かないまま影響が広がる
+		// 移行前のSQLもこの4列を対象外にしていた, 分割代入での漏れは警告なく影響が広がる
 		const set = setClauseOf();
 		for (const column of ['"id"', '"binding"', '"guarantee"', '"created_at"']) {
 			expect(set.includes(`${column} = `), `${column}が更新対象に入っている`).toBe(false);
@@ -41,7 +41,7 @@ describe('投影のUPSERTが更新する列', () => {
 		}
 	});
 
-	it('古いseqの上書きを弾く条件が残っている', () => {
+	it('古いseqの上書きを防止する条件が残っている', () => {
 		expect(setClauseOf()).toContain('excluded');
 	});
 });

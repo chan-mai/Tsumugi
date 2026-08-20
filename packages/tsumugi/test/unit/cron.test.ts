@@ -24,12 +24,12 @@ describe('cron式の解析', () => {
 		expect([...parseCron('0 0 * * 7').daysOfWeek]).toEqual([0]);
 	});
 
-	it('フィールド数の過不足を弾く', () => {
+	it('フィールド数の過不足を拒否する', () => {
 		expect(() => parseCron('* * * *')).toThrow(InvalidCronError);
 		expect(() => parseCron('* * * * * *')).toThrow(InvalidCronError);
 	});
 
-	it('範囲外の値を弾く', () => {
+	it('範囲外の値を拒否する', () => {
 		expect(() => parseCron('60 * * * *')).toThrow(InvalidCronError);
 		expect(() => parseCron('* 24 * * *')).toThrow(InvalidCronError);
 		expect(() => parseCron('* * 0 * *')).toThrow(InvalidCronError);
@@ -37,13 +37,13 @@ describe('cron式の解析', () => {
 		expect(() => parseCron('* * * * 8')).toThrow(InvalidCronError);
 	});
 
-	it('逆転した範囲と単一値へのステップと空の項を弾く', () => {
+	it('逆転した範囲と単一値へのステップと空の項を拒否する', () => {
 		expect(() => parseCron('30-10 * * * *')).toThrow(InvalidCronError);
 		expect(() => parseCron('5/2 * * * *')).toThrow(InvalidCronError);
 		expect(() => parseCron('1,,2 * * * *')).toThrow(InvalidCronError);
 	});
 
-	it('名前と0のステップを弾く', () => {
+	it('名前と0のステップを拒否する', () => {
 		expect(() => parseCron('0 0 * JAN *')).toThrow(InvalidCronError);
 		expect(() => parseCron('*/0 * * * *')).toThrow(InvalidCronError);
 	});
@@ -69,14 +69,14 @@ describe('次回時刻の計算', () => {
 		expect(next('0 0 1 1 *', '2026-06-01T00:00:00Z')).toBe('2027-01-01T00:00:00.000Z');
 	});
 
-	it('日と曜日の両方が絞られている場合はOR判定になる', () => {
+	it('日と曜日の両方に制限がある場合はOR判定になる', () => {
 		// 2026-01-05は月曜, 13日より先の金曜(1/9)が当たる
 		expect(next('0 0 13 * 5', '2026-01-05T12:00:00Z')).toBe('2026-01-09T00:00:00.000Z');
 		// 金曜より先に13日が来る位置から
 		expect(next('0 0 13 * 5', '2026-01-11T12:00:00Z')).toBe('2026-01-13T00:00:00.000Z');
 	});
 
-	it('曜日だけの指定は日と独立に効く', () => {
+	it('曜日だけの指定は日と独立に適用される', () => {
 		// 2026-01-05は月曜なので次の月曜は1/12
 		expect(next('0 9 * * 1', '2026-01-05T10:00:00Z')).toBe('2026-01-12T09:00:00.000Z');
 	});
@@ -85,11 +85,11 @@ describe('次回時刻の計算', () => {
 		expect(next('0 0 29 2 *', '2025-03-01T00:00:00Z')).toBe('2028-02-29T00:00:00.000Z');
 	});
 
-	it('到達し得ない組み合わせは探索の上限で落ちる', () => {
+	it('到達し得ない組み合わせは探索の上限でエラーになる', () => {
 		expect(() => nextCronAt(parseCron('0 0 31 2 *'), at('2026-01-01T00:00:00Z'))).toThrow(InvalidCronError);
 	});
 
-	it('分のステップが日を跨いで巻き戻る', () => {
+	it('分のステップが日を跨いで先頭へ戻る', () => {
 		expect(next('*/20 * * * *', '2026-01-05T23:45:00Z')).toBe('2026-01-06T00:00:00.000Z');
 	});
 });

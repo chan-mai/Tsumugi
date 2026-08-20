@@ -21,7 +21,7 @@ describe('生存報告の間引き', () => {
 		expect(sent).toEqual([0.5]);
 	});
 
-	it('下限に満たない間隔の呼び出しは捨てる', async () => {
+	it('下限に満たない間隔の呼び出しは破棄する', async () => {
 		// performerが1秒ごとに呼んでもDOへの書き込みは増えない
 		const { sent, heartbeat, advance } = harness();
 		await heartbeat();

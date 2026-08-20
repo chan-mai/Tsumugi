@@ -10,13 +10,13 @@ import type { RunNode } from '../api';
 /**
  * Runのグラフ
  *
- * 座標は`runLayout`が決め,描画と操作はVue Flowが持つ
+ * 座標は`runLayout`が決め、描画と操作はVue Flowが持つ
  * 実行時に増えたノードは親ノードの中に入る(ADR-0032)
  */
 const props = defineProps<{ nodes: RunNode[] }>();
 const emit = defineEmits<{ (event: 'select', jobId: string): void; (event: 'run', runId: string): void }>();
 
-// カードの中身の実寸, 届くまでは`runLayout`の見積もりで置く
+// カードの中身の実寸, 届くまでは`runLayout`の見積もりを使用
 const measured = ref(new Map<string, number>());
 const graph = computed(() => runLayout(props.nodes, measured.value));
 
@@ -26,7 +26,7 @@ function measure(id: string, height: number): void {
 	measured.value = new Map(measured.value).set(id, rounded);
 }
 
-// 消えたノードの実寸は捨てる, 残すとRunを開き直すたびに溜まる
+// 消えたノードの実寸は破棄, 残すとRunを開き直すたびに増える
 watch(
 	() => props.nodes.map((node) => node.id).join('|'),
 	() => {
@@ -40,7 +40,7 @@ const { fitView, zoomIn, zoomOut, onNodesInitialized, findNode } = useVueFlow();
 
 /**
  * ドラッグに追従させた辺
- * 端の区間だけを動いた位置へ寄せ, 途中の経路はレイアウトのまま保つ
+ * 端の区間だけを動いた位置へ合わせ、途中の経路はレイアウトのまま維持
  */
 const edges = computed(() =>
 	graph.value.edges.map((edge) => {
@@ -63,14 +63,14 @@ const edges = computed(() =>
 	}),
 );
 
-// ノードの顔ぶれが変わった時だけ合わせ直す, 状態の更新で視点を奪わない
+// ノードの構成が変わった時だけ再調整, 状態の更新では視点を維持
 const shape = computed(() => graph.value.nodes.map((node) => node.id).join('|'));
 let fitted: string | null = null;
 
 onNodesInitialized(() => {
 	if (fitted === shape.value) return;
 	fitted = shape.value;
-	// ノードが少ないRunで拡大されすぎないよう上限を置く
+	// ノードが少ないRunで拡大されすぎないよう上限を設定
 	void fitView({ padding: 0.15, maxZoom: 1 });
 });
 </script>

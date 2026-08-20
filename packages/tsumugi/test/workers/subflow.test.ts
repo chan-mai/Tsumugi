@@ -78,8 +78,8 @@ const nodesOf = (runId: string) =>
 	);
 
 /**
- * Run DOのalarmだけを, ノードの状態が変わらなくなるまで発火させる
- * performerを実行しないので投入までで止まる, ラウンド数で状況を作ると進みすぎる場合がある
+ * Run DOのalarmだけを、ノードの状態が変わらなくなるまで発火
+ * performerを実行せず投入までで止まる, ラウンド数で状況を作ると進みすぎる場合がある
  */
 async function settleRuns(runIds: string[], rounds = 8): Promise<void> {
 	let previous = '';
@@ -116,7 +116,7 @@ describe('subflowの縦串', () => {
 		expect((await nodeOf(parent, 'greetings'))?.child_run_id).toBe('GREETINGS:sub-id-greetings');
 	});
 
-	it('子が失敗すると親のノードも失敗し下流を打ち切る', async () => {
+	it('子が失敗すると親のノードも失敗し下流を中断する', async () => {
 		const parent = 'PIPELINE:sub-fail';
 		const child = 'GREETINGS:sub-fail-greetings';
 		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
@@ -150,7 +150,7 @@ describe('subflowの縦串', () => {
 		expect(await stateOf(parent)).toBe('CANCELLED');
 	});
 
-	it('入れ子の上限を超える起動を弾く', async () => {
+	it('入れ子の上限を超える起動を拒否する', async () => {
 		// 既定は3, 深さの判定は起動された側が行う
 		// RPC越しの例外はvitest-pool-workersが未処理rejectionとして報告するためDO内で実行
 		await expect(

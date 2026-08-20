@@ -4,16 +4,16 @@ import type { RunNode } from '../../api';
 /**
  * Runのグラフの配置
  *
- * ルートノードの箱の寸法をこちらで決め,その寸法でdagreに並べさせる
- * 実行時に増えた子は親の中に入れるので(ADR-0032),箱の高さは子の件数から決まる
- * 描画の実寸を測らずに座標を出せるので,この関数だけで検査できる
+ * ルートノードの箱の寸法をこちらで決め、その寸法でdagreが配置
+ * 実行時に増えた子は親の中に入り(ADR-0032)、箱の高さは子の件数から確定
+ * 描画の実寸を測らずに座標を算出でき、この関数だけで検査可能
  */
 
 /** カードの幅, 現行のw-64と同じ */
 const NODE_W = 256;
 /** IDとbindingの行 + 状態と進捗の行 */
 const HEAD_H = 44;
-/** 2行で切るerror */
+/** 2行で切り詰めるerror */
 const ERROR_H = 40;
 /** Jobボタン */
 const ACTION_H = 24;
@@ -26,10 +26,10 @@ const CHILD_H = 26;
 const CHILD_GAP = 6;
 const MAX_COLS = 4;
 
-/** 個別に描く子の上限, 超えた分は内訳へ畳む */
+/** 個別に描く子の上限, 超えた分は内訳へ集約 */
 export const MAX_CHIPS = 24;
 
-/** 辺が刺さる高さ, 子で箱が伸びても頭の行に合わせる */
+/** 辺の接続位置の高さ, 子で箱が伸びても先頭行に固定 */
 export const HANDLE_TOP = 34;
 
 export type TaskData = {
@@ -73,7 +73,7 @@ export type LayoutEdge = {
 
 export type RunLayout = { nodes: LayoutNode[]; edges: LayoutEdge[] };
 
-/** 描く子を選ぶ順, 手当てが要るものを先に見せる */
+/** 描く子を選ぶ順, 対応が必要なものを先に表示 */
 const ATTENTION: Record<string, number> = {
 	FAILED: 0,
 	STALLED: 1,
@@ -159,7 +159,7 @@ type Gutter = { left: number; right: number };
  * 横に走る高さはdagreが空けた値を使う, ランクを跨ぐ辺が箱に当たらない
  */
 function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Box>, lanes: ReadonlyMap<string, Point[]>): LayoutEdge[] {
-	// dagreのrankは飛び番なので, 並べ直して列の番号にする
+	// dagreのrankは連番ではない, 整列し直して列の番号へ変換
 	const ranks = [...new Set([...boxes.values()].map((box) => box.rank))].sort((a, b) => a - b);
 	const rankOf = new Map([...boxes].map(([id, box]) => [id, ranks.indexOf(box.rank)]));
 
@@ -168,7 +168,7 @@ function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Bo
 	for (let i = 0; i + 1 < ranks.length; i++) {
 		const left = Math.max(...[...boxes.values()].filter((box) => box.rank === ranks[i]).map((box) => box.x + box.w));
 		const right = Math.min(...[...boxes.values()].filter((box) => box.rank === ranks[i + 1]).map((box) => box.x));
-		// 箱が食い違って空きが潰れた場合も, 縦に走る幅だけは確保する
+		// 箱の位置がずれて空きが無くなった場合も, 縦方向の幅だけは確保
 		gutters.push(right - left >= MIN_GUTTER ? { left, right } : { left, right: left + MIN_GUTTER });
 	}
 
@@ -191,7 +191,7 @@ function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Bo
 	}
 	for (const ids of crossing) ids.sort((a, b) => anchors.get(a)!.start.y - anchors.get(b)!.start.y || a.localeCompare(b));
 
-	/** 空きの中での縦の走り位置, 通る本数で等分する */
+	/** 空きの中での縦の配置位置, 経由する本数で等分 */
 	const channel = (index: number, id: string): number => {
 		const gutter = gutters[index]!;
 		const ids = crossing[index]!;
@@ -256,7 +256,7 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 	const seen = new Set<string>();
 	for (const node of roots) {
 		for (const from of node.after) {
-			// 消えた依存や子を指す依存は辺にしない, 自分への依存と重複も落とす
+			// 消えた依存や子を指す依存は辺にしない, 自分への依存と重複も除外
 			if (!known.has(from) || from === node.id || seen.has(`${from}->${node.id}`)) continue;
 			seen.add(`${from}->${node.id}`);
 			graph.setEdge(from, node.id);

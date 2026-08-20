@@ -6,7 +6,7 @@ import type { SpawnRequest } from '../core/run.js';
  * performerを試すための道具
  *
  * DOもQueuesも起動せずにperformを直接呼ぶ
- * DOを絡めた検証は`@cloudflare/vitest-pool-workers`の領域なのでここでは扱わない
+ * DOを含む検証は`@cloudflare/vitest-pool-workers`の領域で対象外
  */
 
 export type TestContext = JobContext & {
@@ -24,18 +24,18 @@ export type TestContextOptions = {
 	deadlineAt?: number;
 };
 
-/** `JobContext`を組み立てる */
+/** `JobContext`の構築 */
 export function createTestContext(options: TestContextOptions = {}): TestContext {
 	const jobId = options.jobId ?? 'TEST#0:testjob000000000000000000';
-	// 本番と同じく溜めるだけ, 実際の投入はDO側で起きる(ADR-0031)
+	// 本番と同じく保持のみ, 実際の投入はDO側で発生(ADR-0031)
 	const spawns: SpawnRequest[] = [];
-	// 本番はDOへ送信するが, ここでは実行の記録だけを残す
+	// 本番はDOへ送信するが、ここでは実行の記録だけを残す
 	const heartbeats: (number | undefined)[] = [];
 
 	return {
 		jobId,
 		attempt: options.attempt ?? 1,
-		// 実装と同じくジョブIDをそのまま使う, 再試行を跨いで同値になる
+		// 実装と同じくジョブIDをそのまま使用, 再試行を跨いで同値
 		idempotencyKey: options.idempotencyKey ?? jobId,
 		deadlineAt: options.deadlineAt ?? Date.now() + 60_000,
 		spawns,
@@ -54,8 +54,8 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 export type PerformResult<Result> = { ok: true; value: Result } | { ok: false; error: unknown };
 
 /**
- * performを呼び, 例外を投げずに結果として返す
- * 本番では例外がそのままリトライの判断になるため, 投げたか否かを同じ形で扱えるようにする
+ * performを呼び、例外を投げずに結果として返す
+ * 本番では例外がそのままリトライの判断材料, 投げたか否かを同じ形で確認可能
  */
 export async function runPerformer<Payload, Result, Req extends Requirements>(
 	performer: PerformerLike<Payload, Result, Req>,

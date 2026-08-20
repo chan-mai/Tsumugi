@@ -17,8 +17,8 @@ const boom = {
 };
 
 /**
- * 期限まで待つ, `deadlineAt`から中断を組み立てられるかを見る(ADR-0037)
- * 自分では解決しない, 解決するとconsumerの打ち切りと競合して成功で終わる場合がある
+ * 期限まで待つ, `deadlineAt`から中断を構築できるかの検証(ADR-0037)
+ * 自分では解決しない, 解決するとconsumerの中断と競合して成功で終わる場合がある
  */
 const waitForDeadline = {
 	perform: (_payload: unknown, ctx: JobContext): Promise<void> => {
@@ -62,7 +62,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
 
-/** DOは再生成されると時計が既定に戻るので,操作の直前に必ず入れ直す */
+/** DOは再生成されると時計が既定に戻り、操作の直前に必ず再設定 */
 async function install(binding: string, clock: Clock, queue: unknown) {
 	await runInDurableObject(shard(binding), (instance) => {
 		(instance as any).clock = clock;
@@ -83,8 +83,8 @@ describe('リトライ', () => {
 		aborted = false;
 	});
 
-	it('失敗するとバックオフぶん先の時刻にalarmが張られる', async () => {
-		// 時間を進めるAPIが無いので次のalarmの予定時刻を検証する
+	it('失敗するとバックオフぶん先の時刻にalarmが設定される', async () => {
+		// 時間を進めるAPIが無く、次のalarmの予定時刻を検証
 		const clock = fixedClock(T0);
 		const { sent, queue } = captureQueue();
 		await install('BOOM', clock, queue);
@@ -93,7 +93,7 @@ describe('リトライ', () => {
 			binding: 'BOOM',
 			payload: {},
 			maxAttempts: 3,
-			// ジッタ無しにして予定時刻を決定的にする
+			// ジッタ無しで予定時刻を決定的に固定
 			backoff: { kind: 'fixed', delayMs: 5_000 },
 		});
 		await runDurableObjectAlarm(shard('BOOM'));
@@ -190,7 +190,7 @@ describe('reaper', () => {
 		await install('ONCE', clock, queue);
 		await runDurableObjectAlarm(shard('ONCE'));
 
-		// 再投入すると二重実行になり得るので人手の判断を待つ(ADR-0006 / ADR-0007)
+		// 再投入は二重実行になり得るため人手の判断を待つ(ADR-0006 / ADR-0007)
 		expect(await stateOf('ONCE', jobId)).toBe('STALLED');
 	});
 
@@ -219,7 +219,7 @@ describe('claim (ADR-0007)', () => {
 		const jobId = await shard('ONCE').enqueue({ binding: 'ONCE', payload: {}, guarantee: 'at-most-once' });
 		await runDurableObjectAlarm(shard('ONCE'));
 
-		// Queues自体がat-least-onceなので重複配送は起こり得る
+		// Queues自体がat-least-onceで重複配送は起こり得る
 		const results = await Promise.all([shard('ONCE').claim(jobId), shard('ONCE').claim(jobId)]);
 		expect(results.filter(Boolean)).toHaveLength(1);
 		expect(await stateOf('ONCE', jobId)).toBe('RUNNING');
@@ -237,7 +237,7 @@ describe('cancel (ADR-0012)', () => {
 		expect(await stateOf('BOOM', jobId)).toBe('CANCELLED');
 	});
 
-	it('QUEUED以降は取り消せない,実行済みかもしれないので成功を返さない', async () => {
+	it('QUEUED以降は取り消せない, 実行済みの可能性があり成功を返さない', async () => {
 		const clock = fixedClock(T0);
 		const { queue } = captureQueue();
 		await install('BOOM', clock, queue);
@@ -246,7 +246,7 @@ describe('cancel (ADR-0012)', () => {
 		await runDurableObjectAlarm(shard('BOOM'));
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 
-		// 状態違いであってDOから消えたのではない, 区別できることをここでも固定する(ADR-0027)
+		// 状態違いであってDOから消えたのではない, 区別できることをここでも固定(ADR-0027)
 		expect(await shard('BOOM').cancel(jobId)).toEqual({ ok: false, reason: 'invalid-state' });
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 	});

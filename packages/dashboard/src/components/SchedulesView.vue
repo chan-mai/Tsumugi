@@ -32,7 +32,7 @@ defineExpose({ load });
 
 const interval = (row: Schedule) => (row.cron !== null ? row.cron : `every ${duration(row.every_ms ?? 0)}`);
 
-/** 間隔は桁の大きい単位から, ミリ秒のままでは読めない */
+/** 間隔は桁の大きい単位から, ミリ秒のままでは判読不能 */
 function duration(ms: number): string {
 	if (ms >= 3_600_000) return `${+(ms / 3_600_000).toFixed(1)}h`;
 	if (ms >= 60_000) return `${+(ms / 60_000).toFixed(1)}m`;

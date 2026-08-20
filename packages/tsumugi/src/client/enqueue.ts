@@ -5,7 +5,7 @@ import type { EnqueueInput, ShardSettings } from '../do/job-shard.js';
 
 /**
  * DOに投げるRPCの形だけの宣言
- * DOクラス非参照によりenqueue専用WorkerがDO実装を持たずに済む(ADR-0023)
+ * DOクラス非参照によりenqueue専用WorkerにDO実装が不要(ADR-0023)
  */
 export interface JobShardStub extends Rpc.DurableObjectBranded {
 	enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]>;
@@ -13,7 +13,7 @@ export interface JobShardStub extends Rpc.DurableObjectBranded {
 
 /**
  * `DurableObjectNamespace<T>`はTに不変, DO本体の型は`JobShardStub`に代入不可
- * 受け口を緩めて`shardOf`の1箇所で絞る,利用者は自分のEnvをそのまま渡せる
+ * 受け口の型を広げ`shardOf`の1箇所で限定, 利用者は自分のEnvをそのまま渡せる
  */
 export type ClientEnv = {
 	JOB_SHARD: DurableObjectNamespace<any>;
@@ -22,14 +22,14 @@ export type ClientEnv = {
 export type BindingConfig = {
 	/**
 	 * 分割数,既定は1
-	 * 2以上にするとpartitionKeyが必須になり,キー単位の保証はpartition内に限定される(ADR-0011)
+	 * 2以上にするとpartitionKeyが必須になり、キー単位の保証はpartition内に限定(ADR-0011)
 	 */
 	shards?: number;
-	/** 流量制御3軸とエージング(ADR-0009 / ADR-0020) */
+	/** 流量制御とエージング(ADR-0009 / ADR-0045 / ADR-0020) */
 	policy?: Partial<Policy>;
 	/**
 	 * 済んだジョブ(COMPLETED / CANCELLED)をDOに残す時間,既定5分
-	 * 明細はD1へ投影済みなのでDOに残す理由がない
+	 * 明細はD1へ投影済みでDOに残す理由が無い
 	 */
 	sweepAfterMs?: number;
 	/**
@@ -65,7 +65,7 @@ export type CommonSettings = {
 	/**
 	 * 失敗を知らせる先のbinding(#30)
 	 * nullは解除, 省略はDOが今持つ宛先を変えない
-	 * 宛先を知り得ない経路から省略が届くので, 未指定と解除を区別する
+	 * 宛先を持たない経路からも省略が届き、未指定と解除を区別
 	 */
 	failureBinding?: string | null;
 };
@@ -89,7 +89,7 @@ export function createClient<Env extends ClientEnv>(
 	};
 
 	async function enqueueMany(env: Env, inputs: readonly EnqueueInput[]): Promise<string[]> {
-		// 宛先DOごとの集約,逐次の個別RPCはDOの1,000 req/sソフト上限に律速される
+		// 宛先DOごとの集約, 逐次の個別RPCはDOの1,000 req/sソフト上限が律速
 		type Group = { stub: DurableObjectStub<JobShardStub>; settings: ShardSettings | undefined; items: EnqueueInput[] };
 		const groups = new Map<string, Group>();
 		const order: string[] = [];

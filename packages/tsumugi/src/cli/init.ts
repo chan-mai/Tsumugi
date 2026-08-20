@@ -8,8 +8,8 @@ import { BARREL_HEADER, devVarsFile, exportLine, indexFile, performerFile, wrang
 /**
  * `tsumugi init`(ADR-0036)
  *
- * D1とキューを作り, wrangler設定とWorkerの雛形を生成し, 読み取りモデルのマイグレーションを適用する
- * 既存ファイルは書き換えず, 設定が在る場合は追記する断片の出力に留める
+ * D1とキューを作成し、wrangler設定とWorkerの雛形を生成し、読み取りモデルのマイグレーションを適用
+ * 既存ファイルは書き換えず、設定が在る場合は追記する断片の出力のみ
  */
 
 export type InitOptions = {
@@ -19,7 +19,7 @@ export type InitOptions = {
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
 
-/** `wrangler d1 create`の出力からdatabase_idを拾う, 形式の揺れに備えて3段で見る */
+/** `wrangler d1 create`の出力からdatabase_idを抽出, 形式の揺れに備えて3段で判定 */
 export function extractDatabaseId(stdout: string): string | undefined {
 	const json = stdout.match(new RegExp(`"database_id"\\s*:\\s*"(${UUID.source})"`));
 	if (json?.[1] !== undefined) return json[1];
@@ -39,7 +39,7 @@ const packageName = (deps: CliDeps): string | undefined => {
 	}
 };
 
-/** Workerの名前の既定値, 既存設定 → package.json → ディレクトリ名の順で引く */
+/** Workerの名前の既定値, 既存設定 → package.json → ディレクトリ名の順で取得 */
 export function resolveWorkerName(deps: CliDeps): string {
 	const existing = detectWranglerConfig(deps);
 	const configName = existing ? readWorkerName(deps.fs.read(existing.path), existing.format) : undefined;
@@ -57,7 +57,7 @@ export function init(options: InitOptions, deps: CliDeps): number {
 		return 1;
 	}
 
-	// 設定より先にリソースを作る, d1 createが出すdatabase_idをそのまま設定へ書くため
+	// 設定より先にリソースを作成, d1 create出力のdatabase_idをそのまま設定へ記入
 	const queue = deps.wrangler(['queues', 'create', name]);
 	if (!queue.ok) deps.error(`warning: \`wrangler queues create ${name}\` failed, create the queue yourself if it does not exist`);
 
@@ -86,7 +86,7 @@ export function init(options: InitOptions, deps: CliDeps): number {
 		wroteConfig = true;
 	}
 
-	// 雛形は個別に見る, 在るものは書き換えない(ADR-0036)
+	// 雛形は個別に判定, 在るものは書き換えない(ADR-0036)
 	const writeNew = (relative: string, content: string): void => {
 		const path = join(deps.cwd, ...relative.split('/'));
 		if (deps.fs.exists(path)) {
@@ -108,7 +108,7 @@ export function init(options: InitOptions, deps: CliDeps): number {
 			const apply = deps.wrangler(['d1', 'migrations', 'apply', name, target]);
 			if (!apply.ok) deps.error(`warning: \`wrangler d1 migrations apply ${name} ${target}\` failed, run it again yourself`);
 		}
-		// 生成したコードが参照する大域のEnvを成立させる
+		// 生成したコードが参照する大域のEnvを定義
 		const types = deps.wrangler(['types']);
 		if (!types.ok) deps.error('warning: `wrangler types` failed, run it again yourself');
 	}

@@ -3,8 +3,8 @@ import { readCookie, type AuthMiddleware } from './auth.js';
 /**
  * Cloudflare AccessのJWT検証
  *
- * Accessはリクエストに`Cf-Access-Jwt-Assertion`ヘッダを付けて転送する
- * 署名を検証せずヘッダの存在だけを見ると, Accessを迂回した直接アクセスを通してしまう
+ * Accessはリクエストに`Cf-Access-Jwt-Assertion`ヘッダを付けて転送
+ * 署名を検証せずヘッダの存在だけを判定すると、Accessを迂回した直接アクセスの拒否が不能
  */
 export type AccessOptions = {
 	/** `<team>.cloudflareaccess.com`のteam部分 */
@@ -54,7 +54,7 @@ export async function verifyAccessJwt(token: string, options: AccessOptions, now
 	const [headerSegment, payloadSegment, signatureSegment] = parts as [string, string, string];
 
 	const header = decodeJson<{ alg?: string; kid?: string }>(headerSegment);
-	// algをJWTの言うままに信じるとalg=noneやHS256への差し替えを許す
+	// algをJWTの値のまま採用するとalg=noneやHS256への差し替えが可能
 	if (!header || header.alg !== 'RS256' || !header.kid) return null;
 
 	const claims = decodeJson<Claims>(payloadSegment);
@@ -74,7 +74,7 @@ export async function verifyAccessJwt(token: string, options: AccessOptions, now
 	const jwk = jwks.keys.find((key) => key.kid === header.kid);
 	if (!jwk) return null;
 
-	// 署名部の復号と鍵の取り込みの失敗も検証の失敗として扱う, 例外のままでは401ではなく500になる
+	// 署名部の復号と鍵の取り込みの失敗も検証の失敗の扱い, 例外のままでは401ではなく500
 	try {
 		const key = await crypto.subtle.importKey(
 			'jwk',
@@ -106,7 +106,7 @@ async function loadJwks(options: AccessOptions): Promise<Jwks> {
 	return jwks;
 }
 
-/** テストや鍵ローテーション時にキャッシュを捨てる */
+/** テストや鍵ローテーション時のキャッシュ削除 */
 export function clearJwksCache(): void {
 	jwksCache.clear();
 }

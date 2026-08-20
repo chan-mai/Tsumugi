@@ -1,8 +1,8 @@
 /**
  * cron式の解釈(ADR-0040)
  *
- * 5フィールド(分 時 日 月 曜日)をUTCの分精度で評価する
- * 対応する記法は数値, `*`, `,`, `-`, `/`のみ, 名前(JAN, MONなど)とタイムゾーンは持たない
+ * 5フィールド(分 時 日 月 曜日)をUTCの分精度で評価
+ * 対応する記法は数値, `*`, `,`, `-`, `/`のみ, 名前(JAN, MON等)とタイムゾーンは非対応
  */
 
 export class InvalidCronError extends Error {
@@ -18,7 +18,7 @@ export type CronSpec = {
 	daysOfMonth: ReadonlySet<number>;
 	months: ReadonlySet<number>;
 	daysOfWeek: ReadonlySet<number>;
-	/** 日と曜日の両方が絞られている場合はOR判定になる, 標準cronの規則 */
+	/** 日と曜日の両方に制限がある場合はOR判定, 標準cronの規則 */
 	restrictedDayOfMonth: boolean;
 	restrictedDayOfWeek: boolean;
 };
@@ -33,7 +33,7 @@ const FIELDS = [
 
 const MINUTE_MS = 60_000;
 
-/** 探索の上限日数, うるう日を含むどの周期もこの窓に必ず現れる */
+/** 探索の上限日数, うるう日を含むどの周期もこの窓に必ず出現 */
 const SEARCH_DAYS = 366 * 5;
 
 /** `A`または`A-B`を[開始, 終了]へ, `*`はフィールドの全域 */
@@ -60,7 +60,7 @@ function parseField(text: string, min: number, max: number, label: string): Set<
 		if (part === '') throw new InvalidCronError(`empty ${label} entry: ${text}`);
 		const [range, ...rest] = part.split('/');
 		if (rest.length > 1) throw new InvalidCronError(`invalid ${label} step: ${part}`);
-		// ステップは範囲か`*`にのみ付く, 単一値へのステップは範囲の書き漏らしと区別できない
+		// ステップは範囲か`*`にのみ付く, 単一値へのステップは範囲の書き漏らしと区別不能
 		if (rest.length === 1 && range !== '*' && !range!.includes('-')) {
 			throw new InvalidCronError(`step requires a range: ${part}`);
 		}
@@ -82,7 +82,7 @@ export function parseCron(expression: string): CronSpec {
 		return parseField(text, min, max, label);
 	});
 
-	// 曜日の7は0と同じ日曜, 判定はgetUTCDay()の0-6で行う
+	// 曜日の7は0と同じ日曜, 判定はgetUTCDay()の0-6
 	const daysOfWeek = new Set([...parsed[4]!].map((value) => (value === 7 ? 0 : value)));
 
 	return {
@@ -96,7 +96,7 @@ export function parseCron(expression: string): CronSpec {
 	};
 }
 
-/** 標準cronの規則, 日と曜日の両方が絞られている場合はどちらかが合えばよい */
+/** 標準cronの規則, 日と曜日の両方に制限がある場合はどちらか一致で可 */
 function dayMatches(spec: CronSpec, date: Date): boolean {
 	const domOk = spec.daysOfMonth.has(date.getUTCDate());
 	const dowOk = spec.daysOfWeek.has(date.getUTCDay());
@@ -105,13 +105,13 @@ function dayMatches(spec: CronSpec, date: Date): boolean {
 
 /**
  * `afterMs`より後の最初の一致時刻を返す
- * ちょうど一致する時刻は返さない, 発火直後の再計算で同じ時刻を繰り返さないため
+ * ちょうど一致する時刻は対象外, 発火直後の再計算での同時刻の反復防止
  */
 export function nextCronAt(spec: CronSpec, afterMs: number): number {
 	const hours = [...spec.hours].sort((a, b) => a - b);
 	const minutes = [...spec.minutes].sort((a, b) => a - b);
 
-	// 日単位で進めて一致する日だけ時分を走査する, 分単位の全走査は5年窓で数百万回になる
+	// 日単位で進め一致する日だけ時分を走査, 分単位の全走査は5年窓で数百万回
 	let cursor = Math.floor(afterMs / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
 	for (let day = 0; day < SEARCH_DAYS; day++) {
 		const date = new Date(cursor);
@@ -129,6 +129,6 @@ export function nextCronAt(spec: CronSpec, afterMs: number): number {
 		cursor = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
 	}
 
-	// 2月31日のように到達し得ない組み合わせ, 待っても解決しないので定義の誤りとして返す
+	// 2月31日のような到達不能な組み合わせ, 待機では解決しない定義の誤りでエラー
 	throw new InvalidCronError(`no occurrence within ${SEARCH_DAYS} days`);
 }

@@ -46,20 +46,20 @@ describe('ダッシュボードの配信(ADR-0025)', () => {
 
 	it('JSとCSSがインライン化されている', async () => {
 		const html = await (await call(handler(), '/', authorized)).text();
-		// 外部参照が残っているとStatic Assetsに依存することになる
+		// 外部参照が残っているとStatic Assetsへの依存が発生
 		expect(html).not.toMatch(/<script[^>]+src=/);
 		expect(html).not.toMatch(/<link[^>]+stylesheet/);
 	});
 
 	it('APIは常にオリジン直下を呼ぶ', async () => {
-		// 呼び先を注入しないので, 配置先の情報はHTMLに入らない
+		// 呼び先を注入せず、配置先の情報はHTMLに入らない
 		const html = await (await call(handler(), '/', authorized)).text();
 		expect(html).not.toContain('"base"');
 	});
 
-	it('注入済みHTMLを使い回す', () => {
+	it('注入済みHTMLを再利用する', () => {
 		const dashboard = ui({ tokenCookie: 'tsumugi_token' });
-		// リクエストごとに数十KBの置換をしない
+		// リクエストごとの数十KBの置換を回避
 		expect(dashboard.render()).toBe(dashboard.render());
 	});
 
@@ -69,7 +69,7 @@ describe('ダッシュボードの配信(ADR-0025)', () => {
 	});
 
 	it('認証が無くてもHTML自体は返る', async () => {
-		// データを含まないのでトークン入力を出すために開ける(ADR-0013)
+		// データを含まず、トークン入力の表示のために開放(ADR-0013)
 		const res = await call(handler(), '/');
 		expect(res.status).toBe(200);
 		expect(await res.text()).toContain('<!doctype html>');
@@ -93,7 +93,7 @@ describe('ダッシュボードの配信(ADR-0025)', () => {
 	it('注入する値がscriptタグを閉じない', () => {
 		const closings = (source: string) => (source.match(/<\/script>/g) ?? []).length;
 		const html = ui({ tokenCookie: '</script><script>alert(1)</script>' }).render();
-		// 増えるのは設定を包む1つだけ, 値の中の`</script>`はエスケープされる
+		// 増えるのは設定を包む1つだけ, 値の中の`</script>`はエスケープ済み
 		expect(closings(html)).toBe(closings(DASHBOARD_HTML) + 1);
 		expect(html).toContain('\\u003c/script>');
 	});

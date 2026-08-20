@@ -3,9 +3,9 @@ import type { ScheduleInput } from '../../src/core/types.js';
 /**
  * schedule()のdispatch決定を独立に再計算する参照モデル
  *
- * property testが実装のロジックをそのまま写すと, 実装がずれても検査が同じだけずれて相殺する
- * このモデルは仕様の用語(同時実行数 / トークン / キー上限 / 優先度)だけで書き, 実装を参照しない
- * reaperとnextAlarmAtは扱わない, dispatchの正しさに絞る
+ * property testが実装のロジックをそのまま写すと、実装がずれても検査が同じだけずれて相殺
+ * このモデルは仕様の用語(同時実行数 / トークン / キー上限 / 優先度)だけで書き、実装は非参照
+ * reaperとnextAlarmAtは対象外, dispatchの正しさに限定
  */
 export function expectedDispatchIds(input: ScheduleInput): string[] {
 	const { now, jobs, policy } = input;
@@ -64,7 +64,7 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 }
 
 /**
- * 優先度の底上げを実装を参照せず再計算する
+ * 優先度の底上げを実装を参照せず再計算
  * 有効時はpriorityへfloor(max(0,now-createdAt)/agingIntervalMs)を加算,無効/0/負はpriorityのまま
  */
 function agedPriority(priority: number, createdAt: number, now: number, agingIntervalMs: number | null): number {

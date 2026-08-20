@@ -2,8 +2,8 @@ import type { ActiveState, JobState } from './types.js';
 
 /**
  * 状態機械の遷移表(ADR-0012)
- * 重複配送や競合で終端状態のジョブが再び動き出すのを弾く
- * cancelをSCHEDULEDからのみ許すのは意図的, QUEUED以降は実行済みかもしれず取り消せていない場合に成功を返さない
+ * 重複配送や競合で終端状態のジョブが再び動き出すのを防止
+ * cancelはSCHEDULEDからのみ許可(意図的), QUEUED以降は実行済みの可能性があり取り消し成功の保証が不可能
  */
 export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
 	// dispatch / cancel
@@ -28,7 +28,7 @@ export function isActive(state: JobState): state is ActiveState {
 	return state === 'SCHEDULED' || state === 'QUEUED' || state === 'RUNNING';
 }
 
-/** 終端判定, FAILEDとSTALLEDは手動復帰できるので終端だが不可逆ではない */
+/** 終端判定, FAILEDとSTALLEDは終端だが手動復帰が可能 */
 export function isTerminal(state: JobState): boolean {
 	return !isActive(state);
 }

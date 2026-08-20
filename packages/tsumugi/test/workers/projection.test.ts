@@ -42,13 +42,13 @@ describe('D1への投影(ADR-0008)', () => {
 		expect(await outboxCount('PROJ#0')).toBe(0);
 	});
 
-	it('同じ範囲を2回流しても結果が変わらない', async () => {
+	it('同じ範囲を2回処理しても結果が変わらない', async () => {
 		await install('PROJ2#0', T0);
 		const jobId = await shard('PROJ2#0').enqueue({ binding: 'PROJ2', payload: {} });
 		await runDurableObjectAlarm(shard('PROJ2#0'));
 		const first = await readD1(jobId);
 
-		// アウトボックスが二重に読まれた状況を再現する
+		// アウトボックスが二重に読まれた状況を再現
 		const rows: OutboxRow[] = [{ seq: first!.seq, job_id: jobId, snapshot: JSON.stringify({ ...(await snapshotOf('PROJ2#0', jobId)) }) }];
 		await project(env.TSUMUGI_DB, rows);
 		await project(env.TSUMUGI_DB, rows);
@@ -87,7 +87,7 @@ describe('D1への投影(ADR-0008)', () => {
 
 		// 投影に失敗してもアウトボックスは残り,次のtickで追いつく
 		expect(await outboxCount('PROJ4#0')).toBeGreaterThanOrEqual(before);
-		// tickが停止しないよう次のalarmが張り直されている
+		// tickが停止しないよう次のalarmが再設定されている
 		const alarm = await runInDurableObject(shard('PROJ4#0'), (_i, state) => state.storage.getAlarm());
 		expect(alarm).not.toBeNull();
 	});

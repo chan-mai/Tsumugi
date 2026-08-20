@@ -30,7 +30,7 @@ async function submit() {
 	try {
 		parsed = JSON.parse(input.value);
 	} catch {
-		// 送る前に弾く,サーバ往復を待たせない
+		// 送信前に拒否, サーバ往復の待ちを回避
 		error.value = 'Input must be valid JSON';
 		return;
 	}

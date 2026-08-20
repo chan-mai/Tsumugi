@@ -1,7 +1,7 @@
 /**
  * Analytics EngineのSQL APIから計測点を読む(ADR-0016)
  *
- * `writeDataPoint`で書いた値はWorkerのbindingからは読めず, アカウントのAPIトークンが要る
+ * `writeDataPoint`で書いた値はWorkerのbindingからは読めず, アカウントのAPIトークンが必要
  * トークンはsecretなので`env`経由でしか読めない, 設定の形は`bearerAuth`と揃える
  */
 
@@ -25,13 +25,13 @@ export type MetricsConfig = {
 	dataset: string;
 };
 
-/** `defineTsumugi`が受け取る形, secretは実行時に`env`から引く */
+/** `defineTsumugi`が受け取る形, secretは実行時に`env`から取得 */
 export type MetricsResolver<Env = any> = (env: Env) => MetricsConfig | undefined;
 
 export type MetricsQuery = {
 	/** 遡る時間, 既定24で最大720 */
 	hours: number;
-	/** binding名での絞り込み */
+	/** binding名での抽出条件 */
 	binding?: string;
 };
 
@@ -73,7 +73,7 @@ export class MetricsQueryError extends Error {
 	}
 }
 
-/** 区間と絞り込みの検証, 通らなければ理由を返す */
+/** 区間と抽出条件の検証, 失敗なら理由を返す */
 export function parseMetricsQuery(url: URL): { query: MetricsQuery } | { error: string } {
 	const raw = url.searchParams.get('hours');
 	const hours = raw === null || raw === '' ? 24 : Number(raw);
@@ -81,7 +81,7 @@ export function parseMetricsQuery(url: URL): { query: MetricsQuery } | { error: 
 	if (hours > 720) return { error: 'hours must not exceed 720' };
 
 	const binding = url.searchParams.get('binding') || undefined;
-	// SQLへ直接差し込むので, binding名として成立する文字だけを通す
+	// SQLへ直接埋め込む値で、binding名として成立する文字だけを許可
 	if (binding !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding)) return { error: 'binding is not a valid name' };
 
 	return { query: { hours: Math.floor(hours), ...(binding ? { binding } : {}) } };
@@ -93,7 +93,7 @@ const totalSum = 'sum(_sample_interval)';
 /**
  * binding単位の集計を求めるSQL
  *
- * サンプリングが有効な場合、1行は`_sample_interval`件を代表する
+ * サンプリングが有効な場合、1行は`_sample_interval`件の代表
  * 件数は素の`count()`ではなく`_sample_interval`の和で数える
  * 所要時間の平均と分位も同じ重みを掛ける, 掛けないとサンプリング時に偏る
  */
@@ -136,7 +136,7 @@ const num = (value: string | number | null | undefined): number => {
 	return Number.isFinite(parsed) ? parsed : 0;
 };
 
-/** SQL APIの応答を待つ上限, subrequestに既定のタイムアウトが無いため明示する */
+/** SQL APIの応答を待つ上限, subrequestに既定のタイムアウトが無く明示が必要 */
 const QUERY_TIMEOUT_MS = 10_000;
 
 /** SQL APIへ1本投げて`data`を取り出す */
@@ -147,7 +147,7 @@ async function query(config: MetricsConfig, sql: string, fetchImpl: typeof globa
 		body: sql,
 		signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
 	}).catch((error: unknown) => {
-		// 応答が無い場合も他の失敗と同じ経路へ寄せる, 待ち続けてWorker全体の時間を使い切らない
+		// 応答が無い場合も他の失敗と同じ経路で処理, 待機の継続によるWorker全体の時間の消費を回避
 		if (error instanceof DOMException && error.name === 'TimeoutError') {
 			throw new MetricsQueryError(504, `analytics engine did not respond within ${QUERY_TIMEOUT_MS}ms`);
 		}
@@ -155,7 +155,7 @@ async function query(config: MetricsConfig, sql: string, fetchImpl: typeof globa
 	});
 
 	if (!response.ok) {
-		// 本文にはSQLの誤りやトークンの不足が入る, そのまま運ぶと原因が分かる
+		// 本文にはSQLの誤りやトークンの不足が入る, そのまま返すと原因を特定可能
 		const detail = await response.text().catch(() => '');
 		throw new MetricsQueryError(response.status, detail.slice(0, 500) || `analytics engine returned ${response.status}`);
 	}
@@ -190,7 +190,7 @@ export async function readMetrics(
 			};
 		}),
 		series: overTime.map((row) => ({
-			// SQL APIはUTCの文字列を返す, 画面はepochミリ秒で扱う
+			// SQL APIはUTCの文字列を返す, 画面はepochミリ秒を使用
 			at: Date.parse(`${String(row.at ?? '')}Z`.replace(' ', 'T')),
 			total: num(row.total),
 			failed: num(row.failed),

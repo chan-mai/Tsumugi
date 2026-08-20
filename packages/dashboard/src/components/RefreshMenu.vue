@@ -41,7 +41,7 @@ const label = computed(() => REFRESH_OPTIONS.find((option) => option.ms === prop
 						close();
 					"
 				>
-					<!-- 選択は排他なので, 選択中の項目にだけ印を出す -->
+					<!-- 選択は排他, 選択中の項目にだけ印を表示 -->
 					<span class="flex size-4 shrink-0 items-center justify-center">
 						<svg
 							v-if="props.interval === option.ms"

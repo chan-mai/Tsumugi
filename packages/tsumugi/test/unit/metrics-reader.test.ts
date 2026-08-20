@@ -4,7 +4,7 @@ import { bindingSql, MetricsQueryError, parseMetricsQuery, readMetrics, seriesSq
 const config = { accountId: 'acct', apiToken: 'token', dataset: 'tsumugi_jobs' };
 const parse = (query: string) => parseMetricsQuery(new URL(`https://example.test/api/metrics${query}`));
 
-/** SQL APIの応答を差し替える, 送ったSQLも記録する */
+/** SQL APIの応答を差し替える, 送ったSQLも記録 */
 function stub(responses: unknown[], status = 200) {
 	const sent: string[] = [];
 	let at = 0;
@@ -16,7 +16,7 @@ function stub(responses: unknown[], status = 200) {
 	return { sent, impl };
 }
 
-describe('集計の区間と絞り込み', () => {
+describe('集計の区間と抽出条件', () => {
 	it('既定は24時間', () => {
 		expect(parse('')).toEqual({ query: { hours: 24 } });
 	});
@@ -32,7 +32,7 @@ describe('集計の区間と絞り込み', () => {
 	});
 
 	it('binding名として成立しない値を拒否する', () => {
-		// SQLへ直接差し込むので, 入口で文字を絞る
+		// SQLへ直接埋め込む値で、入口で文字種を限定
 		for (const binding of ["MAIL' OR '1'='1", 'MAIL;DROP', '1MAIL', 'MA IL']) {
 			expect(parse(`?binding=${encodeURIComponent(binding)}`), binding).toEqual({ error: 'binding is not a valid name' });
 		}
@@ -40,9 +40,9 @@ describe('集計の区間と絞り込み', () => {
 	});
 });
 
-describe('組み立てるSQL', () => {
+describe('構築するSQL', () => {
 	it('件数をサンプリングの重みで数える', () => {
-		// 素のcount()だとサンプリングが効いた時点で実件数と乖離する
+		// 素のcount()はサンプリングの適用時点で実件数と乖離
 		const sql = bindingSql({ hours: 24 }, 'tsumugi_jobs');
 		expect(sql).toContain('sum(_sample_interval) AS total');
 		expect(sql).toContain('quantileWeighted(0.95)(double2, _sample_interval)');
@@ -56,7 +56,7 @@ describe('組み立てるSQL', () => {
 		expect(bindingSql({ hours: 24 }, 'tsumugi_jobs')).toContain("blob1 IN ('FAILED', 'STALLED')");
 	});
 
-	it('区間と絞り込みを条件に載せる', () => {
+	it('区間と抽出条件をSQLの条件に含める', () => {
 		const sql = bindingSql({ hours: 72, binding: 'MAIL' }, 'tsumugi_jobs');
 		expect(sql).toContain("INTERVAL '72' HOUR");
 		expect(sql).toContain("blob2 = 'MAIL'");
@@ -120,7 +120,7 @@ describe('応答の読み取り', () => {
 		await expect(readMetrics(config, { hours: 24 }, impl)).rejects.toMatchObject({ status: 403 });
 	});
 
-	it('アカウントIDとトークンを要求に載せる', async () => {
+	it('アカウントIDとトークンを要求に含める', async () => {
 		const sent: { url: string; init: RequestInit }[] = [];
 		const impl = (async (url: string, init: RequestInit) => {
 			sent.push({ url, init });

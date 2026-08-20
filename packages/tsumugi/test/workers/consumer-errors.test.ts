@@ -37,7 +37,7 @@ function message(body: unknown): FakeMessage {
 		body: body as DispatchMessage,
 		attempts: 1,
 		ack: vi.fn(),
-		// consumerはretryを呼ばない, 呼べばQueuesのリトライに乗る(ADR-0004)
+		// consumerはretryを呼ばない, 呼べばQueuesのリトライが発生(ADR-0004)
 		retry: vi.fn(() => {
 			throw new Error('retry must not be called');
 		}),
@@ -64,12 +64,12 @@ describe('壊れたメッセージ(ADR-0004)', () => {
 
 		await expect(handleBatch(batchOf([broken, valid]), consumerEnv, performers)).resolves.toBeUndefined();
 
-		// 分割代入がtryの外にあると本文nullで例外が出てackに到達しない
+		// 分割代入がtryの外にあると本文nullの例外でackに未到達
 		expect(broken.ack).toHaveBeenCalledTimes(1);
 		expect(broken.retry).not.toHaveBeenCalled();
-		// 壊れた本文はperformerを実行しない, 正常なメッセージだけが1回実行される
+		// 壊れた本文ではperformerは非実行, 正常なメッセージだけが1回実行
 		expect(performed).toEqual(['OK#0:valid']);
-		// 同じバッチの正常なメッセージは巻き添えにならない
+		// 同じバッチの正常なメッセージの処理は継続
 		expect(valid.ack).toHaveBeenCalledTimes(1);
 	});
 
@@ -100,7 +100,7 @@ describe('reportの失敗(ADR-0004)', () => {
 		const msg = message(validBody);
 		await expect(handleBatch(batchOf([msg]), failingEnv, performers)).resolves.toBeUndefined();
 
-		// performerは実行され, 成功をreportしようとして失敗する
+		// performerは実行され、成功のreportの時点で失敗
 		expect(performed).toEqual(['OK#0:valid']);
 		expect(report).toHaveBeenCalledTimes(1);
 		expect(report).toHaveBeenCalledWith('OK#0:valid', { ok: true });
