@@ -16,19 +16,19 @@ describe('ジョブIDの往復', () => {
 		expect(formatJobId({ binding: 'MAIL', shard: 0, localId: 'abc' })).toBe('MAIL#0:abc');
 	});
 
-	it('IDからDO名を引ける', () => {
+	it('IDからDO名を解決できる', () => {
 		expect(shardNameOf('MAIL#3:abc')).toBe('MAIL#3');
 		expect(shardName('MAIL', 3)).toBe('MAIL#3');
 	});
 });
 
 describe('不正なbindingを拒否する', () => {
-	// 区切り文字の混入でparseが壊れる,ここが崩れるとID体系全体が崩れる
+	// 区切り文字の混入でparseが壊れる, ここが崩れるとID体系全体が崩れる
 	it.each(['MA#IL', 'MA:IL', 'MAIL#0', '', '1MAIL', 'MA IL', 'MA-IL', 'メール'])('%oを拒否する', (binding) => {
 		expect(() => formatJobId({ binding, shard: 0, localId: 'abc' })).toThrow(InvalidJobIdError);
 	});
 
-	it('英字始まりの英数字とアンダースコアは通す', () => {
+	it('英字始まりの英数字とアンダースコアは受け付ける', () => {
 		for (const binding of ['MAIL', '_mail', 'sendMail2', 'A']) {
 			expect(() => formatJobId({ binding, shard: 0, localId: 'abc' })).not.toThrow();
 		}

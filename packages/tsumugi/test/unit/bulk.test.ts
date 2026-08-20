@@ -22,7 +22,7 @@ describe('一括操作の対象の検証', () => {
 		expect(validateBulk({}, 'cancel')).toEqual({ input: { kind: 'filter', states: ['SCHEDULED'], limit: BULK_LIMIT_MAX } });
 	});
 
-	it('受け付ける状態の中からなら1つに絞れる', () => {
+	it('受け付ける状態の中からなら1つに限定できる', () => {
 		expect(validateBulk({ state: 'STALLED' }, 'retry')).toEqual({
 			input: { kind: 'filter', states: ['STALLED'], limit: BULK_LIMIT_MAX },
 		});
@@ -34,7 +34,7 @@ describe('一括操作の対象の検証', () => {
 		expect(validateBulk({ state: 'FAILED' }, 'cancel')).toEqual({ error: 'state must be one of SCHEDULED for cancel' });
 	});
 
-	it('絞り込みを引き継ぐ', () => {
+	it('抽出条件を引き継ぐ', () => {
 		expect(validateBulk({ binding: 'MAIL', unique_key: 'u1', concurrency_key: 'c1', created_from: 1, created_to: 2 }, 'retry')).toEqual({
 			input: {
 				kind: 'filter',
@@ -75,7 +75,7 @@ describe('shardごとのまとめ', () => {
 	});
 
 	it('形式が壊れたIDは分けて返す', () => {
-		// 読み取りモデルの行が壊れていても他の対象まで巻き添えにしない
+		// 読み取りモデルの行が壊れていても他の対象の処理は継続
 		const { groups, invalid } = groupByShard(['MAIL#0:a', 'broken']);
 
 		expect([...groups.keys()]).toEqual(['MAIL#0']);

@@ -271,6 +271,12 @@ model Policy {
 		intervalMs: integer;
 	} | null;
 
+	@doc("Token bucket applied per concurrencyKey. One shared limit for every key. Jobs without a concurrencyKey are not limited. Null when no per-key rate limit applies.")
+	perKeyRate: {
+		tokens: integer;
+		intervalMs: integer;
+	} | null;
+
 	@doc("Null disables aging.")
 	agingIntervalMs: integer | null;
 
@@ -289,6 +295,14 @@ model UpdatePolicyRequest {
 	perKeyConcurrency?: integer;
 
 	rate?: {
+		@minValue(0)
+		tokens: integer;
+
+		@minValue(1)
+		intervalMs: integer;
+	} | null;
+
+	perKeyRate?: {
 		@minValue(0)
 		tokens: integer;
 
@@ -323,6 +337,9 @@ model Diagnostics {
 
 		@doc("Candidates skipped by the per-key concurrency limit")
 		perKey: boolean;
+
+		@doc("Candidates skipped because their key ran out of rate tokens")
+		perKeyTokens: boolean;
 	};
 
 	@doc("Limits in effect right now")

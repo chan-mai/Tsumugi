@@ -6,8 +6,8 @@ import { init, resolveWorkerName } from './init.js';
 /**
  * 引数なし起動の対話モード
  *
- * 入力を集めて`init` / `addPerformer`を呼ぶだけの薄い層にする
- * 対話の口は`Prompts`で受け取り, テストは台本を返す偽物で検査する
+ * 入力を集めて`init` / `addPerformer`を呼ぶだけの薄い層
+ * 対話の口は`Prompts`で受け取り、テストは台本を返す代替実装で検査
  */
 
 /** キャンセルはundefinedで返す */
@@ -37,7 +37,7 @@ async function tuiInit(prompts: Prompts, deps: CliDeps): Promise<number> {
 		format = picked;
 	}
 
-	// 書き込みとリソース作成の前に必ず確認を挟む
+	// 書き込みとリソース作成の前に必ず確認を実施
 	const summary = existing
 		? `create a queue and a D1 database named "${name.trim()}" and print a config fragment?`
 		: `create a queue and a D1 database named "${name.trim()}" and write wrangler.${format} and src/?`;

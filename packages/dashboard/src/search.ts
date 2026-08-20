@@ -1,6 +1,6 @@
 /**
  * ジョブ検索の対象
- * いずれもサーバ側は完全一致で絞り込む
+ * いずれもサーバ側は完全一致で抽出
  */
 export type SearchField = 'id' | 'unique_key' | 'concurrency_key';
 

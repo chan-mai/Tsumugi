@@ -5,8 +5,8 @@ import type { TsumugiRunInstance } from '../../src/do/run.js';
 /**
  * 一括の書き込みがバインド変数の上限に収まること
  *
- * 1文の変数は100個までで, 101個目でSQLITE_ERRORになる
- * fan-outの展開もtickで触れたノードの追記も件数が実行時に決まるので, 分割しないと落ちる
+ * 1文の変数は100個までで、101個目はSQLITE_ERROR
+ * fan-outの展開もtickで変更したノードの追記も件数が実行時に確定し、分割なしでは失敗
  */
 
 const ns = env.RUN as unknown as DurableObjectNamespace<TsumugiRunInstance>;

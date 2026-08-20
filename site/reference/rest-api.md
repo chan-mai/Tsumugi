@@ -307,12 +307,13 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
     "MAIL": {
       "active": 2,
       "outbox": 0,
-      "blocked": { "paused": false, "capacity": true, "tokens": false, "perKey": false },
+      "blocked": { "paused": false, "capacity": true, "tokens": false, "perKey": false, "perKeyTokens": false },
       "policy": {
         "paused": false,
         "concurrency": 100,
         "perKeyConcurrency": 1,
         "rate": null,
+        "perKeyRate": null,
         "agingIntervalMs": 60000,
         "reaperGraceMs": 30000
       }
@@ -328,7 +329,7 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
 | `blocked` | 実行待ちのジョブがどの制約で待機しているかの内訳 |
 | `policy`  | 現在適用されている実行量の設定                   |
 
-`blocked`の内訳は、`paused`が一時停止、`capacity`が同時実行数、`tokens`がレート、`perKey`がキー単位の上限に対応します。
+`blocked`の内訳は、`paused`が一時停止、`capacity`が同時実行数、`tokens`がレート、`perKey`がキー単位の同時実行数、`perKeyTokens`がキー単位のレートに対応します。
 
 対象はshard 0のみです。分割している場合、他のshardは含まれません。
 
@@ -346,6 +347,7 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
 | `concurrency`       | 同時実行数。0以上の整数                                  |
 | `perKeyConcurrency` | キー単位の同時実行数。0以上の整数                        |
 | `rate`              | `{ tokens, intervalMs }`。`null`でレート制限を解除します |
+| `perKeyRate`        | `{ tokens, intervalMs }`。キー単位のレート制限。`null`で解除します |
 | `agingIntervalMs`   | エージングの間隔。`null`で無効                           |
 | `reaperGraceMs`     | 無応答と判定するまでの猶予。0以上の整数                  |
 
@@ -362,6 +364,7 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
     "concurrency": 5,
     "perKeyConcurrency": 1,
     "rate": null,
+    "perKeyRate": null,
     "agingIntervalMs": 60000,
     "reaperGraceMs": 30000
   }

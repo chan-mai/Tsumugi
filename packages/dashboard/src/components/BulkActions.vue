@@ -3,7 +3,7 @@ import { Menu, MenuButton, MenuItem, MenuItems, TransitionRoot } from '@headless
 import { ref } from 'vue';
 import { bulkAction } from '../api';
 
-/** 一括操作が受け付ける状態, サーバ側の制限を押す前に示す */
+/** 一括操作が受け付ける状態, サーバ側の制限を操作前に提示 */
 const TARGET_STATES = { retry: ['FAILED', 'STALLED'], cancel: ['SCHEDULED'] } as const;
 
 const props = defineProps<{ ids: string[] }>();
@@ -78,7 +78,7 @@ async function run(action: 'retry' | 'cancel') {
 		</TransitionRoot>
 	</Menu>
 
-	<!-- 選択には対象外の状態も混ざり得るので, 受け付ける状態を押す前に示す -->
+	<!-- 選択には対象外の状態も混ざり得る, 受け付ける状態を操作前に提示 -->
 	<div v-if="confirming" class="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" @click.self="confirming = null">
 		<div class="w-full max-w-md rounded-card border border-border bg-background p-4 shadow-md">
 			<h2 class="text-base font-medium">{{ confirming === 'retry' ? 'Retry' : 'Cancel' }} {{ props.ids.length }} jobs</h2>

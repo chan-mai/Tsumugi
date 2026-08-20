@@ -4,12 +4,12 @@ import type { Backoff, DeliveryGuarantee } from './types.js';
 /**
  * flowの定義(ADR-0030)
  *
- * 写像関数はJSON化できないのでDOには保存できず,定義はコードにしか無い
- * Run DOへ渡るのは`shapeOf`が返す形だけで,関数はその都度ここから引く
- * uniqueKeyはノードでは受け付けない(ADR-0033)
+ * 写像関数はJSON化不能でDOへ保存不可、定義はコードにしか無い
+ * Run DOへ渡るのは`shapeOf`が返す形だけで、関数はその都度ここから取得
+ * uniqueKeyはノードでは不可(ADR-0033)
  */
 
-/** ノードIDに許す文字, `parent:child`で子を作るので区切り文字を弾く(ADR-0032) */
+/** ノードIDの許可文字, `parent:child`の子IDに入る区切り文字は拒否(ADR-0032) */
 const NODE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export class InvalidFlowError extends Error {
@@ -19,24 +19,24 @@ export class InvalidFlowError extends Error {
 	}
 }
 
-/** flow定義の中でノードを指す印,型のために結果の型を運ぶ */
+/** flow定義の中でノードを指す印, 型のために結果の型を保持 */
 export type NodeRef<Result = unknown> = {
 	readonly id: string;
 	/** 型のためだけのプロパティ, 実体なし */
 	readonly __result?: Result;
 };
 
-/** fan-outノードが後続へ渡す集計値,個々のresultは渡さない(ADR-0035) */
+/** fan-outノードが後続へ渡す集計値, 個々のresultは対象外(ADR-0035) */
 export type FanOutSummary = { total: number; succeeded: number; failed: number };
 
 type Refs = Record<string, NodeRef<any>>;
 
-/** `after`のキーをそのまま受け取り口の名前にする */
+/** `after`のキーがそのまま受け取り口の名前 */
 type DepsOf<A extends Refs> = { [K in keyof A]: A[K] extends NodeRef<infer R> ? R : never };
 
 /**
- * 依存が成功していない場合も進む指定では戻り値が無い依存を受ける(ADR-0041)
- * 失敗したノードには戻り値が無いので, 受け取り口を未定義込みで見せる
+ * 依存が成功していない場合も進む指定では、戻り値が無い依存も対象(ADR-0041)
+ * 失敗したノードには戻り値が無く、受け取り口は未定義込みの型
  */
 type PartialDepsOf<A extends Refs> = { [K in keyof A]: DepsOf<A>[K] | undefined };
 
@@ -48,10 +48,10 @@ export type NodeTrigger = 'success' | 'failure' | 'always';
 
 export const NODE_TRIGGERS: readonly NodeTrigger[] = ['success', 'failure', 'always'];
 
-/** uniqueKeyを必須と宣言したperformerはノードに使えない(ADR-0033) */
+/** uniqueKeyを必須と宣言したperformerはノードに使用不可(ADR-0033) */
 type NodeBindings<M extends Performers> = { [K in keyof M]: ReqOf<M[K]>['uniqueKey'] extends true ? never : K }[keyof M];
 
-/** ノードに書けるジョブの設定, uniqueKeyだけ持たない */
+/** ノードに書けるジョブの設定, uniqueKeyのみ非対応 */
 export type NodeJobOptions = {
 	maxAttempts?: number;
 	backoff?: Backoff;
@@ -68,11 +68,11 @@ type ConcurrencyKeyOption<R extends Requirements, Resolve> = R['concurrencyKey']
 
 /** flow全体の設定, ノード単位の設定はノードのオプションが持つ */
 export type FlowOptions = {
-	/** run全体の期限(ms), 超過したrunは打ち切られFAILEDになる(ADR-0039) */
+	/** run全体の期限(ms), 超過したrunは中断されFAILEDへ(ADR-0039) */
 	deadlineMs?: number;
 };
 
-/** 期限の検査, flow定義とstartの両方で使う(ADR-0039) */
+/** 期限の検査, flow定義とstartの両方で使用(ADR-0039) */
 export function assertDeadlineMs(value: number): void {
 	if (!Number.isInteger(value) || value <= 0) {
 		throw new InvalidFlowError(`deadlineMs must be a positive integer: ${value}`);
@@ -81,7 +81,7 @@ export function assertDeadlineMs(value: number): void {
 
 /**
  * 発火条件ごとに受け取り口の型を分ける(ADR-0041)
- * successの指定でだけ依存の戻り値が揃うので, 写像関数の引数を判別可能ユニオンで切り替える
+ * successの指定でだけ依存の戻り値が揃い、写像関数の引数は判別可能ユニオンで切り替え
  * `when`はfalseを返すとSKIPPEDになり, 下流も依存が成功していないので進まない
  */
 type NodeShape<M extends Performers, K extends keyof M, Input, Deps> = NodeJobOptions & {
@@ -94,7 +94,7 @@ export type NodeOptions<M extends Performers, K extends keyof M, Input, A extend
 	| (NodeShape<M, K, Input, PartialDepsOf<A>> & { after?: A; trigger: 'failure' | 'always' });
 
 type FanOutShape<M extends Performers, K extends keyof M, Input, Item, Deps> = NodeJobOptions & {
-	/** 展開する対象,件数だけが実行時に決まる */
+	/** 展開する対象, 件数だけが実行時に確定 */
 	over: (input: Input, deps: Deps) => readonly Item[];
 	input: (item: Item, input: Input, index: number) => PayloadOf<M[K]>;
 	/** 子ノードIDの決め方,既定は項番(ADR-0032) */
@@ -111,7 +111,7 @@ type SubflowShape<Input, ChildInput, Deps> = {
 	when?: (input: Input, deps: Deps) => boolean;
 };
 
-/** 子のrunへ渡す入力を組み立てる, 戻り値の型は子のflowの入力に一致させる */
+/** 子のrunへ渡す入力の構築, 戻り値の型は子のflowの入力に一致 */
 export type SubflowOptions<Input, A extends Refs, ChildInput> =
 	| (SubflowShape<Input, ChildInput, DepsOf<A>> & { after?: A; trigger?: 'success' })
 	| (SubflowShape<Input, ChildInput, PartialDepsOf<A>> & { after?: A; trigger: 'failure' | 'always' });
@@ -128,8 +128,8 @@ export type FlowBuilder<M extends Performers, Input> = {
 		options: FanOutOptions<M, K, Input, A, Item>,
 	): NodeRef<FanOutSummary>;
 	/**
-	 * 別のflowをrunとして起動し, 終端に達するまで待つ
-	 * 子の戻り値は受け取らない, runを跨ぐデータを増やさないため(ADR-0035)
+	 * 別のflowをrunとして起動し、終端に達するまで待機
+	 * 子の戻り値は非対象, runを跨ぐデータの増加防止(ADR-0035)
 	 */
 	subflow<ChildInput, const A extends Refs = {}>(
 		id: string,
@@ -138,7 +138,7 @@ export type FlowBuilder<M extends Performers, Input> = {
 	): NodeRef<void>;
 };
 
-/** 組み立て済みのノードが持つ関数,型引数を落として実行時の形に揃える */
+/** 構築済みノードが持つ関数, 型引数を除いた実行時の形 */
 export type InputFn = (input: unknown, deps: Record<string, unknown>) => unknown;
 export type OverFn = (input: unknown, deps: Record<string, unknown>) => readonly unknown[];
 export type ItemFn = (item: unknown, input: unknown, index: number) => unknown;
@@ -146,11 +146,11 @@ export type ChildKeyFn = (item: unknown, index: number) => string;
 export type ConcurrencyKeyFn = (input: unknown, deps: Record<string, unknown>) => string;
 export type WhenFn = (input: unknown, deps: Record<string, unknown>) => boolean;
 
-/** 組み立て済みのノード,関数はここにしか無い */
+/** 構築済みのノード, 関数はここにしか無い */
 export type FlowNode = {
 	id: string;
 	binding: string;
-	/** fan-outノード, ジョブを持たず子の展開と集約のみを行う */
+	/** fan-outノード, ジョブを持たず子の展開と集約のみ */
 	container: boolean;
 	/** 受け取り口の名前から依存先のノードIDへ */
 	after: Readonly<Record<string, string>>;
@@ -158,7 +158,7 @@ export type FlowNode = {
 	trigger: NodeTrigger;
 	job: NodeJobOptions;
 	input: InputFn;
-	/** 実行するかの判定, 省略時は常に実行する(ADR-0041) */
+	/** 実行するかの判定, 省略時は常に実行(ADR-0041) */
 	when?: WhenFn;
 	concurrencyKey?: string | ConcurrencyKeyFn;
 	/** fan-outノードのみ */
@@ -175,21 +175,21 @@ export type FlowNode = {
 
 export type Flow<Input = unknown> = {
 	readonly nodes: readonly FlowNode[];
-	/** run全体の期限(ms), startの指定が優先される(ADR-0039) */
+	/** run全体の期限(ms), startの指定が優先(ADR-0039) */
 	readonly deadlineMs?: number;
 	/** 型のためだけのプロパティ, 実体なし */
 	readonly __input?: Input;
 };
 
-/** 任意のflowを受ける型, `flows`の要素として使う */
+/** 任意のflowを受ける型, `flows`の要素として使用 */
 export type AnyFlow = Flow<any>;
 
 export type Flows = Record<string, AnyFlow>;
 
-/** flowの入力の型, `start`の引数を`flows`から決める */
+/** flowの入力の型, `start`の引数を`flows`から導出 */
 export type InputOf<F> = F extends Flow<infer I> ? I : never;
 
-/** Run DOへ保存するグラフの形(ADR-0030),関数は含まない */
+/** Run DOへ保存するグラフの形(ADR-0030), 関数は対象外 */
 export type FlowShapeNode = {
 	id: string;
 	binding: string;
@@ -202,22 +202,22 @@ export type FlowShapeNode = {
 export type FlowShape = readonly FlowShapeNode[];
 
 /**
- * 保存する形へ落とす
- * subflowノードは起動する子のflow名が要る, 名前はflow定義そのものからは引けないので外から渡す
+ * 保存する形へ変換
+ * subflowノードは起動する子のflow名が必要, 名前はflow定義に無く引数で受領
  */
 export function shapeOf(flow: AnyFlow, nameOf?: (child: AnyFlow) => string | undefined): FlowShape {
 	return flow.nodes.map((node) => ({
 		id: node.id,
 		binding: node.binding,
 		container: node.container,
-		// 同じ依存先を複数の受け取り口で受けた場合に重複するので畳む, 依存の数を数える側がずれる
+		// 同じ依存先を複数の受け取り口で受けた場合の重複を除去, 依存数の集計のずれを防止
 		after: [...new Set(Object.values(node.after))],
 		trigger: node.trigger,
 		...(node.subflow ? { subflow: subflowNameOf(node.id, nameOf?.(node.subflow)) } : {}),
 	}));
 }
 
-/** 起動先のflow名、名前の無い形を保存するとrunIdを組み立てる時点まで誤りに気付けない */
+/** 起動先のflow名, 名前の無い形の保存は誤りの発覚がrunId構築時まで遅延 */
 function subflowNameOf(nodeId: string, name: string | undefined): string {
 	if (!name) throw new InvalidFlowError(`subflow target is not registered: ${nodeId}`);
 	return name;
@@ -236,7 +236,7 @@ export function assertNodeId(id: string): void {
 const refIds = (after: Refs | undefined): Record<string, string> =>
 	Object.fromEntries(Object.entries(after ?? {}).map(([name, ref]) => [name, ref.id]));
 
-/** 発火条件と判定を取り出す, 3種のノードで同じ形(ADR-0041) */
+/** 発火条件と判定の抽出, 3種のノードで同じ形(ADR-0041) */
 const gateOf = (options: Record<string, any>): { trigger: NodeTrigger; when?: WhenFn } => ({
 	trigger: (options.trigger as NodeTrigger | undefined) ?? 'success',
 	...(options.when !== undefined ? { when: options.when as WhenFn } : {}),
@@ -255,8 +255,8 @@ const jobOptionsOf = (options: NodeJobOptions): NodeJobOptions => ({
 /**
  * `performers`からflowを定義する関数を作る
  *
- * `performers`は型を運ぶためだけの引数で実行時には読まない
- * これを通すことでbinding名もpayloadも必須キーも`performers`1箇所から決まる(ADR-0010)
+ * `performers`は型の伝達のみの引数で実行時には未使用
+ * この経由でbinding名もpayloadも必須キーも`performers`1箇所から確定(ADR-0010)
  */
 export function createFlow<const R extends Record<string, unknown>>(_performers: R) {
 	return function flow<Input>(build: (f: FlowBuilder<PerformersOf<R>, Input>) => void, options?: FlowOptions): Flow<Input> {
@@ -269,13 +269,13 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 			if (!NODE_TRIGGERS.includes(node.trigger)) {
 				throw new InvalidFlowError(`invalid trigger: ${node.id} -> ${JSON.stringify(node.trigger)}`);
 			}
-			// 依存が無ければ成否を問う相手がいない, 書けてしまうと意図が伝わらないので弾く
+			// 依存が無いと成否の判定対象が無い, 意図が不明確な記述は拒否
 			if (node.trigger !== 'success' && Object.keys(node.after).length === 0) {
 				throw new InvalidFlowError(`trigger requires at least one dependency: ${node.id}`);
 			}
 			if (seen.has(node.id)) throw new InvalidFlowError(`duplicate node id: ${node.id}`);
 			seen.add(node.id);
-			// 宣言済みのノードしか変数で参照できないので,循環は構文的に起きない
+			// 宣言済みのノードしか変数で参照できず、循環は構文上あり得ない
 			for (const dependency of Object.values(node.after)) {
 				if (!seen.has(dependency)) throw new InvalidFlowError(`depends on an undeclared node: ${node.id} -> ${dependency}`);
 			}
@@ -299,7 +299,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 			subflow(id: string, child: AnyFlow, options: Record<string, any>) {
 				return register({
 					id,
-					// bindingはperformerを指さない, 画面には起動するflow名を出す
+					// bindingはperformerを指さない, 画面には起動するflow名を表示
 					binding: '',
 					container: false,
 					after: refIds(options.after as Refs | undefined),
@@ -317,7 +317,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 					after: refIds(options.after as Refs | undefined),
 					...gateOf(options),
 					job: jobOptionsOf(options as NodeJobOptions),
-					// fan-outノードはジョブを実行しないのでpayloadを組み立てない
+					// fan-outノード自体はジョブを実行せずpayload構築も不要
 					input: () => undefined,
 					over: options.over as OverFn,
 					item: options.input as ItemFn,

@@ -8,7 +8,7 @@ import type { ScheduleView } from '../../src/do/scheduler.js';
  * 定期実行(ADR-0040)
  *
  * scheduleの定義はexamples/basicが持つ, Scheduler DOはそこから引く
- * poll-namesは固定間隔でskip, ping-helloは重ねる指定, nightlyはcronでflowを起動する
+ * poll-namesは固定間隔でskip, ping-helloは重ねる指定, nightlyはcronでflowを起動
  */
 
 const POLL_MS = 5 * 60 * 1000;
@@ -16,8 +16,8 @@ const PING_MS = 60_000;
 
 /**
  * テストごとの起点
- * 予定を過去に置くと固定した時計と無関係にalarmが即発火するので未来に置く
- * 発火先のジョブIDは予定時刻から決まるため, テストごとに日を分けて衝突を避ける
+ * 予定を過去に置くと固定した時計と無関係にalarmが即発火するため未来に配置
+ * 発火先のジョブIDは予定時刻から確定, テストごとに日を分けて衝突を回避
  */
 const day = (n: number) => Date.UTC(2046, 0, 5 + n, 12, 0, 0);
 
@@ -25,8 +25,8 @@ const day = (n: number) => Date.UTC(2046, 0, 5 + n, 12, 0, 0);
 const nightlyOf = (base: number) => base + 15 * 60 * 60 * 1000;
 
 /**
- * 使う分だけを宣言する
- * DOの面をそのまま通すと戻り値の展開が深くなりTS2589に触れるので, 一覧はここでは緩く受ける
+ * 使う分だけを宣言
+ * DOの面をそのまま使うと戻り値の展開が深くなりTS2589に抵触し、一覧はここでは緩く受ける
  */
 interface SchedulerFace extends Rpc.DurableObjectBranded {
 	sync(): Promise<void>;
@@ -60,14 +60,14 @@ async function installQueues(): Promise<void> {
 
 const jobIdOf = (binding: string, name: string, occurrence: number) => `${binding}#0:${name}-${occurrence}`;
 
-/** 発火先に入ったジョブの状態, 実キューへは出さないので投入直後はSCHEDULED */
+/** 発火先に入ったジョブの状態, 実キューへは送らず投入直後はSCHEDULED */
 const jobStateOf = (binding: string, jobId: string) =>
 	runInDurableObject(shard(binding), (instance) => (instance as any).repo.find(jobId)?.state as string | undefined);
 
 const fired = async (binding: string, name: string, occurrence: number) =>
 	(await jobStateOf(binding, jobIdOf(binding, name, occurrence))) !== undefined;
 
-/** 発火した子のrunを覗く用, こちらも使う分だけを宣言する */
+/** 発火した子のrunの確認用, こちらも使う分だけを宣言 */
 interface RunFace extends Rpc.DurableObjectBranded {
 	state(): Promise<string | null>;
 }
@@ -80,7 +80,7 @@ const runRowOf = (runId: string) =>
 		(instance) => (instance as any).repo.findRun() as RunRow | undefined,
 	);
 
-/** 時計を進めてalarmを1回発火させる */
+/** 時計を進めてalarmを1回発火させるヘルパ */
 async function tickAt(now: number): Promise<void> {
 	await runInDurableObject(inside(), (instance) => {
 		(instance as any).clock = { now: () => now };
@@ -90,8 +90,8 @@ async function tickAt(now: number): Promise<void> {
 
 /**
  * 定義を同期して時計を合わせる
- * DOのストレージはテストを跨いで残るので, 行だけ捨ててから作り直す
- * deleteAllは表ごと落とす, 生成済みのrepoはスキーマを張り直さないので使わない
+ * DOのストレージはテストを跨いで残り、行だけ削除してから作り直す
+ * deleteAllは表ごと削除, 生成済みのrepoはスキーマを再作成せず不使用
  */
 async function sync(now: number): Promise<void> {
 	await installQueues();
@@ -105,7 +105,7 @@ async function sync(now: number): Promise<void> {
 }
 
 describe('定期実行(ADR-0040)', () => {
-	it('syncが定義から行を作り最も早い予定へalarmを張る', async () => {
+	it('syncが定義から行を作り最も早い予定へalarmを設定する', async () => {
 		const base = day(0);
 		await sync(base);
 
@@ -163,7 +163,7 @@ describe('定期実行(ADR-0040)', () => {
 		await shard('Hello').cancel(jobId);
 		expect(await jobStateOf('Hello', jobId)).toBe('CANCELLED');
 
-		// 予定を巻き戻して同じ時刻をもう一度迎えさせる, 決定的IDなので既存が返る(ADR-0029)
+		// 予定を過去へ戻して同じ時刻をもう一度迎えさせる, 決定的IDのため既存が返る(ADR-0029)
 		await runInDurableObject(inside(), (instance) => {
 			(instance as any).repo.markSkipped('ping-hello', occurrence, occurrence);
 		});
@@ -172,13 +172,13 @@ describe('定期実行(ADR-0040)', () => {
 		expect(await jobStateOf('Hello', jobId)).toBe('CANCELLED');
 	});
 
-	it('前回が終わっていなければ飛ばす', async () => {
+	it('前回が終わっていなければ省略する', async () => {
 		const base = day(4);
 		await sync(base);
 		const first = base + POLL_MS;
 		await tickAt(first);
 
-		// 投入したジョブはSCHEDULEDのまま, 次の予定でskipされる
+		// 投入したジョブはSCHEDULEDのまま, 次の予定でskip
 		await tickAt(first + POLL_MS);
 
 		expect(await fired('ListNames', 'poll-names', first + POLL_MS)).toBe(false);
@@ -190,13 +190,13 @@ describe('定期実行(ADR-0040)', () => {
 		});
 	});
 
-	it('前回が終端に達していれば飛ばさない', async () => {
+	it('前回が終端に達していれば省略しない', async () => {
 		const base = day(5);
 		await sync(base);
 		const first = base + POLL_MS;
 		await tickAt(first);
 
-		// 前回を終端へ送る, 掃除済みのnullも同じく終了扱いになる
+		// 前回を終端へ進める, 削除済みのnullも同じく終了扱い
 		await shard('ListNames').cancel(jobIdOf('ListNames', 'poll-names', first));
 		await tickAt(first + POLL_MS);
 
@@ -222,7 +222,7 @@ describe('定期実行(ADR-0040)', () => {
 		const first = base + PING_MS;
 		await tickAt(first);
 
-		// 3周期ぶん遅れてから起きる, 溜まった予定は最も古い1回だけを発火する
+		// 3周期ぶん遅れてから起動, 未消化の予定は最も古い1回だけを発火
 		await tickAt(first + PING_MS * 3 + 1_000);
 
 		expect(await fired('Hello', 'ping-hello', first + PING_MS)).toBe(true);
@@ -240,7 +240,7 @@ describe('定期実行(ADR-0040)', () => {
 		await sync(base);
 		const occurrence = nightlyOf(base);
 
-		// RUNのbindingを外して子のrunの起動を失敗させる
+		// RUNのbindingを未設定にして子のrunの起動を失敗させる状況
 		const restore = await runInDurableObject(inside(), (instance) => {
 			const saved = (instance as any).env.RUN;
 			(instance as any).env.RUN = undefined;
@@ -253,7 +253,7 @@ describe('定期実行(ADR-0040)', () => {
 
 		const row = await rowOf('nightly');
 		expect(row?.last_error).toContain('RUN binding is not configured');
-		// 進めないと同じ行が先頭に居座り, 他のscheduleが発火しなくなる
+		// 進めないと同じ行が先頭に残存し, 他のscheduleが発火しなくなる
 		expect(row?.next_run_at).toBe(occurrence + 24 * 60 * 60 * 1000);
 		expect(row?.last_run_at).toBeNull();
 	});
@@ -275,7 +275,7 @@ describe('定期実行(ADR-0040)', () => {
 		});
 
 		expect((await rowOf('nightly'))?.last_error).not.toBeNull();
-		// ping-helloは起点から見て何周期も過ぎているので, 同じtickで発火している
+		// ping-helloは起点から見て何周期も過ぎており、同じtickで発火している
 		expect((await rowOf('ping-hello'))?.last_fired_at).toBe(occurrence);
 	});
 
@@ -306,7 +306,7 @@ describe('定期実行(ADR-0040)', () => {
 		expect(list[0]).toMatchObject({ kind: 'flow', target: 'GREETINGS', last_job_id: null, skipped_count: 0 });
 	});
 
-	it('発火の後は次の予定へalarmを張り直す', async () => {
+	it('発火の後は次の予定へalarmを再設定する', async () => {
 		const base = day(10);
 		await sync(base);
 		const occurrence = base + PING_MS;

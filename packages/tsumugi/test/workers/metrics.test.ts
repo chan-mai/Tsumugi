@@ -40,7 +40,7 @@ function captureDataset() {
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
-describe('計測点の組み立て', () => {
+describe('計測点の構築', () => {
 	it('終端に達した遷移だけを書く', () => {
 		for (const state of ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED']) {
 			expect(toPoint(row({ state }))).not.toBeNull();
@@ -96,7 +96,7 @@ describe('tickからの書き出し', () => {
 
 		const jobId = await stub.enqueue({ binding: 'MET', payload: {} });
 		await runDurableObjectAlarm(stub);
-		// ここまではSCHEDULEDとQUEUEDだけなので何も書かれない
+		// ここまではSCHEDULEDとQUEUEDだけで何も書かれない
 		expect(points).toHaveLength(0);
 
 		await runInDurableObject(stub, (instance) => {
@@ -111,7 +111,7 @@ describe('tickからの書き出し', () => {
 	});
 
 	it('sweepで明細を消してもメトリクスは残る', async () => {
-		// メトリクスはAnalytics Engine側にあるのでD1の明細とは保持期間が別(ADR-0016)
+		// メトリクスはAnalytics Engine側にあり, D1の明細とは保持期間が別(ADR-0016)
 		const { points, dataset } = captureDataset();
 		const stub = shard('MET2#0');
 
@@ -134,7 +134,7 @@ describe('tickからの書き出し', () => {
 	});
 
 	it('writeMetricsが失敗してもtickは止まらずカーソルが進む(#7)', async () => {
-		// writeDataPointが例外を投げる状況, メトリクスは省略可能なのでtickを止めてはいけない
+		// writeDataPointが例外を投げる状況, メトリクスは省略可能でtickを止めてはいけない
 		const boom = {
 			writeDataPoint: () => {
 				throw new Error('AE is down');
@@ -160,7 +160,7 @@ describe('tickからの書き出し', () => {
 		// 投影はメトリクスの失敗に巻き込まれずD1へ届く
 		const projected = await env.TSUMUGI_DB.prepare('SELECT state FROM job WHERE id = ?').bind(jobId).first<{ state: string }>();
 		expect(projected?.state).toBe('COMPLETED');
-		// カーソルが進みアウトボックスが残らない, 残ると次tickで同じメトリクスを二重書きする
+		// カーソルが進みアウトボックスが残らない, 残ると次tickで同じメトリクスが二重書きになる事故
 		const outbox = await runInDurableObject(stub, (instance) => (instance as any).repo.countOutbox() as number);
 		expect(outbox).toBe(0);
 	});

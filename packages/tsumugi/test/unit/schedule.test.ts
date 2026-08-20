@@ -9,6 +9,7 @@ const policy = (over: Partial<Policy> = {}): Policy => ({
 	concurrency: 10,
 	perKeyConcurrency: 1,
 	rate: null,
+	perKeyRate: null,
 	agingIntervalMs: null,
 	reaperGraceMs: 30_000,
 	...over,
@@ -87,9 +88,9 @@ describe('concurrencyKey単位の上限(ADR-0009)', () => {
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
 	});
 
-	it('埋まったキーが他のキーを巻き添えにしない', () => {
+	it('上限に達したキーが他のキーの投入を止めない', () => {
 		// 実装がcontinueではなくbreakしていると'c'が投入されず,
-		// 1テナントが全体を止める事故になる
+		// 1テナントが全体を止める事故につながる
 		const jobs = [
 			job({ id: 'a', concurrencyKey: 'cust-1' }),
 			job({ id: 'b', concurrencyKey: 'cust-1' }),
@@ -116,7 +117,7 @@ describe('concurrencyKey単位の上限(ADR-0009)', () => {
 });
 
 describe('レート制限(ADR-0009)', () => {
-	it('トークンが尽きたら止まる', () => {
+	it('トークンが枯渇したら止まる', () => {
 		const jobs = [job({ id: 'a' }), job({ id: 'b' }), job({ id: 'c' })];
 		const out = schedule({
 			now: T0,
@@ -151,7 +152,7 @@ describe('レート制限(ADR-0009)', () => {
 		expect(out.bucket.tokens).toBeCloseTo(4, 5);
 	});
 
-	it('上限を超えて溜まらない', () => {
+	it('上限を超えて補充されない', () => {
 		const out = schedule({
 			now: T0 + 3_600_000,
 			jobs: [],
@@ -159,6 +160,104 @@ describe('レート制限(ADR-0009)', () => {
 			bucket: { tokens: 0, refilledAt: T0 },
 		});
 		expect(out.bucket.tokens).toBe(60);
+	});
+});
+
+describe('キー単位のレート制限(ADR-0045)', () => {
+	const perKey = { tokens: 60, intervalMs: 60_000 };
+
+	it('キーのトークンが枯渇しても他のキーとキーがnullのジョブは投入される', () => {
+		const jobs = [
+			job({ id: 'a', concurrencyKey: 'cust-1' }),
+			job({ id: 'b', concurrencyKey: 'cust-1' }),
+			job({ id: 'c', concurrencyKey: 'cust-2' }),
+			job({ id: 'd' }),
+		];
+		const out = schedule({
+			now: T0,
+			jobs,
+			policy: policy({ perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } }),
+			bucket: unlimited,
+		});
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a', 'c', 'd']);
+	});
+
+	it('キーがnullのジョブには適用しない', () => {
+		const jobs = [job({ id: 'a' }), job({ id: 'b' }), job({ id: 'c' })];
+		const out = schedule({ now: T0, jobs, policy: policy({ perKeyRate: { tokens: 1, intervalMs: 60_000 } }), bucket: unlimited });
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a', 'b', 'c']);
+	});
+
+	it('全体のレートと併存し先に枯渇した方で止まる', () => {
+		const jobs = [job({ id: 'a', concurrencyKey: 'cust-1' }), job({ id: 'b', concurrencyKey: 'cust-2' })];
+		const out = schedule({
+			now: T0,
+			jobs,
+			policy: policy({ perKeyConcurrency: 10, rate: { tokens: 60, intervalMs: 60_000 }, perKeyRate: perKey }),
+			bucket: { tokens: 1, refilledAt: T0 },
+		});
+		// 1トークンで'a'のみ, 残りtokensでbreak
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
+		expect(out.blocked.tokens).toBe(true);
+	});
+
+	it('入力のキー別バケットは経過時間ぶん補充される', () => {
+		const out = schedule({
+			now: T0 + 5_000,
+			jobs: [job({ id: 'a', concurrencyKey: 'cust-1', runAfter: T0 })],
+			policy: policy({ perKeyConcurrency: 10, perKeyRate: perKey }),
+			bucket: unlimited,
+			keyBuckets: { 'cust-1': { tokens: 0, refilledAt: T0 } },
+		});
+		// 5秒で5トークン回復, 1件消費して4
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
+		expect(out.keyBuckets['cust-1']?.tokens).toBeCloseTo(4, 5);
+	});
+
+	it('キーのトークン不足ならその回復時刻に起動する', () => {
+		const out = schedule({
+			now: T0,
+			jobs: [job({ id: 'a', concurrencyKey: 'cust-1' })],
+			policy: policy({ perKeyConcurrency: 10, perKeyRate: perKey }),
+			bucket: unlimited,
+			keyBuckets: { 'cust-1': { tokens: 0, refilledAt: T0 } },
+		});
+		expect(out.decisions).toEqual([]);
+		expect(out.blocked.perKeyTokens).toBe(true);
+		expect(out.nextAlarmAt).toBe(T0 + 1_000);
+	});
+
+	it('出力は上限到達のキーを含まずperKeyRate無効なら空になる', () => {
+		const out = schedule({
+			now: T0 + 3_600_000,
+			jobs: [],
+			policy: policy({ perKeyConcurrency: 10, perKeyRate: perKey }),
+			bucket: unlimited,
+			keyBuckets: { 'cust-1': { tokens: 0, refilledAt: T0 } },
+		});
+		// 上限まで回復したキーは出力から消え保存側の削除対象
+		expect(out.keyBuckets).toEqual({});
+
+		const disabled = schedule({
+			now: T0,
+			jobs: [],
+			policy: policy(),
+			bucket: unlimited,
+			keyBuckets: { 'cust-1': { tokens: 0, refilledAt: T0 } },
+		});
+		expect(disabled.keyBuckets).toEqual({});
+	});
+
+	it('キー別バケット省略時は全キーをtokens上限から開始する', () => {
+		const jobs = [job({ id: 'a', concurrencyKey: 'cust-1' }), job({ id: 'b', concurrencyKey: 'cust-1' })];
+		const out = schedule({
+			now: T0,
+			jobs,
+			policy: policy({ perKeyConcurrency: 10, perKeyRate: { tokens: 2, intervalMs: 60_000 } }),
+			bucket: unlimited,
+		});
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a', 'b']);
+		expect(out.keyBuckets['cust-1']?.tokens).toBe(0);
 	});
 });
 
@@ -242,7 +341,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('投入より前の生存報告では期限を縮めない', () => {
-		// 再投入で報告が消えなかった場合でも, 判定が早まってはならない
+		// 再投入で報告が消えなかった場合でも, 判定の前倒しは禁止
 		const out = schedule({
 			now: T0 + 90_000 - 1,
 			jobs: [dispatched({ id: 'a', heartbeatAt: T0 - 60_000 })],
@@ -253,7 +352,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('at-most-onceは再投入せずSTALLEDにする', () => {
-		// Queues自体がat-least-onceなので,再投入すると二重実行になり得る
+		// Queues自体がat-least-onceで、再投入すると二重実行になり得る
 		const out = schedule({
 			now: T0 + 90_000,
 			jobs: [dispatched({ id: 'a', guarantee: 'at-most-once' })],
@@ -295,7 +394,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('RUNNING中に落ちたジョブが滞留しない', () => {
-		// 待ち状態しか見ない実装ではisolateが落ちたジョブが永久に放置される
+		// 待ち状態しか読まない実装ではisolateが停止したジョブが永久に未処理
 		const out = schedule({
 			now: T0 + 10_000_000,
 			jobs: [dispatched({ id: 'zombie', state: 'RUNNING' })],
@@ -308,8 +407,8 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 
 describe('nextAlarmAt', () => {
 	it('投入したジョブの無応答判定時刻を含める', () => {
-		// 入力のスナップショットでは投入対象はまだSCHEDULEDなので, nextSilenceには現れない
-		// ここを取りこぼすと投入後にDOを起動する予定が立たず,応答が無いジョブが永久に回収されない
+		// 入力のスナップショットでは投入対象はまだSCHEDULEDで, nextSilenceには現れない
+		// この予定が無いと投入後のDO起動の予定が立たず、応答が無いジョブは永久に未回収
 		const out = schedule({
 			now: T0,
 			jobs: [job({ id: 'a', timeoutMs: 60_000 })],
@@ -348,7 +447,7 @@ describe('投入が止まった制約の報告(ADR-0009, #10)', () => {
 	it('上限に達するとcapacity', () => {
 		const out = schedule({ now: T0, jobs: [job({ id: 'a' }), job({ id: 'b' })], policy: policy({ concurrency: 1 }), bucket: unlimited });
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
-		expect(out.blocked).toEqual({ paused: false, capacity: true, tokens: false, perKey: false });
+		expect(out.blocked).toEqual({ paused: false, capacity: true, tokens: false, perKey: false, perKeyTokens: false });
 	});
 
 	it('トークンが足りないとtokens', () => {
@@ -359,18 +458,30 @@ describe('投入が止まった制約の報告(ADR-0009, #10)', () => {
 			bucket: { tokens: 0, refilledAt: T0 },
 		});
 		expect(ids(out.decisions, 'dispatch')).toEqual([]);
-		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: true, perKey: false });
+		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: true, perKey: false, perKeyTokens: false });
 	});
 
-	it('キー単位の上限で候補を飛ばすとperKey', () => {
+	it('キー単位の上限で候補を除外するとperKey', () => {
 		const jobs = [job({ id: 'a', concurrencyKey: 'k' }), job({ id: 'b', concurrencyKey: 'k' })];
 		const out = schedule({ now: T0, jobs, policy: policy({ perKeyConcurrency: 1 }), bucket: unlimited });
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
-		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: false, perKey: true });
+		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: false, perKey: true, perKeyTokens: false });
+	});
+
+	it('キーのトークンが足りず候補を除外するとperKeyTokens', () => {
+		const jobs = [job({ id: 'a', concurrencyKey: 'k' }), job({ id: 'b', concurrencyKey: 'k' })];
+		const out = schedule({
+			now: T0,
+			jobs,
+			policy: policy({ perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } }),
+			bucket: unlimited,
+		});
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
+		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: false, perKey: false, perKeyTokens: true });
 	});
 
 	it('自由に投入できるときは全てfalse', () => {
 		const out = schedule({ now: T0, jobs: [job({ id: 'a' })], policy: policy(), bucket: unlimited });
-		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: false, perKey: false });
+		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: false, perKey: false, perKeyTokens: false });
 	});
 });

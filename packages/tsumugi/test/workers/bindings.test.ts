@@ -1,7 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-// M0時点の疎通確認, pool-workersとwrangler設定の連結が壊れていないことを早期に押さえる
+// M0時点の疎通確認, pool-workersとwrangler設定の連結が壊れていないことを早期に確認
 describe('バインディングの疎通', () => {
 	it('必要なバインディングが揃っている', () => {
 		expect(env.JOB_SHARD).toBeDefined();

@@ -126,9 +126,10 @@ const tsumugi = defineTsumugi({
 | ------------------- | ------- | ----------------------------------------------------------------------- |
 | `paused`            | `false` | 投入の一時停止。実行中のジョブの監視とエージングは継続する              |
 | `concurrency`       | `100`   | 同時実行数の上限                                                        |
-| `perKeyConcurrency` | `1`     | `concurrencyKey`単位の上限。キーがnullのジョブには適用しない            |
-| `rate`              | `null`  | `{ tokens, intervalMs }`。intervalMsあたりtokens件まで実行する          |
-| `agingIntervalMs`   | `60000` | この間隔だけ待つごとに実効優先度が1上がる。`null`で無効                 |
+| `perKeyConcurrency` | `1`     | `concurrencyKey`単位の上限            |
+| `rate`              | `null`  | `{ tokens, intervalMs }`, intervalMsあたりtokens件まで実行する          |
+| `perKeyRate`        | `null`  | `{ tokens, intervalMs }`, キーごとにintervalMsあたりtokens件まで実行 |
+| `agingIntervalMs`   | `60000` | この間隔だけ待つごとに実効優先度が1上がる                 |
 | `reaperGraceMs`     | `30000` | `timeoutMs`の経過後さらにこの時間結果が報告されなければ無応答として扱う |
 
 ## EnqueueInput

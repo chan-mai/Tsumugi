@@ -18,7 +18,7 @@ export type JobSummary = {
 	created_at: number;
 	updated_at: number;
 	dispatched_at: number | null;
-	/** 保持期間から出す近似, 最終的な可否はretryの応答が決める(ADR-0027) */
+	/** 保持期間からの近似, 最終的な可否はretryの応答で確定(ADR-0027) */
 	retryable: boolean;
 };
 
@@ -73,16 +73,17 @@ export type StatsResponse = {
 
 export type BindingsResponse = { bindings: string[] };
 
-/** binding単位の運用診断(#10)と今効いている流量設定(#27) */
+/** binding単位の運用診断(#10)と現在適用中の流量設定(#27) */
 export type DiagnosticsEntry = { active: number; outbox: number; blocked: BlockedBy; policy: PolicyView };
 export type DiagnosticsResponse = { shard: number; bindings: Record<string, DiagnosticsEntry> };
 
-/** 流量設定, DOのPolicyをそのまま運ぶ(#27) */
+/** 流量設定, DOのPolicyをそのまま転送(#27) */
 export type PolicyView = {
 	paused: boolean;
 	concurrency: number;
 	perKeyConcurrency: number;
 	rate: { tokens: number; intervalMs: number } | null;
+	perKeyRate: { tokens: number; intervalMs: number } | null;
 	agingIntervalMs: number | null;
 	reaperGraceMs: number;
 };
@@ -148,12 +149,12 @@ export type StartRunRequest = {
 	flow: string;
 	input: unknown;
 	id?: string;
-	/** run全体の期限(ms), flow定義の期限より優先される(ADR-0039) */
+	/** run全体の期限(ms), flow定義の期限より優先(ADR-0039) */
 	deadlineMs?: number;
 };
 export type StartRunResponse = { id: string };
 
-/** 定期実行の1件, Scheduler DOのlist()をそのまま運ぶ(ADR-0040) */
+/** 定期実行の1件, Scheduler DOのlist()をそのまま転送(ADR-0040) */
 export type ScheduleSummary = {
 	name: string;
 	kind: 'job' | 'flow';
@@ -180,7 +181,7 @@ export type MutationResponse = { ok: true };
 /** 4xx / 5xxで返る本文 */
 export type ErrorResponse = { error: string };
 
-/** 一覧の並べ替え, 許可した列以外はサーバ側で既定へ落ちる */
+/** 一覧の並べ替え, 許可した列以外はサーバ側で既定を使用 */
 export type ListOrder = 'asc' | 'desc';
 
 export type ListJobsQuery = {

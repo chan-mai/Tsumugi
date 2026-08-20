@@ -96,7 +96,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toMatchObject({ jobId, binding: 'HELLO', attempt: 1 });
 
-		// consumerがperformerを呼び,必ずackする
+		// consumerがperformerを呼び、必ずack
 		const { acked, batch } = makeBatch(sent);
 		await handleBatch(batch, consumerEnv, performers);
 		expect(acked).toHaveLength(1);
@@ -107,7 +107,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		expect(performed[0]!.deadlineAt).toBeGreaterThan(Date.now());
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
-		// 1回実行して成功したのでattemptsは1,失敗時だけ数えると完了ジョブが0回に見える
+		// 1回実行して成功したためattemptsは1, 失敗時だけの集計では完了ジョブが0回に見える
 		const row = await runInDurableObject(shard('HELLO'), (instance) => (instance as any).repo.find(jobId) as { attempts: number });
 		expect(row.attempts).toBe(1);
 	});
@@ -127,9 +127,9 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		const { acked, batch } = makeBatch(sent);
 		await handleBatch(batch, consumerEnv, performers);
 
-		// 失敗してもQueuesのretryには乗せず必ずackする(ADR-0004)
+		// 失敗してもQueuesのretryを使わず必ずack(ADR-0004)
 		expect(acked).toHaveLength(1);
-		// リトライ方針はDOが持つので,状態はFAILEDではなくSCHEDULEDに戻る
+		// リトライ方針はDOが持ち、状態はFAILEDではなくSCHEDULEDに戻る
 		expect(await stateOf('BOOM', jobId)).toBe('SCHEDULED');
 	});
 
@@ -147,11 +147,11 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		await handleBatch(makeBatch(sent).batch, consumerEnv, performers);
 		expect(await stateOf('ECHO', jobId)).toBe('COMPLETED');
 
-		// DOのjob行に戻り値がJSON文字列で保存される
+		// DOのjob行に戻り値がJSON文字列で保存
 		const row = await runInDurableObject(shard('ECHO'), (instance) => (instance as any).repo.find(jobId) as { result: string | null });
 		expect(row.result).toBe(JSON.stringify({ echoed: 'hi' }));
 
-		// 次のtickでCOMPLETEDのスナップショットがD1へ投影され戻り値も運ばれる
+		// 次のtickでCOMPLETEDのスナップショットがD1へ投影され戻り値も届く
 		await runDurableObjectAlarm(stub);
 		const projected = await env.TSUMUGI_DB.prepare('SELECT result FROM job WHERE id = ?').bind(jobId).first<{ result: string | null }>();
 		expect(projected?.result).toBe(JSON.stringify({ echoed: 'hi' }));
@@ -176,7 +176,7 @@ describe('DOの書き込み回数', () => {
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
 		// 内訳: insert / QUEUEDへの遷移/ COMPLETEDへの遷移 の3回+それぞれのアウトボックス追記3回= 6
-		// 残り1回は投影後のアウトボックス削除,これはバッチ単位なので件数が増えれば償却される
+		// 残り1回は投影後のアウトボックス削除, バッチ単位のため件数が増えれば償却
 		// ジョブあたり6回はスパイクの実測と一致する,増やす時は課金への影響を意識して更新すること
 		expect(after - before).toBe(7);
 	});

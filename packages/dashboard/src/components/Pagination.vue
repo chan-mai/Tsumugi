@@ -12,7 +12,7 @@ const go = (value: number) => emit('update:page', Math.min(Math.max(value, 0), p
 
 		<div class="flex flex-wrap items-center gap-3 sm:gap-6">
 			<div class="flex items-center gap-2">
-				<!-- 狭い画面では文言を落として選択欄だけ残す -->
+				<!-- 狭い画面では文言を省略して選択欄だけ残す -->
 				<span class="hidden text-sm font-medium sm:inline">Rows per page</span>
 				<select
 					class="h-8 rounded-card border border-border bg-background px-2 text-sm"

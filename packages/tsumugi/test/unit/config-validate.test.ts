@@ -7,7 +7,7 @@ class Noop {
 	async perform(): Promise<void> {}
 }
 
-/** 必須bindingが揃った`env`, 個々のテストで欠けさせる */
+/** 必須bindingが揃った`env`, 個々のテストで一部を除いて使用 */
 const complete = () => ({
 	JOB_SHARD: {},
 	TSUMUGI_DB: {},
@@ -72,8 +72,8 @@ describe('リモートperformerの整合(ADR-0026)', () => {
 		expect(names(validateConfig(env, { performers: withRemote }))).toEqual(['MAIL']);
 	});
 
-	it('名前は在るがperformerでない場合も弾く', () => {
-		// 実行時までずれに気付けないので, 起動時に同じ扱いにする
+	it('名前は在るがperformerでない場合も拒否する', () => {
+		// 実行時までずれが発覚せず、起動時も同じ扱い
 		const status = validateConfig({ ...complete(), MAIL: {} }, { performers: withRemote });
 		expect(status.ok).toBe(false);
 		if (status.ok) return;
@@ -86,7 +86,7 @@ describe('リモートperformerの整合(ADR-0026)', () => {
 });
 
 describe('検証結果のキャッシュ', () => {
-	it('成功は使い回す', () => {
+	it('成功は再利用する', () => {
 		const check = cachedValidate({ performers });
 		expect(check(complete())).toEqual({ ok: true });
 		// 2回目は`env`を空にしても再判定しない, 同じisolateでbindingは変わらない
@@ -94,7 +94,7 @@ describe('検証結果のキャッシュ', () => {
 	});
 
 	it('不足はキャッシュしない', () => {
-		// 設定を足した後に再デプロイせず自力で復帰させる
+		// 設定の追加後に再デプロイせず自動で復帰
 		const check = cachedValidate({ performers });
 		expect(check({}).ok).toBe(false);
 		expect(check(complete())).toEqual({ ok: true });

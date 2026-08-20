@@ -30,7 +30,7 @@ watch(
 	() => props.jobId,
 	async (id) => {
 		if (!id) return;
-		// 閉じるアニメーションの間に中身が消えないよう,開く時だけ差し替える
+		// 閉じるアニメーションの間に中身が消えないよう、開く時だけ差し替え
 		job.value = null;
 		attempts.value = [];
 		error.value = null;
@@ -43,7 +43,7 @@ watch(
 async function run(kind: 'retry' | 'cancel') {
 	if (!props.jobId) return;
 	message.value = await act(kind, props.jobId);
-	// 投影は数秒遅れるので即時には変わらないが,反映され次第この再読込で追いつく
+	// 投影は数秒遅れ即時には変わらないが、反映され次第この再読込で追いつく
 	await load(props.jobId);
 	emit('changed');
 }

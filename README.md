@@ -29,7 +29,7 @@ See documentation at [https://tsumugi.mq1.dev](https://tsumugi.mq1.dev).
 
 <br>
 
-- **Workers Paid**が必要, SQLite版のDurable ObjectsとQueuesの両方が必要とする
+- **Workers Paid**が必要, SQLite版のDurable ObjectsとQueuesの両方に必要
 - `compatibility_date`は**2025-11-17以降**, `ctx.exports`のため
 - **D1**が必要, 読み取りモデルの置き場でパッケージ同梱のマイグレーションの適用が必要
 - **Analytics Engine**は任意, 時系列メトリクスを書く場合だけ設定する
@@ -80,7 +80,7 @@ export class SendMail extends Performer<{ to: string }, void, {}, Env> {
 
 Export the performers from the top level of the Worker. The binding name is the exported name, and the payload type is derived from the same place.
 
-performerはWorkerのトップレベルからexportします。binding名はexportした名前がそのまま使われ, payloadの型も同じ場所から決まります。
+performerはWorkerのトップレベルからexportします。binding名はexportした名前がそのまま使われ、payloadの型も同じ場所から決まります。
 
 ```ts
 // src/index.ts
@@ -102,13 +102,13 @@ export default tsumugi;
 
 `npx tsumugi init` generates this file, so it rarely needs to be written by hand.
 
-このファイルは`npx tsumugi init`が生成するため, 手で書く場面はほとんどありません。
+このファイルは`npx tsumugi init`が生成するため、手で書く場面はほとんどありません。
 
 ### 3. Enqueue a job
 
 `enqueue` can be called from any handler. It returns the job ID, and the binding name decides the payload type.
 
-`enqueue`は任意のハンドラから呼び出せます。戻り値はジョブIDで, binding名からpayloadの型が決まります。
+`enqueue`は任意のハンドラから呼び出せます。戻り値はジョブIDで、binding名からpayloadの型が決まります。
 
 ```ts
 const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
@@ -119,13 +119,13 @@ Common options are passed in the same call.
 よく使うオプションは同じ呼び出しで指定します。
 
 ```ts
-// 1分後に実行する
+// 1分後に実行
 await tsumugi.enqueue(env, { binding: 'SendMail', payload, delayMs: 60_000 });
 
-// 待機中の他のジョブより先に投入する
+// 待機中の他のジョブより先に投入
 await tsumugi.enqueue(env, { binding: 'SendMail', payload, priority: 10 });
 
-// 同じキーのジョブが残っている間は作成せず, 既存のジョブIDを返す
+// 同じキーのジョブが残っている間は作成せず、既存のジョブIDを返す
 await tsumugi.enqueue(env, { binding: 'SendMail', payload, uniqueKey: 'a@example.com' });
 ```
 
@@ -133,7 +133,7 @@ await tsumugi.enqueue(env, { binding: 'SendMail', payload, uniqueKey: 'a@example
 
 The dashboard is served at `/` and the REST API under `/api`, both behind the token configured above. Listing, search, retry and cancellation need no code of your own.
 
-`/`にダッシュボード, `/api`にREST APIが用意され, どちらも上で設定したトークンで認証します。一覧, 検索, 再実行, 取り消しは自分でコードを書かずに行えます。
+`/`にダッシュボード, `/api`にREST APIが用意され、どちらも上で設定したトークンで認証します。一覧, 検索, 再実行, 取り消しは自分でコードを書かずに行えます。
 
 |                                                               |                                                               |
 | ------------------------------------------------------------- | ------------------------------------------------------------- |

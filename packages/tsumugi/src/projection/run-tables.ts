@@ -3,14 +3,14 @@ import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlit
 /**
  * runの読み取りモデル(ADR-0008 / ADR-0029)
  *
- * Run DOはrunごとに独立しているので, 横断的な一覧はここにしか作れない
+ * Run DOはrunごとに独立し、横断的な一覧の置き場はここのみ
  * DDLは`migrations/`のSQLが持ち, ここは型とクエリのための定義
  */
 export const run = sqliteTable(
 	'run',
 	{
 		id: text('id').primaryKey(),
-		// 投影元のアウトボックス連番, 古い投影が新しい状態を上書きするのを弾く
+		// 投影元のアウトボックス連番, 古い投影による新しい状態の上書きを防止
 		seq: integer('seq').notNull(),
 		flow: text('flow').notNull(),
 		state: text('state').notNull(),
@@ -28,7 +28,7 @@ export const run = sqliteTable(
 		index('run_state').on(t.state, t.updatedAt),
 		index('run_flow').on(t.flow, t.updatedAt),
 		index('run_created').on(t.createdAt),
-		// 既定の一覧はフィルタ無しでupdated_atの降順, 先頭列がupdated_atの索引が要る
+		// 既定の一覧はフィルタ無しでupdated_atの降順, 先頭列がupdated_atの索引が必要
 		index('run_updated').on(t.updatedAt, t.id),
 	],
 );

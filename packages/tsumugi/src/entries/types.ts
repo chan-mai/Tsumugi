@@ -1,4 +1,4 @@
-// 型のみのエントリ,ランタイムコードを含まない
+// 型のみのエントリ, ランタイムコードなし
 export type {
 	ActiveState,
 	Backoff,
@@ -8,6 +8,7 @@ export type {
 	FailureNotice,
 	JobState,
 	JobView,
+	KeyBuckets,
 	Policy,
 	RateLimit,
 	ScheduleInput,

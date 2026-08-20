@@ -5,7 +5,7 @@ import type { NodeTrigger } from '../core/flow.js';
 import { applyRunSchema, type NodeRow, type RunRow } from './run-schema.js';
 import { node, run, runOutbox } from './run-tables.js';
 
-/** 1文に渡せるバインド変数の上限, 101個目でSQLITE_ERRORになる */
+/** 1文に渡せるバインド変数の上限, 101個目でSQLITE_ERROR */
 const BIND_LIMIT = 100;
 
 const NODE_COLUMNS = Object.keys(getTableColumns(node)).length;
@@ -13,7 +13,7 @@ const OUTBOX_COLUMNS = Object.keys(getTableColumns(runOutbox)).length;
 
 /**
  * バインド変数の上限に収まる件数へ分ける
- * fan-outの展開は件数が実行時に決まるので, 1文にまとめると上限を超える
+ * fan-outの展開は件数が実行時に確定し、1文にまとめると上限を超過
  */
 function chunk<T>(items: readonly T[], perItem: number): T[][] {
 	const size = Math.max(1, Math.floor(BIND_LIMIT / perItem));
@@ -34,7 +34,7 @@ export type NewNode = {
 	seq: number;
 	/** subflowノードのみ, 起動する子のflow名 */
 	subflow?: string;
-	/** 実行時に増えたノードだけが持つ, 静的ノードはflow定義から作る */
+	/** 実行時に増えたノードだけが持つ, 静的ノードはflow定義由来 */
 	payload?: string;
 	options?: string;
 };
@@ -47,7 +47,7 @@ export type NodePatch = {
 	error?: string | null;
 };
 
-/** D1へUPSERTする内容そのもの, 投影側が追加の読み取りをしなくて済むようにする(ADR-0008) */
+/** D1へUPSERTする内容そのもの, 投影側の追加の読み取りを不要化(ADR-0008) */
 export type RunSnapshot = {
 	id: string;
 	flow: string;
@@ -55,7 +55,7 @@ export type RunSnapshot = {
 	input: string;
 	created_at: number;
 	updated_at: number;
-	/** 一覧で進捗を出すための集計, ノードを引き直さずに済ませる */
+	/** 一覧の進捗表示用の集計, ノードの再読を不要化 */
 	node_total: number;
 	node_done: number;
 	node_failed: number;
@@ -78,7 +78,7 @@ export type NodeSnapshot = {
 	child_run_id: string | null;
 	/**
 	 * fan-outノードの集計値のみを持たせる(ADR-0035)
-	 * 通常ノードの戻り値はジョブ側で投影済みなので, ここに持つと同じものを二度運ぶ
+	 * 通常ノードの戻り値はジョブ側で投影済みで、ここに持つと同じものを二度転送
 	 */
 	result: string | null;
 	error: string | null;
@@ -89,8 +89,8 @@ export type NodeSnapshot = {
 };
 
 /**
- * Run DOのSQLiteとの橋渡し
- * 進行の判断は`core/run.ts`が持ち, ここは読み書きに徹する(ADR-0018)
+ * Run DOのSQLiteとの仲介
+ * 進行の判断は`core/run.ts`が持ち、ここは読み書きのみ(ADR-0018)
  */
 export class RunRepo {
 	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
@@ -107,7 +107,7 @@ export class RunRepo {
 		return row ? this.#toRunRow(row) : undefined;
 	}
 
-	/** 開始を1回に絞る, 同じrunIdは必ず同じDOに当たるので検査と挿入が不可分になる(ADR-0029) */
+	/** 開始を1回に限定, 同じrunIdは必ず同じDOに対応し検査と挿入が不可分(ADR-0029) */
 	insertRun(input: {
 		id: string;
 		flow: string;
@@ -147,7 +147,7 @@ export class RunRepo {
 		this.db.update(run).set({ state, updatedAt: now }).where(eq(run.id, id)).run();
 	}
 
-	/** 親へ終端を伝え終えた印, 立てるまで毎tickで再送する */
+	/** 親へ終端を伝え終えた印, 設定まで毎tickで再送 */
 	markParentNotified(id: string, now: number): void {
 		this.db.update(run).set({ parentNotified: 1, updatedAt: now }).where(eq(run.id, id)).run();
 	}
@@ -156,12 +156,12 @@ export class RunRepo {
 		this.db.update(run).set({ cancelling: 1, updatedAt: now }).where(eq(run.id, id)).run();
 	}
 
-	/** 超過の印を立てる, 時計から毎tick判定すると決着済みのrunが後のtickで反転する(ADR-0039) */
+	/** 超過の印の設定, 時計からの毎tick判定は決着済みのrunが後のtickで反転(ADR-0039) */
 	markExpired(id: string, now: number): void {
 		this.db.update(run).set({ expired: 1, updatedAt: now }).where(eq(run.id, id)).run();
 	}
 
-	/** 再開時に期限を引き直し超過の印を外す, 元のままでは再開直後に再び超過する(ADR-0039) */
+	/** 再開時に期限を再計算し超過の印を解除, 元のままでは再開直後に再び超過(ADR-0039) */
 	resetDeadline(now: number): void {
 		this.sql.exec(`UPDATE run SET deadline_at = ? + deadline_ms, expired = 0, updated_at = ? WHERE deadline_ms IS NOT NULL`, now, now);
 	}
@@ -197,14 +197,14 @@ export class RunRepo {
 					updatedAt: now,
 				})),
 			)
-			// 同じIDのspawnは新規作成せず既存を残す(ADR-0032)
+			// 同じIDのspawnは新規作成せず既存を維持(ADR-0032)
 			.onConflictDoNothing()
 			.run();
 	}
 
 	/**
 	 * 進行判断に渡す射影
-	 * resultとerrorは読まない, 全ノードを毎tick読むので本文を載せると展開数に比例して重くなる
+	 * resultとerrorは読まない, 毎tickの全ノード読み取りで本文を含めると展開数に比例して重い
 	 */
 	views(): NodeView[] {
 		const rows = this.db
@@ -238,7 +238,7 @@ export class RunRepo {
 		return row ? this.#toNodeRow(row) : undefined;
 	}
 
-	/** 写像関数へ渡す材料, 依存しているノードのぶんだけ引く */
+	/** 写像関数へ渡す材料, 依存しているノードのぶんだけ取得 */
 	resultsOf(ids: readonly string[]): Map<string, unknown> {
 		const results = new Map<string, unknown>();
 		for (const part of chunk(ids, 1)) {
@@ -262,19 +262,19 @@ export class RunRepo {
 		this.db.update(node).set(set).where(eq(node.id, id)).run();
 	}
 
-	/** 次に作るノードの並び順, 定義順と生成順を1本の連番で保つ */
+	/** 次に作るノードの並び順, 定義順と生成順を1本の連番で維持 */
 	nextSeq(): number {
 		const row = this.sql.exec<{ next: number | null }>(`SELECT max(seq) + 1 AS next FROM node`).one();
 		return row.next ?? 0;
 	}
 
 	/**
-	 * 再開のために打ち切られたノードを起動前へ戻す(ADR-0034)
-	 * fan-outノードは子を作り直さず集約待ちへ戻す, 作り直すと成功済みの子も削除される
-	 * 子のrunIDも外す、残すと旧い子の遅れた通知が再開後の状態を上書きする
+	 * 再開のために中断されたノードを起動前の状態へ復帰(ADR-0034)
+	 * fan-outノードは子を作り直さず集約待ちへ戻す, 作り直しでは成功済みの子も削除
+	 * 子のrunIDも解除, 残すと旧い子の遅れた通知が再開後の状態を上書き
 	 */
 	resetForRetry(now: number): string[] {
-		// 親への通知済みの印を戻す、立てたままでは再開後の終端が親へ届かない
+		// 親への通知済みの印を解除, 設定のままでは再開後の終端が親へ届かない
 		this.db.update(run).set({ parentNotified: 0, updatedAt: now }).run();
 		const cursor = this.sql.exec<{ id: string }>(
 			`UPDATE node SET
@@ -298,7 +298,7 @@ export class RunRepo {
 		return row?.c ?? 0;
 	}
 
-	/** fan-outノードの集計値, 子を1文で数える(ADR-0035) */
+	/** fan-outノードの集計値, 子を1文で集計(ADR-0035) */
 	childSummary(parent: string): { total: number; succeeded: number; failed: number } {
 		const row = this.sql
 			.exec<{ total: number; succeeded: number }>(
@@ -312,7 +312,7 @@ export class RunRepo {
 		return { total, succeeded, failed: total - succeeded };
 	}
 
-	/** 一覧の進捗に載せる集計, runのスナップショットに同梱する */
+	/** 一覧の進捗用の集計, runのスナップショットに同梱 */
 	progress(): { total: number; done: number; failed: number } {
 		const row = this.sql
 			.exec<{ total: number; done: number; failed: number }>(
@@ -349,7 +349,7 @@ export class RunRepo {
 	}
 
 	appendNodeOutbox(runId: string, ids: readonly string[]): void {
-		// 追記側の列数で分ければ, 引く側のIDも上限に収まる
+		// 追記側の列数で分割すれば、読む側のIDも上限に収まる
 		for (const part of chunk(ids, OUTBOX_COLUMNS)) {
 			this.#appendNodeOutboxChunk(runId, part);
 		}

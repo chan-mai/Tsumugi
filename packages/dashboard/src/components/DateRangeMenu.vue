@@ -6,7 +6,7 @@ import { computed } from 'vue';
 const props = defineProps<{ from: number | null; to: number | null }>();
 const emit = defineEmits<{ 'update:from': [value: number | null]; 'update:to': [value: number | null] }>();
 
-/** `input[type=date]`が読む`YYYY-MM-DD`, ローカル時刻で組み立てる */
+/** `input[type=date]`が読む`YYYY-MM-DD`, ローカル時刻で構築 */
 function toDateInput(value: number | null): string {
 	if (value === null) return '';
 	const at = new Date(value);
@@ -14,7 +14,7 @@ function toDateInput(value: number | null): string {
 	return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
-/** 下限はその日の0時, 上限はその日の終わりにする, 同じ日を選んだときに0件にならないようにする */
+/** 下限はその日の0時, 上限はその日の終わり, 同じ日の選択で0件になるのを防止 */
 function fromDateInput(text: string, edge: 'start' | 'end'): number | null {
 	if (!text) return null;
 	const [year, month, day] = text.split('-').map(Number);

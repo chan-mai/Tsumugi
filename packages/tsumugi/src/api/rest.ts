@@ -47,22 +47,22 @@ function stubOf(env: RestEnv, jobId: string): DurableObjectStub<TsumugiJobShard>
 
 export type RestOptions<Env extends RestEnv> = {
 	dashboard?: Ui;
-	/** 登録済みperformerの名前,投入先の検証と選択肢に使う, 省略すると検証しない */
+	/** 登録済みperformerの名前, 投入先の検証と選択肢に使用, 省略すると検証なし */
 	bindings?: readonly string[];
 	/** bindingの分割数, 流量の変更は全shardへ配る(#27) */
 	shardsOf?: (binding: string) => number;
 	enqueue?: (env: Env, input: CreateJobInput) => Promise<string>;
 	/**
 	 * bindingごとの失敗ジョブの保持期間
-	 * 一覧に`retryable`を含めるために必要, 実行可否を事前に判定するため(ADR-0027)
+	 * 一覧の`retryable`に必要, 実行可否の事前判定用(ADR-0027)
 	 */
 	failedRetentionMs?: (binding: string) => number;
-	/** 登録済みflowの名前,開始先の検証と選択肢に使う */
+	/** 登録済みflowの名前, 開始先の検証と選択肢に使用 */
 	flows?: readonly string[];
 	start?: (env: Env, flow: string, input: unknown, options?: { id?: string; deadlineMs?: number }) => Promise<string>;
-	/** 取り消しと再開はDOへ直接送る, 読み取りモデルは正の根拠に使えない(ADR-0015) */
+	/** 取り消しと再開はDOへ直接送信, 読み取りモデルは正の根拠に使用不可(ADR-0015) */
 	runFor?: (env: Env, runId: string) => { cancel(): Promise<MutationResult>; retry(): Promise<MutationResult> };
-	/** 定期実行の一覧, Scheduler DOが正なので直接聞く(ADR-0040)。未設定なら`/api/schedules`は501を返す */
+	/** 定期実行の一覧, Scheduler DOが正で直接照会(ADR-0040), 未設定なら`/api/schedules`は501を返す */
 	schedulerFor?: (env: Env) => { list(): Promise<ScheduleView[]> };
 	/** Analytics Engineの読み取り設定, 未設定なら`/api/metrics`は501を返す */
 	metrics?: MetricsResolver<Env>;
@@ -71,13 +71,13 @@ export type RestOptions<Env extends RestEnv> = {
 /** 要求と応答の型は`api/types.ts`が持つ, 外部の利用者と同じ定義を読む */
 export type CreateJobInput = CreateJobRequest;
 
-/** 投入内容の検証,通らなければ理由を返す */
+/** 投入内容の検証, 失敗なら理由を返す */
 export function validateCreateJob(body: unknown, bindings: readonly string[] | undefined): { input: CreateJobInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
 	const raw = body as Record<string, unknown>;
 
 	if (typeof raw.binding !== 'string' || raw.binding.length === 0) return { error: 'binding is required' };
-	// 未登録のbindingを許すと投入はできるが実行時に必ず失敗する,入口で拒否する
+	// 未登録のbindingは投入できても実行時に必ず失敗, 入口で拒否
 	// 空配列は登録が1件も無い状態, 省略が検証しない指定
 	if (bindings !== undefined && !bindings.includes(raw.binding)) return { error: `unknown binding: ${raw.binding}` };
 	if (!('payload' in raw)) return { error: 'payload is required' };
@@ -109,8 +109,8 @@ export function validateCreateJob(body: unknown, bindings: readonly string[] | u
 export type RescheduleInput = { runAfter: number; priority?: number };
 
 /**
- * 実行時刻の変更内容の検証,通らなければ理由を返す
- * `runAt`と`delayMs`は排他、両方指定された場合にどちらを優先するかは決めない
+ * 実行時刻の変更内容の検証, 失敗なら理由を返す
+ * `runAt`と`delayMs`は排他, 両方指定された場合の優先順位は未定義
  */
 export function validateReschedule(body: unknown, now: number): { input: RescheduleInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
@@ -137,13 +137,13 @@ export function validateReschedule(body: unknown, now: number): { input: Resched
 
 export type StartRunInput = StartRunRequest;
 
-/** 開始内容の検証,通らなければ理由を返す */
+/** 開始内容の検証, 失敗なら理由を返す */
 export function validateStartRun(body: unknown, flows: readonly string[]): { input: StartRunInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
 	const raw = body as Record<string, unknown>;
 
 	if (typeof raw.flow !== 'string' || raw.flow.length === 0) return { error: 'flow is required' };
-	// 未登録のflowを許すと開始はできるが必ず失敗する,入口で弾く
+	// 未登録のflowは開始できても必ず失敗, 入口で拒否
 	if (flows.length > 0 && !flows.includes(raw.flow)) return { error: `unknown flow: ${raw.flow}` };
 	if (!('input' in raw)) return { error: 'input is required' };
 	if (raw.id !== undefined && typeof raw.id !== 'string') return { error: 'id must be a string' };
@@ -160,8 +160,8 @@ export function validateStartRun(body: unknown, flows: readonly string[]): { inp
 export type UpdatePolicyInput = UpdatePolicyRequest;
 
 /**
- * 流量の変更内容の検証, 通らなければ理由を返す(#27)
- * 渡した項目だけを重ねるので, 省略と明示的なnullを区別する
+ * 流量の変更内容の検証, 失敗なら理由を返す(#27)
+ * 渡した項目だけを重ねる方式で、省略と明示的なnullを区別
  */
 export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
@@ -174,7 +174,7 @@ export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { 
 		input.paused = raw.paused;
 	}
 
-	// 0は投入を止める指定として有効, 負数と小数だけを弾く
+	// 0は投入を止める指定として有効, 負数と小数だけを拒否
 	for (const name of ['concurrency', 'perKeyConcurrency', 'reaperGraceMs'] as const) {
 		if (!(name in raw)) continue;
 		const value = raw[name];
@@ -191,19 +191,20 @@ export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { 
 		input.agingIntervalMs = value as number | null;
 	}
 
-	if ('rate' in raw) {
-		const value = raw.rate;
-		if (value === null) input.rate = null;
+	for (const name of ['rate', 'perKeyRate'] as const) {
+		if (!(name in raw)) continue;
+		const value = raw[name];
+		if (value === null) input[name] = null;
 		else {
-			if (typeof value !== 'object') return { error: 'rate must be an object or null' };
+			if (typeof value !== 'object') return { error: `${name} must be an object or null` };
 			const { tokens, intervalMs } = value as Record<string, unknown>;
 			if (typeof tokens !== 'number' || !Number.isInteger(tokens) || tokens < 0) {
-				return { error: 'rate.tokens must be a non-negative integer' };
+				return { error: `${name}.tokens must be a non-negative integer` };
 			}
 			if (typeof intervalMs !== 'number' || !Number.isInteger(intervalMs) || intervalMs <= 0) {
-				return { error: 'rate.intervalMs must be a positive integer' };
+				return { error: `${name}.intervalMs must be a positive integer` };
 			}
-			input.rate = { tokens, intervalMs };
+			input[name] = { tokens, intervalMs };
 		}
 	}
 
@@ -213,13 +214,13 @@ export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { 
 
 /**
  * 一括操作が1回で扱う件数の上限
- * DOのtickが1回で扱う上限と揃える、超えた分は呼び出し側が繰り返して処理する
+ * DOのtickが1回で扱う上限と同一, 超えた分は呼び出し側が繰り返して処理
  */
 export const BULK_LIMIT_MAX = 200;
 
 /**
  * 一括操作の対象になる状態
- * 個別のretry / cancelが受け付ける状態と同じ、ここを広げるとDO側で断られるだけの要求が増える
+ * 個別のretry / cancelが受け付ける状態と同一, 拡大するとDO側で拒否されるだけの要求が増加
  */
 export const BULK_STATES = {
 	retry: ['FAILED', 'STALLED'],
@@ -235,7 +236,7 @@ export type BulkTarget =
 	| {
 			kind: 'filter';
 			binding?: string;
-			/** 未指定なら操作が受け付ける状態すべてを対象にする */
+			/** 未指定なら操作が受け付ける状態すべてが対象 */
 			states: readonly string[];
 			uniqueKey?: string;
 			concurrencyKey?: string;
@@ -245,10 +246,10 @@ export type BulkTarget =
 	  };
 
 /**
- * 一括操作の対象の検証、通らなければ理由を返す
+ * 一括操作の対象の検証, 失敗なら理由を返す
  *
- * `ids`があればそれだけを対象にする、条件との併用は対象が二通りに読める
- * 条件で指定する場合の状態は操作が受け付けるものに限る、限らないと対象が減らず繰り返しが終わらない
+ * `ids`があればそれだけが対象, 条件との併用は対象が二通りに読める
+ * 条件で指定する場合の状態は操作が受け付けるものに限る, 限らないと対象が減らず繰り返しが終わらない
  */
 export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input: BulkTarget } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
@@ -291,7 +292,7 @@ export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input
 	};
 }
 
-/** ジョブIDをshardごとにまとめる、1件ずつ送るとDOへの往復が件数だけ増える */
+/** ジョブIDをshardごとに集約, 1件ずつの送信はDOへの往復が件数ぶん増加 */
 export function groupByShard(jobIds: readonly string[]): { groups: Map<string, string[]>; invalid: string[] } {
 	const groups = new Map<string, string[]>();
 	const invalid: string[] = [];
@@ -301,7 +302,7 @@ export function groupByShard(jobIds: readonly string[]): { groups: Map<string, s
 		try {
 			name = shardNameOf(jobId);
 		} catch {
-			// 読み取りモデルの行が壊れている場合は落とさず理由に載せる
+			// 読み取りモデルの行が壊れている場合は中断せず理由へ記録
 			invalid.push(jobId);
 			continue;
 		}
@@ -321,7 +322,7 @@ function boundedInt(raw: string | null, fallback: number, min: number, max: numb
 	return Math.min(value, max);
 }
 
-/** 一覧のページング, 上限の変更漏れを避けるため両方の一覧で共有する */
+/** 一覧のページング, 上限の変更漏れ防止で両方の一覧が共有 */
 export function parsePaging(url: URL): { limit: number; offset: number } {
 	return {
 		limit: boundedInt(url.searchParams.get('limit'), LIST_LIMIT_DEFAULT, 1, LIST_LIMIT_MAX),
@@ -339,15 +340,15 @@ export type JobFilters = {
 };
 
 /**
- * 一覧の絞り込み条件
- * 数値にならない指定は無視する, 400にすると入力の途中で画面が止まる
- * 一致は完全一致のみ, 部分一致は索引が効かず件数が増えると全表走査になる
+ * 一覧の抽出条件
+ * 数値にならない指定は無視, 400では入力の途中で画面が停止
+ * 一致は完全一致のみ, 部分一致は索引が使われず件数が増えると全表走査
  */
 export function parseJobFilters(url: URL): JobFilters {
 	const text = (name: string) => url.searchParams.get(name) || undefined;
 	const time = (name: string) => {
 		const raw = url.searchParams.get(name);
-		// 空文字は指定なしとして扱う, Number('')は0になり期間の上限が1970年になる
+		// 空文字は指定なしの扱い, Number('')は0となり期間の上限が1970年
 		if (raw === null || raw === '') return undefined;
 		const value = Number(raw);
 		return Number.isFinite(value) ? value : undefined;
@@ -362,7 +363,7 @@ export function parseJobFilters(url: URL): JobFilters {
 	};
 }
 
-/** 依存のノードID, 壊れた行で詳細画面ごと落とさない */
+/** 依存のノードID, 壊れた行でも詳細画面は維持 */
 export function parseAfter(raw: unknown): string[] {
 	if (typeof raw !== 'string' || raw.length === 0) return [];
 	try {
@@ -373,7 +374,7 @@ export function parseAfter(raw: unknown): string[] {
 	}
 }
 
-/** 試行履歴, 壊れていても詳細画面ごと落とさない */
+/** 試行履歴, 壊れていても詳細画面は維持 */
 export function parseAttempts(raw: unknown): AttemptRecord[] {
 	if (typeof raw !== 'string' || raw.length === 0) return [];
 	try {
@@ -385,11 +386,11 @@ export function parseAttempts(raw: unknown): AttemptRecord[] {
 }
 
 /**
- * 1回目で成功したジョブの履歴を組み立てる
+ * 1回目で成功したジョブの履歴の構築
  *
- * この1件はジョブ行から完全に導出できるので保存していない(ADR-0028)
+ * この1件はジョブ行から完全に導出可能で未保存(ADR-0028)
  * 表示のためだけに書くと1ジョブあたりのDO書き込みが常時1回増える
- * 導出できるのはCOMPLETEDかつ開始時刻がある場合に限る,実行中や取り消しでは何も出さない
+ * 導出できるのはCOMPLETEDかつ開始時刻がある場合に限る, 実行中や取り消しでは非表示
  */
 export function attemptsOf(
 	job: { state: string; attempts: number; dispatched_at: number | null; updated_at: number },
@@ -411,9 +412,9 @@ export function attemptsOf(
 export type { AttemptRecord };
 
 /**
- * 並べ替えを許す列の対応
- * 列オブジェクトへ解決してから使うので, 許可リスト外の文字列がSQLに届かない
- * `satisfies`で全列を網羅させる, 名前を足して対応を忘れると型検査で落ちる
+ * 並べ替えを許可する列の対応
+ * 列オブジェクトへ解決してから使用し、許可リスト外の文字列はSQLに届かない
+ * `satisfies`で全列を網羅, 名前を追加して対応を忘れると型検査で失敗
  */
 const SORT_COLUMNS = {
 	updated_at: readModel.updatedAt,
@@ -429,15 +430,15 @@ export type { SortColumn };
 
 /**
  * 一覧と詳細はD1の読み取りモデルから引く(ADR-0008)
- * 稼働中も投影済みなのでページングもソートも通常のSQL
+ * 稼働中も投影済みでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
 	const { dashboard, bindings, shardsOf, enqueue, failedRetentionMs, flows = [], start, runFor, schedulerFor, metrics } = options;
 
 	/**
-	 * 一覧の1行にretryの可否を載せる
-	 * 読み取りモデルはDOに行が在るかを知らないので保持期間から引き算する
-	 * 実際の可否はDOが持つため410が最終的な答え, ここは押す前に分かるようにするための近似
+	 * 一覧の1行にretryの可否を付与
+	 * 読み取りモデルはDOの行の有無を持たず、保持期間からの引き算で近似
+	 * 実際の可否はDOが持ち410が最終的な回答, ここは操作前の目安の近似
 	 */
 	const withRetryable = <T extends { state: string; binding: string; updated_at: number }>(
 		row: T,
@@ -451,21 +452,21 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	};
 	const app = new Hono<{ Bindings: Env }>();
 	// 認証はAPIにのみ掛ける
-	// HTML自体はデータを含まず, 未認証で返すことでSPAがトークン入力欄を表示できる(ADR-0013)
+	// HTML自体はデータを含まず, 未認証で返すことでSPAがトークン入力欄を表示可能(ADR-0013)
 	app.use('/api/*', auth);
 
-	// 仕様の配布口, 他言語の利用者はここからクライアントを生成する
-	// D1を読まないのでマイグレーションの検査より手前に置く, 後ろだと適用漏れの環境で仕様も引けない
+	// 仕様の配布口, 他言語の利用者はここからクライアントを生成
+	// D1を読まずマイグレーションの検査より手前に配置, 後ろでは適用漏れの環境で仕様も取得不能
 	const document = openapiDocument();
 	app.get('/api/openapi.json', (c) => c.json(document));
 
 	// マイグレーションの適用漏れをここで止める
-	// 通さないとD1のraw errorが出るだけで,原因が設定漏れだと分からない
+	// この検査が無いとD1のraw errorが出るだけで、原因が設定漏れだと判別不能
 	const checkSchema = cachedCheck();
 	app.use('/api/*', async (c, next) => {
 		const status = await checkSchema(c.env.TSUMUGI_DB);
 		if (!status.ok) {
-			// 適用漏れは復旧コマンドを, 一時障害は適用済み環境に誤った手順を案内しない(#8)
+			// 適用漏れには復旧コマンドを案内, 一時障害では適用済み環境への誤った手順の案内を回避(#8)
 			const error = 'missing' in status ? migrationErrorMessage(status.missing) : 'database temporarily unavailable';
 			return c.json({ error }, 503);
 		}
@@ -528,7 +529,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	/**
 	 * フィルタと投入先の選択肢
-	 * 登録済みperformerを返す,投影済みのbindingだけだと一度も動いていないものが選べない
+	 * 登録済みperformerを返す, 投影済みのbindingだけでは一度も実行されていないものが選択不能
 	 */
 	app.get('/api/bindings', async (c) => {
 		if (bindings !== undefined) return c.json({ bindings: [...bindings].sort() } satisfies BindingsResponse);
@@ -558,7 +559,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	/**
 	 * Analytics Engineの集計(ADR-0016)
-	 * D1の明細はsweepで消えるが, ここは保持期間の長い時系列から引く
+	 * D1の明細はsweepで消えるが、ここは保持期間の長い時系列から取得
 	 */
 	app.get('/api/metrics', async (c) => {
 		const config = metrics?.(c.env);
@@ -570,18 +571,18 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		try {
 			return c.json(await readMetrics(config, parsed.query));
 		} catch (error) {
-			// 上流の失敗を500にすると設定の誤りと区別がつかない
+			// 上流の失敗が500では設定の誤りと区別が不能
 			if (error instanceof MetricsQueryError) return c.json({ error: error.message }, 502);
 			throw error;
 		}
 	});
 
 	/**
-	 * 条件に一致するジョブをまとめて処理する
+	 * 条件に一致するジョブの一括処理
 	 *
-	 * 対象は読み取りモデルから引く、横断的な絞り込みはDOには問い合わせられない(ADR-0008)
-	 * 数秒遅れるので状態の判定はDO側で改めて行い、条件に合わないものは理由付きで返す
-	 * 一部が断られても全体を失敗にしない、失敗にすると成功した分まで再送される
+	 * 対象は読み取りモデルから取得, 横断的な抽出はDOには問い合わせ不能(ADR-0008)
+	 * 数秒の遅延を考慮し状態の判定はDO側で改めて行い、条件に合わないものは理由付きで返す
+	 * 一部が拒否されても全体は成功扱い, 全体失敗では成功した分まで再送が発生
 	 */
 	const bulk = async (action: 'retry' | 'cancel', env: Env, body: unknown) => {
 		const parsed = validateBulk(body, action);
@@ -606,7 +607,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				].filter((f) => f !== undefined),
 			);
 
-			// 古い順に処理する、繰り返し呼んだときに対象が順に減る
+			// 古い順に処理, 繰り返しの呼び出しで対象が順に減少
 			const [page, total] = await d.batch([
 				d.select({ id: readModel.id }).from(readModel).where(clause).orderBy(asc(readModel.createdAt), asc(readModel.id)).limit(limit),
 				d
@@ -615,13 +616,13 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 					.where(clause),
 			]);
 			targets = page.map((row) => row.id);
-			// 上限で切った残り、読み取りモデルの遅れを含むので見積り
+			// 上限で除外した残り, 読み取りモデルの遅延を含む見積り
 			remaining = Math.max(0, (total[0]?.total ?? 0) - targets.length);
 		}
 
 		const { groups, invalid } = groupByShard(targets);
 		const entries = [...groups];
-		// 届かなかったshardも個別の失敗として返す, 全体を500にすると成功した分まで再送される
+		// 届かなかったshardも個別の失敗として返す, 全体500では成功した分まで再送が発生
 		const settled = await Promise.allSettled(
 			entries.map(([name, ids]) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)).mutateMany(action, ids)),
 		);
@@ -662,7 +663,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			.from(readModel)
 			.groupBy(readModel.state);
 		// 最古のSCHEDULEDの経過時間, バックログがどれだけ待たされているかの指標(#10)
-		// 読み取りモデル経由なので数秒遅れる, 傾向を掴む用途
+		// 読み取りモデル経由で数秒の遅延, 傾向の把握用
 		const oldest = await db
 			.select({ createdAt: sql<number | null>`min(${readModel.createdAt})` })
 			.from(readModel)
@@ -676,7 +677,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	});
 
 	// 運用診断, DOに直接問い合わせてバックログ/投影滞留/投入が止まった制約を返す(#10)
-	// 既定はshards=1なのでshard 0を代表として引く, 分割時はshard 0のみになる(ADR-0011)
+	// 既定はshards=1でshard 0を代表として照会, 分割時はshard 0のみ(ADR-0011)
 	app.get('/api/diagnostics', async (c) => {
 		const perBinding = await Promise.all(
 			(bindings ?? []).map(async (binding) => {
@@ -691,7 +692,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	/**
 	 * 実行時の流量変更(#27)
 	 * 分割している場合は全shardへ同じ設定を配る, 1つでも残ると投入が止まらない(ADR-0011)
-	 * 途中で止めずに全shardへ試す, 届かなかったshardは呼び出し側へ返して再試行に委ねる
+	 * 途中で止めずに全shardへ試行, 届かなかったshardは呼び出し側へ返して呼び出し側が再試行
 	 */
 	const eachShard = async <T>(env: RestEnv, binding: string, run: (stub: DurableObjectStub<TsumugiJobShard>) => Promise<T>) => {
 		const shards = Math.max(1, shardsOf?.(binding) ?? 1);
@@ -705,7 +706,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		return { shards, failed, applied };
 	};
 
-	/** 一部のshardにしか届かなかった要求, 成功として返すと止まっていない投入を止まったものとして扱う(#27) */
+	/** 一部のshardにしか届かなかった要求, 成功として返すと止まっていない投入を止まったものと誤認(#27) */
 	const partial = (binding: string, shards: number, failed: number[]) =>
 		({
 			error: `the change reached ${shards - failed.length} of ${shards} shards, send the same request again`,
@@ -731,12 +732,12 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 		const { shards, failed, applied } = await eachShard(c.env, binding, (stub) => stub.updatePolicy(parsed.input));
 		if (failed.length > 0) return c.json(partial(binding, shards, failed), 500);
-		// 全shardへ同じ内容を配るので, 代表として先頭の結果を返す
+		// 全shardへ同じ内容を配り、代表として先頭の結果を返す
 		const policy = applied[0] as UpdatePolicyResponse['policy'];
 		return c.json({ binding, shards, policy } satisfies UpdatePolicyResponse);
 	});
 
-	/** 実行時の設定を捨てて静的設定へ戻す(#27), 次の投入に同梱された設定が再び有効(#6) */
+	/** 実行時の設定を破棄して静的設定へ復帰(#27), 次の投入に同梱された設定が再び有効(#6) */
 	app.post('/api/bindings/:binding/policy/reset', async (c) => {
 		const binding = c.req.param('binding');
 		if (bindings !== undefined && !bindings.includes(binding))
@@ -747,7 +748,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		return c.json({ ok: true } satisfies MutationResponse);
 	});
 
-	// 定期実行の一覧, 定義と状態はScheduler DOが正なので直接聞く(ADR-0040)
+	// 定期実行の一覧, 定義と状態はScheduler DOが正で直接照会(ADR-0040)
 	app.get('/api/schedules', async (c) => {
 		if (!schedulerFor) return c.json({ error: 'schedules are not available' } satisfies ErrorResponse, 501);
 		const schedules = await schedulerFor(c.env).list();
@@ -763,7 +764,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const found = rows[0];
 		if (!found) return c.json({ error: 'not found' } satisfies ErrorResponse, 404);
 
-		// 返す列を明示する, 展開すると投影の内部列(seq)やcamelCaseの重複まで出る
+		// 返す列を明示, 展開では投影の内部列(seq)やcamelCaseの重複まで露出
 		const job: Omit<JobDetail, 'retryable' | 'attempts_log'> = {
 			id: found.id,
 			binding: found.binding,
@@ -777,25 +778,25 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			created_at: found.createdAt,
 			updated_at: found.updatedAt,
 			dispatched_at: found.dispatchedAt,
-			// SCHEDULEDが実行可能になる時刻, 変更できるので現在値を返す
+			// SCHEDULEDが実行可能になる時刻, 変更可能で現在値を返す
 			run_after: found.runAfter,
 			progress: found.progress,
 			payload: found.payload,
 			// performの戻り値, 成功時のみ入り未完了はnull(#9), payloadと同じくJSON文字列のまま返す
 			result: found.result,
-			// 投入元のrunへ画面から辿れるようにする, 単発で投入したジョブはnull(ADR-0015)
+			// 投入元のrunへの画面からの参照用, 単発で投入したジョブはnull(ADR-0015)
 			run_id: found.runId,
 			node_id: found.nodeId,
 		};
-		// 履歴は詳細でだけ返す, 一覧に載せると1画面で数百KBになり得る(ADR-0028)
-		// `attempts`は試行回数の数値なので別名にする, 上書きすると画面の n/m が壊れる
+		// 履歴は詳細でだけ返す, 一覧に含めると1画面で数百KBになり得る(ADR-0028)
+		// `attempts`は試行回数の数値で別名を使用, 上書きすると画面のn/mの表示が破損
 		const detail: JobDetail = { ...withRetryable(job, Date.now()), attempts_log: attemptsOf(job, parseAttempts(found.attemptsLog)) };
 		return c.json({ job: detail } satisfies JobDetailResponse);
 	});
 
 	/**
-	 * 断られた理由をHTTPの意味に写す
-	 * goneは410, 資源が在ったが失われた状態を指す, 状態違いの409とは利用者の打つ手が違う
+	 * 拒否の理由をHTTPの意味へ変換
+	 * goneは410, 資源が在ったが失われた状態を指す, 状態違いの409とは利用者の対応が違う
 	 */
 	function refusal(result: { ok: false; reason: 'invalid-state' | 'gone' }, subject: 'job' | 'run' = 'job') {
 		return result.reason === 'gone'
@@ -809,7 +810,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.post('/api/jobs/:id/retry', async (c) => {
 		const id = c.req.param('id');
 		try {
-			// 変更は正となるDOへ問い合わせる
+			// 変更は正となるDOへ問い合わせ
 			const result = await stubOf(c.env, id).retry(id);
 			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
 			const { body, status } = refusal(result);
@@ -834,7 +835,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
 		try {
-			// SCHEDULED以外は予定を変えても実行が止まらないのでDO側で断る
+			// SCHEDULED以外は予定を変えても実行が止まらず, DO側で拒否
 			const result = await stubOf(c.env, id).reschedule(id, parsed.input);
 			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
 			const { body: refused, status } = refusal(result);
@@ -861,7 +862,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	/**
 	 * runの一覧(ADR-0029)
-	 * Run DOはrunごとに独立しているので, 横断的な一覧は読み取りモデルからしか引けない
+	 * Run DOはrunごとに独立し、横断的な一覧は読み取りモデルからのみ取得可能
 	 */
 	app.get('/api/runs', async (c) => {
 		const url = new URL(c.req.url);
@@ -926,7 +927,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			});
 			return c.json({ id: started } satisfies StartRunResponse, 201);
 		} catch (error) {
-			// runIdのローカル部として使えないidは要求側の誤り, ジョブ側の経路と同じ扱いにする
+			// runIdのローカル部として使えないidは要求側の誤り, ジョブ側の経路と同じ扱い
 			if (error instanceof InvalidRunIdError) return c.json({ error: 'invalid run id' } satisfies ErrorResponse, 400);
 			throw error;
 		}
@@ -954,10 +955,10 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				node_failed: found.nodeFailed,
 				created_at: found.createdAt,
 				updated_at: found.updatedAt,
-				// subflowとして起動された場合の親, 画面から親のrunへ辿る
+				// subflowとして起動された場合の親, 画面から親のrunへの参照用
 				parent_run_id: found.parentRunId,
 				parent_node_id: found.parentNodeId,
-				// 終端でなければ再開できない, 押す前に可否を出す(ADR-0034)
+				// 終端でなければ再開不可, 操作前に可否を表示(ADR-0034)
 				retryable: found.state === 'FAILED',
 			},
 			nodes: nodes.map((node) => ({
@@ -981,8 +982,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	});
 
 	/**
-	 * 取り消しと再開は正となるRun DOへ送る
-	 * Honoの文脈型に依存しないよう, 必要な値だけを引数で受ける
+	 * 取り消しと再開は正となるRun DOへ送信
+	 * Honoの文脈型に依存しないよう、必要な値だけを引数で受ける
 	 */
 	const runMutation = async (action: 'cancel' | 'retry', env: Env, id: string) => {
 		if (!runFor) return { body: { error: 'run control is not available' } satisfies ErrorResponse, status: 501 } as const;
@@ -1008,7 +1009,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		return c.json(body, status);
 	});
 
-	// APIに該当しないGETはSPAへ渡す,クライアント側でルーティングする
+	// APIに該当しないGETはSPAへ渡す, ルーティングはクライアント側
 	if (dashboard) {
 		app.get('*', (c) => c.html(dashboard.render()));
 	}

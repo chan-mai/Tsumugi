@@ -4,7 +4,7 @@ import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm
  * Job DOのSQLiteスキーマ
  *
  * 稼働中ジョブについて正となるデータ(ADR-0002)
- * 終端に達したジョブもアウトボックスの投影が済むまでは残り, sweepで削除される
+ * 終端に達したジョブもアウトボックスの投影が済むまでは残り、sweepで削除
  */
 export const job = sqliteTable(
 	'job',
@@ -31,12 +31,12 @@ export const job = sqliteTable(
 		payload: text('payload').notNull(),
 		// performの戻り値, 成功時にJSON文字列で入る(#9)
 		result: text('result'),
-		// v2のDAG用の予約席(ADR-0015),後からスキーマを書き換えずに済むよう最初から置く
+		// v2のDAG用の予約列(ADR-0015), 後からのスキーマ変更が不要なよう最初から配置
 		runId: text('run_id'),
 		nodeId: text('node_id'),
 	},
 	(t) => [
-		// tickが最初に引くクエリ,実行可能なジョブの絞り込みに使う
+		// tickが最初に実行するクエリ, 実行可能なジョブの抽出に使用
 		index('job_active').on(t.state, t.runAfter),
 		index('job_concurrency_key').on(t.concurrencyKey, t.state),
 		index('job_run').on(t.runId, t.nodeId),
@@ -44,8 +44,8 @@ export const job = sqliteTable(
 );
 
 /**
- * 重複排除(ADR-0021 / ADR-0022), ジョブ本体ではなくキーだけを一定期間残す
- * KVには条件付き書き込みが無く「無ければ入れる」を不可分に実行できないためDO内に置く
+ * 重複排除(ADR-0021 / ADR-0022), ジョブ本体ではなくキーだけを一定期間保持
+ * KVには条件付き書き込みが無く「無ければ挿入」の不可分な実行が不能, DO内に配置
  */
 export const uniqueKey = sqliteTable(
 	'unique_key',
@@ -57,15 +57,26 @@ export const uniqueKey = sqliteTable(
 	(t) => [index('unique_key_expiry').on(t.expiresAt)],
 );
 
-/** binding単位のポリシー, tickが同期で読めるようSQLiteに置く */
+/** binding単位のポリシー, tickの同期読み取り用にSQLiteへ配置 */
 export const setting = sqliteTable('setting', {
 	key: text('key').primaryKey(),
 	value: text('value').notNull(),
 });
 
+/** キー別トークンバケット(ADR-0045), tokens上限の行は保存対象外 */
+export const keyBucket = sqliteTable(
+	'key_bucket',
+	{
+		key: text('key').primaryKey(),
+		tokens: real('tokens').notNull(),
+		refilledAt: integer('refilled_at').notNull(),
+	},
+	(t) => [index('key_bucket_refilled').on(t.refilledAt)],
+);
+
 /**
  * 試行ごとの記録(ADR-0028), 失敗の事後調査に必要
- * ジョブ行は最新の状態しか持たず,何回目がいつ何で落ちたかは残らない
+ * ジョブ行は最新の状態しか持たず、何回目がいつ何で失敗したかは残らない
  */
 export const attempt = sqliteTable(
 	'attempt',
@@ -82,15 +93,15 @@ export const attempt = sqliteTable(
 
 /**
  * D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
- * D1書き込みが成功するまで削除しないので,失敗してもカーソルが進まず次回で追いつく
+ * D1書き込みの成功まで削除せず、失敗時もカーソルが進まず次回で追いつく
  */
 /**
  * Run DOへの通知待ち(ADR-0031)
- * D1への投影とは宛先もまとめ方も違うので別の表にする
+ * D1への投影とは宛先もまとめ方も別で表も分離
  */
 /**
  * 失敗の通知待ち(#30)
- * Run DOへの通知とは宛先も対象も違うので別の表にする
+ * Run DOへの通知とは宛先も対象も別で表も分離
  */
 export const failureNotify = sqliteTable('failure_notify', {
 	seq: integer('seq').primaryKey({ autoIncrement: true }),

@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 const decisionDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'docs', 'decision');
 
 describe('ADR索引の網羅', () => {
-	it('実在するADRが全て索引に載っている', () => {
-		// 索引が手書きなので, 追加時に載せ忘れるとコードの参照先が辿れなくなる
+	it('実在するADRが全て索引に含まれている', () => {
+		// 索引は手書きで、追加時に記載を忘れるとコードの参照先が解決不能
 		const files = readdirSync(decisionDir)
 			.filter((name) => /^\d{4}-.+\.md$/.test(name))
 			.sort();

@@ -8,8 +8,8 @@ import { BARREL_HEADER, exportLine, performerFile } from './templates.js';
 /**
  * `tsumugi add-performer <NAME>`(ADR-0036)
  *
- * performerのファイルを生成し, バレルへexport行を追記する
- * バレルの既存行は書き換えない, wrangler設定にも触れない(ADR-0037)
+ * performerのファイルを生成し、バレルへexport行を追記
+ * バレルの既存行は書き換えない, wrangler設定も無変更(ADR-0037)
  */
 
 /** 引数からクラス名とファイル名を導く, kebab / camel / Pascal / SNAKEを受ける */
@@ -29,7 +29,7 @@ export function performerNames(raw: string): { className: string; fileBase: stri
 	return { className, fileBase: words.map((word) => word.toLowerCase()).join('-') };
 }
 
-/** 同じ名前が既に並んでいるかを見る, クラス名かimport元のどちらかが重なれば止める */
+/** 同じ名前が既に並んでいるかの判定, クラス名かimport元のどちらかが重なれば中止 */
 const barrelHas = (barrel: string, names: { className: string; fileBase: string }): boolean =>
 	new RegExp(`\\b${names.className}\\b`).test(barrel) || barrel.includes(`'./${names.fileBase}.js'`);
 
@@ -66,7 +66,7 @@ export function addPerformer(rawName: string, deps: CliDeps): number {
 	deps.log(`created src/performers/${names.fileBase}.ts`);
 	deps.log(`added ${names.className} to src/performers/index.ts`);
 
-	// 別のWorkerから使う場合に呼び出し側が足すservice bindingの断片, 自分の設定には何も要らない
+	// 別のWorkerから使う場合に呼び出し側が追加するservice bindingの断片, 自分の設定には何も不要
 	const config = detectWranglerConfig(deps);
 	const worker = config ? readWorkerName(deps.fs.read(config.path), config.format) : undefined;
 	const missing: MissingBinding[] = [{ kind: 'service', name: names.className, className: names.className, reason: 'absent' }];

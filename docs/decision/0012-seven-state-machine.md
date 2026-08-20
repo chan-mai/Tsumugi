@@ -2,12 +2,12 @@
 
 ## 状況
 
-投入済み未開始と実行中を1つの状態にまとめると, performerが動いていないのか遅いだけなのかを区別できず固着の診断ができない
+投入済み未開始と実行中を1つの状態にまとめると、performerが動いていないのか遅いだけなのかを区別できず固着の診断ができない
 
 ## 決定
 
 SCHEDULED / QUEUED / RUNNING / COMPLETED / FAILED / CANCELLED / STALLEDの7状態
-待ち状態はattemptsで区別できるのでSCHEDULEDに統合する
+待ち状態はattemptsで区別できるためSCHEDULEDに統合する
 
 ## 帰結
 

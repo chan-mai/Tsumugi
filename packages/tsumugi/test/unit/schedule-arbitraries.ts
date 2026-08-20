@@ -1,20 +1,20 @@
 import fc from 'fast-check';
-import type { Bucket, JobView, Policy, ScheduleInput } from '../../src/core/types.js';
+import type { Bucket, JobView, KeyBuckets, Policy, ScheduleInput } from '../../src/core/types.js';
 
 /**
  * schedule()に渡せる正当な入力の生成器
  *
  * 守らないと偽陽性が出る制約(スケジューラ分析より):
- * - idは一意, reaperがSetでソートの同値比較が非対称なため重複で順序が未定義になる
+ * - idは一意, reaperがSetでソートの同値比較が非対称なため重複で順序が未定義
  * - SCHEDULED ⟹ dispatchedAt === null
- * - QUEUED / RUNNING ⟹ dispatchedAt !== null, nullだと永久に回収されずDOが構築し得ない状態になる
- * - concurrencyKeyは小さな集合, 広い空間だと衝突せずキー制御が一度も効かない
- * - 時刻はnowからの相対, 絶対epochは縮小が効かない
+ * - QUEUED / RUNNING ⟹ dispatchedAt !== null, nullでは永久に回収されずDOが構築し得ない状態
+ * - concurrencyKeyは小さな集合, 広い空間だと衝突が無くキー制御の分岐が未実行
+ * - 時刻はnowからの相対, 絶対epochでは縮小が無効
  */
 
 const NOW = 1_000_000;
 
-/** キーはnullか小さな集合から, 衝突させてperKeyの分岐を踏ませる */
+/** キーはnullか小さな集合から, 衝突させてperKeyの分岐を実行させるため */
 const concurrencyKey = fc.constantFrom(null, 'k0', 'k1', 'k2');
 
 const guarantee = fc.constantFrom('at-least-once' as const, 'at-most-once' as const);
@@ -62,7 +62,12 @@ const policy: fc.Arbitrary<Policy> = fc.record({
 		fc.constant(null),
 		fc.record({ tokens: fc.integer({ min: 1, max: 100 }), intervalMs: fc.integer({ min: 1, max: 60_000 }) }),
 	),
-	// null / 0 / 負 / 正, effectivePriorityの<=0分岐も踏む
+	// 小さいtokensで枯渇の分岐を確実に実行
+	perKeyRate: fc.oneof(
+		fc.constant(null),
+		fc.record({ tokens: fc.integer({ min: 1, max: 3 }), intervalMs: fc.integer({ min: 1, max: 60_000 }) }),
+	),
+	// null / 0 / 負 / 正, effectivePriorityの<=0分岐も実行
 	agingIntervalMs: fc.oneof(fc.constant(null), fc.integer({ min: -1, max: 600_000 })),
 	reaperGraceMs: fc.integer({ min: 0, max: 60_000 }),
 });
@@ -76,9 +81,25 @@ const bucket: fc.Arbitrary<Bucket> = fc.oneof(
 	fc.record({ tokens: fc.constant(Number.POSITIVE_INFINITY), refilledAt: fc.constant(NOW) }),
 );
 
+/** キー別バケット, キーはconcurrencyKeyと同じ集合から, undefinedの分岐で省略も検査 */
+const keyBuckets: fc.Arbitrary<KeyBuckets | undefined> = fc.oneof(
+	fc.constant(undefined),
+	fc.dictionary(
+		fc.constantFrom('k0', 'k1', 'k2'),
+		fc.record({
+			tokens: fc.double({ min: 0, max: 5, noNaN: true }),
+			refilledAt: fc.integer({ min: NOW - 600_000, max: NOW }),
+		}),
+		{ maxKeys: 3 },
+	),
+);
+
 export const scheduleInput: fc.Arbitrary<ScheduleInput> = fc
 	.uniqueArray(fc.string({ minLength: 1, maxLength: 8 }), { minLength: 0, maxLength: 12 })
-	.chain((ids) => fc.tuple(fc.tuple(...ids.map(jobOf)), policy, bucket))
-	.map(([jobs, policy, bucket]) => ({ now: NOW, jobs, policy, bucket }));
+	.chain((ids) => fc.tuple(fc.tuple(...ids.map(jobOf)), policy, bucket, keyBuckets))
+	// undefinedの分岐はプロパティごと省略, 省略時の既定(全キーtokens上限)も検査
+	.map(([jobs, policy, bucket, keyBuckets]) =>
+		keyBuckets === undefined ? { now: NOW, jobs, policy, bucket } : { now: NOW, jobs, policy, bucket, keyBuckets },
+	);
 
 export { NOW };

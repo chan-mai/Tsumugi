@@ -3,15 +3,15 @@ import type { BindingKind, MissingBinding } from './validate.js';
 /**
  * 不足したbindingからwrangler設定の断片を作る(ADR-0036)
  *
- * `examples/basic/wrangler.jsonc`の構成をそのまま雛形にする
- * 値は利用者が埋める箇所だけを空にし,残りは貼ればそのまま通る形にする
- * 起動時検証とCLIの両方が使う, 断片の実装はここに一本化する
+ * `examples/basic/wrangler.jsonc`の構成がそのまま雛形
+ * 値は利用者が埋める箇所だけを空にし、残りは貼り付けでそのまま有効な形
+ * 起動時検証とCLIの両方が使用, 断片の実装はここに一本化
  */
 
 /** D1のマイグレーションの既定の置き場所, パッケージが持つSQLを指す */
 export const DEFAULT_MIGRATIONS_DIR = './node_modules/tsumugi/migrations';
 
-/** Durable Objectのmigrationsのtagは順に増やす, 既存と衝突しない番号を利用者が振り直す */
+/** Durable Objectのmigrationsのtagは順に増やす, 既存と衝突しない番号を利用者が再設定 */
 const DO_MIGRATION_TAG = 'vN';
 
 /** CLIが実測値を埋めるための指定, 省略した項目はプレースホルダのまま */
@@ -20,13 +20,13 @@ export type FragmentValues = {
 	databaseId?: string;
 	databaseName?: string;
 	queueName?: string;
-	/** Durable Objectのmigrationsのtag, 新規生成ではv1で確定できる */
+	/** Durable Objectのmigrationsのtag, 新規生成ではv1で確定可能 */
 	migrationTag?: string;
 	/** service bindingが指す相手のWorker名 */
 	serviceWorker?: string;
 };
 
-/** 形式に依存しない断片のかたまり, レンダラがJSONCとTOMLへ変換する */
+/** 形式に依存しない断片の集合, レンダラがJSONCとTOMLへ変換 */
 type FragmentBlock = {
 	comment?: string;
 	key: string;
@@ -104,7 +104,7 @@ const blocksOf = (missing: readonly MissingBinding[], values: FragmentValues): F
 
 const jsonc = (value: unknown): string => JSON.stringify(value, null, 2);
 
-/** durable_objectsだけbindingsを同じ行の`{}`で包む, 従来の出力を保つ */
+/** durable_objectsだけbindingsを同じ行の`{}`で包む, 従来の出力を維持 */
 const renderJsonc = (block: FragmentBlock): string => {
 	const body =
 		block.key === 'durable_objects'
@@ -122,7 +122,7 @@ const tomlValue = (value: unknown): string => {
 const tomlTables = (path: string, items: Record<string, unknown>[]): string[] =>
 	items.map((item) => [`[[${path}]]`, ...Object.entries(item).map(([key, value]) => `${key} = ${tomlValue(value)}`)].join('\n'));
 
-/** 配列は`[[key]]`, 配列を持つオブジェクトは`[[key.prop]]`のテーブル配列にする */
+/** 配列は`[[key]]`, 配列を持つオブジェクトは`[[key.prop]]`のテーブル配列で表現 */
 const renderToml = (block: FragmentBlock): string => {
 	const tables = Array.isArray(block.value)
 		? tomlTables(block.key, block.value as Record<string, unknown>[])
@@ -133,7 +133,7 @@ const renderToml = (block: FragmentBlock): string => {
 	return block.comment ? `# ${block.comment}\n${body}` : body;
 };
 
-/** 貼り付けられるJSONCの断片, 種別ごとにまとめる */
+/** 貼り付け可能なJSONCの断片, 種別ごとに集約 */
 export function configFragment(missing: readonly MissingBinding[], values: FragmentValues = {}): string {
 	return blocksOf(missing, values).map(renderJsonc).join(',\n');
 }

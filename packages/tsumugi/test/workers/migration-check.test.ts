@@ -25,10 +25,10 @@ const call = (path: string, database: D1Database) =>
 	);
 
 /**
- * 台帳の応答だけ差し替えたD1を返す, 実際のテスト用D1は壊さない
+ * 台帳の応答だけ差し替えたD1を返す, 実際のテスト用D1は無変更
  *
  * D1のメソッドはプロトタイプにあり展開では失われる
- * `prepare`しか使わない経路では気づけず, `batch`を通した時に初めて壊れる
+ * `prepare`しか使わない経路では発覚せず、`batch`の実行時に初めて壊れる
  */
 function proxyD1(onMigrationsQuery: () => D1PreparedStatement): D1Database {
 	const base = env.TSUMUGI_DB;
@@ -66,7 +66,7 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('欠けていれば名前を返す', async () => {
-		// 期待値は定義から導く, マイグレーションを足すたびにここを書き換えないため
+		// 期待値は定義から導く, マイグレーションを追加するたびの書き換えの回避
 		const [first, ...rest] = EXPECTED_MIGRATIONS;
 		const status = await checkMigrations(withLedger([{ name: first }]));
 		expect(status).toEqual({ ok: false, missing: rest });
@@ -79,13 +79,13 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('一時障害はunavailableとして扱い未適用と区別する(#8)', async () => {
-		// D1の一時障害を未適用と混同すると, 適用済みの環境に誤った復旧手順を案内する
+		// D1の一時障害を未適用と混同すると、適用済みの環境への誤った復旧手順の案内につながる
 		const status = await checkMigrations(withError('D1_ERROR: Network connection lost'));
 		expect(status).toEqual({ ok: false, unavailable: true });
 	});
 
 	it('一時障害では適用漏れの復旧手順を案内しない(#8)', async () => {
-		// unavailableはTTLで使い回されるので, 共有appのキャッシュに影響しないよう専用のappを用意する
+		// unavailableはTTLで再利用され、共有appのキャッシュに影響しないよう専用のappを用意
 		const isolated = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
 		const res = await isolated.fetch!(
 			new Request('https://example.com/api/jobs', { headers: { authorization: `Bearer ${TOKEN}` } }),
@@ -99,7 +99,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		expect(body.error).toContain('temporarily unavailable');
 	});
 
-	it('一時障害の結果は短いTTLで使い回しD1へ再問い合わせしない(#8)', async () => {
+	it('一時障害の結果は短いTTLで再利用しD1へ再問い合わせしない(#8)', async () => {
 		let calls = 0;
 		let clock = 1_000;
 		const failing = proxyD1(() => {
@@ -109,11 +109,11 @@ describe('マイグレーション適用漏れの検出', () => {
 		const check = cachedCheck(() => clock);
 
 		expect((await check(failing)).ok).toBe(false);
-		// TTL内なので再問い合わせしない, 障害中にクエリが増え続けるのを防ぐ
+		// TTL内は再問い合わせなし, 障害中のクエリ増加を防止
 		expect((await check(failing)).ok).toBe(false);
 		expect(calls).toBe(1);
 
-		// TTLを過ぎたら再検査する
+		// TTLを過ぎたら再検査
 		clock += 5_001;
 		await check(failing);
 		expect(calls).toBe(2);
@@ -149,12 +149,12 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('batchを使う経路も通る', async () => {
-		// 展開でモックを作るとプロトタイプのメソッドが落ち, ここで初めて壊れる
+		// 展開でモックを作るとプロトタイプのメソッドが欠落し、ここで初めて壊れる
 		const res = await call('/api/jobs', withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
 		expect(res.status).toBe(200);
 	});
 
-	it('通った結果は使い回してD1へ再問い合わせしない', async () => {
+	it('成功した結果は再利用してD1へ再問い合わせしない', async () => {
 		let calls = 0;
 		const counting = proxyD1(() => {
 			calls++;
@@ -168,7 +168,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		expect(calls).toBe(1);
 	});
 
-	it('未適用の結果は使い回さない, 適用後に自力で復帰する', async () => {
+	it('未適用の結果は再利用しない, 適用後に自動で復帰する', async () => {
 		let applied = false;
 		const flipping = proxyD1(() =>
 			ledgerOf(applied ? EXPECTED_MIGRATIONS.map((name) => ({ name })) : [{ name: '0001_create_job_read_model.sql' }]),
@@ -177,7 +177,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		const check = cachedCheck();
 		expect((await check(flipping)).ok).toBe(false);
 		applied = true;
-		// 失敗を保持し続けると, 適用してもWorkerを再デプロイするまで復帰しない
+		// 失敗を保持し続けると、適用してもWorkerの再デプロイまで未復帰
 		expect((await check(flipping)).ok).toBe(true);
 	});
 });

@@ -40,12 +40,12 @@ describe('runの進行判断', () => {
 		expect(ids(nodes, 'start')).toEqual(['b']);
 	});
 
-	it('依存が失敗したら下流を打ち切る', () => {
+	it('依存が失敗したら下流を中断する', () => {
 		const nodes = [node({ id: 'a', state: 'FAILED' }), node({ id: 'b', state: 'PENDING', after: ['a'] })];
 		expect(ids(nodes, 'skip')).toEqual(['b']);
 	});
 
-	it('独立した枝は失敗の影響を受けない', () => {
+	it('独立した分岐は失敗の影響を受けない', () => {
 		const nodes = [
 			node({ id: 'a', state: 'FAILED' }),
 			node({ id: 'b', state: 'PENDING', after: ['a'] }),
@@ -137,7 +137,7 @@ describe('runの進行判断', () => {
 	});
 
 	it('取り消し中もfan-outノードを集約する', () => {
-		// 集約しないと子孫が終わってもRUNNINGのまま残り, runがCANCELLEDに決着しない
+		// 集約しないと子孫が終わってもRUNNINGのまま残り、runがCANCELLEDに未決着
 		const nodes = [
 			node({ id: 'each', state: 'RUNNING', container: true }),
 			node({ id: 'each:0', state: 'COMPLETED', parent: 'each', origin: 'fanOut' }),
@@ -147,8 +147,8 @@ describe('runの進行判断', () => {
 		expect(output.state).toBe('RUNNING');
 	});
 
-	it('依存が消えていれば待たずに打ち切る(ADR-0030)', () => {
-		// 定義から消えたノードは決着しないので, 待つと永久にRUNNINGのまま残る
+	it('依存が消えていれば待たずに中断する(ADR-0030)', () => {
+		// 定義から消えたノードは決着せず、待つと永久にRUNNINGのまま残る
 		const nodes = [node({ id: 'b', state: 'PENDING', after: ['gone'] })];
 		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
 			{ type: 'skip', id: 'b', reason: 'a dependency is missing from the flow' },
@@ -174,7 +174,7 @@ describe('runの状態', () => {
 		expect(stateOf([node({ id: 'a', state: 'COMPLETED' })])).toBe('COMPLETED');
 	});
 
-	it('打ち切りが残ればFAILED', () => {
+	it('中断が残ればFAILED', () => {
 		expect(stateOf([node({ id: 'a', state: 'FAILED' }), node({ id: 'b', state: 'SKIPPED' })])).toBe('FAILED');
 	});
 
@@ -258,7 +258,7 @@ describe('発火条件(ADR-0041)', () => {
 		}
 	});
 
-	it('消えた依存はalwaysでも打ち切る', () => {
+	it('消えた依存はalwaysでも中断する', () => {
 		// 成否が分からないので待っても解決しない(ADR-0030)
 		const nodes = [node({ id: 'b', state: 'PENDING', after: ['gone'], trigger: 'always' })];
 		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
@@ -271,7 +271,7 @@ describe('発火条件(ADR-0041)', () => {
 		expect(advance({ nodes, cancelling: false }).state).toBe('FAILED');
 	});
 
-	it('fan-outノードとsubflowノードにも効く', () => {
+	it('fan-outノードとsubflowノードにも適用される', () => {
 		const container = [
 			node({ id: 'a', state: 'FAILED' }),
 			node({ id: 'each', state: 'PENDING', after: ['a'], container: true, trigger: 'always' }),
@@ -305,7 +305,7 @@ describe('期限超過(ADR-0039)', () => {
 		expect(advance({ nodes: [node({ id: 'a', state: 'RUNNING' })], cancelling: false, expired: true }).state).toBe('RUNNING');
 	});
 
-	it('打ち切られたノードが残ればFAILED', () => {
+	it('中断されたノードが残ればFAILED', () => {
 		const nodes = [node({ id: 'a', state: 'COMPLETED' }), node({ id: 'b', state: 'FAILED' })];
 		expect(advance({ nodes, cancelling: false, expired: true }).state).toBe('FAILED');
 	});
@@ -315,8 +315,8 @@ describe('期限超過(ADR-0039)', () => {
 		expect(advance({ nodes: [node({ id: 'a', state: 'COMPLETED' })], cancelling: false, expired: true }).state).toBe('FAILED');
 	});
 
-	it('期限で打ち切られたfan-outの子は親を成功扱いにしない', () => {
-		// fan-outの子の失敗は非致命(ADR-0035)なので, ノードの状態だけではrunがCOMPLETEDに決着してしまう
+	it('期限で中断されたfan-outの子は親を成功扱いにしない', () => {
+		// fan-outの子の失敗は非致命(ADR-0035)で、ノードの状態だけではrunがCOMPLETEDに決着し得る
 		const nodes = [
 			node({ id: 'each', state: 'COMPLETED', container: true }),
 			node({ id: 'each:0', state: 'FAILED', parent: 'each', origin: 'fanOut' }),
@@ -336,7 +336,7 @@ describe('subflowノード', () => {
 	});
 
 	it('ジョブの投入は要求しない', () => {
-		// performerを持たないので, startを出すとJob DOへ空のbindingが渡る
+		// performerを持たず、startの決定ではJob DOへ空のbindingが渡る
 		const nodes = [node({ id: 'child', state: 'PENDING', subflow: true })];
 		expect(advance({ nodes, cancelling: false }).decisions).not.toContainEqual({ type: 'start', id: 'child' });
 	});
@@ -346,7 +346,7 @@ describe('subflowノード', () => {
 		expect(advance({ nodes, cancelling: false }).decisions).toEqual([]);
 	});
 
-	it('子が失敗すると下流を打ち切る', () => {
+	it('子が失敗すると下流を中断する', () => {
 		const nodes = [node({ id: 'child', state: 'FAILED', subflow: true }), node({ id: 'after', state: 'PENDING', after: ['child'] })];
 		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
 			{ type: 'skip', id: 'after', reason: 'a dependency did not succeed' },

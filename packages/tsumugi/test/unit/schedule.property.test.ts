@@ -10,7 +10,7 @@ import { expectedDispatchIds } from './schedule-model.js';
  * schedule()の不変条件をproperty-based testで固める
  *
  * テーブル駆動は境界を突くが組み合わせの隙間が空く
- * perKeyConcurrency > 1やreaperとレート制限の同時発火は, ここで初めて広く踏まれる
+ * perKeyConcurrency > 1やreaperとレート制限の同時発火の検査はここが初めて
  */
 
 const RUNS = 500;
@@ -57,7 +57,7 @@ describe('schedule()の不変条件', () => {
 				}
 
 				for (const [key, count] of after) {
-					// 既にスナップショットが上限を超えていてもdispatchで増やさなければ許容する
+					// 既にスナップショットが上限を超えていてもdispatchで増やさなければ許容
 					const ceiling = Math.max(input.policy.perKeyConcurrency, existing.get(key) ?? 0);
 					expect(count, `key ${key}`).toBeLessThanOrEqual(ceiling);
 				}
@@ -76,6 +76,49 @@ describe('schedule()の不変条件', () => {
 				}
 				expect(out.bucket.tokens).toBeGreaterThanOrEqual(0);
 				expect(out.bucket.tokens).toBeLessThanOrEqual(input.policy.rate.tokens);
+			}),
+			{ numRuns: RUNS },
+		);
+	});
+
+	it('各キーのdispatch数が補充後のキー別トークンを超えない', () => {
+		fc.assert(
+			fc.property(scheduleInput, (input) => {
+				const rate = input.policy.perKeyRate;
+				if (rate === null) return;
+				const byId = activeById(input);
+				const counts = new Map<string, number>();
+				for (const d of dispatches(schedule(input).decisions)) {
+					const key = byId.get(d.id)?.concurrencyKey;
+					if (key != null) counts.set(key, (counts.get(key) ?? 0) + 1);
+				}
+				for (const [key, count] of counts) {
+					const stored = input.keyBuckets?.[key];
+					// 格納が無いキーは補充済み, 有れば補充後の残量が上限
+					const refilled =
+						stored === undefined
+							? rate.tokens
+							: Math.min(rate.tokens, stored.tokens + Math.max(0, input.now - stored.refilledAt) * (rate.tokens / rate.intervalMs));
+					expect(count, `key ${key}`).toBeLessThanOrEqual(refilled);
+				}
+			}),
+			{ numRuns: RUNS },
+		);
+	});
+
+	it('出力のキー別バケットに上限到達のキーが残らない, perKeyRate無しなら空', () => {
+		fc.assert(
+			fc.property(scheduleInput, (input) => {
+				const out = schedule(input);
+				const rate = input.policy.perKeyRate;
+				if (rate === null) {
+					expect(out.keyBuckets).toEqual({});
+					return;
+				}
+				for (const [key, b] of Object.entries(out.keyBuckets)) {
+					expect(b.tokens, `key ${key}`).toBeGreaterThanOrEqual(0);
+					expect(b.tokens, `key ${key}`).toBeLessThan(rate.tokens);
+				}
 			}),
 			{ numRuns: RUNS },
 		);

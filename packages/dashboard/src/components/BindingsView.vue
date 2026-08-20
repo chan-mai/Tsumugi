@@ -9,10 +9,10 @@ const error = ref<string | null>(null);
 const message = ref<string | null>(null);
 /** 操作中のbinding, 二度押しを防ぐ */
 const busy = ref<string | null>(null);
-/** 入力中の同時実行数, 反映するまでは画面の値だけを持つ. 空欄では数値にならない */
+/** 入力中の同時実行数, 反映までは画面の値だけを保持, 空欄は非数値 */
 const draft = ref<Record<string, number | string>>({});
 
-/** 入力が0以上の整数の時だけ送る, 空欄のまま送るとサーバに断られる */
+/** 入力が0以上の整数の時だけ送信, 空欄のままではサーバが拒否 */
 const draftValue = (binding: string): number | null => {
 	const value = draft.value[binding];
 	return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
@@ -28,7 +28,7 @@ async function load() {
 		if (requested !== generation) return;
 		entries.value = Object.entries(loaded.bindings).sort(([a], [b]) => (a < b ? -1 : 1));
 		for (const [binding, entry] of entries.value) {
-			// 入力中の値は上書きしない, 定期更新のたびに戻ると入力できない
+			// 入力中の値は上書きなし, 定期更新のたびに戻ると入力が不能
 			if (draft.value[binding] === undefined) draft.value[binding] = entry.policy.concurrency;
 		}
 		error.value = null;
@@ -54,7 +54,7 @@ async function act(binding: string, run: () => Promise<unknown>, done: string) {
 		message.value = e instanceof Error ? e.message : String(e);
 	} finally {
 		busy.value = null;
-		// 操作の後はサーバの値へ引き直す, resetで戻った値が入力欄に残らないようにする
+		// 操作の後はサーバの値で再取得, resetで戻った値の入力欄への残存を防止
 		delete draft.value[binding];
 		await load();
 	}
@@ -71,15 +71,17 @@ function applyConcurrency(binding: string) {
 
 const reset = (binding: string) => act(binding, () => resetPolicy(binding), 'reset to the static settings');
 
-/** 投入が止まっている理由, 複数該当する場合は全て出す */
+/** 投入が止まっている理由, 複数該当する場合は全て表示 */
 const blockedBy = (entry: BindingDiagnostics) =>
 	Object.entries(entry.blocked)
 		.filter(([, on]) => on)
 		.map(([name]) => name)
 		.join(', ');
 
-const rateOf = (entry: BindingDiagnostics) =>
-	entry.policy.rate === null ? '-' : `${entry.policy.rate.tokens} / ${entry.policy.rate.intervalMs} ms`;
+const formatRate = (rate: { tokens: number; intervalMs: number } | null) =>
+	rate === null ? '-' : `${rate.tokens} / ${rate.intervalMs} ms`;
+const rateOf = (entry: BindingDiagnostics) => formatRate(entry.policy.rate);
+const perKeyRateOf = (entry: BindingDiagnostics) => formatRate(entry.policy.perKeyRate);
 
 const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
 const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent disabled:opacity-50';
@@ -107,6 +109,7 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 						<th :class="HEAD">Concurrency</th>
 						<th :class="HEAD">Per key</th>
 						<th :class="HEAD">Rate</th>
+						<th :class="HEAD">Per-key rate</th>
 						<th :class="HEAD">Actions</th>
 					</tr>
 				</thead>
@@ -139,6 +142,7 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 						</td>
 						<td class="p-4 align-middle tabular-nums">{{ entry.policy.perKeyConcurrency }}</td>
 						<td class="p-4 align-middle tabular-nums">{{ rateOf(entry) }}</td>
+						<td class="p-4 align-middle tabular-nums">{{ perKeyRateOf(entry) }}</td>
 						<td class="p-4 align-middle">
 							<div class="flex items-center gap-1">
 								<button type="button" :class="BTN" :disabled="busy === binding" @click="setPaused(binding, !entry.policy.paused)">
@@ -149,7 +153,7 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 						</td>
 					</tr>
 					<tr v-if="entries.length === 0">
-						<td colspan="8" class="h-24 text-center text-muted-foreground">No bindings.</td>
+						<td colspan="9" class="h-24 text-center text-muted-foreground">No bindings.</td>
 					</tr>
 				</tbody>
 			</table>

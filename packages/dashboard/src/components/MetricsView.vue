@@ -17,7 +17,7 @@ const binding = ref('');
 const metrics = ref<Metrics | null>(null);
 const error = ref<string | null>(null);
 
-/** 遅れて届いた古い応答で最新の絞り込みの結果を上書きしないための連番 */
+/** 遅れて届いた古い応答で最新の抽出条件の結果を上書きしないための連番 */
 let generation = 0;
 
 async function load() {
@@ -40,7 +40,7 @@ async function load() {
 watch([hours, binding], load, { immediate: true });
 defineExpose({ load });
 
-/** 棒の高さは区間内の最大件数で割る */
+/** 棒の高さは区間内の最大件数で正規化 */
 const peak = computed(() => Math.max(1, ...(metrics.value?.series ?? []).map((point) => point.total)));
 
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`;

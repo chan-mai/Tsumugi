@@ -6,13 +6,13 @@
   "durable_objects": {
     "bindings": [
       { "name": "JOB_SHARD", "class_name": "TsumugiJobShard" },
-      // flowsを使う場合だけ要る(ADR-0029)
+      // flowsを使う場合だけ必要(ADR-0029)
       { "name": "RUN", "class_name": "TsumugiRun" },
-      // schedulesを使う場合だけ要る(ADR-0040)
+      // schedulesを使う場合だけ必要(ADR-0040)
       { "name": "SCHEDULER", "class_name": "TsumugiScheduler" },
     ],
   },
-  // exportsフィールドは片道切符なので当面migrations配列を使う
+  // exportsフィールドは不可逆のため当面migrations配列を使用
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TsumugiJobShard"] },
     { "tag": "v2", "new_sqlite_classes": ["TsumugiRun"] },
@@ -23,7 +23,7 @@
       "binding": "TSUMUGI_DB",
       "database_name": "tsumugi-example",
       "database_id": "9945ba53-b1cb-45a2-8f01-c650518c2f2a",
-      // 読み取りモデルのマイグレーション,利用者は./node_modules/tsumugi/migrationsを指す
+      // 読み取りモデルのマイグレーション, 利用者は./node_modules/tsumugi/migrationsを指定
       "migrations_dir": "../../packages/tsumugi/migrations",
     },
   ],
@@ -32,7 +32,7 @@
     "consumers": [{ "queue": "tsumugi-example", "max_batch_size": 10, "max_retries": 5 }],
   },
   "analytics_engine_datasets": [{ "binding": "TSUMUGI_METRICS", "dataset": "tsumugi_jobs" }],
-  // 別Workerのperformer, bindingの名前がそのままbinding名になる(ADR-0037)
+  // 別Workerのperformer, bindingの名前がそのままbinding名(ADR-0037)
   "services": [
     {
       "binding": "MAIL",
@@ -40,6 +40,6 @@
       "entrypoint": "SendMail",
     },
   ],
-  // D1の読み取りモデルの保持はscheduledで行う
+  // D1の読み取りモデルの保持はscheduledが担当
   "triggers": { "crons": ["0 * * * *"] },
 }

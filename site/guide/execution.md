@@ -65,13 +65,14 @@ await tsumugi.enqueue(env, {
 
 ## 流量制御
 
-binding単位に3つの設定で宣言します。
+binding単位に4つの設定で宣言します。
 
-| 設定                | 既定   | 内容                                   |
-| ------------------- | ------ | -------------------------------------- |
-| `concurrency`       | `100`  | 同時実行数の上限                       |
-| `rate`              | `null` | 一定時間あたりの実行数の上限           |
-| `perKeyConcurrency` | `1`    | `concurrencyKey`単位の同時実行数の上限 |
+| 設定                | 既定   | 内容                                             |
+| ------------------- | ------ | ------------------------------------------------ |
+| `concurrency`       | `100`  | 同時実行数の上限                                 |
+| `rate`              | `null` | 一定時間あたりの実行数の上限                     |
+| `perKeyConcurrency` | `1`    | `concurrencyKey`単位の同時実行数の上限           |
+| `perKeyRate`        | `null` | `concurrencyKey`単位の一定時間あたりの実行数の上限 |
 
 ```ts
 const tsumugi = defineTsumugi({
@@ -82,15 +83,17 @@ const tsumugi = defineTsumugi({
         concurrency: 20,
         rate: { tokens: 100, intervalMs: 60_000 },
         perKeyConcurrency: 1,
+        perKeyRate: { tokens: 10, intervalMs: 60_000 },
       },
     },
   },
 });
 ```
 
-`concurrencyKey`がnullのジョブに`perKeyConcurrency`は適用されません。
+`perKeyRate`はすべてのキーに同じ値が適用されます。キーごとに異なる値は指定できません。
+`concurrencyKey`がnullのジョブに`perKeyConcurrency`と`perKeyRate`は適用されません。
 
-3つすべてを有効にした場合のスループット低下は実測で約17%です。
+`concurrency`・`rate`・`perKeyConcurrency`の3つを有効にした場合のスループット低下は実測で約17%です。
 
 ### 実行されない原因の確認 {#diagnostics}
 

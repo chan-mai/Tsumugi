@@ -34,11 +34,11 @@ const report = {
 	},
 };
 
-/** 自分の内側に子を1つ足すperformer, spawnの経路を見る(ADR-0032) */
+/** 自分の内側に子を1つ追加するperformer, spawnの経路の検証用(ADR-0032) */
 const greetAndSpawn = {
 	perform: async (payload: { name: string }, ctx: JobContext) => {
 		performed.push({ binding: 'Greet', payload });
-		// 子は孫を作らない, 際限なく増えるので印で止める
+		// 子は孫を作らない, 際限なく増えるため印で停止
 		if (!payload.name.endsWith('-child')) ctx.spawn('child', 'Greet', { name: `${payload.name}-child` });
 		return { greeted: payload.name };
 	},
@@ -55,7 +55,7 @@ const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`$
 const runNamespace = env.RUN as unknown as DurableObjectNamespace<TsumugiRunInstance>;
 const runStub = (runId: string) => runNamespace.get(runNamespace.idFromName(runId));
 
-/** DOが送ったメッセージを溜めてconsumerへ手で渡す, Queuesの配送自体はここでの関心ではない */
+/** DOが送ったメッセージを保持してconsumerへ手で渡す, Queuesの配送自体はここでの関心ではない */
 const sent: DispatchMessage[] = [];
 const queue = {
 	send: async (body: DispatchMessage) => {
@@ -82,7 +82,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 
 /**
  * Job DOの投入先を差し替える
- * 実キューへ出すとconsumerが自動で走り, 完了通知が割り込んで手で作った状況が壊れる
+ * 実キューへ送るとconsumerが自動で実行され、完了通知が割り込んで手で作った状況が壊れる
  */
 async function installQueues(): Promise<void> {
 	for (const binding of BINDINGS) {
@@ -118,7 +118,7 @@ const nodesOf = (runId: string) =>
 
 /**
  * ノードの状態が変わらなくなるまでtickを回す
- * 掃除のalarmは終端後も張られ続けるので, alarmの枯渇では収束を判定できない
+ * 削除のalarmは終端後も設定され続け、alarmの枯渇では収束を判定不能
  * 収束させてから読むことで, 自然発火したtickと重なって値がずれるのを防ぐ
  */
 async function settleRun(runId: string, rounds = 8): Promise<void> {
@@ -167,14 +167,14 @@ describe('縦串: runの開始から完了まで', () => {
 			report: 'COMPLETED',
 		});
 
-		// 前段の戻り値が後段のpayloadへ渡る, 子は並列に走るので順序は問わない
+		// 前段の戻り値が後段のpayloadへ渡る, 子は並列に実行され順序は問わない
 		const greeted = performed.filter((p) => p.binding === 'Greet').map((p) => (p.payload as { name: string }).name);
 		expect([...greeted].sort()).toEqual(['hello-1', 'hello-2', 'hello-3']);
 		// fan-outノードが渡すのは集計値のみ(ADR-0035)
 		expect(performed.find((p) => p.binding === 'Report')?.payload).toEqual({ total: 3, failed: 0 });
 	});
 
-	it('performの中で足した子を親が待つ(ADR-0032)', async () => {
+	it('performの中で追加した子を親が待つ(ADR-0032)', async () => {
 		performed.length = 0;
 		const runId = 'GREETINGS:spawn1';
 		await installQueues();
@@ -186,12 +186,12 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(nodes['greet:0:child']).toBe('COMPLETED');
 		expect(nodes['report']).toBe('COMPLETED');
 		expect(await stateOf(runId)).toBe('COMPLETED');
-		// 3件の展開それぞれが子を1つ持つので6回走る
+		// 3件の展開それぞれが子を1つ持ち6回実行
 		expect(performed.filter((p) => p.binding === 'Greet')).toHaveLength(6);
 	});
 
 	it('不正なspawnのIDはノードのFAILEDになりtickを止めない', async () => {
-		// consumerが手前で検証するので, ここへ届くのは検証を入れる前に積まれた通知だけ
+		// consumerが手前で検証し、ここへ届くのは検証の追加前に記録された通知だけ
 		const runId = 'GREETINGS:spawnbad';
 		const stub = runStub(runId);
 		await installQueues();
@@ -222,7 +222,7 @@ describe('縦串: runの開始から完了まで', () => {
 		const runId = 'GREETINGS:mapfail';
 		const stub = runStub(runId);
 		await installQueues();
-		// inputがnullなので`list`のinputがTypeErrorになる
+		// inputがnullのため`list`のinputがTypeError
 		await stub.start({ flow: 'GREETINGS', input: null });
 		await settleRun(runId);
 
@@ -231,10 +231,10 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('FAILED');
 	});
 
-	it('ノードの失敗で下流が打ち切られrunがFAILEDになる', async () => {
+	it('ノードの失敗で下流が中断されrunがFAILEDになる', async () => {
 		const runId = 'GREETINGS:fail1';
 		const stub = runStub(runId);
-		// 実際の完了通知が割り込むと失敗の検査にならないので, 投入先を先に差し替える
+		// 実際の完了通知が割り込むと失敗の検査にならず、投入先を先に差し替える
 		await installQueues();
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'ng' } });
 
@@ -243,7 +243,7 @@ describe('縦串: runの開始から完了まで', () => {
 		// 投入されたメッセージは配送しない, 実行されると完了報告が返る
 		sent.length = 0;
 		const jobId = await jobIdOf(runId, 'list');
-		// 通知はジョブIDで宛先を照合するので, 確定していなければ検査自体が成り立たない
+		// 通知はジョブIDで宛先を照合し、確定していなければ検査自体が成り立たない
 		if (jobId === null) throw new Error('the first node has no job id');
 		await stub.notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'intentional failure' }]);
 		await settleRun(runId);
@@ -251,7 +251,7 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
 		expect(await stateOf(runId)).toBe('FAILED');
 
-		// 再開すると打ち切ったノードが起動前へ戻る(ADR-0034)
+		// 再開すると中断したノードが起動前へ戻る(ADR-0034)
 		expect(await stub.retry()).toEqual({ ok: true });
 		expect(await stateOf(runId)).toBe('RUNNING');
 		await settle(runId);

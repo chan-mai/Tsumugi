@@ -16,7 +16,7 @@ class Work {
 
 const flow = createFlow({ FETCH: Fetch, WORK: Work });
 
-describe('flowの組み立て', () => {
+describe('flowの構築', () => {
 	it('afterの受け取り口を依存先のノードIDへ写す', () => {
 		const built = flow<{ since: number }>((f) => {
 			const fetched = f.node('fetch', 'FETCH', { input: (i) => ({ since: i.since }) });
@@ -27,7 +27,7 @@ describe('flowの組み立て', () => {
 		expect(built.nodes[1]?.after).toEqual({ fetched: 'fetch' });
 	});
 
-	it('shapeOfは関数を落として形だけ返す(ADR-0030)', () => {
+	it('shapeOfは関数を除いて形だけ返す(ADR-0030)', () => {
 		const built = flow<void>((f) => {
 			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 			f.fanOut('each', 'WORK', {
@@ -42,11 +42,11 @@ describe('flowの組み立て', () => {
 			{ id: 'fetch', binding: 'FETCH', container: false, after: [], trigger: 'success' },
 			{ id: 'each', binding: 'WORK', container: true, after: ['fetch'], trigger: 'success' },
 		]);
-		// JSONへ載せてDOに渡すので関数が混ざっていないこと自体が要件
+		// JSON化してDOに渡す前提で関数が混ざっていないこと自体が要件
 		expect(JSON.parse(JSON.stringify(shape))).toEqual(shape);
 	});
 
-	it('ノードIDの重複を弾く', () => {
+	it('ノードIDの重複を拒否する', () => {
 		expect(() =>
 			flow<void>((f) => {
 				f.node('same', 'FETCH', { input: () => ({ since: 0 }) });
@@ -55,15 +55,15 @@ describe('flowの組み立て', () => {
 		).toThrow(InvalidFlowError);
 	});
 
-	it('区切り文字を含むノードIDを弾く', () => {
+	it('区切り文字を含むノードIDを拒否する', () => {
 		expect(() => flow<void>((f) => f.node('a:b', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void)).toThrow(InvalidFlowError);
 	});
 
-	it('ノードが1つも無いflowを弾く', () => {
+	it('ノードが1つも無いflowを拒否する', () => {
 		expect(() => flow<void>(() => {})).toThrow(InvalidFlowError);
 	});
 
-	it('deadlineMsを持つflowを組み立てる(ADR-0039)', () => {
+	it('deadlineMsを持つflowを構築する(ADR-0039)', () => {
 		const built = flow<void>((f) => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void, {
 			deadlineMs: 60_000,
 		});
@@ -75,7 +75,7 @@ describe('flowの組み立て', () => {
 		expect('deadlineMs' in built).toBe(false);
 	});
 
-	it('正の整数でないdeadlineMsを弾く', () => {
+	it('正の整数でないdeadlineMsを拒否する', () => {
 		for (const deadlineMs of [0, -1, 1.5]) {
 			expect(() => flow<void>((f) => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void, { deadlineMs })).toThrow(
 				InvalidFlowError,
@@ -83,7 +83,7 @@ describe('flowの組み立て', () => {
 		}
 	});
 
-	it('triggerとwhenを持つノードを組み立てる(ADR-0041)', () => {
+	it('triggerとwhenを持つノードを構築する(ADR-0041)', () => {
 		const built = flow<void>((f) => {
 			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 			f.node('cleanup', 'WORK', {
@@ -104,14 +104,14 @@ describe('flowの組み立て', () => {
 		expect(shapeOf(built)[1]?.trigger).toBe('failure');
 	});
 
-	it('依存の無いノードのtrigger指定を弾く', () => {
+	it('依存の無いノードのtrigger指定を拒否する', () => {
 		// 成否を問う相手がいない, 書けてしまうと意図が伝わらない
 		expect(() =>
 			flow<void>((f) => f.node('lonely', 'FETCH', { trigger: 'failure', input: () => ({ since: 0 }) }) as unknown as void),
 		).toThrow(InvalidFlowError);
 	});
 
-	it('不正なtriggerを弾く', () => {
+	it('不正なtriggerを拒否する', () => {
 		expect(() =>
 			flow<void>((f) => {
 				const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
@@ -120,7 +120,7 @@ describe('flowの組み立て', () => {
 		).toThrow(InvalidFlowError);
 	});
 
-	it('別のflowのノードへの依存を弾く', () => {
+	it('別のflowのノードへの依存を拒否する', () => {
 		const other = flow<void>((f) => {
 			f.node('outside', 'FETCH', { input: () => ({ since: 0 }) });
 		});

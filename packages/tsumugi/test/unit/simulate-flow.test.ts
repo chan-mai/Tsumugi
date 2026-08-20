@@ -3,7 +3,7 @@ import type { PerformerLike } from '../../src/core/api.js';
 import { createFlow } from '../../src/core/flow.js';
 import { simulateFlow } from '../../src/testing/flow.js';
 
-// `createFlow`はctorのインスタンス型からpayloadと戻り値を引くので, 実体は呼ばれない
+// `createFlow`はctorのインスタンス型からpayloadと戻り値を導出し、実体は呼ばれない
 // `Performer`は`cloudflare:workers`に依存し, workerdを起動しないこのプロジェクトでは読めない
 type Ctor<P, R> = new (...args: any[]) => PerformerLike<P, R>;
 
@@ -15,7 +15,7 @@ const performers = {
 
 const flow = createFlow(performers);
 
-/** exampleと同じ形, 一覧を取り件数だけ実行時に決まる並列で挨拶し最後に要約する */
+/** exampleと同じ形, 一覧を取り件数だけ実行時に決まる並列で挨拶し最後に要約 */
 const greetings = flow<{ prefix: string }>((f) => {
 	const list = f.node('list', 'LIST', { input: (i) => ({ prefix: i.prefix }) });
 	const each = f.fanOut('greet', 'GREET', {
@@ -86,7 +86,7 @@ describe('flowの通し実行', () => {
 		expect(result.nodes.find((node) => node.id === 'greet:0')?.payload).toEqual({ name: 'z' });
 	});
 
-	it('失敗時の後始末が通り成功時は飛ばされる(ADR-0041)', () => {
+	it('失敗時の後処理が実行され成功時は実行されない(ADR-0041)', () => {
 		const withCleanup = flow<void>((f) => {
 			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
 			f.node('cleanup', 'REPORT', {

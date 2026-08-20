@@ -1,6 +1,6 @@
 /**
- * 型レベルの検証,実行時テストではないのでvitestからは読ませず`tsc --noEmit`で検査する
- * @ts-expect-errorが不要になるとTS2578で落ちるため検査が形骸化しない
+ * 型レベルの検証, 実行時テストではなくvitestからは読ませず`tsc --noEmit`で検査
+ * @ts-expect-errorが不要になるとTS2578で失敗し検査の形骸化を防止
  * (実際に1つを正しいコードへ変えてTS2578が出ることを確認済み)
  */
 import { Performer } from '../../src/performer/entrypoint.js';
@@ -13,25 +13,25 @@ class SendMail extends Performer<{ to: string; subject: string }> {
 	}
 }
 
-/** 顧客単位で直列化したいのでconcurrencyKeyを必須にする */
+/** 顧客単位の直列化用にconcurrencyKeyを必須化 */
 class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, void, { concurrencyKey: true }> {
 	async perform(_payload: { customerId: string; amountJpy: number }, _ctx: JobContext) {}
 }
 
-/** 重複投入を防ぎたいのでuniqueKeyを必須にする */
+/** 重複投入の防止用にuniqueKeyを必須化 */
 class SyncInventory extends Performer<{ sku: string }, void, { uniqueKey: true }> {
 	async perform(_payload: { sku: string }, _ctx: JobContext) {}
 }
 
 // defineTsumugiが返す実体を検査対象にする, 実装の無い変数への型テストにしない(#5 / ADR-0010)
-// performersからMを推論するので, 明示の型引数は要らない
+// performersからMを推論し、明示の型引数は不要
 const tsumugi = defineTsumugi({ performers: { MAIL: SendMail, CHARGE: ChargeCard, SYNC: SyncInventory } });
 declare const env: never;
 const q = tsumugi.jobs(env);
 
 // 実行はしない,型検査のみが目的
 export function typeChecks() {
-	// payloadがbindingから推論される
+	// payloadはbindingから推論
 	q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' });
 
 	// payloadの型が違えばエラー
@@ -44,12 +44,12 @@ export function typeChecks() {
 	// @ts-expect-error未定義のbinding
 	q.enqueue('NOPE', {});
 
-	// 印の無いperformerはoptionsを省略できる
+	// 印の無いperformerはoptionsを省略可能
 	q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' }, { priority: 5 });
 
 	// concurrencyKey必須のperformerは渡し忘れがコンパイルエラー(ADR-0010)
 	q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { concurrencyKey: 'cust:c1' });
-	// @ts-expect-error optionsごと省略できない
+	// @ts-expect-error optionsごとの省略は不可
 	q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 });
 	// @ts-expect-error concurrencyKeyが無い
 	q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { priority: 1 });
@@ -68,13 +68,13 @@ export function typeChecks() {
 		{ binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 }, options: { concurrencyKey: 'cust:c1' } },
 	]);
 
-	// 必須の印はバルクでも効く
+	// 必須の印はバルクにも適用
 	q.enqueueMany([
 		// @ts-expect-error concurrencyKeyが無い
 		{ binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 } },
 	]);
 
-	// payloadの取り違えを検出する
+	// payloadの取り違えを検出
 	q.enqueueMany([
 		// @ts-expect-error MAILにCHARGEのpayload
 		{ binding: 'MAIL', payload: { customerId: 'c1', amountJpy: 1200 } },
@@ -102,7 +102,7 @@ export function typeChecks() {
 }
 
 // 異なるbindingを要求するperformerを複数登録すると, 環境は各envのintersectionになる(#5)
-// 全performerは同一のWorker環境で初期化されるので, どちらのbindingも満たす環境しか受け付けない
+// 全performerは同一のWorker環境で初期化され、どちらのbindingも満たす環境しか受け付けない
 type EnvA = { A_DB: string };
 type EnvB = { B_QUEUE: string };
 class NeedsA extends Performer<{ x: number }, void, {}, EnvA> {
@@ -118,6 +118,6 @@ declare const fullEnv: EnvA & EnvB;
 export function envIsIntersection() {
 	// 両方のbindingを満たす環境は通る
 	both.jobs(fullEnv);
-	// @ts-expect-error A_DBしか無い環境はB_QUEUEを満たさないので拒否される
+	// @ts-expect-error A_DBしか無い環境はB_QUEUEを満たさず拒否
 	both.jobs({ A_DB: 'x' } as EnvA);
 }

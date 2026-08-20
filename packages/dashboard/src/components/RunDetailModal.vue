@@ -31,7 +31,7 @@ watch(
 	() => props.runId,
 	async (id) => {
 		if (!id) return;
-		// 閉じるアニメーションの間に中身が消えないよう,開く時だけ差し替える
+		// 閉じるアニメーションの間に中身が消えないよう、開く時だけ差し替え
 		run.value = null;
 		nodes.value = [];
 		error.value = null;
@@ -46,11 +46,11 @@ async function act(kind: 'retry' | 'cancel') {
 	try {
 		const outcome = kind === 'retry' ? await retryRun(props.runId) : await cancelRun(props.runId);
 		message.value = outcome.message;
-		// 投影は数秒遅れるので即時には変わらないが,反映され次第この再読込で追いつく
+		// 投影は数秒遅れ即時には変わらないが、反映され次第この再読込で追いつく
 		await load(props.runId);
 		emit('changed');
 	} catch (e) {
-		// 捕まえないと何も起きなかったように見える
+		// 捕捉しないと何も起きなかったように見える
 		message.value = e instanceof Error ? e.message : String(e);
 	} finally {
 		busy.value = false;

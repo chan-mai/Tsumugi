@@ -11,7 +11,7 @@ export default defineConfig({
 	cleanUrls: true,
 	lastUpdated: true,
 	head: [['meta', { name: 'theme-color', content: '#f7a1b2' }]],
-	// 単改行をそのまま改行として出す, 1文1行で書いた原稿が連結されないようにする
+	// 単改行をそのまま改行として出力, 1文1行で書いた原稿の連結を防止
 	markdown: { breaks: true },
 	themeConfig: {
 		nav: [

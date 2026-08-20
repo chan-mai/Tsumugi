@@ -3,8 +3,8 @@ import type { JobRow } from '../do/schema.js';
 /**
  * 時系列メトリクスの書き出し(ADR-0016)
  *
- * 明細はsweepで消えるがメトリクスは残る,両者は要求される保持期間が違う
- * 終端に達した遷移だけを書く,全遷移を書くと件数が3倍になり得るものが増えない
+ * 明細はsweepで消えるがメトリクスは残る, 両者は要求される保持期間が違う
+ * 終端に達した遷移だけを記録, 全遷移の記録は件数が3倍になる一方で情報は増えない
  */
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED']);
 
@@ -14,13 +14,13 @@ export type MetricPoint = {
 	doubles: [number, number];
 };
 
-/** 1件ぶんの計測点,書き出し対象でなければnull */
+/** 1件ぶんの計測点, 書き出し対象でなければnull */
 export function toPoint(job: JobRow): MetricPoint | null {
 	if (!TERMINAL.has(job.state)) return null;
 	// 投入から終端までの所要, dispatched_atが無ければ実行に至らず終わったジョブ
 	const durationMs = job.dispatched_at === null ? 0 : Math.max(0, job.updated_at - job.dispatched_at);
 	return {
-		// indexはサンプリングの単位, binding単位で見たいのでbindingを置く
+		// indexはサンプリングの単位, binding単位の集計用にbindingを設定
 		indexes: [job.binding],
 		blobs: [job.state, job.binding, job.guarantee],
 		doubles: [job.attempts, durationMs],

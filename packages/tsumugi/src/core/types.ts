@@ -7,7 +7,7 @@ export type ActiveState = 'SCHEDULED' | 'QUEUED' | 'RUNNING';
 /** ADR-0006,既定はat-least-once */
 export type DeliveryGuarantee = 'at-least-once' | 'at-most-once';
 
-/** ADR-0020,ジッタ用の乱数は純粋性のため外から受け取る */
+/** ADR-0020, 純粋性維持でジッタ用の乱数は引数渡し */
 export type Backoff =
 	| { kind: 'fixed'; delayMs: number; jitter?: boolean }
 	| { kind: 'exponential'; baseMs: number; factor: number; maxMs: number; jitter?: boolean };
@@ -34,14 +34,16 @@ export type JobView = {
 
 export type RateLimit = { tokens: number; intervalMs: number };
 
-/** ADR-0009の3軸+ ADR-0020のエージング */
+/** ADR-0009の3軸+ ADR-0045のキー単位レート+ ADR-0020のエージング */
 export type Policy = {
-	/** 投入の一時停止(#27), 実行中の回収とエージングは止めない */
+	/** 投入の一時停止(#27), 実行中の回収とエージングは継続 */
 	paused: boolean;
 	concurrency: number;
 	/** concurrencyKey単位の同時実行上限,キーがnullのジョブには非適用 */
 	perKeyConcurrency: number;
 	rate: RateLimit | null;
+	/** concurrencyKey単位のトークンバケット,全キー一律,キーがnullのジョブには非適用 */
+	perKeyRate: RateLimit | null;
 	/** nullでエージング無効, ADR-0020の既定は有効 */
 	agingIntervalMs: number | null;
 	/** timeoutMs経過後さらにこの時間応答が無ければ回収 */
@@ -50,12 +52,12 @@ export type Policy = {
 
 /**
  * 失敗したジョブの知らせ(#30)
- * 通知先のperformerが受け取るpayload, ジョブの明細は読み取りモデルから引ける
+ * 通知先のperformerが受け取るpayload, ジョブの明細は読み取りモデルから取得可能
  */
 export type FailureNotice = {
 	jobId: string;
 	binding: string;
-	/** FAILEDかSTALLED, 再試行で回復する途中の失敗は届かない */
+	/** FAILEDかSTALLED, 再試行で回復する途中の失敗は対象外 */
 	state: 'FAILED' | 'STALLED';
 	attempts: number;
 	maxAttempts: number;
@@ -69,9 +71,12 @@ export type FailureNotice = {
 
 export type Bucket = { tokens: number; refilledAt: number };
 
+/** concurrencyKey別のバケット, tokens上限のキーは除外 */
+export type KeyBuckets = Record<string, Bucket>;
+
 export type Decision =
 	| { type: 'dispatch'; id: string }
-	/** 無応答のat-least-onceジョブの再投入, SCHEDULEDへ戻す */
+	/** 無応答のat-least-onceジョブの再投入, SCHEDULEDへ */
 	| { type: 'reap'; id: string; attempts: number }
 	/** 無応答のat-most-onceジョブ, 再投入せずSTALLEDへ */
 	| { type: 'stall'; id: string }
@@ -80,36 +85,42 @@ export type Decision =
 
 export type ScheduleInput = {
 	now: number;
-	/** SCHEDULED/QUEUED/RUNNINGのみ,終端状態は渡さない */
+	/** SCHEDULED/QUEUED/RUNNINGのみ, 終端状態は対象外 */
 	jobs: readonly JobView[];
 	policy: Policy;
 	bucket: Bucket;
+	/** キー別バケット, 省略時は全キーtokens上限の扱い */
+	keyBuckets?: KeyBuckets;
 };
 
-/** 投入が止まった制約, ADR-0009の3軸のどれで詰まったか(#10) */
+/** 投入が止まった制約, どの軸で停止したか(#10) */
 export type BlockedBy = {
-	/** paused: 一時停止中なので投入しない(#27) */
+	/** paused: 一時停止中で投入なし(#27) */
 	paused: boolean;
-	/** concurrency: 同時実行の上限に達した */
+	/** concurrency: 同時実行の上限に到達 */
 	capacity: boolean;
-	/** rate: トークンが足りない */
+	/** rate: トークン不足 */
 	tokens: boolean;
-	/** perKeyConcurrency: キー単位の上限で候補を飛ばした */
+	/** perKeyConcurrency: キー単位の上限で候補を除外 */
 	perKey: boolean;
+	/** perKeyRate: キーのトークン不足で候補を除外 */
+	perKeyTokens: boolean;
 };
 
 export type ScheduleOutput = {
 	decisions: Decision[];
 	bucket: Bucket;
-	/** 次にスケジューラを起こす時刻,不要ならnull */
+	/** 消費後のキー別バケット */
+	keyBuckets: KeyBuckets;
+	/** 次のスケジューラ起動時刻, 不要ならnull */
 	nextAlarmAt: number | null;
-	/** どの制約で投入が止まったか, どれを緩めればよいか外から判断できるようにする(#10) */
+	/** どの制約で投入が止まったか, 緩和対象の外部からの判断用(#10) */
 	blocked: BlockedBy;
 };
 
 /**
  * DOに終端ジョブを残す時間(ADR-0027)
- * 済んだジョブと再開余地のあるジョブは役割が違うので別の数字で持つ
+ * 済んだジョブと再開余地のあるジョブは役割が別, 保持時間も別の値
  */
 export type Retention = {
 	/** COMPLETED / CANCELLED */

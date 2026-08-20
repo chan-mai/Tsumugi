@@ -1,5 +1,5 @@
 /**
- * flow定義の型レベル検証,実行時テストではないので`tsc --noEmit`で検査する
+ * flow定義の型レベル検証, 実行時テストではなく`tsc --noEmit`で検査
  * 依存の受け取り口が実際に前段の戻り値の型になるかがここの主眼(ADR-0030)
  */
 import { Performer } from '../../src/performer/entrypoint.js';
@@ -18,7 +18,7 @@ class ProcessItem extends Performer<{ id: string }, { ok: boolean }> {
 	}
 }
 
-/** 顧客単位で直列化したいのでconcurrencyKeyを必須にする */
+/** 顧客単位の直列化用にconcurrencyKeyを必須化 */
 class ChargeCard extends Performer<{ customerId: string }, { txId: string }, { concurrencyKey: true }> {
 	async perform(_payload: { customerId: string }, _ctx: JobContext) {
 		return { txId: 't' };
@@ -48,7 +48,7 @@ export const order = flow<{ orderId: string; since: number }>((f) => {
 		input: (item) => ({ id: item.id }),
 	});
 
-	// 合流,受け取り口の名前は after のキーそのもの
+	// 合流, 受け取り口の名前は`after`のキーそのもの
 	f.node('report', 'PROCESS', {
 		after: { each, charge },
 		input: (_i, d) => ({ id: `${d.each.total}-${d.charge.txId}` }),

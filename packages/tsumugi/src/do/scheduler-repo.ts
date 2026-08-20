@@ -4,7 +4,7 @@ import type { NormalizedSchedule } from '../core/recurring.js';
 import { applySchedulerSchema, type ScheduleRow } from './scheduler-schema.js';
 import { schedule, schedulerSetting, type ScheduleRecord } from './scheduler-tables.js';
 
-/** 発火の記録, jobとflowで埋まる列が入れ替わる */
+/** 発火の記録, jobとflowで使用する列が入れ替わる */
 export type FiredPatch = {
 	occurrence: number;
 	jobId?: string;
@@ -12,8 +12,8 @@ export type FiredPatch = {
 };
 
 /**
- * Scheduler DOのSQLiteとの橋渡し
- * 次回時刻の計算はcore/recurring.tsが持ち, ここは読み書きに徹する(ADR-0018)
+ * Scheduler DOのSQLiteとの仲介
+ * 次回時刻の計算はcore/recurring.tsが持ち、ここは読み書きのみ(ADR-0018)
  */
 export class SchedulerRepo {
 	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
@@ -54,7 +54,7 @@ export class SchedulerRepo {
 			.run();
 	}
 
-	/** 定義変更の反映, 間隔が変わった場合だけnextRunAtを渡して引き直す */
+	/** 定義変更の反映, 間隔が変わった場合だけnextRunAtを渡して更新 */
 	updateSpec(spec: NormalizedSchedule, nextRunAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
@@ -91,7 +91,7 @@ export class SchedulerRepo {
 			.map(this.#toRow);
 	}
 
-	/** 次のalarmを張る時刻, 行が無ければnull */
+	/** 次のalarmを設定する時刻, 行が無ければnull */
 	minNextRunAt(): number | null {
 		const row = this.db
 			.select({ min: sql<number | null>`min(${schedule.nextRunAt})` })
@@ -129,7 +129,7 @@ export class SchedulerRepo {
 			.run();
 	}
 
-	/** 失敗の記録, nextRunAtがnullなら行を進めず次のtickで再試行する */
+	/** 失敗の記録, nextRunAtがnullなら行を進めず次のtickで再試行 */
 	markError(name: string, message: string, nextRunAt: number | null, now: number): void {
 		this.db
 			.update(schedule)

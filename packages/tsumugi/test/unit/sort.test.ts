@@ -13,15 +13,15 @@ describe('一覧の並べ替え', () => {
 		}
 	});
 
-	it('許可していない列は既定に落とす', () => {
-		// 列名はSQLへの直接差し込み,漏れはそのまま注入
+	it('許可していない列は既定を使う', () => {
+		// 列名はSQLへ直接埋め込み, 検査漏れはそのまま注入
 		for (const injection of ['payload', 'id; DROP TABLE job', '(SELECT 1)', '', 'UPDATED_AT']) {
 			expect(resolveSort(injection, null).column).toBe('updated_at');
 		}
 	});
 
 	it('プロトタイプ由来の名前は許可しない', () => {
-		// `in`で判定するとconstructor等が素通りし,列の代わりに関数が渡って500になる
+		// `in`での判定はconstructor等を拒否できず、列の代わりに関数が渡り500が発生
 		for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
 			expect(resolveSort(name, null).column, name).toBe('updated_at');
 		}
@@ -34,20 +34,20 @@ describe('一覧の並べ替え', () => {
 	});
 });
 
-describe('1回目で成功した試行の組み立て(ADR-0028)', () => {
+describe('1回目で成功した試行の構築(ADR-0028)', () => {
 	const done = { state: 'COMPLETED', attempts: 1, dispatched_at: 1_000, updated_at: 1_500 };
 
-	it('ジョブ行から1件を組み立てる', () => {
+	it('ジョブ行から1件を構築する', () => {
 		expect(attemptsOf(done, [])).toEqual([{ attempt: 1, state: 'COMPLETED', started_at: 1_000, finished_at: 1_500, error: null }]);
 	});
 
 	it('保存された履歴があればそちらを使う', () => {
-		// 組み立てた1件で上書きすると失敗の理由が消える
+		// 構築した1件で上書きすると失敗の理由が消える
 		const stored = [{ attempt: 2, state: 'COMPLETED', started_at: 5, finished_at: 6, error: null }];
 		expect(attemptsOf(done, stored)).toBe(stored);
 	});
 
-	it('実行に至っていないジョブは組み立てない', () => {
+	it('実行に至っていないジョブは構築しない', () => {
 		for (const job of [
 			{ state: 'QUEUED', attempts: 0, dispatched_at: 1_000, updated_at: 1_500 },
 			{ state: 'CANCELLED', attempts: 0, dispatched_at: null, updated_at: 1_500 },
@@ -67,7 +67,7 @@ describe('例外の文字列化(ADR-0028)', () => {
 		expect(text.split('\n').filter((l) => l.includes('Error: boom'))).toHaveLength(1);
 	});
 
-	it('stackが無ければ名前とメッセージで組み立てる', () => {
+	it('stackが無ければ名前とメッセージで構築する', () => {
 		const error = new Error('boom');
 		delete (error as { stack?: string }).stack;
 		expect(describeError(error)).toBe('Error: boom');

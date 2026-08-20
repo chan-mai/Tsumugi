@@ -109,7 +109,7 @@ describe('実際のservice binding越し', () => {
 	});
 
 	it('文脈がそのまま渡りspawnも呼べる', async () => {
-		// 関数はRPCのstubとして越えるので, 別Workerでもspawnが使える(ADR-0037)
+		// 関数はRPCのstubとして越え、別Workerでもspawnが使用可能(ADR-0037)
 		const service = (env as unknown as { MAIL: { perform(p: unknown, c: unknown): Promise<{ keys: string[]; spawned: boolean }> } }).MAIL;
 		const spawned: unknown[] = [];
 		const result = await service.perform(

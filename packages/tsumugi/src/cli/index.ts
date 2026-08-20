@@ -12,14 +12,14 @@ import { runTui } from './tui.js';
  * 専用CLIの入口(ADR-0036)
  *
  * ファイル入出力とwranglerの実行は`CliDeps`で受け取る
- * 単体テストはメモリ実装へ差し替え, 実際の書き込みや子プロセスを伴わずに検査する
+ * 単体テストはメモリ実装へ差し替え、実際の書き込みや子プロセスを伴わず検査
  */
 
 export type CliFs = {
 	exists(path: string): boolean;
 	read(path: string): string;
 	write(path: string, content: string): void;
-	/** 再帰的に作る, 既存なら何もしない */
+	/** 再帰的に作成, 既存なら無変更 */
 	mkdir(path: string): void;
 };
 
@@ -59,7 +59,7 @@ const OPTIONS = {
 	format: { type: 'string' },
 } as const;
 
-/** 引数を解釈してコマンドへ振り分ける, テストはここを入口にする */
+/** 引数を解釈してコマンドへ分配, テストはここが入口 */
 export function main(argv: readonly string[], deps: CliDeps): number {
 	let parsed: { values: { help?: boolean; version?: boolean; name?: string; format?: string }; positionals: string[] };
 	try {
@@ -117,7 +117,7 @@ export function main(argv: readonly string[], deps: CliDeps): number {
 /** バンドル後は`dist/cli.js`からパッケージルートのpackage.jsonを指す */
 const packageVersion = (): string => {
 	try {
-		// workers-typesのURL型と衝突するので, URLオブジェクトを経由せず文字列で解決する
+		// workers-typesのURL型と衝突し、URLオブジェクトを経由せず文字列で解決
 		const path = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
 		const parsed = JSON.parse(readFileSync(path, 'utf8')) as { version?: string };
 		return parsed.version ?? 'unknown';
@@ -144,11 +144,11 @@ const nodeDeps = (): CliDeps => ({
 	isTty: process.stdin.isTTY === true && process.stdout.isTTY === true,
 });
 
-/** binの入口, 予期しない例外もexit codeへ丸める */
+/** binの入口, 予期しない例外もexit codeへ変換 */
 export async function runCli(argv: readonly string[]): Promise<number> {
 	const deps = nodeDeps();
 	try {
-		// 引数なしのTTYは対話モード, パイプやCIではmainがusageを出す
+		// 引数なしのTTYは対話モード, パイプやCIではmainがusageを表示
 		if (argv.length === 0 && deps.isTty) return await runTui(clackPrompts(), deps);
 		return main(argv, deps);
 	} catch (cause) {

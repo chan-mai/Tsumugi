@@ -3,7 +3,7 @@ import { runTui, type Prompts } from '../../src/cli/tui.js';
 import { makeDeps, ok } from './cli-harness.js';
 
 // 対話モードは入力を集めて同じinit / addPerformerを呼ぶだけの層
-// 確認より前に書き込みやwranglerの実行が走らないことをここで保証する
+// 確認より前に書き込みやwranglerの実行が発生しないことをここで保証
 
 const DATABASE_ID = '9945ba53-b1cb-45a2-8f01-c650518c2f2a';
 const d1Script = (args: readonly string[]) => (args[0] === 'd1' && args[1] === 'create' ? ok(`{ "database_id": "${DATABASE_ID}" }`) : ok());
@@ -45,7 +45,7 @@ describe('対話モードのinit', () => {
 		expect(fs.files.has('/proj/wrangler.toml')).toBe(true);
 	});
 
-	it('既存の設定があれば形式を聞かない', async () => {
+	it('既存の設定があれば形式を確認しない', async () => {
 		// 台本のselectは1回分しか無い, 形式を聞くとundefinedになりこのテストが落ちる
 		const { deps, fs, logs } = makeDeps(d1Script);
 		fs.write('/proj/wrangler.toml', 'name = "existing-app"\n');

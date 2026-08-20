@@ -11,7 +11,7 @@ import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
  * cleanupはtrigger=failure, auditはtrigger=always, detailはwhenで経路を選ぶ
  */
 
-/** 面をそのまま通すと型の展開が深くなりTS2589に触れる, 使う分だけを宣言する */
+/** 面をそのまま使うと型の展開が深くなりTS2589に抵触, 使う分だけを宣言 */
 interface RunFace extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown }): Promise<{ id: string; created: boolean }>;
 	notify(events: readonly NodeEvent[]): Promise<void>;
@@ -29,7 +29,7 @@ const performers = {
 	Report: { perform: async (_payload: { total: number; failed: number }): Promise<void> => {} },
 };
 
-/** DOが送ったメッセージを溜めてconsumerへ手で渡す */
+/** DOが送ったメッセージを保持してconsumerへ手で渡す */
 const sent: DispatchMessage[] = [];
 const queue = {
 	send: async (body: DispatchMessage) => void sent.push(body),
@@ -100,7 +100,7 @@ async function settleRun(runId: string): Promise<void> {
 }
 
 describe('条件分岐と失敗時の継続(ADR-0041)', () => {
-	it('成功時は後始末を飛ばしwhenで経路を選ぶ', async () => {
+	it('成功時は後処理を省略しwhenで経路を選ぶ', async () => {
 		const runId = 'BRANCHED:ok';
 		await installQueues();
 		await runStub(runId).start({ flow: 'BRANCHED', input: { prefix: 'ok', verbose: true } });
@@ -112,9 +112,9 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 			detail: 'COMPLETED',
 			audit: 'COMPLETED',
 		});
-		// 飛ばした理由が残る, 状態だけでは判別できない
+		// 省略の理由が残る, 状態だけでは判別不能
 		expect(await errorOf(runId, 'cleanup')).toBe('no dependency failed');
-		// 分岐で通らなかっただけなのでrunは成功
+		// 分岐で選択されなかっただけでrunは成功
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
@@ -147,10 +147,10 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 
 		expect(await nodesOf(runId)).toEqual({
 			list: 'FAILED',
-			// 失敗時だけ通る後始末と, 成否を問わない監査は実行される
+			// 失敗時だけ実行される後処理と、成否を問わない監査は実行
 			cleanup: 'COMPLETED',
 			audit: 'COMPLETED',
-			// 成功を待つノードは飛ばされる
+			// 成功を待つノードは省略
 			detail: 'SKIPPED',
 		});
 		expect(await errorOf(runId, 'detail')).toBe('a dependency did not succeed');

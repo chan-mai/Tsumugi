@@ -4,8 +4,8 @@ export type NextAttempt = { kind: 'retry'; runAfter: number; delayMs: number } |
 
 /**
  * 失敗後の次回実行時刻の算出
- * 上限とジッタを持たせ,同時失敗した大量ジョブが一斉に戻るのを防ぐ
- * 乱数は引数で受け取り純粋性を保つ(呼び出し側のDOがMath.random()を渡す)
+ * 上限とジッタを持たせ、同時失敗した大量ジョブの一斉回帰を防止
+ * 乱数は引数で受け取り純粋性を維持(呼び出し側のDOがMath.random()を渡す)
  */
 export function nextAttempt(args: {
 	/** 失敗計上後の試行回数 */
@@ -24,7 +24,7 @@ export function nextAttempt(args: {
 			? backoff.delayMs
 			: Math.min(backoff.baseMs * Math.pow(backoff.factor, Math.max(0, attempts - 1)), backoff.maxMs);
 
-	// equal jitter (半分固定+半分乱数), full jitterと違い遅延が0にならない
+	// equal jitter(半分固定+半分乱数), full jitterと違い遅延0を回避
 	const delayMs = backoff.jitter ? Math.round(base / 2 + rand * (base / 2)) : Math.round(base);
 
 	return { kind: 'retry', runAfter: now + delayMs, delayMs };

@@ -3,17 +3,17 @@ import { cancelJob, retryJob } from './api';
 
 /**
  * retry / cancelの可否と実行
- * 一覧と詳細の両方から使う, 判定を2箇所に書くと必ずずれる
+ * 一覧と詳細の両方で使用, 判定を2箇所に書くと必ずずれる
  */
 export function useJobActions(source: Ref<{ state: string; retryable?: boolean } | null>) {
 	const busy = ref(false);
-	/** 410を受けたら以後は押させない, 一覧はD1から引くので再読込しても行は残る */
+	/** 410を受けたら以後は操作不可, 一覧はD1由来で再読込しても行は残る */
 	const gone = ref(false);
 
 	const canRetry = computed(() => !gone.value && !busy.value && source.value?.retryable !== false);
 	const canCancel = computed(() => !gone.value && !busy.value && source.value?.state === 'SCHEDULED');
 
-	/** retryableはサーバの近似,実際に消えているかは押して410が返って初めて分かる */
+	/** retryableはサーバの近似, 実際に消えているかは操作して410が返って初めて判明 */
 	const goneReason = computed(() =>
 		gone.value || source.value?.retryable === false ? 'Removed from the coordinator after the retention period' : undefined,
 	);

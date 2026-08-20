@@ -3,9 +3,9 @@ import type { ScheduleInput } from '../../src/core/types.js';
 /**
  * schedule()のdispatch決定を独立に再計算する参照モデル
  *
- * property testが実装のロジックをそのまま写すと, 実装がずれても検査が同じだけずれて相殺する
- * このモデルは仕様の用語(同時実行数 / トークン / キー上限 / 優先度)だけで書き, 実装を参照しない
- * reaperとnextAlarmAtは扱わない, dispatchの正しさに絞る
+ * property testが実装のロジックをそのまま写すと、実装がずれても検査が同じだけずれて相殺
+ * このモデルは仕様の用語(同時実行数 / トークン / キー上限 / 優先度)だけで書き、実装は非参照
+ * reaperとnextAlarmAtは対象外, dispatchの正しさに限定
  */
 export function expectedDispatchIds(input: ScheduleInput): string[] {
 	const { now, jobs, policy } = input;
@@ -34,6 +34,17 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 	let slots = policy.paused ? 0 : Math.max(0, policy.concurrency - inFlight.length);
 	// rate無しはトークン無限, 有りは補充後の残量から始める
 	let tokens = policy.rate === null ? Number.POSITIVE_INFINITY : refilledTokens(input);
+	// キー別トークン, 格納が無いキーはtokens上限(ADR-0045)
+	const keyTokens = new Map<string, number>();
+	const keyTokensOf = (key: string): number => {
+		if (policy.perKeyRate === null) return Number.POSITIVE_INFINITY;
+		const known = keyTokens.get(key);
+		if (known !== undefined) return known;
+		const stored = input.keyBuckets?.[key];
+		if (stored === undefined) return policy.perKeyRate.tokens;
+		const elapsed = Math.max(0, now - stored.refilledAt);
+		return Math.min(policy.perKeyRate.tokens, stored.tokens + elapsed * (policy.perKeyRate.tokens / policy.perKeyRate.intervalMs));
+	};
 
 	const dispatched: string[] = [];
 	for (const { job } of ready) {
@@ -41,17 +52,19 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 		if (tokens < 1) break;
 		const key = job.concurrencyKey;
 		if (key !== null && (keyInFlight.get(key) ?? 0) >= policy.perKeyConcurrency) continue;
+		if (key !== null && keyTokensOf(key) < 1) continue;
 
 		dispatched.push(job.id);
 		slots--;
 		tokens--;
+		if (key !== null) keyTokens.set(key, keyTokensOf(key) - 1);
 		if (key !== null) keyInFlight.set(key, (keyInFlight.get(key) ?? 0) + 1);
 	}
 	return dispatched;
 }
 
 /**
- * 優先度の底上げを実装を参照せず再計算する
+ * 優先度の底上げを実装を参照せず再計算
  * 有効時はpriorityへfloor(max(0,now-createdAt)/agingIntervalMs)を加算,無効/0/負はpriorityのまま
  */
 function agedPriority(priority: number, createdAt: number, now: number, agingIntervalMs: number | null): number {

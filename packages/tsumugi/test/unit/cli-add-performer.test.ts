@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { addPerformer, performerNames } from '../../src/cli/add-performer.js';
 import { makeDeps, type Harness } from './cli-harness.js';
 
-// バレルは利用者の手書き行と同居する
-// 追記が既存行を壊すと全performerが解決不能になるので, 不変条件をここで検査する
+// バレルは利用者の手書き行と同居
+// 追記が既存行を破損すると全performerが解決不能になり、不変条件をここで検査
 
 const BARREL = "export { Hello } from './hello.js';\n";
 
@@ -23,7 +23,7 @@ describe('performerの生成', () => {
 		expect(fs.read('/proj/src/performers/index.ts')).toBe(`${BARREL}export { SendMail } from './send-mail.js';\n`);
 	});
 
-	it('末尾に改行が無いバレルにも1行として足す', () => {
+	it('末尾に改行が無いバレルにも1行として追加する', () => {
 		const { deps, fs } = withProject();
 		fs.write('/proj/src/performers/index.ts', BARREL.trimEnd());
 		expect(addPerformer('send-mail', deps)).toBe(0);
@@ -89,7 +89,7 @@ describe('重複と前提の検査', () => {
 
 describe('service bindingの断片', () => {
 	it('自分のWorker名を相手側の断片へ埋める', () => {
-		// 別のWorkerから使う場合のみ要る, 自分の設定には何も足さない(ADR-0037)
+		// 別のWorkerから使う場合のみ必要, 自分の設定には何も追加しない(ADR-0037)
 		const { deps, fs, logs } = withProject();
 		fs.write('/proj/wrangler.jsonc', '{ "name": "my-jobs" }');
 		expect(addPerformer('send-mail', deps)).toBe(0);

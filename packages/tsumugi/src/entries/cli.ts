@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// CLIのentry, wranglerを子プロセスで呼びファイルを書くので実行はNodeに限る
-// 本体は`../cli/index.js`, ここではprocessとの接続だけを行う
+// CLIのentry, wranglerの子プロセス起動とファイル書き込みがあり実行はNodeに限定
+// 本体は`../cli/index.js`, ここはprocessとの接続のみ
 import { runCli } from '../cli/index.js';
 
 process.exitCode = await runCli(process.argv.slice(2));
