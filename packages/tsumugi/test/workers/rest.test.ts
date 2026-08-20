@@ -241,7 +241,11 @@ describe('REST API', () => {
 
 		const res = await post({ paused: true, concurrency: 5, perKeyRate: { tokens: 3, intervalMs: 1_000 } });
 		expect(res.status).toBe(200);
-		const body = await res.json<{ binding: string; shards: number; policy: { paused: boolean; concurrency: number } }>();
+		const body = await res.json<{
+			binding: string;
+			shards: number;
+			policy: { paused: boolean; concurrency: number; perKeyRate: { tokens: number; intervalMs: number } | null };
+		}>();
 		expect(body).toMatchObject({
 			binding: 'REST',
 			shards: 1,
@@ -255,7 +259,13 @@ describe('REST API', () => {
 		// 診断が現在適用中の値を返す
 		const diag = await call(withAuth, 'GET', '/api/diagnostics', authorized);
 		const seen = await diag.json<{
-			bindings: Record<string, { policy: { concurrency: number }; blocked: { paused: boolean; perKeyTokens: boolean } }>;
+			bindings: Record<
+				string,
+				{
+					policy: { concurrency: number; perKeyRate: { tokens: number; intervalMs: number } | null };
+					blocked: { paused: boolean; perKeyTokens: boolean };
+				}
+			>;
 		}>();
 		expect(seen.bindings.REST?.policy.concurrency).toBe(5);
 		expect(typeof seen.bindings.REST?.blocked.paused).toBe('boolean');

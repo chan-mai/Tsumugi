@@ -683,9 +683,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 		// 上限まで読んだなら残りがある可能性が高く、即座に自分を再起動
 		// 投入候補はreadyCountで判定, 実行中のジョブで範囲が埋まっても投入すべき候補が無ければ再実行なし
+		// ただしトークン待ちでは読める候補が変わらず, readyCount起因の再実行は回復時刻のalarmで代替
 		// 投影待ちの残りも確認, tickのawait中に入った報告やclaimは投影されないまま残る
+		const blockedOnTokens = output.blocked.tokens || output.blocked.perKeyTokens;
 		const hasMore =
-			readyCount >= TICK_LIMIT ||
+			(readyCount >= TICK_LIMIT && !blockedOnTokens) ||
 			projected >= PROJECTION_LIMIT ||
 			deleted >= SWEEP_LIMIT ||
 			notified >= NOTIFY_LIMIT ||

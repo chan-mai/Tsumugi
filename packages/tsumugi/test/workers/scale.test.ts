@@ -395,6 +395,25 @@ describe('キー別トークンバケットの永続化(ADR-0045)', () => {
 		expect(await countOf('KB4#0')).toBe(0);
 	});
 
+	it('キーのトークン待ちで候補が残っていても即時の再実行はしない', async () => {
+		const { queue, sent } = captureQueue();
+		await install('KB6#0', T0, queue);
+		await shard('KB6#0').configure({ policy: { concurrency: 300, perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } } });
+		const inputs = Array.from({ length: 201 }, (_, i) => ({ binding: 'KB6', payload: { i }, concurrencyKey: 'cust-a' }));
+		await shard('KB6#0').enqueueMany(inputs);
+
+		// 投影の残りを処理し終えるまで数tick, その後はトークンの回復時刻まで待機
+		for (let i = 0; i < 3; i++) await runDurableObjectAlarm(shard('KB6#0'));
+
+		expect(sent).toHaveLength(1);
+		// readyCountが上限でも読める候補は不変, nowの再実行では回復までtickが空転
+		const alarm = await runInDurableObject(
+			shard('KB6#0'),
+			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,
+		);
+		expect(alarm).toBe(T0 + 60_000);
+	});
+
 	it('perKeyRateを無効にすると残った行を削除する', async () => {
 		const { queue } = captureQueue();
 		await install('KB5#0', T0, queue);
