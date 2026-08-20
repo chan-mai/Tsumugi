@@ -3,12 +3,12 @@
 ## 状況
 
 難所(alarm発火/reaper境界/claim競合/投影)が全て時間依存
-Workersには時間を進めるAPIが無く, fake timersはDOに効かない
+Workersには時間を進めるAPIが無く、fake timersはDOでは無効
 
 ## 決定
 
-`schedule(now, jobs, policy, bucket) -> Decision[]`を純粋関数として切り出す
-時刻も乱数も引数で受け取り, core内で`Date.now()`と`Math.random()`を呼ばない
+`schedule(now, jobs, policy, bucket) -> Decision[]`を純粋関数として分離する
+時刻も乱数も引数で受け取り、core内で`Date.now()`と`Math.random()`を呼ばない
 
 ## 帰結
 

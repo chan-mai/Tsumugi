@@ -7,8 +7,8 @@
 
 ## 決定
 
-既定はat-least-once,ジョブ単位でat-most-onceを選べる
-at-most-onceを選んだジョブは再投入せずSTALLEDに落として人手の判断を待つ
+既定はat-least-once, ジョブ単位でat-most-onceを選べる
+at-most-onceを選んだジョブは再投入せずSTALLEDへ遷移させて人手の判断を待つ
 
 ## 帰結
 

@@ -2,15 +2,15 @@
 
 ## 状況
 
-`[site]`はWrangler v4で非推奨,後継のStatic Assetsは1 Workerにつき1コレクションのみでユーザー自身のアセットと併存できない
+`[site]`はWrangler v4で非推奨, 後継のStatic Assetsは1 Workerにつき1コレクションのみでユーザー自身のアセットと併存できない
 
 ## 決定
 
-Vueで構成されるSPAをViteで単一HTML(JS/CSSインライン)にビルドし,文字列としてJSに焼き込む
+Vueで構成されるSPAをViteで単一HTML(JS/CSSインライン)にビルドし、文字列としてJSへ埋め込む
 本体エントリではなく`tsumugi/ui`という別サブパスから提供する
-スタイルはTailwindCSSとHeadless UI,ベースにkiso.cssを敷く
+スタイルはTailwindCSSとHeadless UI, ベースにkiso.cssを使用する
 
 ## 帰結
 
-文字列定数はV8がコードとして解析しないので起動時間への影響はほぼない
+文字列定数はV8がコードとして解析しないため起動時間への影響はほぼない
 別サブパスにすることで数百KBの文字列を全利用者のバンドルに強制しない
