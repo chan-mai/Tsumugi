@@ -324,3 +324,87 @@ describe('トークンバケットの永続化(ADR-0009)', () => {
 		expect(sent).toHaveLength(0);
 	});
 });
+
+describe('キー別トークンバケットの永続化(ADR-0045)', () => {
+	const keyBucketsOf = (name: string, keys: string[]) =>
+		runInDurableObject(
+			shard(name),
+			(instance) => (instance as any).repo.readKeyBuckets(keys) as Record<string, { tokens: number; refilledAt: number }>,
+		);
+	const countOf = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countKeyBuckets() as number);
+
+	it('消費した残りをキーごとの行へ保存する', async () => {
+		const { queue, sent } = captureQueue();
+		await install('KB1#0', T0, queue);
+		// perKeyConcurrencyが1だと2件目は同時実行上限で除外されレート未検証
+		await shard('KB1#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } } });
+		await shard('KB1#0').enqueueMany([
+			{ binding: 'KB1', payload: {}, concurrencyKey: 'cust-a' },
+			{ binding: 'KB1', payload: {}, concurrencyKey: 'cust-a' },
+			{ binding: 'KB1', payload: {}, concurrencyKey: 'cust-b' },
+		]);
+		await runDurableObjectAlarm(shard('KB1#0'));
+
+		expect(sent).toHaveLength(2);
+		expect(await keyBucketsOf('KB1#0', ['cust-a', 'cust-b'])).toEqual({
+			'cust-a': { tokens: 0, refilledAt: T0 },
+			'cust-b': { tokens: 0, refilledAt: T0 },
+		});
+	});
+
+	it('perKeyRate未設定やキーがnullのジョブでは行を作らない', async () => {
+		const { queue } = captureQueue();
+		await install('KB2#0', T0, queue);
+		await shard('KB2#0').enqueue({ binding: 'KB2', payload: {}, concurrencyKey: 'cust-a' });
+		await runDurableObjectAlarm(shard('KB2#0'));
+		expect(await countOf('KB2#0')).toBe(0);
+
+		await shard('KB2#0').configure({ policy: { perKeyRate: { tokens: 1, intervalMs: 60_000 } } });
+		await shard('KB2#0').enqueue({ binding: 'KB2', payload: {} });
+		await runDurableObjectAlarm(shard('KB2#0'));
+		expect(await countOf('KB2#0')).toBe(0);
+	});
+
+	it('保存した残りを読み戻して投入を制限する', async () => {
+		// DOの退避は再現不可, 初回tick前に行を直接書き同じ状態を再現
+		const { queue, sent } = captureQueue();
+		await install('KB3#0', T0, queue);
+		await runInDurableObject(shard('KB3#0'), (instance) =>
+			(instance as any).repo.writeKeyBuckets({ 'cust-a': { tokens: 0, refilledAt: T0 } }),
+		);
+		await shard('KB3#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 10, perKeyRate: { tokens: 2, intervalMs: 60_000 } } });
+		for (let i = 0; i < 3; i++) await shard('KB3#0').enqueue({ binding: 'KB3', payload: { i }, concurrencyKey: 'cust-a' });
+		await runDurableObjectAlarm(shard('KB3#0'));
+
+		expect(sent).toHaveLength(0);
+	});
+
+	it('上限まで補充された行は次のtickで削除される', async () => {
+		const { queue, sent } = captureQueue();
+		await install('KB4#0', T0, queue);
+		await shard('KB4#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } } });
+		await shard('KB4#0').enqueue({ binding: 'KB4', payload: {}, concurrencyKey: 'cust-a' });
+		await runDurableObjectAlarm(shard('KB4#0'));
+		expect(sent).toHaveLength(1);
+		expect(await countOf('KB4#0')).toBe(1);
+
+		// intervalMs経過でrefilled_atが古い行は上限到達と同値, 候補に無いキーもsweepで削除
+		await install('KB4#0', T0 + 60_000, queue);
+		await shard('KB4#0').enqueue({ binding: 'KB4', payload: {} });
+		await runDurableObjectAlarm(shard('KB4#0'));
+		expect(await countOf('KB4#0')).toBe(0);
+	});
+
+	it('perKeyRateを無効にすると残った行を削除する', async () => {
+		const { queue } = captureQueue();
+		await install('KB5#0', T0, queue);
+		await shard('KB5#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } } });
+		await shard('KB5#0').enqueue({ binding: 'KB5', payload: {}, concurrencyKey: 'cust-a' });
+		await runDurableObjectAlarm(shard('KB5#0'));
+		expect(await countOf('KB5#0')).toBe(1);
+
+		await shard('KB5#0').updatePolicy({ perKeyRate: null });
+		await runDurableObjectAlarm(shard('KB5#0'));
+		expect(await countOf('KB5#0')).toBe(0);
+	});
+});

@@ -191,19 +191,20 @@ export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { 
 		input.agingIntervalMs = value as number | null;
 	}
 
-	if ('rate' in raw) {
-		const value = raw.rate;
-		if (value === null) input.rate = null;
+	for (const name of ['rate', 'perKeyRate'] as const) {
+		if (!(name in raw)) continue;
+		const value = raw[name];
+		if (value === null) input[name] = null;
 		else {
-			if (typeof value !== 'object') return { error: 'rate must be an object or null' };
+			if (typeof value !== 'object') return { error: `${name} must be an object or null` };
 			const { tokens, intervalMs } = value as Record<string, unknown>;
 			if (typeof tokens !== 'number' || !Number.isInteger(tokens) || tokens < 0) {
-				return { error: 'rate.tokens must be a non-negative integer' };
+				return { error: `${name}.tokens must be a non-negative integer` };
 			}
 			if (typeof intervalMs !== 'number' || !Number.isInteger(intervalMs) || intervalMs <= 0) {
-				return { error: 'rate.intervalMs must be a positive integer' };
+				return { error: `${name}.intervalMs must be a positive integer` };
 			}
-			input.rate = { tokens, intervalMs };
+			input[name] = { tokens, intervalMs };
 		}
 	}
 

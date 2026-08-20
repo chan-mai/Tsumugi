@@ -114,7 +114,15 @@ describe('公開している純粋関数', () => {
 					timeoutMs: 1_000,
 				},
 			],
-			policy: { paused: false, concurrency: 1, perKeyConcurrency: 1, rate: null, agingIntervalMs: null, reaperGraceMs: 0 },
+			policy: {
+				paused: false,
+				concurrency: 1,
+				perKeyConcurrency: 1,
+				rate: null,
+				perKeyRate: null,
+				agingIntervalMs: null,
+				reaperGraceMs: 0,
+			},
 			bucket: { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 },
 		});
 		expect(out.decisions).toEqual([{ type: 'dispatch', id: 'a' }]);

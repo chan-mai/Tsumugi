@@ -4,7 +4,7 @@ import { embedJobId, formatJobId, shardName } from '../core/ids.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
-import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, FailureNotice, Policy, Retention } from '../core/types.js';
+import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, FailureNotice, KeyBuckets, Policy, Retention } from '../core/types.js';
 import type { RunStub } from './run.js';
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
@@ -111,6 +111,7 @@ export const DEFAULT_POLICY: Policy = {
 	concurrency: 100,
 	perKeyConcurrency: 1,
 	rate: null,
+	perKeyRate: null,
 	agingIntervalMs: 60_000,
 	reaperGraceMs: 30_000,
 };
@@ -190,9 +191,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
 	#bucketLoaded = false;
+	// falseならkey_bucketは空, perKeyRate無効時の存在確認
+	#keyBucketsMaybePresent = true;
 	#policyLoaded = false;
 	/** 直近tickで投入が止まった制約, 診断で外へ出す(#10) */
-	#lastBlocked: BlockedBy = { paused: false, capacity: false, tokens: false, perKey: false };
+	#lastBlocked: BlockedBy = { paused: false, capacity: false, tokens: false, perKey: false, perKeyTokens: false };
 	#blockedLoaded = false;
 
 	get repo(): JobRepo {
@@ -305,6 +308,25 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const rate = this.policy.rate;
 		if (rate === null || bucket.tokens >= rate.tokens) return;
 		this.repo.writeSetting(BUCKET_KEY, JSON.stringify(bucket));
+	}
+
+	/**
+	 * キー別バケットの反映(ADR-0045), 保存は使用中の行のみ
+	 * 読んだが出力に無いキー(上限到達)が削除対象
+	 * sweepは選考に入らないまま残った行の削除, tokensが0以上の行はintervalMs以内に上限へ回復
+	 */
+	#persistKeyBuckets(read: KeyBuckets, out: KeyBuckets, now: number): void {
+		const rate = this.policy.perKeyRate;
+		if (rate === null) {
+			if (!this.#keyBucketsMaybePresent) return;
+			if (this.repo.countKeyBuckets() > 0) this.repo.clearKeyBuckets();
+			this.#keyBucketsMaybePresent = false;
+			return;
+		}
+		this.repo.deleteKeyBuckets(Object.keys(read).filter((key) => !Object.hasOwn(out, key)));
+		this.repo.writeKeyBuckets(out);
+		if (Object.keys(out).length > 0) this.#keyBucketsMaybePresent = true;
+		this.repo.sweepKeyBuckets(now - rate.intervalMs);
 	}
 
 	/** blockedを保存する,変化した時だけ書いて毎tickの書き込みを避ける(#10) */
@@ -596,9 +618,20 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#loadPolicy();
 		this.#loadBucket();
 		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT);
-		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket });
+
+		const readyKeys =
+			this.policy.perKeyRate === null
+				? []
+				: [
+						...new Set(
+							jobs.flatMap((j) => (j.state === 'SCHEDULED' && j.runAfter <= now && j.concurrencyKey !== null ? [j.concurrencyKey] : [])),
+						),
+					];
+		const keyBuckets = this.repo.readKeyBuckets(readyKeys);
+		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket, keyBuckets });
 		this.#bucket = output.bucket;
 		this.#persistBucket(output.bucket);
+		this.#persistKeyBuckets(keyBuckets, output.keyBuckets, now);
 		// どの制約で投入が止まったかを診断で外へ出す,DO退避後も残す(#10)
 		this.#persistBlocked(output.blocked);
 

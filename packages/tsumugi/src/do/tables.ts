@@ -63,6 +63,17 @@ export const setting = sqliteTable('setting', {
 	value: text('value').notNull(),
 });
 
+/** キー別トークンバケット(ADR-0045), tokens上限の行は保存対象外 */
+export const keyBucket = sqliteTable(
+	'key_bucket',
+	{
+		key: text('key').primaryKey(),
+		tokens: real('tokens').notNull(),
+		refilledAt: integer('refilled_at').notNull(),
+	},
+	(t) => [index('key_bucket_refilled').on(t.refilledAt)],
+);
+
 /**
  * 試行ごとの記録(ADR-0028), 失敗の事後調査に必要
  * ジョブ行は最新の状態しか持たず,何回目がいつ何で落ちたかは残らない

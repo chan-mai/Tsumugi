@@ -34,7 +34,7 @@ export type JobView = {
 
 export type RateLimit = { tokens: number; intervalMs: number };
 
-/** ADR-0009の3軸+ ADR-0020のエージング */
+/** ADR-0009の3軸+ ADR-0045のキー単位レート+ ADR-0020のエージング */
 export type Policy = {
 	/** 投入の一時停止(#27), 実行中の回収とエージングは止めない */
 	paused: boolean;
@@ -42,6 +42,8 @@ export type Policy = {
 	/** concurrencyKey単位の同時実行上限,キーがnullのジョブには非適用 */
 	perKeyConcurrency: number;
 	rate: RateLimit | null;
+	/** concurrencyKey単位のトークンバケット,全キー一律,キーがnullのジョブには非適用 */
+	perKeyRate: RateLimit | null;
 	/** nullでエージング無効, ADR-0020の既定は有効 */
 	agingIntervalMs: number | null;
 	/** timeoutMs経過後さらにこの時間応答が無ければ回収 */
@@ -69,6 +71,9 @@ export type FailureNotice = {
 
 export type Bucket = { tokens: number; refilledAt: number };
 
+/** concurrencyKey別のバケット, tokens上限のキーは除外 */
+export type KeyBuckets = Record<string, Bucket>;
+
 export type Decision =
 	| { type: 'dispatch'; id: string }
 	/** 無応答のat-least-onceジョブの再投入, SCHEDULEDへ戻す */
@@ -84,6 +89,8 @@ export type ScheduleInput = {
 	jobs: readonly JobView[];
 	policy: Policy;
 	bucket: Bucket;
+	/** キー別バケット, 省略時は全キーtokens上限の扱い */
+	keyBuckets?: KeyBuckets;
 };
 
 /** 投入が止まった制約, ADR-0009の3軸のどれで詰まったか(#10) */
@@ -96,11 +103,15 @@ export type BlockedBy = {
 	tokens: boolean;
 	/** perKeyConcurrency: キー単位の上限で候補を飛ばした */
 	perKey: boolean;
+	/** perKeyRate: キーのトークン不足で候補を除外 */
+	perKeyTokens: boolean;
 };
 
 export type ScheduleOutput = {
 	decisions: Decision[];
 	bucket: Bucket;
+	/** 消費後のキー別バケット */
+	keyBuckets: KeyBuckets;
 	/** 次にスケジューラを起こす時刻,不要ならnull */
 	nextAlarmAt: number | null;
 	/** どの制約で投入が止まったか, どれを緩めればよいか外から判断できるようにする(#10) */

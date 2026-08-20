@@ -1,4 +1,4 @@
-import type { Bucket, Decision, JobView, Policy, ScheduleInput, ScheduleOutput } from './types.js';
+import type { Bucket, Decision, JobView, KeyBuckets, Policy, RateLimit, ScheduleInput, ScheduleOutput } from './types.js';
 
 /** エージング込みの実効優先度, ADR-0020 */
 export function effectivePriority(job: JobView, now: number, agingIntervalMs: number | null): number {
@@ -16,18 +16,18 @@ function silenceDeadline(job: JobView, policy: Policy): number | null {
 	return since + job.timeoutMs + policy.reaperGraceMs;
 }
 
-function refill(bucket: Bucket, policy: Policy, now: number): Bucket {
-	if (policy.rate === null) return { tokens: Number.POSITIVE_INFINITY, refilledAt: now };
+function refill(bucket: Bucket, rate: RateLimit | null, now: number): Bucket {
+	if (rate === null) return { tokens: Number.POSITIVE_INFINITY, refilledAt: now };
 	const elapsed = Math.max(0, now - bucket.refilledAt);
-	const perMs = policy.rate.tokens / policy.rate.intervalMs;
-	const tokens = Math.min(policy.rate.tokens, bucket.tokens + elapsed * perMs);
+	const perMs = rate.tokens / rate.intervalMs;
+	const tokens = Math.min(rate.tokens, bucket.tokens + elapsed * perMs);
 	return { tokens, refilledAt: now };
 }
 
 /** トークンが1に達する時刻,既に足りていればnull */
-function tokenReadyAt(bucket: Bucket, policy: Policy, now: number): number | null {
-	if (policy.rate === null || bucket.tokens >= 1) return null;
-	const perMs = policy.rate.tokens / policy.rate.intervalMs;
+function tokenReadyAt(bucket: Bucket, rate: RateLimit | null, now: number): number | null {
+	if (rate === null || bucket.tokens >= 1) return null;
+	const perMs = rate.tokens / rate.intervalMs;
 	if (perMs <= 0) return null;
 	return now + Math.ceil((1 - bucket.tokens) / perMs);
 }
@@ -48,7 +48,22 @@ const minOf = (values: readonly (number | null)[]): number | null =>
 export function schedule(input: ScheduleInput): ScheduleOutput {
 	const { now, jobs, policy } = input;
 	const decisions: Decision[] = [];
-	let bucket = refill(input.bucket, policy, now);
+	let bucket = refill(input.bucket, policy.rate, now);
+
+	// キー別バケット(ADR-0045),入力の全キーをrefillし上限到達キーは出力の正規化で除外
+	const perKeyRate = policy.perKeyRate;
+	const keyBuckets = new Map<string, Bucket>();
+	if (perKeyRate !== null) {
+		for (const [key, stored] of Object.entries(input.keyBuckets ?? {})) keyBuckets.set(key, refill(stored, perKeyRate, now));
+	}
+	// readyに現れた未知キーはtokens上限から開始
+	const keyBucketOf = (key: string, rate: RateLimit): Bucket => {
+		const existing = keyBuckets.get(key);
+		if (existing !== undefined) return existing;
+		const created = { tokens: rate.tokens, refilledAt: now };
+		keyBuckets.set(key, created);
+		return created;
+	};
 
 	// 1. reaper:投入後に応答が無いジョブの回収
 	const reaped = new Set<string>();
@@ -90,6 +105,8 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 	let blockedByCapacity = false;
 	let blockedByTokens = false;
 	let blockedByKey = false;
+	let blockedByKeyTokens = false;
+	let keyTokenReady: number | null = null;
 	let dispatchedSilence: number | null = null;
 
 	for (const { job } of ready) {
@@ -108,10 +125,19 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 			blockedByKey = true;
 			continue;
 		}
+		// キーのトークン不足は候補の除外のみ, 他のキーとキーがnullのジョブは投入
+		const keyBucket = key === null || perKeyRate === null ? null : keyBucketOf(key, perKeyRate);
+		if (keyBucket !== null && keyBucket.tokens < 1) {
+			blockedByKeyTokens = true;
+			// スキップ後のバケットは不変, 回復時刻はここで確定
+			keyTokenReady = minOf([keyTokenReady, tokenReadyAt(keyBucket, perKeyRate, now)]);
+			continue;
+		}
 
 		decisions.push({ type: 'dispatch', id: job.id });
 		slots--;
 		bucket = { tokens: bucket.tokens - 1, refilledAt: bucket.refilledAt };
+		if (keyBucket !== null) keyBucket.tokens -= 1;
 		if (key !== null) keyInFlight.set(key, (keyInFlight.get(key) ?? 0) + 1);
 		// 今投入したジョブの無応答判定時刻,入力のスナップショットではまだSCHEDULEDなので個別に数える
 		// これを忘れると投入後にDOを起動する予定が立たず,応答が無いジョブが永久に回収されない
@@ -129,14 +155,26 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		futureRunAfter,
 		nextSilence,
 		dispatchedSilence,
-		blockedByTokens ? tokenReadyAt(bucket, policy, now) : null,
+		blockedByTokens ? tokenReadyAt(bucket, policy.rate, now) : null,
+		keyTokenReady,
 		// 上限待ちは完了報告が次のtickを起動するのでここでは予約しない(capacityのalarmは張らない)
 	]);
+
+	// 上限到達キーは出力から除外,入力にあり出力に無いキーが保存側の削除対象
+	const outKeyBuckets: KeyBuckets =
+		perKeyRate === null ? {} : Object.fromEntries([...keyBuckets].filter(([, b]) => b.tokens < perKeyRate.tokens));
 
 	return {
 		decisions,
 		bucket,
+		keyBuckets: outKeyBuckets,
 		nextAlarmAt,
-		blocked: { paused: policy.paused && ready.length > 0, capacity: blockedByCapacity, tokens: blockedByTokens, perKey: blockedByKey },
+		blocked: {
+			paused: policy.paused && ready.length > 0,
+			capacity: blockedByCapacity,
+			tokens: blockedByTokens,
+			perKey: blockedByKey,
+			perKeyTokens: blockedByKeyTokens,
+		},
 	};
 }

@@ -47,3 +47,4 @@
 - [ADR-0042](0042-runtime-policy-over-rest.md) — 流量の実行時変更をREST APIから行い一時停止を別に持つ
 - [ADR-0043](0043-failure-notification-as-a-job.md) — 失敗の通知はジョブとして投入する
 - [ADR-0044](0044-explicit-unsafe-no-auth.md) — 認証なしの開放を明示的な選択肢として用意する
+- [ADR-0045](0045-per-key-rate-limit.md) — concurrencyKey単位のレート制限を全キー一律のperKeyRateとして持つ

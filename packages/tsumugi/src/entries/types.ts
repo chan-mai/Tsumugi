@@ -8,6 +8,7 @@ export type {
 	FailureNotice,
 	JobState,
 	JobView,
+	KeyBuckets,
 	Policy,
 	RateLimit,
 	ScheduleInput,

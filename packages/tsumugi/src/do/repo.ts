@@ -2,9 +2,9 @@ import { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { assertTransition } from '../core/transitions.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
-import type { Backoff, DeliveryGuarantee, FailureNotice, JobState, JobView, Retention } from '../core/types.js';
+import type { Backoff, DeliveryGuarantee, FailureNotice, JobState, JobView, KeyBuckets, Retention } from '../core/types.js';
 import { applySchema, type AttemptRow, type JobRow } from './schema.js';
-import { attempt, failureNotify, job, outbox, runNotify, setting, uniqueKey } from './tables.js';
+import { attempt, failureNotify, job, keyBucket, outbox, runNotify, setting, uniqueKey } from './tables.js';
 
 /**
  * 1試行あたりのエラー本文の上限
@@ -592,5 +592,58 @@ export class JobRepo {
 	deleteSetting(key: string): void {
 		this.db.delete(setting).where(eq(setting.key, key)).run();
 		this.writes++;
+	}
+
+	/** キー別バケットの読み出し(ADR-0045), 対象は投入候補のキーのみで有界 */
+	readKeyBuckets(keys: readonly string[]): KeyBuckets {
+		if (keys.length === 0) return {};
+		const rows = this.db
+			.select()
+			.from(keyBucket)
+			.where(inArray(keyBucket.key, [...keys]))
+			.all();
+		this.reads++;
+		return Object.fromEntries(rows.map((r) => [r.key, { tokens: r.tokens, refilledAt: r.refilledAt }]));
+	}
+
+	writeKeyBuckets(buckets: KeyBuckets): void {
+		for (const [key, b] of Object.entries(buckets)) {
+			this.db
+				.insert(keyBucket)
+				.values({ key, tokens: b.tokens, refilledAt: b.refilledAt })
+				.onConflictDoUpdate({ target: keyBucket.key, set: { tokens: b.tokens, refilledAt: b.refilledAt } })
+				.run();
+			this.writes++;
+		}
+	}
+
+	deleteKeyBuckets(keys: readonly string[]): void {
+		if (keys.length === 0) return;
+		this.db
+			.delete(keyBucket)
+			.where(inArray(keyBucket.key, [...keys]))
+			.run();
+		this.writes++;
+	}
+
+	/** 上限到達行の削除, tokensが0以上の行はintervalMs以内に上限へ回復 */
+	sweepKeyBuckets(before: number): void {
+		this.db.delete(keyBucket).where(lte(keyBucket.refilledAt, before)).run();
+		this.writes++;
+	}
+
+	/** perKeyRate無効化後に残った行の削除に利用 */
+	clearKeyBuckets(): void {
+		this.db.delete(keyBucket).run();
+		this.writes++;
+	}
+
+	countKeyBuckets(): number {
+		const row = this.db
+			.select({ c: sql<number>`count(*)` })
+			.from(keyBucket)
+			.get();
+		this.reads++;
+		return row?.c ?? 0;
 	}
 }

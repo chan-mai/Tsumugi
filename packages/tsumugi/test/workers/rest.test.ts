@@ -239,10 +239,14 @@ describe('REST API', () => {
 				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 			);
 
-		const res = await post({ paused: true, concurrency: 5 });
+		const res = await post({ paused: true, concurrency: 5, perKeyRate: { tokens: 3, intervalMs: 1_000 } });
 		expect(res.status).toBe(200);
 		const body = await res.json<{ binding: string; shards: number; policy: { paused: boolean; concurrency: number } }>();
-		expect(body).toMatchObject({ binding: 'REST', shards: 1, policy: { paused: true, concurrency: 5 } });
+		expect(body).toMatchObject({
+			binding: 'REST',
+			shards: 1,
+			policy: { paused: true, concurrency: 5, perKeyRate: { tokens: 3, intervalMs: 1_000 } },
+		});
 
 		// 渡さなかった項目は変わらない
 		const next = await (await post({ paused: false })).json<{ policy: { paused: boolean; concurrency: number } }>();
@@ -250,9 +254,12 @@ describe('REST API', () => {
 
 		// 診断が今効いている値を返す
 		const diag = await call(withAuth, 'GET', '/api/diagnostics', authorized);
-		const seen = await diag.json<{ bindings: Record<string, { policy: { concurrency: number }; blocked: { paused: boolean } }> }>();
+		const seen = await diag.json<{
+			bindings: Record<string, { policy: { concurrency: number }; blocked: { paused: boolean; perKeyTokens: boolean } }>;
+		}>();
 		expect(seen.bindings.REST?.policy.concurrency).toBe(5);
 		expect(typeof seen.bindings.REST?.blocked.paused).toBe('boolean');
+		expect(typeof seen.bindings.REST?.blocked.perKeyTokens).toBe('boolean');
 
 		// 実行時の設定を捨てると既定へ戻る
 		expect((await post({}, '/api/bindings/REST/policy/reset')).status).toBe(200);
@@ -276,6 +283,9 @@ describe('REST API', () => {
 		expect((await post({ concurrency: -1 })).status).toBe(400);
 		expect((await post({ paused: 'yes' })).status).toBe(400);
 		expect((await post({ rate: { tokens: 1, intervalMs: 0 } })).status).toBe(400);
+		expect((await post({ perKeyRate: { tokens: -1, intervalMs: 1_000 } })).status).toBe(400);
+		expect((await post({ perKeyRate: { tokens: 1, intervalMs: 0 } })).status).toBe(400);
+		expect((await post({ perKeyRate: 5 })).status).toBe(400);
 		expect((await post({ agingIntervalMs: 0 })).status).toBe(400);
 		// 変更する項目が無い要求は取り違えの元
 		expect((await post({})).status).toBe(400);
@@ -284,6 +294,7 @@ describe('REST API', () => {
 		// 0は投入を止める指定として通す
 		expect((await post({ concurrency: 0 })).status).toBe(200);
 		expect((await post({ rate: null, agingIntervalMs: null })).status).toBe(200);
+		expect((await post({ perKeyRate: null })).status).toBe(200);
 
 		// 変更はshardに残るので, 後続のテストのために捨てておく
 		await withAuth.fetch!(

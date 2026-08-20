@@ -34,6 +34,17 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 	let slots = policy.paused ? 0 : Math.max(0, policy.concurrency - inFlight.length);
 	// rate無しはトークン無限, 有りは補充後の残量から始める
 	let tokens = policy.rate === null ? Number.POSITIVE_INFINITY : refilledTokens(input);
+	// キー別トークン, 格納が無いキーはtokens上限(ADR-0045)
+	const keyTokens = new Map<string, number>();
+	const keyTokensOf = (key: string): number => {
+		if (policy.perKeyRate === null) return Number.POSITIVE_INFINITY;
+		const known = keyTokens.get(key);
+		if (known !== undefined) return known;
+		const stored = input.keyBuckets?.[key];
+		if (stored === undefined) return policy.perKeyRate.tokens;
+		const elapsed = Math.max(0, now - stored.refilledAt);
+		return Math.min(policy.perKeyRate.tokens, stored.tokens + elapsed * (policy.perKeyRate.tokens / policy.perKeyRate.intervalMs));
+	};
 
 	const dispatched: string[] = [];
 	for (const { job } of ready) {
@@ -41,10 +52,12 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 		if (tokens < 1) break;
 		const key = job.concurrencyKey;
 		if (key !== null && (keyInFlight.get(key) ?? 0) >= policy.perKeyConcurrency) continue;
+		if (key !== null && keyTokensOf(key) < 1) continue;
 
 		dispatched.push(job.id);
 		slots--;
 		tokens--;
+		if (key !== null) keyTokens.set(key, keyTokensOf(key) - 1);
 		if (key !== null) keyInFlight.set(key, (keyInFlight.get(key) ?? 0) + 1);
 	}
 	return dispatched;

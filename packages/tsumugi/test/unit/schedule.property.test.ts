@@ -81,6 +81,49 @@ describe('schedule()の不変条件', () => {
 		);
 	});
 
+	it('各キーのdispatch数が補充後のキー別トークンを超えない', () => {
+		fc.assert(
+			fc.property(scheduleInput, (input) => {
+				const rate = input.policy.perKeyRate;
+				if (rate === null) return;
+				const byId = activeById(input);
+				const counts = new Map<string, number>();
+				for (const d of dispatches(schedule(input).decisions)) {
+					const key = byId.get(d.id)?.concurrencyKey;
+					if (key != null) counts.set(key, (counts.get(key) ?? 0) + 1);
+				}
+				for (const [key, count] of counts) {
+					const stored = input.keyBuckets?.[key];
+					// 格納が無いキーは補充済み, 有れば補充後の残量が上限
+					const refilled =
+						stored === undefined
+							? rate.tokens
+							: Math.min(rate.tokens, stored.tokens + Math.max(0, input.now - stored.refilledAt) * (rate.tokens / rate.intervalMs));
+					expect(count, `key ${key}`).toBeLessThanOrEqual(refilled);
+				}
+			}),
+			{ numRuns: RUNS },
+		);
+	});
+
+	it('出力のキー別バケットに上限到達のキーが残らない, perKeyRate無しなら空', () => {
+		fc.assert(
+			fc.property(scheduleInput, (input) => {
+				const out = schedule(input);
+				const rate = input.policy.perKeyRate;
+				if (rate === null) {
+					expect(out.keyBuckets).toEqual({});
+					return;
+				}
+				for (const [key, b] of Object.entries(out.keyBuckets)) {
+					expect(b.tokens, `key ${key}`).toBeGreaterThanOrEqual(0);
+					expect(b.tokens, `key ${key}`).toBeLessThan(rate.tokens);
+				}
+			}),
+			{ numRuns: RUNS },
+		);
+	});
+
 	it('1ジョブに2つの決定が出ない', () => {
 		fc.assert(
 			fc.property(scheduleInput, (input) => {

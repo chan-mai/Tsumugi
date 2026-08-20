@@ -83,6 +83,7 @@ export type PolicyView = {
 	concurrency: number;
 	perKeyConcurrency: number;
 	rate: { tokens: number; intervalMs: number } | null;
+	perKeyRate: { tokens: number; intervalMs: number } | null;
 	agingIntervalMs: number | null;
 	reaperGraceMs: number;
 };

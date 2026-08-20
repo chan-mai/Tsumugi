@@ -78,8 +78,10 @@ const blockedBy = (entry: BindingDiagnostics) =>
 		.map(([name]) => name)
 		.join(', ');
 
-const rateOf = (entry: BindingDiagnostics) =>
-	entry.policy.rate === null ? '-' : `${entry.policy.rate.tokens} / ${entry.policy.rate.intervalMs} ms`;
+const formatRate = (rate: { tokens: number; intervalMs: number } | null) =>
+	rate === null ? '-' : `${rate.tokens} / ${rate.intervalMs} ms`;
+const rateOf = (entry: BindingDiagnostics) => formatRate(entry.policy.rate);
+const perKeyRateOf = (entry: BindingDiagnostics) => formatRate(entry.policy.perKeyRate);
 
 const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
 const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent disabled:opacity-50';
@@ -107,6 +109,7 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 						<th :class="HEAD">Concurrency</th>
 						<th :class="HEAD">Per key</th>
 						<th :class="HEAD">Rate</th>
+						<th :class="HEAD">Per-key rate</th>
 						<th :class="HEAD">Actions</th>
 					</tr>
 				</thead>
@@ -139,6 +142,7 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 						</td>
 						<td class="p-4 align-middle tabular-nums">{{ entry.policy.perKeyConcurrency }}</td>
 						<td class="p-4 align-middle tabular-nums">{{ rateOf(entry) }}</td>
+						<td class="p-4 align-middle tabular-nums">{{ perKeyRateOf(entry) }}</td>
 						<td class="p-4 align-middle">
 							<div class="flex items-center gap-1">
 								<button type="button" :class="BTN" :disabled="busy === binding" @click="setPaused(binding, !entry.policy.paused)">
@@ -149,7 +153,7 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 						</td>
 					</tr>
 					<tr v-if="entries.length === 0">
-						<td colspan="8" class="h-24 text-center text-muted-foreground">No bindings.</td>
+						<td colspan="9" class="h-24 text-center text-muted-foreground">No bindings.</td>
 					</tr>
 				</tbody>
 			</table>

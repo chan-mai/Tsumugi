@@ -49,6 +49,14 @@ export const SCHEMA = [
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	)`,
+	// キー別トークンバケット(ADR-0045), tokens上限の行は保存対象外
+	`CREATE TABLE IF NOT EXISTS key_bucket (
+		key TEXT PRIMARY KEY,
+		tokens REAL NOT NULL,
+		refilled_at INTEGER NOT NULL
+	)`,
+	// 上限到達行の削除用
+	`CREATE INDEX IF NOT EXISTS key_bucket_refilled ON key_bucket (refilled_at)`,
 	// 試行ごとの記録(ADR-0028), 失敗の事後調査に必要
 	// ジョブ行は最新の状態しか持たず,何回目がいつ何で落ちたかは残らない
 	`CREATE TABLE IF NOT EXISTS attempt (
