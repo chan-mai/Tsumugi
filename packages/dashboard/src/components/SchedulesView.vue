@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { isUnauthorized, listSchedules, type Schedule } from '../api';
+import { formatTimestamp } from '../time';
 
 const emit = defineEmits<{ unauthorized: []; job: [string]; run: [string] }>();
 
@@ -39,7 +40,7 @@ function duration(ms: number): string {
 	return `${+(ms / 1_000).toFixed(1)}s`;
 }
 
-const at = (value: number | null) => (value === null ? '' : new Date(value).toLocaleString());
+const at = (value: number | null, timeZone: string) => (value === null ? '' : formatTimestamp(value, timeZone));
 
 /** 予定と実際の差, 遅れの観測に使う */
 const delay = (row: Schedule) =>
@@ -80,9 +81,9 @@ const LINK = 'block border-none p-0 font-mono text-xs break-all underline underl
 						</td>
 						<td class="p-4 align-middle tabular-nums">{{ interval(row) }}</td>
 						<td class="p-4 align-middle text-muted-foreground">{{ row.overlap }}</td>
-						<td class="p-4 align-middle tabular-nums">{{ at(row.next_run_at) }}</td>
+						<td class="p-4 align-middle tabular-nums">{{ at(row.next_run_at, row.time_zone) }}</td>
 						<td class="p-4 align-middle tabular-nums">
-							{{ at(row.last_run_at) }}
+							{{ at(row.last_run_at, row.time_zone) }}
 							<span v-if="delay(row)" class="text-xs text-muted-foreground">{{ delay(row) }}</span>
 							<button v-if="row.last_job_id" type="button" :class="LINK" @click="emit('job', row.last_job_id)">
 								{{ row.last_job_id }}
@@ -93,7 +94,7 @@ const LINK = 'block border-none p-0 font-mono text-xs break-all underline underl
 						</td>
 						<td class="p-4 align-middle tabular-nums">
 							{{ row.skipped_count }}
-							<span v-if="row.last_skipped_at" class="text-xs text-muted-foreground">{{ at(row.last_skipped_at) }}</span>
+							<span v-if="row.last_skipped_at" class="text-xs text-muted-foreground">{{ at(row.last_skipped_at, row.time_zone) }}</span>
 						</td>
 					</tr>
 					<tr v-if="schedules.length === 0">

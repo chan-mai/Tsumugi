@@ -1,6 +1,6 @@
 import type { PayloadOf, Performers, ReqOf } from './api.js';
 import type { Flows, InputOf, NodeJobOptions } from './flow.js';
-import { InvalidCronError, nextCronAt, parseCron } from './cron.js';
+import { InvalidCronError, nextCronAt, parseCron, resolveTimeZone } from './cron.js';
 
 /**
  * 定期実行の定義(ADR-0040)
@@ -61,7 +61,9 @@ export type FlowSchedule<F extends Flows> = {
 	};
 }[keyof F & string];
 
-export type ScheduleTiming = ({ everyMs: number; cron?: never } | { cron: string; everyMs?: never }) & {
+export type ScheduleTiming = (
+	{ everyMs: number; cron?: never; timeZone?: never } | { cron: string; everyMs?: never; timeZone?: string }
+) & {
 	/** 前回が終わっていない時刻に次回が来た場合の扱い, 既定は'skip'(ADR-0040) */
 	overlap?: 'skip' | 'overlap';
 };
@@ -79,6 +81,7 @@ export type AnyScheduleDef = {
 	deadlineMs?: number;
 	everyMs?: number;
 	cron?: string;
+	timeZone?: string;
 	overlap?: 'skip' | 'overlap';
 } & ScheduleJobOptions;
 
@@ -91,6 +94,7 @@ export type NormalizedSchedule = {
 	target: string;
 	everyMs: number | null;
 	cron: string | null;
+	timeZone: string;
 	overlap: 'skip' | 'overlap';
 };
 
@@ -139,10 +143,19 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 	if (def.everyMs !== undefined && (!Number.isInteger(def.everyMs) || def.everyMs < 1000)) {
 		throw new InvalidScheduleError(`everyMs must be an integer of at least 1000: ${name}`);
 	}
+	if (def.everyMs !== undefined && 'timeZone' in def) {
+		throw new InvalidScheduleError(`timeZone is only allowed with cron: ${name}`);
+	}
+
+	let timeZone = 'UTC';
 	if (def.cron !== undefined) {
+		if (def.timeZone !== undefined && typeof def.timeZone !== 'string') {
+			throw new InvalidScheduleError(`timeZone must be an IANA time zone: ${name}`);
+		}
 		try {
+			timeZone = resolveTimeZone(def.timeZone ?? 'UTC');
 			// 解析に加えて到達可能性も検査, 2月31日のような式は発火の機会が永遠に無い
-			nextCronAt(parseCron(def.cron), CRON_PROBE_AT);
+			nextCronAt(parseCron(def.cron), CRON_PROBE_AT, timeZone);
 		} catch (error) {
 			if (!(error instanceof InvalidCronError)) throw error;
 			throw new InvalidScheduleError(`invalid cron in schedule ${name}: ${error.message}`);
@@ -171,6 +184,7 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 		target: def.binding ?? def.flow!,
 		everyMs: def.everyMs ?? null,
 		cron: def.cron ?? null,
+		timeZone,
 		overlap: def.overlap ?? 'skip',
 	};
 }
@@ -179,11 +193,15 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
  * 次回の発火時刻を返す
  * everyMsは初回の予定から位相を維持して進め、経過済みの分は発火せず省略(ADR-0040)
  */
-export function nextOccurrence(timing: { everyMs: number | null; cron: string | null }, previous: number | null, now: number): number {
+export function nextOccurrence(
+	timing: { everyMs: number | null; cron: string | null; timeZone?: string },
+	previous: number | null,
+	now: number,
+): number {
 	if (timing.everyMs !== null) {
 		if (previous === null) return now + timing.everyMs;
 		const base = Math.max(now, previous);
 		return previous + timing.everyMs * (Math.floor((base - previous) / timing.everyMs) + 1);
 	}
-	return nextCronAt(parseCron(timing.cron ?? ''), Math.max(now, previous ?? now));
+	return nextCronAt(parseCron(timing.cron ?? ''), Math.max(now, previous ?? now), timing.timeZone);
 }

@@ -409,12 +409,13 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
       "target": "REPORT",
       "every_ms": null,
       "cron": "0 3 * * *",
+      "time_zone": "Asia/Tokyo",
       "overlap": "skip",
-      "next_run_at": 1767668400000,
-      "last_run_at": 1767582000000,
-      "last_fired_at": 1767582001200,
+      "next_run_at": 1767722400000,
+      "last_run_at": 1767636000000,
+      "last_fired_at": 1767636001200,
       "last_job_id": null,
-      "last_run_id": "REPORT:nightly-1767582000000",
+      "last_run_id": "REPORT:nightly-1767636000000",
       "last_skipped_at": null,
       "skipped_count": 0,
       "last_error": null
@@ -430,6 +431,7 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
 | `target`          | binding名またはFlow名                                    |
 | `every_ms`        | 固定間隔。`cron`を指定した場合は`null`                   |
 | `cron`            | cron式。`everyMs`を指定した場合は`null`                  |
+| `time_zone`       | cronと表示に使うIANAタイムゾーン。固定間隔では`UTC`     |
 | `overlap`         | `skip`または`overlap`                                    |
 | `next_run_at`     | 次回の実行予定                                           |
 | `last_run_at`     | 直近の発火の予定時刻。一度も発火していない場合は`null`   |

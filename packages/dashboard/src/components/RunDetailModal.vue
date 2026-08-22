@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 import RunGraph from './RunGraph.vue';
 import StatusCell from './StatusCell.vue';
 import { cancelRun, getRun, retryRun, type Run, type RunNode } from '../api';
+import { formatTimestamp } from '../time';
 
 const props = defineProps<{ runId: string | null }>();
 const emit = defineEmits<{ close: []; changed: []; job: [jobId: string]; run: [runId: string] }>();
@@ -57,7 +58,7 @@ async function act(kind: 'retry' | 'cancel') {
 	}
 }
 
-const at = (value: number | null | undefined) => (value ? new Date(value).toLocaleString() : '-');
+const at = (value: number | null | undefined) => (value ? formatTimestamp(value) : '-');
 
 const pretty = (input: string | undefined) => {
 	if (!input) return '';

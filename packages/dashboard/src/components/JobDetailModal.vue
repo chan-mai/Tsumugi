@@ -4,6 +4,7 @@ import { ref, watch } from 'vue';
 import AttemptLog from './AttemptLog.vue';
 import StatusCell from './StatusCell.vue';
 import { getJob, type Attempt, type Job } from '../api';
+import { formatTimestamp } from '../time';
 import { useJobActions } from '../useJobActions';
 
 const props = defineProps<{ jobId: string | null }>();
@@ -48,7 +49,7 @@ async function run(kind: 'retry' | 'cancel') {
 	emit('changed');
 }
 
-const at = (value: number | null | undefined) => (value ? new Date(value).toLocaleString() : '-');
+const at = (value: number | null | undefined) => (value ? formatTimestamp(value) : '-');
 
 const pretty = (payload: string | undefined) => {
 	if (!payload) return '';

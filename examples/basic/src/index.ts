@@ -65,8 +65,13 @@ const tsumugi = defineTsumugi({
 		'poll-names': { binding: 'ListNames', payload: { prefix: 'poll' }, everyMs: 5 * 60 * 1000 },
 		// 前回の終了を待たずに発火
 		'ping-hello': { binding: 'Hello', payload: { name: 'ping' }, everyMs: 60_000, overlap: 'overlap' },
-		// cronはUTCの分精度, 引数は発火の予定時刻
-		nightly: { flow: 'GREETINGS', input: ({ scheduledAt }) => ({ prefix: `nightly-${scheduledAt}` }), cron: '0 3 * * *' },
+		// cronは指定TZの分精度,引数は発火の予定時刻
+		nightly: {
+			flow: 'GREETINGS',
+			input: ({ scheduledAt }) => ({ prefix: `nightly-${scheduledAt}` }),
+			cron: '0 3 * * *',
+			timeZone: 'Asia/Tokyo',
+		},
 	},
 	// トークンはsecretから取得, 直書きではリポジトリとバンドルの両方に残る
 	auth: bearerAuth((env: Env) => env.TSUMUGI_TOKEN, { cookie: 'tsumugi_token' }),

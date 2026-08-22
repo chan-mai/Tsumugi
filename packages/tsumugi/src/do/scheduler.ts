@@ -1,7 +1,14 @@
 import { DurableObject } from 'cloudflare:workers';
 import { configOf, createClient, type BindingConfig, type ClientEnv } from '../client/enqueue.js';
 import { formatJobId, formatRunId, shardNameOf } from '../core/ids.js';
-import { normalizeSchedules, nextOccurrence, type AnyScheduleDef, type AnySchedules, type ScheduleContext } from '../core/recurring.js';
+import {
+	normalizeSchedules,
+	nextOccurrence,
+	type AnyScheduleDef,
+	type AnySchedules,
+	type NormalizedSchedule,
+	type ScheduleContext,
+} from '../core/recurring.js';
 import { resolveShard } from '../core/shard.js';
 import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput } from './job-shard.js';
@@ -30,6 +37,7 @@ export type ScheduleView = {
 	target: string;
 	every_ms: number | null;
 	cron: string | null;
+	time_zone: string;
 	overlap: 'skip' | 'overlap';
 	next_run_at: number;
 	last_run_at: number | null;
@@ -126,6 +134,7 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 				target: row.target,
 				every_ms: row.every_ms,
 				cron: row.cron,
+				time_zone: row.time_zone,
 				overlap: row.overlap as 'skip' | 'overlap',
 				next_run_at: row.next_run_at,
 				last_run_at: row.last_run_at,
@@ -172,11 +181,20 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 			}
 		}
 
-		/** 行とコードの定義の突き合わせ, fingerprintが一致すれば差分なし */
+		/** 行とコードの定義の突き合わせ */
 		#reconcile(now: number): void {
-			if (this.repo.readSetting(FINGERPRINT_KEY) === fingerprint) return;
-
 			const rows = new Map(this.repo.rows().map((row) => [row.name, row]));
+			if (
+				this.repo.readSetting(FINGERPRINT_KEY) === fingerprint &&
+				rows.size === normalized.length &&
+				normalized.every((spec) => {
+					const row = rows.get(spec.name);
+					return row !== undefined && rowMatchesSpec(row, spec);
+				})
+			) {
+				return;
+			}
+
 			for (const spec of normalized) {
 				const row = rows.get(spec.name);
 				if (!row) {
@@ -184,7 +202,7 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 					continue;
 				}
 				rows.delete(spec.name);
-				const timingChanged = row.every_ms !== spec.everyMs || row.cron !== spec.cron;
+				const timingChanged = !timingMatchesSpec(row, spec);
 				if (timingChanged || row.kind !== spec.kind || row.target !== spec.target || row.overlap !== spec.overlap) {
 					// 間隔が変わった場合だけ次回を再計算, 表示項目の変更では位相を維持
 					this.repo.updateSpec(spec, timingChanged ? nextOccurrence(spec, null, now) : null, now);
@@ -200,7 +218,7 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 		 */
 		async #fire(row: ScheduleRow, def: AnyScheduleDef, now: number): Promise<void> {
 			const occurrence = row.next_run_at;
-			const next = nextOccurrence({ everyMs: row.every_ms, cron: row.cron }, occurrence, now);
+			const next = nextOccurrence({ everyMs: row.every_ms, cron: row.cron, timeZone: row.time_zone }, occurrence, now);
 
 			try {
 				if (row.overlap === 'skip' && (await this.#previousActive(row))) {
@@ -282,6 +300,17 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 			await this.ctx.storage.setAlarm(next);
 		}
 	};
+}
+
+/** 保存済み予定が現在のタイムゾーン規則でも同じcron分か確認 */
+function timingMatchesSpec(row: ScheduleRow, spec: NormalizedSchedule): boolean {
+	if (row.every_ms !== spec.everyMs || row.cron !== spec.cron || row.time_zone !== spec.timeZone) return false;
+	if (spec.cron === null) return true;
+	return nextOccurrence(spec, null, row.next_run_at - 1) === row.next_run_at;
+}
+
+function rowMatchesSpec(row: ScheduleRow, spec: NormalizedSchedule): boolean {
+	return timingMatchesSpec(row, spec) && row.kind === spec.kind && row.target === spec.target && row.overlap === spec.overlap;
 }
 
 /** scheduleの定義から投入設定だけを抽出, タイミング系のキーは対象外(ADR-0040) */

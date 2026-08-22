@@ -14,6 +14,7 @@ export const SCHEDULER_SCHEMA = [
 		-- 固定間隔(ms), cronと排他
 		every_ms INTEGER,
 		cron TEXT,
+		time_zone TEXT NOT NULL DEFAULT 'UTC',
 		-- 'skip' | 'overlap', 前回未了時の扱い
 		overlap TEXT NOT NULL,
 		next_run_at INTEGER NOT NULL,
@@ -40,6 +41,10 @@ export const SCHEDULER_SCHEMA = [
 
 export function applySchedulerSchema(sql: SqlStorage): void {
 	for (const statement of SCHEDULER_SCHEMA) sql.exec(statement);
+	const columns = sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('schedule')`).toArray();
+	if (!columns.some((column) => column.name === 'time_zone')) {
+		sql.exec(`ALTER TABLE schedule ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'UTC'`);
+	}
 }
 
 /** SQLiteの行そのまま, 射影はscheduler-repo.tsが担当 */
@@ -49,6 +54,7 @@ export type ScheduleRow = {
 	target: string;
 	every_ms: number | null;
 	cron: string | null;
+	time_zone: string;
 	overlap: string;
 	next_run_at: number;
 	last_run_at: number | null;

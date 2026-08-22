@@ -10,7 +10,12 @@ const tsumugi = defineTsumugi({
   flows,
   schedules: {
     'poll-inbox': { binding: 'PollInbox', payload: {}, everyMs: 5 * 60 * 1000 },
-    nightly: { flow: 'REPORT', input: ({ scheduledAt }) => ({ until: scheduledAt }), cron: '0 3 * * *' },
+    nightly: {
+      flow: 'REPORT',
+      input: ({ scheduledAt }) => ({ until: scheduledAt }),
+      cron: '0 9 * * *',
+      timeZone: 'Asia/Tokyo',
+    },
   },
   auth: /* ... */,
 });
@@ -37,7 +42,7 @@ Runの場合は`deadlineMs`を指定できます。
 `everyMs`はミリ秒の固定間隔で、1000以上の整数です。
 最初の発火は登録した時刻から1間隔後で、以降は最初の予定を基準に進みます。
 
-`cron`は5つのフィールド(分 時 日 月 曜日)です。時刻はUTCで、精度は分です。
+`cron`は5つのフィールド(分 時 日 月 曜日)です。精度は分です。
 
 ```text
 0 3 * * *     毎日3:00
@@ -48,6 +53,16 @@ Runの場合は`deadlineMs`を指定できます。
 
 使用できる記法は数値、`*`、`,`、`-`、`/`です。`JAN`や`MON`のような名前は使用できません。
 日と曜日の両方を指定した場合は、どちらかが一致する日に発火します。
+
+`timeZone`にはIANAタイムゾーンを指定します。省略時は`UTC`です。`+09:00`のような固定オフセット識別子は指定できません。
+
+```ts
+{ binding: 'OpenShop', payload: {}, cron: '0 9 * * 1-5', timeZone: 'Asia/Tokyo' }
+```
+
+`timeZone`は`cron`だけに指定できます。`everyMs`はUTCインスタント間の固定間隔であり、タイムゾーンによる補正はありません。
+存在しないローカル時刻は発火しません。DST終了で同じローカル時刻が2回存在する場合は、最初のUTC時刻だけで発火します。
+最初の時刻より後に次回を計算する場合、同じローカル時刻の2回目ではなく次のローカル候補へ進みます。
 
 ## 前回が終わっていない場合
 
@@ -73,6 +88,7 @@ Runの場合は`RUNNING`であれば発火しません。発火しなかった�
 次回の予定は現在時刻から見た次の境界になるため、間隔の位相は保たれます。
 
 一覧には予定時刻と実際に発火した時刻の両方が表示されるため、遅れの大きさが分かります。
+時刻にはスケジュールのIANAタイムゾーンと、その時点のGMTオフセットが表示されます。
 
 ## 重複
 
@@ -136,6 +152,7 @@ export class TsumugiScheduler extends tsumugi.schedulerClass {}
 
 - 名前は英数字とハイフンとアンダースコアの64文字までです
 - `everyMs`は1000以上の整数です
-- `cron`はUTCの分精度で、秒と年のフィールドはありません
+- `cron`は分精度で、秒と年のフィールドはありません
+- `timeZone`はIANAタイムゾーンで、`cron`にだけ指定できます。既定は`UTC`です
 - 定義の誤りは`defineTsumugi`の呼び出し時に例外になります
 - 手動での発火と一時停止の手段はありません
