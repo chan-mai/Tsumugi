@@ -49,7 +49,7 @@ async function run(kind: 'retry' | 'cancel') {
 	emit('changed');
 }
 
-const at = (value: number | null | undefined) => (value ? formatTimestamp(value) : '-');
+const at = (value: number | null | undefined) => (value === null || value === undefined ? '-' : formatTimestamp(value));
 
 const pretty = (payload: string | undefined) => {
 	if (!payload) return '';

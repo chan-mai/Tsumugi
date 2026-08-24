@@ -208,6 +208,47 @@ describe('定期実行(ADR-0040)', () => {
 		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_run_at: existingNext });
 	});
 
+	it('NULLのtime_zoneをUTCへ補正し既存のnext_run_atを維持する', async () => {
+		const legacy = namespace.get(namespace.idFromName('scheduler-time-zone-null'));
+		const base = day(15);
+		const existingNext = base + 123_456;
+		await runInDurableObject(legacy, (instance) => {
+			const sql = (instance as any).ctx.storage.sql as SqlStorage;
+			sql.exec(`CREATE TABLE schedule (
+				name TEXT PRIMARY KEY,
+				kind TEXT NOT NULL,
+				target TEXT NOT NULL,
+				every_ms INTEGER,
+				cron TEXT,
+				time_zone TEXT,
+				overlap TEXT NOT NULL,
+				next_run_at INTEGER NOT NULL,
+				last_run_at INTEGER,
+				last_fired_at INTEGER,
+				last_job_id TEXT,
+				last_run_id TEXT,
+				last_skipped_at INTEGER,
+				skipped_count INTEGER NOT NULL DEFAULT 0,
+				last_error TEXT,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL
+			)`);
+			sql.exec(
+				`INSERT INTO schedule (name, kind, target, every_ms, cron, time_zone, overlap, next_run_at, created_at, updated_at)
+				 VALUES ('poll-names', 'job', 'ListNames', ?, NULL, NULL, 'skip', ?, ?, ?)`,
+				POLL_MS,
+				existingNext,
+				base,
+				base,
+			);
+			(instance as any).clock = { now: () => base };
+		});
+
+		await legacy.sync();
+		const rows = (await legacy.list()) as ScheduleView[];
+		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_run_at: existingNext });
+	});
+
 	it('予定時刻に決定的なIDでジョブを投入する', async () => {
 		const base = day(2);
 		await sync(base);

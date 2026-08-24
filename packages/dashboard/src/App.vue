@@ -271,7 +271,7 @@ onMounted(() => {
 });
 onUnmounted(() => timer && clearInterval(timer));
 
-const at = (value: number | null) => (value ? formatTimestamp(value) : '');
+const at = (value: number | null) => (value === null ? '' : formatTimestamp(value));
 const durationOf = (job: Job) =>
 	job.dispatched_at && job.updated_at > job.dispatched_at ? `${job.updated_at - job.dispatched_at} ms` : '';
 

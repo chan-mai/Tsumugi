@@ -154,6 +154,11 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 		}
 		try {
 			timeZone = resolveTimeZone(def.timeZone ?? 'UTC');
+		} catch (error) {
+			if (!(error instanceof InvalidCronError)) throw error;
+			throw new InvalidScheduleError(`invalid timeZone in schedule ${name}: ${error.message}`);
+		}
+		try {
 			// 解析に加えて到達可能性も検査, 2月31日のような式は発火の機会が永遠に無い
 			nextCronAt(parseCron(def.cron), CRON_PROBE_AT, timeZone);
 		} catch (error) {

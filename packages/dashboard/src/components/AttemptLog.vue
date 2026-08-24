@@ -5,7 +5,7 @@ import { formatTimestamp } from '../time';
 
 const props = defineProps<{ attempts: Attempt[] }>();
 
-const at = (value: number | null) => (value ? formatTimestamp(value) : '-');
+const at = (value: number | null) => (value === null ? '-' : formatTimestamp(value));
 
 /** 開始が取れていない試行では所要も出せない */
 const durationOf = (a: Attempt) => (a.started_at === null ? '-' : `${a.finished_at - a.started_at} ms`);

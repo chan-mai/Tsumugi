@@ -94,7 +94,7 @@ const LINK = 'block border-none p-0 font-mono text-xs break-all underline underl
 						</td>
 						<td class="p-4 align-middle tabular-nums">
 							{{ row.skipped_count }}
-							<span v-if="row.last_skipped_at" class="text-xs text-muted-foreground">{{ at(row.last_skipped_at, row.time_zone) }}</span>
+							<span v-if="row.last_skipped_at !== null" class="text-xs text-muted-foreground">{{ at(row.last_skipped_at, row.time_zone) }}</span>
 						</td>
 					</tr>
 					<tr v-if="schedules.length === 0">

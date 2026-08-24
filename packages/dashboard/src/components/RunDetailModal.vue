@@ -58,7 +58,7 @@ async function act(kind: 'retry' | 'cancel') {
 	}
 }
 
-const at = (value: number | null | undefined) => (value ? formatTimestamp(value) : '-');
+const at = (value: number | null | undefined) => (value === null || value === undefined ? '-' : formatTimestamp(value));
 
 const pretty = (input: string | undefined) => {
 	if (!input) return '';

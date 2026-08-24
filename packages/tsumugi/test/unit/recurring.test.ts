@@ -64,7 +64,9 @@ describe('scheduleの正規化', () => {
 
 	it('不正なタイムゾーンを拒否する', () => {
 		for (const timeZone of ['Invalid/Zone', '+09:00']) {
-			expect(() => normalize({ x: { binding: 'Greet', payload: {}, cron: '0 9 * * *', timeZone } })).toThrow(InvalidScheduleError);
+			expect(() => normalize({ x: { binding: 'Greet', payload: {}, cron: '0 9 * * *', timeZone } })).toThrow(
+				`invalid timeZone in schedule x: invalid time zone: ${timeZone}`,
+			);
 		}
 	});
 

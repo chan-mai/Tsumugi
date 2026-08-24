@@ -44,6 +44,9 @@ export function applySchedulerSchema(sql: SqlStorage): void {
 	const columns = sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('schedule')`).toArray();
 	if (!columns.some((column) => column.name === 'time_zone')) {
 		sql.exec(`ALTER TABLE schedule ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'UTC'`);
+	} else {
+		// NULL許容で作られた既存列への防御
+		sql.exec(`UPDATE schedule SET time_zone = 'UTC' WHERE time_zone IS NULL`);
 	}
 }
 
