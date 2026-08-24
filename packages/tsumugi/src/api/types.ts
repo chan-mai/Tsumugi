@@ -161,6 +161,7 @@ export type ScheduleSummary = {
 	target: string;
 	every_ms: number | null;
 	cron: string | null;
+	time_zone: string;
 	overlap: 'skip' | 'overlap';
 	next_run_at: number;
 	/** 直近発火の予定時刻, last_fired_atとの差が遅延 */

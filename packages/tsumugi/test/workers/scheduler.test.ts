@@ -21,8 +21,8 @@ const PING_MS = 60_000;
  */
 const day = (n: number) => Date.UTC(2046, 0, 5 + n, 12, 0, 0);
 
-/** 起点の日から見た次の3時, cronは`0 3 * * *` */
-const nightlyOf = (base: number) => base + 15 * 60 * 60 * 1000;
+/** 起点の日から見た次の東京3時, cronは`0 3 * * *` */
+const nightlyOf = (base: number) => base + 6 * 60 * 60 * 1000;
 
 /**
  * 使う分だけを宣言
@@ -116,14 +116,21 @@ describe('定期実行(ADR-0040)', () => {
 			target: 'ListNames',
 			every_ms: POLL_MS,
 			cron: null,
+			time_zone: 'UTC',
 			overlap: 'skip',
 			next_run_at: base + POLL_MS,
 			last_run_at: null,
 			skipped_count: 0,
 		});
 		expect(await rowOf('ping-hello')).toMatchObject({ overlap: 'overlap', next_run_at: base + PING_MS });
-		// cronはUTCの分精度, 12時から見た次の3時は翌日
-		expect(await rowOf('nightly')).toMatchObject({ kind: 'flow', target: 'GREETINGS', cron: '0 3 * * *', next_run_at: nightlyOf(base) });
+		// UTC12時は東京21時,次の東京3時はUTC18時
+		expect(await rowOf('nightly')).toMatchObject({
+			kind: 'flow',
+			target: 'GREETINGS',
+			cron: '0 3 * * *',
+			time_zone: 'Asia/Tokyo',
+			next_run_at: nightlyOf(base),
+		});
 
 		expect(await alarmOf()).toBe(base + PING_MS);
 	});
@@ -133,6 +140,113 @@ describe('定期実行(ADR-0040)', () => {
 		const before = await rowOf('poll-names');
 		await callSync();
 		expect(await rowOf('poll-names')).toEqual(before);
+	});
+
+	it('保存済み予定が現在のタイムゾーン規則と異なる場合は再計算する', async () => {
+		const base = day(12);
+		await sync(base);
+		await runInDurableObject(inside(), (instance) => {
+			(instance as any).repo.sql.exec(`UPDATE schedule SET next_run_at = ? WHERE name = 'nightly'`, base + 15 * 60 * 60 * 1000);
+		});
+
+		await callSync();
+		expect(await rowOf('nightly')).toMatchObject({ next_run_at: nightlyOf(base) });
+	});
+
+	it('タイムゾーンの変更をタイミング変更として次回へ反映する', async () => {
+		const base = day(13);
+		await sync(base);
+		await runInDurableObject(inside(), (instance) => {
+			(instance as any).repo.sql.exec(
+				`UPDATE schedule SET time_zone = 'UTC', next_run_at = ? WHERE name = 'nightly'`,
+				base + 15 * 60 * 60 * 1000,
+			);
+			(instance as any).repo.sql.exec('DELETE FROM setting');
+		});
+
+		await callSync();
+		expect(await rowOf('nightly')).toMatchObject({ time_zone: 'Asia/Tokyo', next_run_at: nightlyOf(base) });
+	});
+
+	it('旧スキーマをUTCで補完し既存のnext_run_atを維持する', async () => {
+		const legacy = namespace.get(namespace.idFromName('scheduler-time-zone-upgrade'));
+		const base = day(14);
+		const existingNext = base + 123_456;
+		await runInDurableObject(legacy, (instance) => {
+			const sql = (instance as any).ctx.storage.sql as SqlStorage;
+			sql.exec(`CREATE TABLE schedule (
+				name TEXT PRIMARY KEY,
+				kind TEXT NOT NULL,
+				target TEXT NOT NULL,
+				every_ms INTEGER,
+				cron TEXT,
+				overlap TEXT NOT NULL,
+				next_run_at INTEGER NOT NULL,
+				last_run_at INTEGER,
+				last_fired_at INTEGER,
+				last_job_id TEXT,
+				last_run_id TEXT,
+				last_skipped_at INTEGER,
+				skipped_count INTEGER NOT NULL DEFAULT 0,
+				last_error TEXT,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL
+			)`);
+			sql.exec(
+				`INSERT INTO schedule (name, kind, target, every_ms, cron, overlap, next_run_at, created_at, updated_at)
+				 VALUES ('poll-names', 'job', 'ListNames', ?, NULL, 'skip', ?, ?, ?)`,
+				POLL_MS,
+				existingNext,
+				base,
+				base,
+			);
+			(instance as any).clock = { now: () => base };
+		});
+
+		await legacy.sync();
+		const rows = (await legacy.list()) as ScheduleView[];
+		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_run_at: existingNext });
+	});
+
+	it('NULLのtime_zoneをUTCへ補正し既存のnext_run_atを維持する', async () => {
+		const legacy = namespace.get(namespace.idFromName('scheduler-time-zone-null'));
+		const base = day(15);
+		const existingNext = base + 123_456;
+		await runInDurableObject(legacy, (instance) => {
+			const sql = (instance as any).ctx.storage.sql as SqlStorage;
+			sql.exec(`CREATE TABLE schedule (
+				name TEXT PRIMARY KEY,
+				kind TEXT NOT NULL,
+				target TEXT NOT NULL,
+				every_ms INTEGER,
+				cron TEXT,
+				time_zone TEXT,
+				overlap TEXT NOT NULL,
+				next_run_at INTEGER NOT NULL,
+				last_run_at INTEGER,
+				last_fired_at INTEGER,
+				last_job_id TEXT,
+				last_run_id TEXT,
+				last_skipped_at INTEGER,
+				skipped_count INTEGER NOT NULL DEFAULT 0,
+				last_error TEXT,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL
+			)`);
+			sql.exec(
+				`INSERT INTO schedule (name, kind, target, every_ms, cron, time_zone, overlap, next_run_at, created_at, updated_at)
+				 VALUES ('poll-names', 'job', 'ListNames', ?, NULL, NULL, 'skip', ?, ?, ?)`,
+				POLL_MS,
+				existingNext,
+				base,
+				base,
+			);
+			(instance as any).clock = { now: () => base };
+		});
+
+		await legacy.sync();
+		const rows = (await legacy.list()) as ScheduleView[];
+		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_run_at: existingNext });
 	});
 
 	it('予定時刻に決定的なIDでジョブを投入する', async () => {
@@ -303,7 +417,7 @@ describe('定期実行(ADR-0040)', () => {
 		await sync(day(9));
 		const list = await callList();
 		expect(list.map((row) => row.name)).toEqual(['nightly', 'ping-hello', 'poll-names']);
-		expect(list[0]).toMatchObject({ kind: 'flow', target: 'GREETINGS', last_job_id: null, skipped_count: 0 });
+		expect(list[0]).toMatchObject({ kind: 'flow', target: 'GREETINGS', time_zone: 'Asia/Tokyo', last_job_id: null, skipped_count: 0 });
 	});
 
 	it('発火の後は次の予定へalarmを再設定する', async () => {

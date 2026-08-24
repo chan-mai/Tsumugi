@@ -4,7 +4,8 @@ import { InvalidCronError, nextCronAt, parseCron } from '../../src/core/cron.js'
 const at = (iso: string) => Date.parse(iso);
 
 /** 式とafterからISO文字列へ, 期待値を読める形で書くため */
-const next = (expression: string, after: string) => new Date(nextCronAt(parseCron(expression), at(after))).toISOString();
+const next = (expression: string, after: string, timeZone?: string) =>
+	new Date(nextCronAt(parseCron(expression), at(after), timeZone)).toISOString();
 
 describe('cron式の解析', () => {
 	it('全域と数値とリストと範囲とステップを受ける', () => {
@@ -91,5 +92,51 @@ describe('次回時刻の計算', () => {
 
 	it('分のステップが日を跨いで先頭へ戻る', () => {
 		expect(next('*/20 * * * *', '2026-01-05T23:45:00Z')).toBe('2026-01-06T00:00:00.000Z');
+	});
+
+	it('IANAタイムゾーンのローカル時刻で評価する', () => {
+		expect(next('0 9 * * *', '2026-01-04T23:30:00Z', 'Asia/Tokyo')).toBe('2026-01-05T00:00:00.000Z');
+	});
+
+	it('タイムゾーン省略時はUTCを維持する', () => {
+		const spec = parseCron('0 9 * * *');
+		const after = at('2026-01-04T23:30:00Z');
+		expect(nextCronAt(spec, after)).toBe(nextCronAt(spec, after, 'UTC'));
+	});
+
+	it('不正なタイムゾーンを拒否する', () => {
+		expect(() => nextCronAt(parseCron('0 9 * * *'), at('2026-01-01T00:00:00Z'), 'Invalid/Zone')).toThrow(InvalidCronError);
+	});
+
+	it('固定オフセット識別子をIANAタイムゾーンとして受け付けない', () => {
+		expect(() => nextCronAt(parseCron('0 9 * * *'), at('2026-01-01T00:00:00Z'), '+09:00')).toThrow(InvalidCronError);
+		expect(next('0 9 * * *', '2026-01-04T23:30:00Z', 'Etc/GMT-9')).toBe('2026-01-05T00:00:00.000Z');
+	});
+
+	it('DST開始で存在しないローカル時刻を省略する', () => {
+		expect(next('30 2 * * *', '2026-03-07T07:30:00Z', 'America/New_York')).toBe('2026-03-09T06:30:00.000Z');
+	});
+
+	it('DST終了で重複するローカル時刻は最初のUTC時刻だけを返す', () => {
+		expect(next('30 1 * * *', '2026-10-31T05:30:00Z', 'America/New_York')).toBe('2026-11-01T05:30:00.000Z');
+	});
+
+	it('DST重複の最初のUTC時刻以後は2回目を返さず翌日へ進む', () => {
+		expect(next('30 1 * * *', '2026-11-01T05:30:00Z', 'America/New_York')).toBe('2026-11-02T06:30:00.000Z');
+		expect(next('30 1 * * *', '2026-11-01T05:31:00Z', 'America/New_York')).toBe('2026-11-02T06:30:00.000Z');
+	});
+
+	it('DST重複中の全分指定でも2回目の時刻帯を省略する', () => {
+		expect(next('* * * * *', '2026-11-01T05:59:00Z', 'America/New_York')).toBe('2026-11-01T07:00:00.000Z');
+		expect(next('* * * * *', '2026-11-01T06:15:00Z', 'America/New_York')).toBe('2026-11-01T07:00:00.000Z');
+	});
+
+	it('30分のDST開始で存在しないローカル時刻を省略する', () => {
+		expect(next('15 2 * * *', '2026-10-02T15:45:00Z', 'Australia/Lord_Howe')).toBe('2026-10-04T15:15:00.000Z');
+	});
+
+	it('30分のDST終了で重複するローカル時刻は最初のUTC時刻だけを返す', () => {
+		expect(next('45 1 * * *', '2026-04-03T14:45:00Z', 'Australia/Lord_Howe')).toBe('2026-04-04T14:45:00.000Z');
+		expect(next('45 1 * * *', '2026-04-04T14:45:00Z', 'Australia/Lord_Howe')).toBe('2026-04-05T15:15:00.000Z');
 	});
 });

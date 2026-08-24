@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import FilterMenu from './FilterMenu.vue';
 import { getMetrics, isUnauthorized, type Metrics } from '../api';
+import { formatTimestamp } from '../time';
 
 const WINDOWS = [
 	{ hours: 24, label: '24h' },
@@ -45,7 +46,7 @@ const peak = computed(() => Math.max(1, ...(metrics.value?.series ?? []).map((po
 
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
 const ms = (value: number) => (value >= 1_000 ? `${(value / 1_000).toFixed(1)} s` : `${Math.round(value)} ms`);
-const at = (value: number) => (Number.isFinite(value) ? new Date(value).toLocaleString() : '');
+const at = (value: number) => (Number.isFinite(value) ? formatTimestamp(value) : '');
 
 const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
 </script>

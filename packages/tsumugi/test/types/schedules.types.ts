@@ -39,7 +39,12 @@ export const positives = defineTsumugi({
 		// payloadの型はbindingから決まる
 		'poll-fixed': { binding: 'POLL', payload: { prefix: 'a' }, everyMs: 60_000 },
 		// 写像関数は発火の予定時刻を受け取る, 戻り値の型も同じく縛られる
-		'poll-fn': { binding: 'POLL', payload: ({ scheduledAt }) => ({ prefix: `a-${scheduledAt}` }), cron: '0 * * * *' },
+		'poll-fn': {
+			binding: 'POLL',
+			payload: ({ scheduledAt }) => ({ prefix: `a-${scheduledAt}` }),
+			cron: '0 * * * *',
+			timeZone: 'Asia/Tokyo',
+		},
 		// 必須のconcurrencyKeyはscheduleでも必要
 		charge: { binding: 'CHARGE', payload: { customerId: 'c1' }, concurrencyKey: 'c1', everyMs: 3_600_000 },
 		// inputの型はflowから決まる
@@ -107,6 +112,15 @@ defineTsumugi({
 	schedules: {
 		// @ts-expect-error everyMsとcronは排他
 		both: { binding: 'POLL', payload: { prefix: 'a' }, everyMs: 60_000, cron: '0 * * * *' },
+	},
+});
+
+defineTsumugi({
+	performers,
+	flows,
+	schedules: {
+		// @ts-expect-error timeZoneはcron専用
+		fixed: { binding: 'POLL', payload: { prefix: 'a' }, everyMs: 60_000, timeZone: 'Asia/Tokyo' },
 	},
 });
 

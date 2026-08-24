@@ -35,6 +35,7 @@ import {
 } from './api';
 import { loadRefresh, REFRESH_KEY } from './refresh';
 import { isJobId, type SearchField } from './search';
+import { formatTimestamp } from './time';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 /** runが取る4つ(ADR-0029) */
@@ -270,7 +271,7 @@ onMounted(() => {
 });
 onUnmounted(() => timer && clearInterval(timer));
 
-const at = (value: number | null) => (value ? new Date(value).toLocaleString() : '');
+const at = (value: number | null) => (value === null ? '' : formatTimestamp(value));
 const durationOf = (job: Job) =>
 	job.dispatched_at && job.updated_at > job.dispatched_at ? `${job.updated_at - job.dispatched_at} ms` : '';
 

@@ -6,6 +6,7 @@ import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
 import { createRest, SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
+import type { ScheduleView } from '../../src/do/scheduler.js';
 
 const T0 = 2_200_000_000_000;
 const TOKEN = 'secret-token';
@@ -404,6 +405,32 @@ describe('REST API', () => {
 	it('不正な形式のジョブIDは400', async () => {
 		const res = await call(withAuth, 'POST', '/api/jobs/not-a-job-id/retry', authorized);
 		expect(res.status).toBe(400);
+	});
+
+	it('schedule一覧がtime_zoneを返す', async () => {
+		const schedule: ScheduleView = {
+			name: 'nightly',
+			kind: 'flow',
+			target: 'REPORT',
+			every_ms: null,
+			cron: '0 3 * * *',
+			time_zone: 'Asia/Tokyo',
+			overlap: 'skip',
+			next_run_at: T0,
+			last_run_at: null,
+			last_fired_at: null,
+			last_job_id: null,
+			last_run_id: null,
+			last_skipped_at: null,
+			skipped_count: 0,
+			last_error: null,
+		};
+		const app = createRest(bearerAuth(TOKEN), {
+			schedulerFor: () => ({ list: async () => [schedule] }) as never,
+		});
+		const res = await app.request('/api/schedules', { headers: authorized }, env as RestEnv);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ schedules: [schedule] });
 	});
 });
 

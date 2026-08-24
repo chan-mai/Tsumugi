@@ -358,8 +358,11 @@ model Schedule {
 	@doc("Fixed interval in milliseconds. Null when cron is set.")
 	every_ms: integer | null;
 
-	@doc("Cron expression in UTC. Null when every_ms is set.")
+	@doc("Cron expression interpreted in time_zone. Null when every_ms is set.")
 	cron: string | null;
+
+	@doc("IANA time zone used by cron and schedule timestamp displays. UTC for fixed intervals and cron without timeZone.")
+	time_zone: string;
 
 	@doc("What happens when the previous occurrence has not finished")
 	overlap: "skip" | "overlap";

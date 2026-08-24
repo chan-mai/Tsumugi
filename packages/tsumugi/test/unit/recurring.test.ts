@@ -12,8 +12,16 @@ describe('scheduleの正規化', () => {
 			nightly: { flow: 'GREETINGS', input: {}, cron: '0 3 * * *', overlap: 'overlap' },
 		});
 		expect(schedules).toEqual([
-			{ name: 'hello', kind: 'job', target: 'Greet', everyMs: 60_000, cron: null, overlap: 'skip' },
-			{ name: 'nightly', kind: 'flow', target: 'GREETINGS', everyMs: null, cron: '0 3 * * *', overlap: 'overlap' },
+			{ name: 'hello', kind: 'job', target: 'Greet', everyMs: 60_000, cron: null, timeZone: 'UTC', overlap: 'skip' },
+			{
+				name: 'nightly',
+				kind: 'flow',
+				target: 'GREETINGS',
+				everyMs: null,
+				cron: '0 3 * * *',
+				timeZone: 'UTC',
+				overlap: 'overlap',
+			},
 		]);
 		expect(fingerprint).toBe(JSON.stringify(schedules));
 	});
@@ -38,6 +46,28 @@ describe('scheduleの正規化', () => {
 	it('everyMsとcronの排他を検査する', () => {
 		expect(() => normalize({ x: { binding: 'Greet', payload: {} } })).toThrow(InvalidScheduleError);
 		expect(() => normalize({ x: { binding: 'Greet', payload: {}, everyMs: 60_000, cron: '* * * * *' } })).toThrow(InvalidScheduleError);
+	});
+
+	it('cronのタイムゾーンを解決してfingerprintへ含める', () => {
+		const utc = normalize({ x: { binding: 'Greet', payload: {}, cron: '0 9 * * *' } });
+		const tokyo = normalize({ x: { binding: 'Greet', payload: {}, cron: '0 9 * * *', timeZone: 'Asia/Tokyo' } });
+		expect(utc.schedules[0]?.timeZone).toBe('UTC');
+		expect(tokyo.schedules[0]?.timeZone).toBe('Asia/Tokyo');
+		expect(tokyo.fingerprint).not.toBe(utc.fingerprint);
+	});
+
+	it('everyMsへのtimeZone指定を拒否する', () => {
+		expect(() => normalize({ x: { binding: 'Greet', payload: {}, everyMs: 60_000, timeZone: 'Asia/Tokyo' } })).toThrow(
+			InvalidScheduleError,
+		);
+	});
+
+	it('不正なタイムゾーンを拒否する', () => {
+		for (const timeZone of ['Invalid/Zone', '+09:00']) {
+			expect(() => normalize({ x: { binding: 'Greet', payload: {}, cron: '0 9 * * *', timeZone } })).toThrow(
+				`invalid timeZone in schedule x: invalid time zone: ${timeZone}`,
+			);
+		}
 	});
 
 	it('短すぎるeveryMsと小数を拒否する', () => {
@@ -102,5 +132,10 @@ describe('次回時刻の前進', () => {
 		const previous = Date.parse('2026-01-05T03:00:00Z');
 		const lateNow = Date.parse('2026-01-07T12:00:00Z');
 		expect(nextOccurrence(timing, previous, lateNow)).toBe(Date.parse('2026-01-08T03:00:00Z'));
+	});
+
+	it('cronはタイムゾーンを引き継ぐ', () => {
+		const timing = { everyMs: null, cron: '0 9 * * *', timeZone: 'Asia/Tokyo' };
+		expect(nextOccurrence(timing, null, Date.parse('2026-01-04T23:30:00Z'))).toBe(Date.parse('2026-01-05T00:00:00Z'));
 	});
 });

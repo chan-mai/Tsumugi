@@ -16,6 +16,7 @@ export const schedule = sqliteTable(
 		/** 固定間隔(ms), cronと排他 */
 		everyMs: integer('every_ms'),
 		cron: text('cron'),
+		timeZone: text('time_zone').notNull().default('UTC'),
 		/** 'skip' | 'overlap', 前回未了時の扱い */
 		overlap: text('overlap').notNull(),
 		nextRunAt: integer('next_run_at').notNull(),

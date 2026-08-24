@@ -82,6 +82,16 @@ describe('OpenAPI定義', () => {
 		expect(sort?.schema.enum).toEqual([...SORTABLE_COLUMNS]);
 	});
 
+	it('scheduleがIANAタイムゾーンを公開する', () => {
+		const schema = openapiDocument().components.schemas.Schedule as {
+			required: string[];
+			properties: Record<string, { type?: string; description?: string }>;
+		};
+		expect(schema.required).toContain('time_zone');
+		expect(schema.properties.time_zone).toMatchObject({ type: 'string' });
+		expect(schema.properties.time_zone?.description).toContain('IANA time zone');
+	});
+
 	it('版がpackage.jsonと一致する', () => {
 		// 実行時にpackage.jsonを読めないので写しを持っている, 上げ忘れると古い版の仕様が配られる
 		const { version } = JSON.parse(readFileSync(packageJson, 'utf8')) as { version: string };
