@@ -141,6 +141,27 @@ describe('有効期限(ADR-0047)', () => {
 		expect(await stateOf('EXPE', jobId)).toBe('CANCELLED');
 	});
 
+	it('無応答のat-most-onceジョブは期限切れならSTALLEDではなくCANCELLEDになる', async () => {
+		// consumerの期限切れ報告が失敗した場合の回復経路, reaperの判定で期限切れ
+		const { sent, queue } = captureQueue();
+		await install('EXPG', fixedClock(T0), queue);
+		const jobId = await shard('EXPG').enqueue({
+			binding: 'EXPG',
+			payload: {},
+			guarantee: 'at-most-once',
+			timeoutMs: 1_000,
+			expiresInMs: 5_000,
+		});
+		await runDurableObjectAlarm(shard('EXPG'));
+		expect(sent).toHaveLength(1);
+
+		// 報告のないままreaperの判定時刻と期限を経過
+		await install('EXPG', fixedClock(T0 + 40_000), queue);
+		await runDurableObjectAlarm(shard('EXPG'));
+
+		expect(await stateOf('EXPG', jobId)).toBe('CANCELLED');
+	});
+
 	it('期限を越える再試行は予約されずCANCELLEDになる', async () => {
 		const { sent, queue } = captureQueue();
 		await install('EXPF', fixedClock(T0), queue);

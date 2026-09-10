@@ -93,7 +93,7 @@ describe('有効期限(ADR-0047)', () => {
 		expect(out.nextAlarmAt).toBe(T0 + 5_000);
 	});
 
-	it('投入済みのジョブはtickでは期限切れにしない', () => {
+	it('応答のある投入済みジョブはtickでは期限切れにしない', () => {
 		// 実行直前の判定はconsumer側, ここでの遷移は実行中と競合
 		const out = schedule({
 			now: T0,
@@ -102,6 +102,29 @@ describe('有効期限(ADR-0047)', () => {
 			bucket: unlimited,
 		});
 		expect(out.decisions).toEqual([]);
+	});
+
+	it('無応答かつ期限切れのat-most-onceはSTALLEDではなく期限切れにする', () => {
+		// consumerの期限切れ報告が失敗した場合の回復経路
+		const out = schedule({
+			now: T0 + 100_000,
+			jobs: [job({ id: 'q', state: 'QUEUED', dispatchedAt: T0, guarantee: 'at-most-once', expiresAt: T0 + 1_000 })],
+			policy: policy(),
+			bucket: unlimited,
+		});
+		expect(ids(out.decisions, 'expire')).toEqual(['q']);
+		expect(ids(out.decisions, 'stall')).toEqual([]);
+	});
+
+	it('無応答かつ期限切れのat-least-onceは再投入せず期限切れにする', () => {
+		const out = schedule({
+			now: T0 + 100_000,
+			jobs: [job({ id: 'r', state: 'RUNNING', dispatchedAt: T0, expiresAt: T0 + 1_000 })],
+			policy: policy(),
+			bucket: unlimited,
+		});
+		expect(ids(out.decisions, 'expire')).toEqual(['r']);
+		expect(ids(out.decisions, 'reap')).toEqual([]);
 	});
 
 	it('一時停止中も期限切れの回収は行う', () => {

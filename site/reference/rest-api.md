@@ -115,7 +115,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 
 `result`はperformの戻り値で、成功時のみ値が含まれます。それ以外はnullです。
 `run_after`は予約済みジョブの実行予定時刻です。
-`expires_at`は実行開始の期限で、期限を過ぎたジョブは実行されずCANCELLEDになります。
+`expires_at`は実行開始の期限で、期限を過ぎたジョブは実行されずCANCELLEDになります。at-least-onceの重複配送が期限をまたいだ場合、実行されたジョブがCANCELLEDと記録されることがあります。
 `attempts_log`は新しい試行から順に並びます。
 
 見つからない場合は404です。
@@ -139,6 +139,8 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 
 `binding`と`payload`が必須です。
 `performers`にないbindingは受け付けません。投入できても実行時に必ず失敗するためです。
+
+`expiresInMs`は投入時刻からの相対の期限です。期限を過ぎたジョブは実行されずCANCELLEDになります。
 
 指定できるのは上記の項目のみです。`timeoutMs`や`backoff`などは指定できず、既定値が使われます。
 `partitionKey`も指定できないため、分割したbindingへの投入には利用できません。

@@ -73,7 +73,10 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		if (deadline === null || now < deadline) continue;
 
 		reaped.add(job.id);
-		if (job.guarantee === 'at-most-once') {
+		if (job.expiresAt !== null && now >= job.expiresAt) {
+			// 期限切れの無応答ジョブは回収せず終了, consumerの報告が失敗した場合の回復経路(ADR-0047)
+			decisions.push({ type: 'expire', id: job.id });
+		} else if (job.guarantee === 'at-most-once') {
 			// ADR-0006 / ADR-0007, 二重実行になり得る再投入は人手で判断
 			decisions.push({ type: 'stall', id: job.id });
 		} else if (job.attempts >= job.maxAttempts) {

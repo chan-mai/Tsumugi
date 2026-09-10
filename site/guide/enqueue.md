@@ -66,7 +66,7 @@ await jobs.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { concurrenc
 | `delayMs`        | なし                                        | 実行開始を遅らせる                     |
 | `runAt`          | なし                                        | 絶対時刻での予約、`delayMs`とは排他    |
 | `expiresInMs`    | なし                                        | 投入時刻からの相対の期限               |
-| `expiresAt`      | なし                                        | 絶対時刻での期限、`expiresInMs`とは排他 |
+| `expiresAt`      | なし                                        | 絶対時刻での期限、`expiresInMs`より優先 |
 | `guarantee`      | `at-least-once`                             | 実行保証                               |
 | `concurrencyKey` | なし                                        | キー単位の直列化に使う                 |
 | `uniqueKey`      | なし                                        | 重複排除に使う                         |
@@ -98,6 +98,8 @@ await tsumugi.enqueue(env, { binding: 'NOTIFY', payload, expiresInMs: 5 * 60 * 1
 判定は実行開始の直前に行われ、実行中のジョブは期限が過ぎても中断されることはありません。
 リトライの予定が期限を越える場合、失敗した時点でCANCELLEDになります。
 FAILEDやSTALLEDからの手動リトライも期限の対象です。
+
+なお、実行の抑止は開始前のジョブに対するものです。at-least-onceの重複配送が期限をまたいだ場合、実行されたジョブがCANCELLEDと記録されることがあります。
 
 ## 重複排除
 

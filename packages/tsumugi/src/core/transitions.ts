@@ -4,7 +4,7 @@ import type { ActiveState, JobState } from './types.js';
  * 状態機械の遷移表(ADR-0012)
  * 重複配送や競合で終端状態のジョブが再び動き出すのを防止
  * cancelはSCHEDULEDからのみ許可(意図的), QUEUED以降は実行済みの可能性があり取り消し成功の保証が不可能
- * QUEUED / RUNNINGからのCANCELLEDは期限切れ専用(ADR-0047), 実行開始前の判定と期限を越える再試行の中止に限定
+ * QUEUED / RUNNINGからのCANCELLEDは期限切れ専用(ADR-0047), 実行前判定・無応答の回収・期限を越える再試行の中止に限定
  */
 export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
 	// dispatch / cancel /期限切れ

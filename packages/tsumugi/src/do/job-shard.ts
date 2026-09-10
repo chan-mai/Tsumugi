@@ -681,7 +681,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 					break;
 				}
 				case 'expire':
-					this.repo.compareAndSet(decision.id, ['SCHEDULED'], 'CANCELLED', { now });
+					// 無応答の期限切れも対象, QUEUED / RUNNINGからも遷移(ADR-0047)
+					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', { now });
 					break;
 				case 'reap':
 					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'SCHEDULED', {

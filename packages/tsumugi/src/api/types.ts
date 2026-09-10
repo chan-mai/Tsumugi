@@ -60,7 +60,7 @@ export type CreateJobRequest = {
 	payload: unknown;
 	maxAttempts?: number;
 	delayMs?: number;
-	/** 要求時刻からの相対の期限, 経過後は実行されずCANCELLED */
+	/** 投入時刻からの相対の期限, 経過後は実行されずCANCELLED */
 	expiresInMs?: number;
 	priority?: number;
 	concurrencyKey?: string;

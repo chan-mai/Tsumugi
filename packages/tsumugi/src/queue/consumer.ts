@@ -159,7 +159,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt } = body;
 
 		// 期限切れは実行せず終了(ADR-0047), 滞留から復帰した時のまとめ実行を防止
-		// 報告の失敗はreaperがSCHEDULEDへ回収し次のtickの判定で期限切れ
+		// 報告の失敗時はreaperの判定で期限切れとしてCANCELLEDへ遷移
 		if (typeof expiresAt === 'number' && Date.now() >= expiresAt) {
 			await shardStub(env, jobId)
 				.expire(jobId)

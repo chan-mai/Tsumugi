@@ -92,7 +92,7 @@ model CreateJobRequest {
 	@minValue(0)
 	delayMs?: integer;
 
-	@doc("Deadline relative to the time of the request. Once it passes the job is cancelled instead of executed.")
+	@doc("Deadline relative to the time of enqueueing. Once it passes the job is cancelled instead of executed.")
 	@minValue(1)
 	expiresInMs?: integer;
 

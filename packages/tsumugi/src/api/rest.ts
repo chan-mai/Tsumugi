@@ -93,7 +93,9 @@ export function validateCreateJob(body: unknown, bindings: readonly string[] | u
 	}
 	if (typeof raw.maxAttempts === 'number' && raw.maxAttempts < 1) return { error: 'maxAttempts must be at least 1' };
 	if (typeof raw.delayMs === 'number' && raw.delayMs < 0) return { error: 'delayMs must not be negative' };
-	if (typeof raw.expiresInMs === 'number' && raw.expiresInMs < 1) return { error: 'expiresInMs must be positive' };
+	if (typeof raw.expiresInMs === 'number' && (!Number.isInteger(raw.expiresInMs) || raw.expiresInMs < 1)) {
+		return { error: 'expiresInMs must be a positive integer' };
+	}
 
 	for (const name of ['concurrencyKey', 'uniqueKey'] as const) {
 		if (raw[name] !== undefined && typeof raw[name] !== 'string') return { error: `${name} must be a string` };
