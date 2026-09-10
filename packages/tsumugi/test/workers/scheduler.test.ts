@@ -565,4 +565,39 @@ describe('一時停止と手動発火', () => {
 		expect(await jobStateOf('ListNames', first)).toBeDefined();
 		expect(await jobStateOf('ListNames', second)).toBeDefined();
 	});
+
+	it('発火のRPC待ちの間に一時停止した行は同じtickで発火しない', async () => {
+		const base = day(27);
+		await sync(base);
+
+		// 先に発火するping-helloの投入中に割り込むRPCがpoll-namesを一時停止する状況
+		const restore = await runInDurableObject(inside(), (instance) => {
+			const real = (instance as any).env.JOB_SHARD;
+			(instance as any).env.JOB_SHARD = {
+				idFromName: (name: string) => ({ name, id: real.idFromName(name) }),
+				get: (ref: { name: string; id: unknown }) => {
+					const stub = real.get(ref.id);
+					if (ref.name !== 'Hello#0') return stub;
+					return {
+						id: stub.id,
+						enqueueMany: async (inputs: unknown, settings: unknown) => {
+							await (instance as any).setPaused('poll-names', true);
+							return stub.enqueueMany(inputs, settings);
+						},
+					};
+				},
+			};
+			return real;
+		});
+		// ping-helloとpoll-namesの両方が期限到来, 予定の早いping-helloが先に発火
+		await tickAt(base + POLL_MS);
+		await runInDurableObject(inside(), (instance) => {
+			(instance as any).env.JOB_SHARD = restore;
+		});
+
+		expect(await fired('Hello', 'ping-hello', base + PING_MS)).toBe(true);
+		// due()で保持済みの行でも停止後は発火なし
+		expect(await fired('ListNames', 'poll-names', base + POLL_MS)).toBe(false);
+		expect(await rowOf('poll-names')).toMatchObject({ paused: 1, next_run_at: base + POLL_MS });
+	});
 });

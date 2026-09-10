@@ -228,13 +228,16 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 				// デプロイ直後の自己同期, トラフィックが無くても既存alarmの発火で定義に追いつく
 				this.#reconcile(now);
 
-				for (const row of this.repo.due(now, TICK_LIMIT)) {
-					const def = Object.hasOwn(schedules, row.name) ? schedules[row.name] : undefined;
+				for (const due of this.repo.due(now, TICK_LIMIT)) {
+					const def = Object.hasOwn(schedules, due.name) ? schedules[due.name] : undefined;
 					if (!def) {
 						// reconcileで消えているはずの行への防御, 定義の無い行は発火不能
-						this.repo.remove([row.name]);
+						this.repo.remove([due.name]);
 						continue;
 					}
+					// 前の発火のRPC待ちの間に一時停止や再開が入り得るため直前の行で発火可否を再判定
+					const row = this.repo.find(due.name);
+					if (!row || row.paused === 1 || row.next_run_at > now) continue;
 					await this.#fire(row, def, now);
 				}
 				await this.#armNext();
