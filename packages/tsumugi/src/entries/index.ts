@@ -31,7 +31,7 @@ export { DEFAULT_MAX_NODES } from '../do/run.js';
 export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } from '../do/run.js';
 // createSchedulerClassはschedules定義を参照するので出さない, runClassと同じ理由(ADR-0040)
 export { SCHEDULER_DO_NAME } from '../do/scheduler.js';
-export type { SchedulerClass, SchedulerEnv, ScheduleView } from '../do/scheduler.js';
+export type { ScheduleMutationResult, SchedulerClass, SchedulerEnv, ScheduleTriggerResult, ScheduleView } from '../do/scheduler.js';
 export { InvalidScheduleError } from '../core/recurring.js';
 export { InvalidCronError, nextCronAt, parseCron } from '../core/cron.js';
 export { systemClock, fixedClock } from '../do/clock.js';

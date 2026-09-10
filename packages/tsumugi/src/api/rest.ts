@@ -34,8 +34,9 @@ import type {
 	UpdatePolicyResponse,
 	SchedulesResponse,
 	StatsResponse,
+	TriggerScheduleResponse,
 } from './types.js';
-import type { ScheduleView } from '../do/scheduler.js';
+import type { ScheduleMutationResult, ScheduleTriggerResult, ScheduleView } from '../do/scheduler.js';
 
 export type RestEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };
 
@@ -62,8 +63,12 @@ export type RestOptions<Env extends RestEnv> = {
 	start?: (env: Env, flow: string, input: unknown, options?: { id?: string; deadlineMs?: number }) => Promise<string>;
 	/** 取り消しと再開はDOへ直接送信, 読み取りモデルは正の根拠に使用不可(ADR-0015) */
 	runFor?: (env: Env, runId: string) => { cancel(): Promise<MutationResult>; retry(): Promise<MutationResult> };
-	/** 定期実行の一覧, Scheduler DOが正で直接照会(ADR-0040), 未設定なら`/api/schedules`は501を返す */
-	schedulerFor?: (env: Env) => { list(): Promise<ScheduleView[]> };
+	/** 定期実行の照会と操作, Scheduler DOが正で直接送信(ADR-0040), 未設定なら`/api/schedules`は501を返す */
+	schedulerFor?: (env: Env) => {
+		list(): Promise<ScheduleView[]>;
+		setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult>;
+		trigger(name: string): Promise<ScheduleTriggerResult>;
+	};
 	/** Analytics Engineの読み取り設定, 未設定なら`/api/metrics`は501を返す */
 	metrics?: MetricsResolver<Env>;
 };
@@ -753,6 +758,31 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		if (!schedulerFor) return c.json({ error: 'schedules are not available' } satisfies ErrorResponse, 501);
 		const schedules = await schedulerFor(c.env).list();
 		return c.json({ schedules } satisfies SchedulesResponse);
+	});
+
+	// 定期実行の一時停止と再開, 対象の有無はScheduler DOが判定
+	for (const [action, paused] of [
+		['pause', true],
+		['resume', false],
+	] as const) {
+		app.post(`/api/schedules/:name/${action}`, async (c) => {
+			if (!schedulerFor) return c.json({ error: 'schedules are not available' } satisfies ErrorResponse, 501);
+			const name = c.req.param('name');
+			const result = await schedulerFor(c.env).setPaused(name, paused);
+			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
+			return c.json({ error: `unknown schedule: ${name}` } satisfies ErrorResponse, 404);
+		});
+	}
+
+	// 手動発火, 一時停止中も対象で次回の予定はかwあらない
+	app.post('/api/schedules/:name/trigger', async (c) => {
+		if (!schedulerFor) return c.json({ error: 'schedules are not available' } satisfies ErrorResponse, 501);
+		const name = c.req.param('name');
+		const result = await schedulerFor(c.env).trigger(name);
+		if (result.ok) return c.json({ id: result.id, kind: result.kind } satisfies TriggerScheduleResponse, 201);
+		if (result.reason === 'not-found') return c.json({ error: `unknown schedule: ${name}` } satisfies ErrorResponse, 404);
+		// 写像関数や投入の失敗, 理由は一覧のlast_errorにも残る
+		return c.json({ error: result.error } satisfies ErrorResponse, 500);
 	});
 
 	app.get('/api/jobs/:id', async (c) => {

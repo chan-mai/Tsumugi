@@ -1,4 +1,4 @@
-import { asc, eq, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { NormalizedSchedule } from '../core/recurring.js';
 import { applySchedulerSchema, type ScheduleRow } from './scheduler-schema.js';
@@ -35,6 +35,11 @@ export class SchedulerRepo {
 
 	rows(): ScheduleRow[] {
 		return this.db.select().from(schedule).orderBy(asc(schedule.name)).all().map(this.#toRow);
+	}
+
+	find(name: string): ScheduleRow | undefined {
+		const record = this.db.select().from(schedule).where(eq(schedule.name, name)).get();
+		return record === undefined ? undefined : this.#toRow(record);
 	}
 
 	insert(spec: NormalizedSchedule, nextRunAt: number, now: number): void {
@@ -81,28 +86,39 @@ export class SchedulerRepo {
 			.run();
 	}
 
-	/** 発火時刻を迎えた行, 予定の早い順に有界で読む */
+	/** 発火時刻を迎えた行, 予定の早い順に有界で読む, 一時停止中は対象外 */
 	due(now: number, limit: number): ScheduleRow[] {
 		return this.db
 			.select()
 			.from(schedule)
-			.where(lte(schedule.nextRunAt, now))
+			.where(and(lte(schedule.nextRunAt, now), eq(schedule.paused, 0)))
 			.orderBy(asc(schedule.nextRunAt), asc(schedule.name))
 			.limit(limit)
 			.all()
 			.map(this.#toRow);
 	}
 
-	/** 次のalarmを設定する時刻, 行が無ければnull */
+	/** 次のalarmを設定する時刻, 一時停止中を除き行が無ければnull */
 	minNextRunAt(): number | null {
 		const row = this.db
 			.select({ min: sql<number | null>`min(${schedule.nextRunAt})` })
 			.from(schedule)
+			.where(eq(schedule.paused, 0))
 			.get();
 		return row?.min ?? null;
 	}
 
-	markFired(name: string, fired: FiredPatch, nextRunAt: number, now: number): void {
+	/** 一時停止の切り替え, 再開で予定が経過済みならnextRunAtで再計算値を受ける */
+	setPaused(name: string, paused: boolean, nextRunAt: number | null, now: number): void {
+		this.db
+			.update(schedule)
+			.set({ paused: paused ? 1 : 0, ...(nextRunAt !== null ? { nextRunAt } : {}), updatedAt: now })
+			.where(eq(schedule.name, name))
+			.run();
+	}
+
+	/** 発火の記録, nextRunAtがnullなら手動発火で予定を進めない */
+	markFired(name: string, fired: FiredPatch, nextRunAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
 			.set({
@@ -111,7 +127,7 @@ export class SchedulerRepo {
 				lastJobId: fired.jobId ?? null,
 				lastRunId: fired.runId ?? null,
 				lastError: null,
-				nextRunAt,
+				...(nextRunAt !== null ? { nextRunAt } : {}),
 				updatedAt: now,
 			})
 			.where(eq(schedule.name, name))
@@ -149,6 +165,7 @@ export class SchedulerRepo {
 			cron: record.cron,
 			time_zone: record.timeZone,
 			overlap: record.overlap,
+			paused: record.paused,
 			next_run_at: record.nextRunAt,
 			last_run_at: record.lastRunAt,
 			last_fired_at: record.lastFiredAt,

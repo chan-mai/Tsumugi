@@ -17,6 +17,8 @@ export const SCHEDULER_SCHEMA = [
 		time_zone TEXT NOT NULL DEFAULT 'UTC',
 		-- 'skip' | 'overlap', 前回未了時の扱い
 		overlap TEXT NOT NULL,
+		-- 一時停止中は1, tickの発火対象から除外
+		paused INTEGER NOT NULL DEFAULT 0,
 		next_run_at INTEGER NOT NULL,
 		-- 直近発火の予定時刻
 		last_run_at INTEGER,
@@ -48,6 +50,9 @@ export function applySchedulerSchema(sql: SqlStorage): void {
 		// NULL許容で作られた既存列への防御
 		sql.exec(`UPDATE schedule SET time_zone = 'UTC' WHERE time_zone IS NULL`);
 	}
+	if (!columns.some((column) => column.name === 'paused')) {
+		sql.exec(`ALTER TABLE schedule ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`);
+	}
 }
 
 /** SQLiteの行そのまま, 射影はscheduler-repo.tsが担当 */
@@ -59,6 +64,7 @@ export type ScheduleRow = {
 	cron: string | null;
 	time_zone: string;
 	overlap: string;
+	paused: number;
 	next_run_at: number;
 	last_run_at: number | null;
 	last_fired_at: number | null;

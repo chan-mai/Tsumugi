@@ -4,7 +4,14 @@ import { configOf, createClient, type BindingConfig, type ClientEnv } from './cl
 import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
 import { createRunClass, type RunClass, type RunSettings, type StartResult } from './do/run.js';
-import { createSchedulerClass, SCHEDULER_DO_NAME, type SchedulerClass, type ScheduleView } from './do/scheduler.js';
+import {
+	createSchedulerClass,
+	SCHEDULER_DO_NAME,
+	type SchedulerClass,
+	type ScheduleMutationResult,
+	type ScheduleTriggerResult,
+	type ScheduleView,
+} from './do/scheduler.js';
 import type { AnySchedules, ScheduleDefs } from './core/recurring.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry, type PerformerSource } from './queue/consumer.js';
 import type { EnvOf, FailurePerformer, JobQueue, Performers, PerformersOf, TypedEnqueueInput } from './core/api.js';
@@ -49,6 +56,8 @@ export type SchedulerNamespaceEnv = {
 export interface SchedulerControl extends Rpc.DurableObjectBranded {
 	sync(): Promise<void>;
 	list(): Promise<ScheduleView[]>;
+	setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult>;
+	trigger(name: string): Promise<ScheduleTriggerResult>;
 }
 
 export type TsumugiConfig<Env extends ConsumerEnv> = {

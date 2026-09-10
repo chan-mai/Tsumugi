@@ -12,6 +12,7 @@ import type {
 	StartRunRequest,
 	DiagnosticsResponse,
 	PolicyView,
+	TriggerScheduleResponse,
 	UpdatePolicyRequest,
 } from '../../tsumugi/src/api/types.js';
 
@@ -210,6 +211,14 @@ export const listSchedules = async (): Promise<Schedule[]> => {
 	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
 	return body.schedules ?? [];
 };
+
+/** 停止中に経過した回は再開時に破棄される */
+export const setSchedulePaused = (name: string, paused: boolean) =>
+	call<{ ok: true }>(`/api/schedules/${encodeURIComponent(name)}/${paused ? 'pause' : 'resume'}`, { method: 'POST' });
+
+/** 手動発火, 一時停止中も対象で次回の予定は変わらない */
+export const triggerSchedule = (name: string) =>
+	call<TriggerScheduleResponse>(`/api/schedules/${encodeURIComponent(name)}/trigger`, { method: 'POST' });
 
 export type BulkInput = { ids: string[] };
 

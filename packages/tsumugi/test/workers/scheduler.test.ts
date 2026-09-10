@@ -31,6 +31,8 @@ const nightlyOf = (base: number) => base + 6 * 60 * 60 * 1000;
 interface SchedulerFace extends Rpc.DurableObjectBranded {
 	sync(): Promise<void>;
 	list(): Promise<unknown[]>;
+	setPaused(name: string, paused: boolean): Promise<unknown>;
+	trigger(name: string): Promise<unknown>;
 }
 
 const namespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
@@ -427,5 +429,129 @@ describe('定期実行(ADR-0040)', () => {
 		await tickAt(occurrence);
 		// 最も早い予定はping-helloの次回
 		expect(await alarmOf()).toBe(occurrence + PING_MS);
+	});
+});
+
+describe('一時停止と手動発火', () => {
+	it('一時停止中は発火せずalarmは停止中の行を除いて設定する', async () => {
+		const base = day(16);
+		await sync(base);
+		await inside().setPaused('ping-hello', true);
+		// 最も早い予定だったping-helloを除いた次はpoll-names
+		expect(await alarmOf()).toBe(base + POLL_MS);
+
+		const first = base + PING_MS;
+		await tickAt(first);
+		expect(await fired('Hello', 'ping-hello', first)).toBe(false);
+		// skipではなく停止, 記録も予定も動かない
+		expect(await rowOf('ping-hello')).toMatchObject({ paused: 1, next_run_at: first, skipped_count: 0 });
+	});
+
+	it('再開は停止中に経過した回を破棄し次の境界だけを予定する', async () => {
+		const base = day(17);
+		await sync(base);
+		await inside().setPaused('ping-hello', true);
+
+		// 3周期あまり経過してから再開
+		const later = base + PING_MS * 3 + 1_000;
+		await runInDurableObject(inside(), (instance) => {
+			(instance as any).clock = { now: () => later };
+		});
+		await inside().setPaused('ping-hello', false);
+
+		// 位相は最初の予定のまま, 経過済みの回は発火なし
+		expect(await rowOf('ping-hello')).toMatchObject({ paused: 0, next_run_at: base + PING_MS * 4 });
+		expect(await fired('Hello', 'ping-hello', base + PING_MS)).toBe(false);
+		expect(await alarmOf()).toBe(base + PING_MS * 4);
+	});
+
+	it('再開時に予定が未来ならそのまま維持する', async () => {
+		const base = day(18);
+		await sync(base);
+		await inside().setPaused('poll-names', true);
+		await inside().setPaused('poll-names', false);
+		expect(await rowOf('poll-names')).toMatchObject({ paused: 0, next_run_at: base + POLL_MS });
+	});
+
+	it('停止中でない行へのresumeは発火待ちの予定を破棄しない', async () => {
+		const base = day(25);
+		await sync(base);
+		// alarm未発火のまま予定を過ぎた状態でresumeを受ける
+		await runInDurableObject(inside(), (instance) => {
+			(instance as any).clock = { now: () => base + PING_MS + 1_000 };
+		});
+		await inside().setPaused('ping-hello', false);
+		expect(await rowOf('ping-hello')).toMatchObject({ paused: 0, next_run_at: base + PING_MS });
+	});
+
+	it('手動発火はジョブを投入し次回の予定を進めない', async () => {
+		const base = day(19);
+		await sync(base);
+		const jobId = `ListNames#0:poll-names-${base}-manual`;
+		expect(await inside().trigger('poll-names')).toEqual({ ok: true, kind: 'job', id: jobId });
+		expect(await jobStateOf('ListNames', jobId)).toBe('SCHEDULED');
+		expect(await rowOf('poll-names')).toMatchObject({
+			last_run_at: base,
+			last_fired_at: base,
+			last_job_id: jobId,
+			next_run_at: base + POLL_MS,
+		});
+	});
+
+	it('一時停止中でも手動発火は可能', async () => {
+		const base = day(20);
+		await sync(base);
+		await inside().setPaused('ping-hello', true);
+		const jobId = `Hello#0:ping-hello-${base}-manual`;
+		expect(await inside().trigger('ping-hello')).toEqual({ ok: true, kind: 'job', id: jobId });
+		expect(await jobStateOf('Hello', jobId)).toBe('SCHEDULED');
+		expect(await rowOf('ping-hello')).toMatchObject({ paused: 1 });
+	});
+
+	it('手動発火でflowのrunを開始する', async () => {
+		const base = day(21);
+		await sync(base);
+		const runId = `GREETINGS:nightly-${base}-manual`;
+		expect(await inside().trigger('nightly')).toEqual({ ok: true, kind: 'flow', id: runId });
+
+		const row = await runRowOf(runId);
+		expect(row?.state).toBe('RUNNING');
+		// 写像関数は手動発火の時刻を受け取る
+		expect(row?.input).toBe(JSON.stringify({ prefix: `nightly-${base}` }));
+	});
+
+	it('不明な名前はnot-found', async () => {
+		await sync(day(22));
+		expect(await inside().setPaused('missing', true)).toEqual({ ok: false, reason: 'not-found' });
+		expect(await inside().trigger('missing')).toEqual({ ok: false, reason: 'not-found' });
+	});
+
+	it('一時停止はsyncを跨いで維持される', async () => {
+		const base = day(23);
+		await sync(base);
+		await inside().setPaused('ping-hello', true);
+		await callSync();
+		expect(await rowOf('ping-hello')).toMatchObject({ paused: 1 });
+	});
+
+	it('手動発火の失敗は理由を返し予定を進めない', async () => {
+		const base = day(24);
+		await sync(base);
+
+		// RUNのbindingを未設定にして子のrunの起動を失敗させる状況
+		const restore = await runInDurableObject(inside(), (instance) => {
+			const saved = (instance as any).env.RUN;
+			(instance as any).env.RUN = undefined;
+			return saved;
+		});
+		const result = await inside().trigger('nightly');
+		await runInDurableObject(inside(), (instance) => {
+			(instance as any).env.RUN = restore;
+		});
+
+		expect(result).toMatchObject({ ok: false, reason: 'failed' });
+		const row = await rowOf('nightly');
+		expect(row?.last_error).toContain('RUN binding is not configured');
+		expect(row?.next_run_at).toBe(nightlyOf(base));
 	});
 });

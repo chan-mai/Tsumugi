@@ -30,7 +30,11 @@ function registeredRoutes(): string[] {
 		flows: ['report'],
 		start: async () => 'report:x',
 		runFor: () => ({ cancel: async () => ({ ok: true }), retry: async () => ({ ok: true }) }),
-		schedulerFor: () => ({ list: async () => [] }),
+		schedulerFor: () => ({
+			list: async () => [],
+			setPaused: async () => ({ ok: true }),
+			trigger: async () => ({ ok: true, kind: 'job', id: 'MAIL#0:x' }),
+		}),
 		shardsOf: () => 1,
 	});
 
