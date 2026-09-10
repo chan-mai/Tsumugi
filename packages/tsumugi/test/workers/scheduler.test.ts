@@ -487,7 +487,7 @@ describe('一時停止と手動発火', () => {
 	it('手動発火はジョブを投入し次回の予定を進めない', async () => {
 		const base = day(19);
 		await sync(base);
-		const jobId = `ListNames#0:poll-names-${base}-manual`;
+		const jobId = `ListNames#0:poll-names-${base}-1-manual`;
 		expect(await inside().trigger('poll-names')).toEqual({ ok: true, kind: 'job', id: jobId });
 		expect(await jobStateOf('ListNames', jobId)).toBeDefined();
 		expect(await rowOf('poll-names')).toMatchObject({
@@ -502,7 +502,7 @@ describe('一時停止と手動発火', () => {
 		const base = day(20);
 		await sync(base);
 		await inside().setPaused('ping-hello', true);
-		const jobId = `Hello#0:ping-hello-${base}-manual`;
+		const jobId = `Hello#0:ping-hello-${base}-1-manual`;
 		expect(await inside().trigger('ping-hello')).toEqual({ ok: true, kind: 'job', id: jobId });
 		expect(await jobStateOf('Hello', jobId)).toBeDefined();
 		expect(await rowOf('ping-hello')).toMatchObject({ paused: 1 });
@@ -511,7 +511,7 @@ describe('一時停止と手動発火', () => {
 	it('手動発火でflowのrunを開始する', async () => {
 		const base = day(21);
 		await sync(base);
-		const runId = `GREETINGS:nightly-${base}-manual`;
+		const runId = `GREETINGS:nightly-${base}-1-manual`;
 		expect(await inside().trigger('nightly')).toEqual({ ok: true, kind: 'flow', id: runId });
 
 		const row = await runRowOf(runId);
@@ -553,5 +553,16 @@ describe('一時停止と手動発火', () => {
 		const row = await rowOf('nightly');
 		expect(row?.last_error).toContain('RUN binding is not configured');
 		expect(row?.next_run_at).toBe(nightlyOf(base));
+	});
+
+	it('同一時刻の手動発火は連番で区別し別に発火する', async () => {
+		const base = day(26);
+		await sync(base);
+		const first = `ListNames#0:poll-names-${base}-1-manual`;
+		const second = `ListNames#0:poll-names-${base}-2-manual`;
+		expect(await inside().trigger('poll-names')).toEqual({ ok: true, kind: 'job', id: first });
+		expect(await inside().trigger('poll-names')).toEqual({ ok: true, kind: 'job', id: second });
+		expect(await jobStateOf('ListNames', first)).toBeDefined();
+		expect(await jobStateOf('ListNames', second)).toBeDefined();
 	});
 });

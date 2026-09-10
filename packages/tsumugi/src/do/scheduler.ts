@@ -30,6 +30,9 @@ const TICK_LIMIT = 50;
 /** 正規化した定義のfingerprintを置くsettingのキー */
 const FINGERPRINT_KEY = 'defs_fingerprint';
 
+/** 手動発火の連番を置くsettingのキー, 同一ミリ秒の発火をIDで区別 */
+const MANUAL_SEQ_KEY = 'manual_seq';
+
 /** 一覧RPCが返す1件, RESTとダッシュボードがそのまま表示 */
 export type ScheduleView = {
 	name: string;
@@ -190,9 +193,13 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 			const def = Object.hasOwn(schedules, name) ? schedules[name] : undefined;
 			if (!row || !def) return { ok: false, reason: 'not-found' };
 
+			// 連番で同一ミリ秒の再発火もIDを区別, 発火ごとに別実行
+			const seq = Number(this.repo.readSetting(MANUAL_SEQ_KEY) ?? '0') + 1;
+			this.repo.writeSetting(MANUAL_SEQ_KEY, String(seq));
+
 			try {
 				// 通常のlocalIdは数字終端, 末尾-manualの形式と衝突なし
-				const fired = await this.#dispatch(row, def, now, `${name}-${now}-manual`);
+				const fired = await this.#dispatch(row, def, now, `${name}-${now}-${seq}-manual`);
 				this.repo.markFired(name, fired, null, now);
 				return { ok: true, kind: row.kind as 'job' | 'flow', id: (fired.jobId ?? fired.runId)! };
 			} catch (error) {
