@@ -42,7 +42,10 @@ export default defineConfig({
 				],
 			},
 		],
-		socialLinks: [{ icon: 'github', link: repo }, { icon: 'npm', link: 'https://www.npmjs.com/package/tsumugi' }],
+		socialLinks: [
+			{ icon: 'github', link: repo },
+			{ icon: 'npm', link: 'https://www.npmjs.com/package/tsumugi' },
+		],
 		editLink: {
 			pattern: `${repo}/edit/main/site/:path`,
 			text: 'このページを編集',

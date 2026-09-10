@@ -25,8 +25,9 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 		if (j.concurrencyKey !== null) keyInFlight.set(j.concurrencyKey, (keyInFlight.get(j.concurrencyKey) ?? 0) + 1);
 	}
 
+	// 期限を過ぎたジョブは投入の候補にならない(ADR-0047)
 	const ready = jobs
-		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now)
+		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now && (j.expiresAt === null || now < j.expiresAt))
 		.map((j) => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 

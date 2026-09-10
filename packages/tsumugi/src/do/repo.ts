@@ -35,6 +35,8 @@ export type NewJob = {
 	timeoutMs: number;
 	backoff: Backoff;
 	runAfter: number;
+	/** 実行開始の期限, 無期限はnull */
+	expiresAt: number | null;
 	createdAt: number;
 	payload: unknown;
 	/** DAGのノードとして投入された場合の宛先(ADR-0015) */
@@ -56,6 +58,7 @@ const toView = (row: JobRow): JobView => ({
 	maxAttempts: row.max_attempts,
 	concurrencyKey: row.concurrency_key,
 	runAfter: row.run_after,
+	expiresAt: row.expires_at,
 	createdAt: row.created_at,
 	dispatchedAt: row.dispatched_at,
 	heartbeatAt: row.heartbeat_at,
@@ -110,6 +113,7 @@ export class JobRepo {
 				timeoutMs: newJob.timeoutMs,
 				backoff: JSON.stringify(newJob.backoff),
 				runAfter: newJob.runAfter,
+				expiresAt: newJob.expiresAt,
 				createdAt: newJob.createdAt,
 				updatedAt: newJob.createdAt,
 				dispatchedAt: null,
@@ -283,6 +287,7 @@ export class JobRepo {
 			timeout_ms: r.timeoutMs,
 			backoff: r.backoff,
 			run_after: r.runAfter,
+			expires_at: r.expiresAt,
 			created_at: r.createdAt,
 			updated_at: r.updatedAt,
 			dispatched_at: r.dispatchedAt,

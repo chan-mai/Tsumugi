@@ -147,6 +147,11 @@ const pretty = (payload: string | undefined) => {
 								<dd>{{ job.unique_key ?? '-' }}</dd>
 								<dt class="text-muted-foreground">Created at</dt>
 								<dd>{{ at(job.created_at) }}</dd>
+								<!-- 期限を設定したジョブでのみ埋まる -->
+								<template v-if="job.expires_at !== null && job.expires_at !== undefined">
+									<dt class="text-muted-foreground">Expires at</dt>
+									<dd>{{ at(job.expires_at) }}</dd>
+								</template>
 								<dt class="text-muted-foreground">Started at</dt>
 								<dd>{{ at(job.dispatched_at) }}</dd>
 								<dt class="text-muted-foreground">Updated at</dt>

@@ -55,6 +55,9 @@ model JobDetail {
 	@doc("When a scheduled job becomes eligible to run.")
 	run_after: integer | null;
 
+	@doc("Deadline of dispatching. Once it passes the job is cancelled instead of executed. Null when no deadline is set.")
+	expires_at: integer | null;
+
 	@doc("Progress reported by the performer while running. Null until it reports.")
 	@minValue(0)
 	@maxValue(1)
@@ -88,6 +91,10 @@ model CreateJobRequest {
 
 	@minValue(0)
 	delayMs?: integer;
+
+	@doc("Deadline relative to the time of enqueueing. Once it passes the job is cancelled instead of executed.")
+	@minValue(1)
+	expiresInMs?: integer;
 
 	priority?: integer;
 	concurrencyKey?: string;

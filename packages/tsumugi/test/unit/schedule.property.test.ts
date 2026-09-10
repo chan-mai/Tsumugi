@@ -137,6 +137,7 @@ describe('schedule()の不変条件', () => {
 	it('全ての決定が合法な状態遷移', () => {
 		const target: Record<Decision['type'], JobState> = {
 			dispatch: 'QUEUED',
+			expire: 'CANCELLED',
 			reap: 'SCHEDULED',
 			stall: 'STALLED',
 			fail: 'FAILED',
@@ -190,11 +191,12 @@ describe('schedule()の不変条件', () => {
 		);
 	});
 
-	it('dispatch以外の決定があればnextAlarmAtはnowになる', () => {
+	it('dispatchとexpire以外の決定があればnextAlarmAtはnowになる', () => {
+		// expireは同じtickで遷移が完結, 続きのtickの要求なし
 		fc.assert(
 			fc.property(scheduleInput, (input) => {
 				const out = schedule(input);
-				if (out.decisions.some((d) => d.type !== 'dispatch')) {
+				if (out.decisions.some((d) => d.type !== 'dispatch' && d.type !== 'expire')) {
 					expect(out.nextAlarmAt).toBe(input.now);
 				}
 			}),

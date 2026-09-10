@@ -26,6 +26,8 @@ export const job = sqliteTable(
 		dispatchedAt: integer('dispatched_at'),
 		/** SCHEDULEDが実行可能になる時刻, 後から変更可能で投影対象 */
 		runAfter: integer('run_after'),
+		/** 実行開始の期限, 経過後は実行されずCANCELLED */
+		expiresAt: integer('expires_at'),
 		/** 実行中のジョブが報告した進捗, 0以上1以下 */
 		progress: real('progress'),
 		payload: text('payload').notNull(),

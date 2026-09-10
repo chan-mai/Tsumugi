@@ -19,6 +19,7 @@ export const EXPECTED_MIGRATIONS = [
 	'0006_add_run_after.sql',
 	'0007_add_key_indexes.sql',
 	'0008_add_progress.sql',
+	'0009_add_expires_at.sql',
 ] as const;
 
 /**

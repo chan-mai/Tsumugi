@@ -144,6 +144,8 @@ const tsumugi = defineTsumugi({
 | `timeoutMs`      | `60000`         | 結果を待つ時間の上限                   |
 | `delayMs`        |                 | 実行開始の遅延                         |
 | `runAt`          |                 | 絶対時刻での予約。`delayMs`とは排他    |
+| `expiresInMs`    |                 | 投入時刻からの相対の期限               |
+| `expiresAt`      |                 | 絶対時刻での期限。`expiresInMs`より優先 |
 | `guarantee`      | `at-least-once` | `at-least-once`か`at-most-once`        |
 | `concurrencyKey` |                 | キー単位の直列化                       |
 | `uniqueKey`      |                 | 重複排除                               |

@@ -85,6 +85,7 @@ export function validateCreateJob(body: unknown, bindings: readonly string[] | u
 	const numbers: [keyof CreateJobInput, unknown][] = [
 		['maxAttempts', raw.maxAttempts],
 		['delayMs', raw.delayMs],
+		['expiresInMs', raw.expiresInMs],
 		['priority', raw.priority],
 	];
 	for (const [name, value] of numbers) {
@@ -92,6 +93,9 @@ export function validateCreateJob(body: unknown, bindings: readonly string[] | u
 	}
 	if (typeof raw.maxAttempts === 'number' && raw.maxAttempts < 1) return { error: 'maxAttempts must be at least 1' };
 	if (typeof raw.delayMs === 'number' && raw.delayMs < 0) return { error: 'delayMs must not be negative' };
+	if (typeof raw.expiresInMs === 'number' && (!Number.isInteger(raw.expiresInMs) || raw.expiresInMs < 1)) {
+		return { error: 'expiresInMs must be a positive integer' };
+	}
 
 	for (const name of ['concurrencyKey', 'uniqueKey'] as const) {
 		if (raw[name] !== undefined && typeof raw[name] !== 'string') return { error: `${name} must be a string` };
@@ -100,6 +104,7 @@ export function validateCreateJob(body: unknown, bindings: readonly string[] | u
 	const input: CreateJobInput = { binding: raw.binding, payload: raw.payload };
 	if (typeof raw.maxAttempts === 'number') input.maxAttempts = raw.maxAttempts;
 	if (typeof raw.delayMs === 'number') input.delayMs = raw.delayMs;
+	if (typeof raw.expiresInMs === 'number') input.expiresInMs = raw.expiresInMs;
 	if (typeof raw.priority === 'number') input.priority = raw.priority;
 	if (typeof raw.concurrencyKey === 'string' && raw.concurrencyKey) input.concurrencyKey = raw.concurrencyKey;
 	if (typeof raw.uniqueKey === 'string' && raw.uniqueKey) input.uniqueKey = raw.uniqueKey;
@@ -780,6 +785,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			dispatched_at: found.dispatchedAt,
 			// SCHEDULEDが実行可能になる時刻, 変更可能で現在値を返す
 			run_after: found.runAfter,
+			// 実行開始の期限, 経過後は実行されずCANCELLED(#97)
+			expires_at: found.expiresAt,
 			progress: found.progress,
 			payload: found.payload,
 			// performの戻り値, 成功時のみ入り未完了はnull(#9), payloadと同じくJSON文字列のまま返す

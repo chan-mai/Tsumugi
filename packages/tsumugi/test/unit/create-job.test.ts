@@ -46,6 +46,9 @@ describe('投入内容の検証', () => {
 	it('範囲外の指定を拒否する', () => {
 		expect(ok({ binding: 'MAIL', payload: {}, maxAttempts: 0 })).toEqual({ error: 'maxAttempts must be at least 1' });
 		expect(ok({ binding: 'MAIL', payload: {}, delayMs: -1 })).toEqual({ error: 'delayMs must not be negative' });
+		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: 0 })).toEqual({ error: 'expiresInMs must be a positive integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: 1.5 })).toEqual({ error: 'expiresInMs must be a positive integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: '60000' })).toEqual({ error: 'expiresInMs must be a number' });
 	});
 
 	it('キーは文字列でなければ拒否する', () => {
@@ -59,6 +62,7 @@ describe('投入内容の検証', () => {
 			payload: { amount: 1 },
 			maxAttempts: 5,
 			delayMs: 1_000,
+			expiresInMs: 60_000,
 			priority: 2,
 			uniqueKey: 'u',
 			concurrencyKey: 'c',
@@ -69,6 +73,7 @@ describe('投入内容の検証', () => {
 				payload: { amount: 1 },
 				maxAttempts: 5,
 				delayMs: 1_000,
+				expiresInMs: 60_000,
 				priority: 2,
 				uniqueKey: 'u',
 				concurrencyKey: 'c',

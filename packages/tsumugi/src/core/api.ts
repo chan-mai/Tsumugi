@@ -89,6 +89,10 @@ export type BaseOptions = {
 	delayMs?: number;
 	/** 絶対時刻での予約, delayMsとは排他 */
 	runAt?: number;
+	/** 絶対時刻での期限, 経過後は実行せずCANCELLED */
+	expiresAt?: number;
+	/** 投入時刻からの相対の期限, expiresAtとは排他 */
+	expiresInMs?: number;
 	timeoutMs?: number;
 	priority?: number;
 	guarantee?: DeliveryGuarantee;

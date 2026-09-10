@@ -49,3 +49,4 @@
 - [ADR-0044](0044-explicit-unsafe-no-auth.md) — 認証なしの開放を明示的な選択肢として用意する
 - [ADR-0045](0045-per-key-rate-limit.md) — concurrencyKey単位のレート制限を全キー一律のperKeyRateとして持つ
 - [ADR-0046](0046-per-cron-time-zone.md) - cronタイムゾーンをスケジュール単位で指定する
+- [ADR-0047](0047-job-expiration.md) - ジョブの期限切れは投入直前と実行直前に判定しCANCELLEDへ集約する

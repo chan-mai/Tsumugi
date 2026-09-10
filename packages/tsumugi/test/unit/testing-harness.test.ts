@@ -107,6 +107,7 @@ describe('公開している純粋関数', () => {
 					maxAttempts: 3,
 					concurrencyKey: null,
 					runAfter: 0,
+					expiresAt: null,
 					createdAt: 0,
 					dispatchedAt: null,
 					heartbeatAt: null,

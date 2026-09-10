@@ -10,6 +10,7 @@ const binding = ref('');
 const payload = ref('{}');
 const maxAttempts = ref<number | null>(null);
 const delayMs = ref<number | null>(null);
+const expiresInMs = ref<number | null>(null);
 const priority = ref<number | null>(null);
 const uniqueKey = ref('');
 const concurrencyKey = ref('');
@@ -24,6 +25,7 @@ watch(
 		payload.value = '{}';
 		maxAttempts.value = null;
 		delayMs.value = null;
+		expiresInMs.value = null;
 		priority.value = null;
 		uniqueKey.value = '';
 		concurrencyKey.value = '';
@@ -50,6 +52,7 @@ async function submit() {
 			payload: parsed,
 			...(maxAttempts.value !== null ? { maxAttempts: maxAttempts.value } : {}),
 			...(delayMs.value !== null ? { delayMs: delayMs.value } : {}),
+			...(expiresInMs.value !== null ? { expiresInMs: expiresInMs.value } : {}),
 			...(priority.value !== null ? { priority: priority.value } : {}),
 			...(uniqueKey.value ? { uniqueKey: uniqueKey.value } : {}),
 			...(concurrencyKey.value ? { concurrencyKey: concurrencyKey.value } : {}),
@@ -127,18 +130,22 @@ const LABEL = 'mb-1 block text-sm text-muted-foreground';
 								/>
 							</div>
 
-							<div class="grid gap-4 sm:grid-cols-3">
+							<div class="grid gap-4 sm:grid-cols-2">
 								<div>
 									<label :class="LABEL" for="new-job-attempts">Max attempts</label>
 									<input id="new-job-attempts" v-model.number="maxAttempts" type="number" min="1" placeholder="3" :class="FIELD" />
+								</div>
+								<div>
+									<label :class="LABEL" for="new-job-priority">Priority</label>
+									<input id="new-job-priority" v-model.number="priority" type="number" placeholder="0" :class="FIELD" />
 								</div>
 								<div>
 									<label :class="LABEL" for="new-job-delay">Delay (ms)</label>
 									<input id="new-job-delay" v-model.number="delayMs" type="number" min="0" placeholder="0" :class="FIELD" />
 								</div>
 								<div>
-									<label :class="LABEL" for="new-job-priority">Priority</label>
-									<input id="new-job-priority" v-model.number="priority" type="number" placeholder="0" :class="FIELD" />
+									<label :class="LABEL" for="new-job-expires">Expires in (ms)</label>
+									<input id="new-job-expires" v-model.number="expiresInMs" type="number" min="1" placeholder="none" :class="FIELD" />
 								</div>
 							</div>
 

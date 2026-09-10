@@ -24,10 +24,12 @@ const ALLOWED = new Set([
 	'QUEUED->FAILED',
 	'QUEUED->SCHEDULED',
 	'QUEUED->STALLED',
+	'QUEUED->CANCELLED',
 	'RUNNING->COMPLETED',
 	'RUNNING->FAILED',
 	'RUNNING->SCHEDULED',
 	'RUNNING->STALLED',
+	'RUNNING->CANCELLED',
 	'FAILED->SCHEDULED',
 	'STALLED->SCHEDULED',
 ]);
@@ -62,10 +64,11 @@ describe('遷移表(ADR-0012)', () => {
 		}
 	});
 
-	it('cancelはSCHEDULEDからのみ, QUEUED以降は実行済みの可能性があり成功を返さない', () => {
+	it('QUEUED / RUNNINGからのCANCELLEDは期限切れ用に許可(ADR-0047)', () => {
+		// cancel APIは従来通りSCHEDULEDのみを受け付ける, 制限はAPI側が持つ
 		expect(canTransition('SCHEDULED', 'CANCELLED')).toBe(true);
-		expect(canTransition('QUEUED', 'CANCELLED')).toBe(false);
-		expect(canTransition('RUNNING', 'CANCELLED')).toBe(false);
+		expect(canTransition('QUEUED', 'CANCELLED')).toBe(true);
+		expect(canTransition('RUNNING', 'CANCELLED')).toBe(true);
 	});
 });
 
