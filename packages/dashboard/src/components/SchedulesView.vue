@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/vue';
 import { ref } from 'vue';
 import { isUnauthorized, listSchedules, setSchedulePaused, triggerSchedule, type Schedule } from '../api';
 import { formatTimestamp } from '../time';
@@ -40,14 +41,15 @@ async function act(name: string, run: () => Promise<string>) {
 		message.value = `${name}: ${await run()}`;
 	} catch (e) {
 		if (isUnauthorized(e)) {
+			// 再読込も401で同じ通知が重複するため省略
+			busy.value = null;
 			emit('unauthorized');
 			return;
 		}
 		message.value = e instanceof Error ? e.message : String(e);
-	} finally {
-		busy.value = null;
-		await load();
 	}
+	busy.value = null;
+	await load();
 }
 
 const setPaused = (row: Schedule, paused: boolean) =>
@@ -161,30 +163,33 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 		</div>
 
 		<!-- 即時発火の確認 -->
-		<div v-if="confirming" class="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" @click.self="confirming = null">
-			<div class="w-full max-w-md rounded-card border border-border bg-background p-4 shadow-md">
-				<h2 class="text-base font-medium">Trigger {{ confirming.name }}</h2>
-				<p class="mt-2 text-sm text-muted-foreground">
-					Fires {{ confirming.kind === 'job' ? 'a job for' : 'a run of' }} {{ confirming.target }} once, now.
-				</p>
-				<p class="mt-1 text-sm text-muted-foreground">The next scheduled run does not change.</p>
-				<div class="mt-4 flex justify-end gap-2">
-					<button
-						type="button"
-						class="h-8 rounded-card border-none bg-accent px-3 text-sm text-muted-foreground hover:bg-border"
-						@click="confirming = null"
-					>
-						Cancel
-					</button>
-					<button
-						type="button"
-						class="h-8 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
-						@click="runTrigger(confirming)"
-					>
-						Trigger
-					</button>
-				</div>
+		<Dialog :open="confirming !== null" class="relative z-30" @close="confirming = null">
+			<div class="fixed inset-0 bg-black/40" aria-hidden="true" />
+			<div class="fixed inset-0 flex items-center justify-center p-4">
+				<DialogPanel v-if="confirming" class="w-full max-w-md rounded-card border border-border bg-background p-4 shadow-md">
+					<DialogTitle class="text-base font-medium">Trigger {{ confirming.name }}</DialogTitle>
+					<p class="mt-2 text-sm text-muted-foreground">
+						Fires {{ confirming.kind === 'job' ? 'a job for' : 'a run of' }} {{ confirming.target }} once, now.
+					</p>
+					<p class="mt-1 text-sm text-muted-foreground">The next scheduled run does not change.</p>
+					<div class="mt-4 flex justify-end gap-2">
+						<button
+							type="button"
+							class="h-8 rounded-card border-none bg-accent px-3 text-sm text-muted-foreground hover:bg-border"
+							@click="confirming = null"
+						>
+							Cancel
+						</button>
+						<button
+							type="button"
+							class="h-8 rounded-card border-none bg-primary px-3 text-sm text-primary-foreground"
+							@click="runTrigger(confirming)"
+						>
+							Trigger
+						</button>
+					</div>
+				</DialogPanel>
 			</div>
-		</div>
+		</Dialog>
 	</div>
 </template>
