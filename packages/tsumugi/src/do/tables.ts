@@ -21,6 +21,8 @@ export const job = sqliteTable(
 		timeoutMs: integer('timeout_ms').notNull(),
 		backoff: text('backoff').notNull(),
 		runAfter: integer('run_after').notNull(),
+		// 実行開始の期限, 経過後は実行せず終了
+		expiresAt: integer('expires_at'),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 		dispatchedAt: integer('dispatched_at'),

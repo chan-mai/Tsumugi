@@ -38,6 +38,8 @@ export type DispatchMessage = {
 	timeoutMs: number;
 	/** at-most-onceのジョブは実行前にclaimの取得が必要(ADR-0007) */
 	claimRequired: boolean;
+	/** 実行開始の期限, consumerが実行の直前に判定 */
+	expiresAt: number | null;
 };
 
 export type ShardEnv = {
@@ -92,6 +94,10 @@ export type EnqueueInput = {
 	backoff?: Backoff;
 	delayMs?: number;
 	runAt?: number;
+	/** 絶対時刻での期限, 経過後は実行せずCANCELLED */
+	expiresAt?: number;
+	/** 投入時刻からの相対の期限, expiresAtとは排他 */
+	expiresInMs?: number;
 	/** uniqueKeyの予約を保持する期間, 経過後は同じキーでも新規ジョブ */
 	uniqueForMs?: number;
 	/** 分割している場合の投入先の決定に使う(ADR-0011) */
@@ -417,6 +423,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				timeoutMs: input.timeoutMs ?? DEFAULTS.timeoutMs,
 				backoff: input.backoff ?? DEFAULTS.backoff,
 				runAfter: input.runAt ?? now + (input.delayMs ?? 0),
+				expiresAt: input.expiresAt ?? (input.expiresInMs !== undefined ? now + input.expiresInMs : null),
 				createdAt: now,
 				payload: input.payload,
 				runId: input.runId ?? null,
@@ -493,6 +500,13 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			return;
 		}
 
+		// 期限を越える再試行は予約しない, この時点で期限切れとして終了(ADR-0047)
+		if (row.expires_at !== null && next.runAfter >= row.expires_at) {
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'CANCELLED', { now, attempts });
+			await this.#armAlarm(now);
+			return;
+		}
+
 		this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'SCHEDULED', {
 			now,
 			attempts,
@@ -524,6 +538,16 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 */
 	async claim(jobId: string): Promise<boolean> {
 		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now: this.clock.now() });
+	}
+
+	/**
+	 * consumerからの期限切れ報告(ADR-0047)
+	 * 実行開始前の判定で二重実行の懸念なし, Queuesで滞留したメッセージも対象
+	 */
+	async expire(jobId: string): Promise<void> {
+		const now = this.clock.now();
+		// 投影のためのalarm設定, 動きが無いシャードでは読み取りモデルが古いまま残存
+		if (this.repo.compareAndSet(jobId, ['QUEUED'], 'CANCELLED', { now })) await this.#armAlarm(now);
 	}
 
 	/**
@@ -651,10 +675,14 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 							payload: this.repo.payloadOf(row),
 							timeoutMs: row.timeout_ms,
 							claimRequired: row.guarantee === 'at-most-once',
+							expiresAt: row.expires_at,
 						},
 					});
 					break;
 				}
+				case 'expire':
+					this.repo.compareAndSet(decision.id, ['SCHEDULED'], 'CANCELLED', { now });
+					break;
 				case 'reap':
 					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'SCHEDULED', {
 						now,

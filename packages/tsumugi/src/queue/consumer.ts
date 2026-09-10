@@ -156,7 +156,19 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		// jobIdが無い/文字列でない本文はここで拒否, performer実行とreportの対象外
 		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
-		const { binding, attempt, payload, timeoutMs, claimRequired } = body;
+		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt } = body;
+
+		// 期限切れは実行せず終了(ADR-0047), 滞留から復帰した時のまとめ実行を防止
+		// 報告の失敗はreaperがSCHEDULEDへ回収し次のtickの判定で期限切れ
+		if (typeof expiresAt === 'number' && Date.now() >= expiresAt) {
+			await shardStub(env, jobId)
+				.expire(jobId)
+				.catch((error: unknown) => {
+					console.error(`tsumugi: expire failed (${jobId})`, error);
+				});
+			message.ack();
+			return;
+		}
 
 		if (claimRequired && !(await shardStub(env, jobId).claim(jobId))) {
 			// 重複配送で他方が既に実行権を取得済み, 二重実行の回避で何もせず終了(ADR-0007)

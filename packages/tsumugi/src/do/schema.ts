@@ -18,6 +18,8 @@ export const SCHEMA = [
 		timeout_ms INTEGER NOT NULL,
 		backoff TEXT NOT NULL,
 		run_after INTEGER NOT NULL,
+		-- 実行開始の期限, 経過後は実行せず終了
+		expires_at INTEGER,
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL,
 		dispatched_at INTEGER,
@@ -97,6 +99,7 @@ export function applySchema(sql: SqlStorage): void {
 	ensureColumn(sql, 'job', 'result', 'TEXT');
 	ensureColumn(sql, 'job', 'heartbeat_at', 'INTEGER');
 	ensureColumn(sql, 'job', 'progress', 'REAL');
+	ensureColumn(sql, 'job', 'expires_at', 'INTEGER');
 	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
 }
 
@@ -133,6 +136,7 @@ export type JobRow = {
 	timeout_ms: number;
 	backoff: string;
 	run_after: number;
+	expires_at: number | null;
 	created_at: number;
 	updated_at: number;
 	dispatched_at: number | null;

@@ -32,10 +32,14 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 		timeoutMs: fc.integer({ min: 1, max: 300_000 }),
 	};
 
+	// 期限の境界(NOW)をまたぐよう幅を取る, nullは無期限
+	const expiresAt = fc.oneof(fc.constant(null), fc.integer({ min: NOW - 10_000, max: NOW + 10_000 }));
+
 	const scheduled = fc.record({
 		...common,
 		state: fc.constant('SCHEDULED' as const),
 		runAfter: fc.integer({ min: NOW - 10_000, max: NOW + 10_000 }),
+		expiresAt,
 		dispatchedAt: fc.constant(null),
 		heartbeatAt: fc.constant(null),
 	});
@@ -45,6 +49,7 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 		...common,
 		state: fc.constantFrom('QUEUED' as const, 'RUNNING' as const),
 		runAfter: fc.integer({ min: NOW - 10_000, max: NOW + 10_000 }),
+		expiresAt,
 		dispatchedAt: fc.integer({ min: NOW - 600_000, max: NOW }),
 		heartbeatAt: fc.constant(null),
 	});

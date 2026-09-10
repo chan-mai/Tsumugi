@@ -4,14 +4,15 @@ import type { ActiveState, JobState } from './types.js';
  * 状態機械の遷移表(ADR-0012)
  * 重複配送や競合で終端状態のジョブが再び動き出すのを防止
  * cancelはSCHEDULEDからのみ許可(意図的), QUEUED以降は実行済みの可能性があり取り消し成功の保証が不可能
+ * QUEUED / RUNNINGからのCANCELLEDは期限切れ専用(ADR-0047), 実行開始前の判定と期限を越える再試行の中止に限定
  */
 export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
-	// dispatch / cancel
+	// dispatch / cancel /期限切れ
 	SCHEDULED: ['QUEUED', 'CANCELLED'],
-	// claim(at-most-onceのみ) /完了報告/ reaper
-	QUEUED: ['RUNNING', 'COMPLETED', 'FAILED', 'SCHEDULED', 'STALLED'],
-	// 完了報告/ reaper
-	RUNNING: ['COMPLETED', 'FAILED', 'SCHEDULED', 'STALLED'],
+	// claim(at-most-onceのみ) /完了報告/ reaper /期限切れ
+	QUEUED: ['RUNNING', 'COMPLETED', 'FAILED', 'SCHEDULED', 'STALLED', 'CANCELLED'],
+	// 完了報告/ reaper /期限を越える再試行の中止
+	RUNNING: ['COMPLETED', 'FAILED', 'SCHEDULED', 'STALLED', 'CANCELLED'],
 	COMPLETED: [],
 	// ダッシュボードからの手動リトライ
 	FAILED: ['SCHEDULED'],

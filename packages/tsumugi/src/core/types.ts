@@ -22,6 +22,8 @@ export type JobView = {
 	concurrencyKey: string | null;
 	/** SCHEDULEDが実行可能になる時刻 */
 	runAfter: number;
+	/** 実行開始の期限, 経過後は実行せず終了, 無期限はnull */
+	expiresAt: number | null;
 	createdAt: number;
 	/** QUEUEDへの遷移時刻, SCHEDULEDならnull */
 	dispatchedAt: number | null;
@@ -76,6 +78,8 @@ export type KeyBuckets = Record<string, Bucket>;
 
 export type Decision =
 	| { type: 'dispatch'; id: string }
+	/** 期限切れのSCHEDULED, 実行せずCANCELLEDへ */
+	| { type: 'expire'; id: string }
 	/** 無応答のat-least-onceジョブの再投入, SCHEDULEDへ */
 	| { type: 'reap'; id: string; attempts: number }
 	/** 無応答のat-most-onceジョブ, 再投入せずSTALLEDへ */

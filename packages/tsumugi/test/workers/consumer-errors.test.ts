@@ -55,6 +55,7 @@ const validBody: DispatchMessage = {
 	payload: {},
 	timeoutMs: 60_000,
 	claimRequired: false,
+	expiresAt: null,
 };
 
 describe('壊れたメッセージ(ADR-0004)', () => {

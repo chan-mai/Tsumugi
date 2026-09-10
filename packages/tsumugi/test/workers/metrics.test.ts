@@ -18,6 +18,7 @@ const row = (over: Partial<JobRow> = {}): JobRow => ({
 	timeout_ms: 60_000,
 	backoff: '{}',
 	run_after: T0,
+	expires_at: null,
 	created_at: T0,
 	updated_at: T0 + 5_000,
 	dispatched_at: T0 + 1_000,

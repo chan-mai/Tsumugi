@@ -98,6 +98,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
     "updated_at": 1753000060000,
     "dispatched_at": 1753000030000,
     "run_after": null,
+    "expires_at": null,
     "retryable": true,
     "attempts_log": [
       {
@@ -114,6 +115,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 
 `result`はperformの戻り値で、成功時のみ値が含まれます。それ以外はnullです。
 `run_after`は予約済みジョブの実行予定時刻です。
+`expires_at`は実行開始の期限で、期限を過ぎたジョブは実行されずCANCELLEDになります。
 `attempts_log`は新しい試行から順に並びます。
 
 見つからない場合は404です。
@@ -128,6 +130,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
   "payload": { "to": "a@example.com", "subject": "hi" },
   "maxAttempts": 5,
   "delayMs": 60000,
+  "expiresInMs": 600000,
   "priority": 10,
   "concurrencyKey": "domain:example.com",
   "uniqueKey": "mail:a@example.com:hi"

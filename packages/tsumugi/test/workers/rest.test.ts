@@ -189,6 +189,7 @@ describe('REST API', () => {
 			'concurrency_key',
 			'created_at',
 			'dispatched_at',
+			'expires_at',
 			'guarantee',
 			'id',
 			'max_attempts',

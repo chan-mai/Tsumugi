@@ -83,6 +83,16 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 		}
 	}
 
+	// 1.5期限切れ: 実行可能になったが期限を過ぎたSCHEDULEDは投入せず終了
+	// 判定は投入候補に限定, 未到来のジョブはrunAfter到来時のtickで判定
+	const expired = new Set<string>();
+	for (const job of jobs) {
+		if (job.state !== 'SCHEDULED' || job.runAfter > now) continue;
+		if (job.expiresAt === null || now < job.expiresAt) continue;
+		expired.add(job.id);
+		decisions.push({ type: 'expire', id: job.id });
+	}
+
 	// 2.実行中の件数の集計, 回収した分は空きの扱い
 	const keyInFlight = new Map<string, number>();
 	let inFlight = 0;
@@ -95,7 +105,7 @@ export function schedule(input: ScheduleInput): ScheduleOutput {
 
 	// 3.実行可能な候補を実効優先度順に整列
 	const ready = jobs
-		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now)
+		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now && !expired.has(j.id))
 		.map((j) => ({ job: j, ep: effectivePriority(j, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 

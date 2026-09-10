@@ -22,6 +22,7 @@ const job = (over: Partial<JobView> & { id: string }): JobView => ({
 	maxAttempts: 3,
 	concurrencyKey: null,
 	runAfter: T0,
+	expiresAt: null,
 	createdAt: T0,
 	dispatchedAt: null,
 	heartbeatAt: null,
@@ -59,6 +60,70 @@ describe('dispatchの基本', () => {
 		const jobs = [job({ id: 'c' }), job({ id: 'a' }), job({ id: 'b' })];
 		const out = schedule({ now: T0, jobs, policy: policy(), bucket: unlimited });
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a', 'b', 'c']);
+	});
+});
+
+describe('有効期限(ADR-0047)', () => {
+	it('期限を過ぎた実行可能ジョブは投入せず期限切れにする', () => {
+		const out = schedule({ now: T0, jobs: [job({ id: 'a', expiresAt: T0 - 1 })], policy: policy(), bucket: unlimited });
+		expect(ids(out.decisions, 'expire')).toEqual(['a']);
+		expect(ids(out.decisions, 'dispatch')).toEqual([]);
+	});
+
+	it('期限ちょうどは期限切れ', () => {
+		const out = schedule({ now: T0, jobs: [job({ id: 'a', expiresAt: T0 })], policy: policy(), bucket: unlimited });
+		expect(ids(out.decisions, 'expire')).toEqual(['a']);
+	});
+
+	it('期限内のジョブは投入する', () => {
+		const out = schedule({ now: T0, jobs: [job({ id: 'a', expiresAt: T0 + 1 })], policy: policy(), bucket: unlimited });
+		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
+		expect(ids(out.decisions, 'expire')).toEqual([]);
+	});
+
+	it('未到来のジョブは期限が過ぎていても判定しない', () => {
+		// 判定は投入候補になった時点, runAfter到来時のtickで期限切れ
+		const out = schedule({
+			now: T0,
+			jobs: [job({ id: 'later', runAfter: T0 + 5_000, expiresAt: T0 - 1 })],
+			policy: policy(),
+			bucket: unlimited,
+		});
+		expect(out.decisions).toEqual([]);
+		expect(out.nextAlarmAt).toBe(T0 + 5_000);
+	});
+
+	it('投入済みのジョブはtickでは期限切れにしない', () => {
+		// 実行直前の判定はconsumer側, ここでの遷移は実行中と競合
+		const out = schedule({
+			now: T0,
+			jobs: [job({ id: 'q', state: 'QUEUED', dispatchedAt: T0, expiresAt: T0 - 1 })],
+			policy: policy(),
+			bucket: unlimited,
+		});
+		expect(out.decisions).toEqual([]);
+	});
+
+	it('一時停止中も期限切れの回収は行う', () => {
+		const out = schedule({
+			now: T0,
+			jobs: [job({ id: 'a', expiresAt: T0 - 1 })],
+			policy: policy({ paused: true }),
+			bucket: unlimited,
+		});
+		expect(ids(out.decisions, 'expire')).toEqual(['a']);
+	});
+
+	it('期限切れはトークンも同時実行の枠も消費しない', () => {
+		const jobs = [job({ id: 'a', expiresAt: T0 - 1, createdAt: T0 - 1 }), job({ id: 'b' })];
+		const out = schedule({
+			now: T0,
+			jobs,
+			policy: policy({ concurrency: 1, rate: { tokens: 1, intervalMs: 1_000 } }),
+			bucket: { tokens: 1, refilledAt: T0 },
+		});
+		expect(ids(out.decisions, 'expire')).toEqual(['a']);
+		expect(ids(out.decisions, 'dispatch')).toEqual(['b']);
 	});
 });
 

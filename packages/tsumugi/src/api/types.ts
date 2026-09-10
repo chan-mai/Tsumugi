@@ -37,6 +37,8 @@ export type JobDetail = JobSummary & {
 	guarantee: string;
 	/** SCHEDULEDが実行可能になる時刻, 投影前の古い行はnull */
 	run_after: number | null;
+	/** 実行開始の期限, 経過後は実行されずCANCELLED, 無期限はnull */
+	expires_at: number | null;
 	/** 実行中のジョブが報告した進捗, 0以上1以下で報告が無ければnull */
 	progress: number | null;
 	payload: string;
@@ -58,6 +60,8 @@ export type CreateJobRequest = {
 	payload: unknown;
 	maxAttempts?: number;
 	delayMs?: number;
+	/** 要求時刻からの相対の期限, 経過後は実行されずCANCELLED */
+	expiresInMs?: number;
 	priority?: number;
 	concurrencyKey?: string;
 	uniqueKey?: string;
