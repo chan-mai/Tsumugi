@@ -2,7 +2,7 @@
 
 ## 状態
 
-ジョブは7つの状態を持ちます。
+ジョブは以下7つの状態を持ちます。
 
 | 状態        | 意味                                                   |
 | ----------- | ------------------------------------------------------ |
@@ -14,10 +14,9 @@
 | `CANCELLED` | 取り消された                                           |
 | `STALLED`   | 結果が報告されないまま停止し、手動での判断を待っている |
 
-`RUNNING`へ遷移するのは`at-most-once`のジョブのみです。
-既定の`at-least-once`では`QUEUED`のまま実行されるため、`QUEUED`は未開始と実行中の両方を含みます。
+`RUNNING`へ遷移するのは`at-most-once`のジョブのみであり、`at-least-once`のジョブは`QUEUED`のまま実行されるため、`QUEUED`は未開始と実行中の両方を含みます。
 
-初回待ちとリトライ待ちはどちらも`SCHEDULED`です。判別には`attempts`を使います。
+初回待ちとリトライ待ちはどちらも`SCHEDULED`です。判別には`attempts`を参照してください。
 
 ### 遷移
 
@@ -31,17 +30,17 @@ FAILED    → SCHEDULED
 STALLED   → SCHEDULED
 ```
 
-`FAILED`と`STALLED`から`SCHEDULED`へ戻る遷移は、ダッシュボードやREST APIからの手動リトライです。
+`FAILED`と`STALLED`から`SCHEDULED`へ戻る遷移は、ダッシュボードやREST APIからの手動リトライに限ります。
 
-取り消しが可能なのは`SCHEDULED`の場合のみです。
-`QUEUED`以降は既に実行されている可能性があるため、取り消しの要求を受け付けません。
+取り消しが可能なのは`SCHEDULED`の場合のみであり、既に実行されている可能性を排除するため、原則として`QUEUED`以降は取り消しの要求を受け付けません。
 
 ## リトライ
 
-試行回数とバックオフは`maxAttempts`と`backoff`で決まります。
+試行回数とバックオフは`maxAttempts`と`backoff`により決定されます。`maxAttempts`は1以上の整数、`backoff`は固定間隔または指数バックオフを指定可能です。
 
-wrangler.jsoncの`max_retries`はQueues側の設定で、Tsumugiのリトライとは別のものです。
-ジョブが失敗した場合の再試行には使われず、配送そのものが失敗した場合の再配送回数になります。
+::: info
+wrangler.jsoncで定義される`max_retries`はQueues固有の設定であり、Tsumugiのリトライ機構への影響はありません。
+:::
 
 ### バックオフ
 
@@ -61,11 +60,11 @@ await tsumugi.enqueue(env, {
 });
 ```
 
-`jitter`を有効にすると、同時に失敗した多数のジョブの再試行が同じ時刻に集中しません。
+`jitter`を有効にすることで、同時に失敗した多数のジョブの再試行が同じ時間帯に集中することを避けられます。
 
 ## 流量制御
 
-binding単位に4つの設定で宣言します。
+binding単位に以下4つの設定で宣言します。
 
 | 設定                | 既定   | 内容                                             |
 | ------------------- | ------ | ------------------------------------------------ |
@@ -90,10 +89,10 @@ const tsumugi = defineTsumugi({
 });
 ```
 
-`perKeyRate`はすべてのキーに同じ値が適用されます。キーごとに異なる値は指定できません。
+`perKeyRate`はすべてのキーに同じ値が適用され、キーごとに異なる値は指定できません。
 `concurrencyKey`がnullのジョブに`perKeyConcurrency`と`perKeyRate`は適用されません。
 
-`concurrency`・`rate`・`perKeyConcurrency`の3つを有効にした場合のスループット低下は実測で約17%です。
+`concurrency` / `rate` / `perKeyConcurrency`の3つを有効にした場合のスループット低下は実測で約17%です。
 
 ### 実行されない原因の確認 {#diagnostics}
 
@@ -102,7 +101,7 @@ const tsumugi = defineTsumugi({
 ### 実行時の上書き
 
 ダッシュボードの`bindings`タブから、変更デプロイなしに同時実行数の変更と投入の一時停止が可能です。変更はすべてのshardへ適用されます。
-また、同様の操作を[POST /api/bindings/:binding/policy](/reference/rest-api#post-api-bindings-binding-policy)からも行えます。
+この操作は[POST /api/bindings/:binding/policy](/reference/rest-api#post-api-bindings-binding-policy)と等価です。
 
 ![bindingsタブ](/dashboard-bindings.jpg)
 
@@ -112,32 +111,32 @@ curl -X POST -H "authorization: Bearer $TOKEN" -H 'content-type: application/jso
 ```
 
 一時停止中も、実行中のジョブの監視とエージングは継続します。
-再開後の投入順は通常と同じく実効優先度順です。停止中も待ち時間は増え続けるため、低優先度のジョブほど順位が上がります。
+再開後の投入順は通常と同じく実効優先度順であり、停止中も待ち時間は増え続けるため、低優先度のジョブほど順位が上がります。
 
-コードから変更する場合は`tsumugi.shardFor`で取得したstubの`configure`を使います。保持期間もあわせて変更可能です。
+コードから変更する場合は`tsumugi.shardFor`で取得したstubの`configure`を利用してください。保持期間もあわせて変更可能です。
 
 ```ts
 await tsumugi.shardFor(env, 'MAIL').configure({ policy: { concurrency: 5 } });
 ```
 
-実行時に変更すると、以降は`bindings`の静的な設定が無視されます。
+前述の通り、ダッシュボード/REST APIを介した操作が優先されるため、実行時に変更操作を行うことにより、以降は`bindings`の静的な設定が適用されません。
 静的な設定へ戻す場合は[POST /api/bindings/:binding/policy/reset](/reference/rest-api#post-api-bindings-binding-policy-reset)を使うか、改めて`configure`で同じ内容を指定する必要があります。
 
 ## エージング
 
 高優先度のジョブが継続して投入される限り、低優先度のジョブは実行されません。
-これを避けるため、待ち時間に応じて実効優先度を上げます。
+これを避けるため、待ち時間に応じて実効優先度が上がるオプションが既定で有効になっています。
 
 ```text
 effectivePriority = priority + floor(waited / agingIntervalMs)
 ```
 
-既定は有効で、間隔は60秒です。
-厳密な優先順序が必要な場合は`agingIntervalMs`に`null`を指定します。
+このオプションは既定で有効になっており、間隔は60秒です。
+厳密な優先順序が必要な場合は`agingIntervalMs`に`null`を指定してください。
 
 ## 実行保証
 
-ジョブごとに選択します。違いは、完了が報告されなかったときの動作です。
+実行保証はジョブごとに指定可能です。`at-least-once`と`at-most-once`の2種類があります。
 
 | 保証                  | 結果が報告されないときの動作                  |
 | --------------------- | --------------------------------------------- |
@@ -152,22 +151,21 @@ await tsumugi.enqueue(env, {
 });
 ```
 
-`at-most-once`を指定したジョブは、同じジョブが二度実行されることがありません。
-その代わり、実行を開始するまでの時間が既定の`at-least-once`より長くなります。
+`at-most-once`を指定したジョブは、同じジョブが二度実行されず、実行を開始するまでの時間が既定の`at-least-once`より長くなります。
 
 ## タイムアウトと無応答の検知
 
 `timeoutMs`を過ぎると結果の待機を終了します。
 performerには期限が`ctx.deadlineAt`として渡るため、中断に応じるかはperformer側の実装に依存します。
-どちらの場合もperformerの実行そのものは停止しません。
+どちらの場合においても、原則としてperformerの実行そのものは停止しません。
 
 さらに`reaperGraceMs`(既定30秒)だけ結果が報告されない状態が続いたジョブは、無応答として扱われます。
 `at-most-once`のジョブは、試行回数に関わらず`STALLED`になります。
-`at-least-once`のジョブは、試行回数が残っていれば再投入され、使い切っていれば`FAILED`になります。
+`at-least-once`のジョブは、試行回数が残っていれば再投入され、そうでない場合は`FAILED`として扱われます。
 
 ## shard {#shard}
 
-shard数の既定は1です。
+既定のshard数は1です。
 
 ```ts
 bindings: {
@@ -175,18 +173,17 @@ bindings: {
 }
 ```
 
-2以上にすると`partitionKey`の指定が必須になります。
-`concurrencyKey`や`uniqueKey`の保証はpartition内に限定されます。
+shard数を2以上にすると`partitionKey`の指定が必須になり、`concurrencyKey`や`uniqueKey`の保証がpartition内に限定されます。
 
 - shardが1: binding内でキーは常に有効
 - shardが2以上: `partitionKey`で決まったshardの中でのみ有効
 
-`concurrencyKey`や`uniqueKey`を使う場合は、`partitionKey`にも同じキーを指定してください。
-指定しないとエラーにならないまま保証が無効になります。
+`concurrencyKey`や`uniqueKey`を使う場合、`partitionKey`にも同じキーを指定する必要があります。
+指定を行わない場合、実行保証が無効になり、同じキーのジョブが同時に実行される可能性があります。
 
 ## 保持期間
 
-リトライを受け付ける期間は`failedRetentionMs`で決まります。
+リトライを受け付ける期間は`failedRetentionMs`、リトライを受け付けない期間は`sweepAfterMs`で指定します。
 
 | 対象                      | 設定                | 既定 |
 | ------------------------- | ------------------- | ---- |
@@ -205,10 +202,9 @@ const tsumugi = defineTsumugi({
 ```
 
 一覧そのものの保持はこれとは別の設定で、`retention`で指定します。
-cronトリガーを設定すると、期間を過ぎた終了済みのジョブが一覧から削除されます。[SweepOptions](/reference/config#sweepoptions)を参照してください。
+cronトリガーを設定すると、期間を過ぎた終了済みのジョブが一覧から削除されます。詳細は[SweepOptions](/reference/config#sweepoptions)を参照してください。
 
-既定では両者の期間が揃っているため、一覧に表示されているジョブはリトライが可能です。
-片方だけ変えると、一覧に表示されていてもリトライを受け付けないジョブが出ます。
+既定では両者の期間が揃っているため、一覧に表示されているジョブはリトライが可能ですが、片方だけ変えた場合には、一覧に表示されていてもリトライを受け付けないジョブが発生してしまう可能性があります。
 
 ## 失敗の通知 {#failure-notification}
 
@@ -238,7 +234,7 @@ export class NotifyFailure extends Performer<FailureNotice, void, {}, Env> {
 }
 ```
 
-`FailureNotice`が持つ値は次の通りです。
+`FailureNotice`が持つ値は以下の通りです。
 
 | 名前          | 内容                                           |
 | ------------- | ---------------------------------------------- |
@@ -254,7 +250,7 @@ export class NotifyFailure extends Performer<FailureNotice, void, {}, Env> {
 
 通知は全てのbindingが対象です。
 
-通知そのものもジョブなので、送信に失敗すれば一覧に残り、リトライも可能です。
-ただし通知先のbinding自身の失敗は通知されません。通知が無限に連鎖しないための仕様です。
+通知そのものもジョブとして扱われるため、送信に失敗すれば一覧に残り、リトライも可能です。
+ただし通知先のbinding自身の失敗は通知されません。これは意図的なものであり、通知が無限に連鎖しないための仕様です。
 
 `onFailure`を指定する前に発生した失敗は通知されません。

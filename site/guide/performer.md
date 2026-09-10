@@ -34,7 +34,7 @@ export { SendMail } from './performers/send-mail.js';
 ```
 
 `defineTsumugi`の`performers`には、performerをまとめたモジュールをそのまま渡します。
-これはペイロードと必須キーの型を導出するためのもので、実行時の解決には使いません。
+これはペイロードと必須キーの型を導出するためのものであり、実行時の解決には利用されません。
 
 ```ts
 import * as performers from './performers/index.js';
@@ -44,8 +44,8 @@ export * from './performers/index.js';
 const tsumugi = defineTsumugi({ performers, /* ... */ });
 ```
 
-別名を付ける場合はバレルのexportで変えます。
-実行時の解決先と`performers`のキーが同じ1箇所から決まるため、両者が一致します。
+別名を付ける場合はバレルのexportで変更してください。
+実行時の解決先と`performers`のキーが同じ1箇所から決定されるため、両者が一致します。
 
 ```ts
 // src/performers/index.ts
@@ -75,10 +75,10 @@ export { SendMail as MAIL } from './performers/send-mail.js';
 
 at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください。
 
-中断が必要な処理には`deadlineAt`から`AbortSignal`を組み立てて渡します。
-`AbortSignal`はRPCの引数として渡せない制約があるため、Tsumugiが渡すのは時刻のみです。
+中断が必要なケースでは`deadlineAt`から`AbortSignal`を組み立てて渡します。
+`AbortSignal`はRPCの引数として渡せない制約があるため、Tsumugiは時刻のみを渡します。
 
-`AbortSignal.timeout`は負の値を受け付けないため、期限を過ぎている場合は`AbortSignal.abort()`を使います。
+`AbortSignal.timeout`は負の値を受け付けないため、期限を過ぎている場合は`AbortSignal.abort()`を利用してください。
 
 ```ts
 const remaining = ctx.deadlineAt - Date.now();
@@ -92,7 +92,6 @@ const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abor
 ### heartbeat
 
 所要時間が入力によって大きく変わる処理では、`timeoutMs`を最長の場合に合わせる必要があります。
-その場合、実際に停止したジョブを無応答と判定するまでの時間も同じだけ長くなります。
 
 `ctx.heartbeat()`を実行すると、無応答の判定が最後の報告時刻を起点として行われます。
 `timeoutMs`は1回の報告間隔に対して設定してください。
@@ -111,13 +110,12 @@ class Import extends Performer<{ rows: string[] }, void, {}, Env> {
 引数の進捗は0以上1以下です。範囲外の値は0以上1以下へ丸められ、数値以外は進捗なしの報告として扱われます。
 報告した進捗はジョブの詳細画面に表示されます。
 
-実行間隔には5秒の下限があります。これより短い間隔で実行しても、報告は5秒に1回までです。
-報告に失敗しても例外にはなりません。その場合は報告が無いジョブと同様に扱われます。
+実行間隔には5秒の下限があります。これより短い間隔で実行しても、報告は5秒に1回までに制限されます。
+報告に失敗しても例外にはならず、報告が無いジョブと同様に扱われます。
 
 ## 失敗の通知
 
-例外をthrowすると失敗として扱われ、試行回数が残っていればリトライされます。
-例外が発生せずに完了した場合は成功で、戻り値は保存されて[REST API](/reference/rest-api#get-api-jobs-id)から取得できます。
+例外をthrowすると失敗として扱われ、試行回数が残っている場合に限りリトライされます。
 8,192文字を超える戻り値と直列化できない値は保存されません。Flowのノードでの扱いは[Flow](/guide/flow)を参照してください。
 
 ```ts
@@ -140,9 +138,9 @@ class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, vo
 class ChargeCard extends Performer<Payload, void, { concurrencyKey: true }, Env> {}
 ```
 
-キーは投入時に文字列として渡します。performer側の関数で導出する形は取りません。
+キーは投入時に文字列として渡します。performer側の関数で導出することはできません。
 
-必須化は`tsumugi.enqueue`と`tsumugi.jobs(env)`で適用され、渡し忘れはコンパイルエラーになります。
+必須化は`tsumugi.enqueue`と`tsumugi.jobs(env)`で適用され、キーの渡し忘れはコンパイルエラーになります。
 
 ```ts
 await tsumugi.enqueue(env, { binding: 'CHARGE', payload, concurrencyKey: 'customer:c1' });
@@ -150,7 +148,7 @@ await tsumugi.jobs(env).enqueue('CHARGE', payload, { concurrencyKey: 'customer:c
 ```
 
 ::: warning
-トップレベルの`enqueue(env, input)`と`createClient()`では必須化が適用されず、キーの渡し忘れも型エラーになりません。
+トップレベルの`enqueue(env, input)`と`createClient()`では必須化が適用されません。
 [投入経路](/guide/enqueue#paths)を参照してください。
 :::
 
@@ -185,7 +183,6 @@ wrangler.jsoncのservice bindingで、binding名とentrypointを対応させま�
 ```
 
 呼び出し側の`performers`には、クラスの代わりに`remote()`を置きます。
-相手のクラスは別Workerにあるためimportできず、型を運ぶためだけに指定します。
 
 ```ts
 import { remote } from 'tsumugi';
@@ -198,7 +195,7 @@ const performers = { ...local, MAIL: remote<SendMail>() };
 
 ### 別Worker時の制約 {#remote-constraints}
 
-`spawn`で要求した子ノードは`perform`が完了してから作成されます。呼び出した時点では実行が始まりません。
+`spawn`で要求した子ノードは`perform`が完了してから作成されます。呼び出した時点では実行されません。
 
 別Workerでは`ctx.spawn`が非同期の呼び出しになるため、`await`が必要になります。`await`せずに`perform`が終わると、その要求は失われます。
 
@@ -206,7 +203,6 @@ const performers = { ...local, MAIL: remote<SendMail>() };
 await ctx.spawn('child', 'MAIL', payload);
 ```
 
-`ctx.heartbeat`も同様ですが、こちらは元から`await`して使います。
 
 ## テスト
 

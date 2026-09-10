@@ -2,8 +2,8 @@
 
 ## 用意するもの
 
-- Workers Paidプランの有効なCloudflareアカウント(SQLite版のDurable ObjectsとQueuesの両方が要求)
-- `compatibility_date`は2025-11-17以降(自己参照のservice bindingを`ctx.exports`で解決するため)
+- Workers Paidプランが有効なCloudflareアカウント
+- 2025-11-17以降の`compatibility_date`
 
 ## インストール
 
@@ -15,13 +15,12 @@ pnpm add tsumugi
 
 ## セットアップ
 
-initがリソースの作成から雛形の生成までを行います。
 
 ```bash
 npx tsumugi init
 ```
 
-新しいプロジェクトでは、実行が終わると次の状態になります。
+新しいプロジェクトでは次の状態になります。
 
 - D1とQueuesが作成済み
 - `wrangler.jsonc`が生成済み。`wrangler d1 create`が出力した`database_id`は転記済み
@@ -31,23 +30,21 @@ npx tsumugi init
 途中の手順が失敗した場合は警告が表示され、再実行するコマンドが案内されます。
 
 既にwrangler設定がある場合は書き換えず、追記する箇所が出力されます。
-この場合マイグレーションは適用されないため、編集後に出力される手順に沿って適用してください。
+この場合、マイグレーションは自動で適用されないため、編集後に出力される手順に沿って適用してください。
 オプションと生成物の詳細は[CLI](/reference/cli)を参照してください。
 
-`TSUMUGI_METRICS`のbindingは任意で、設定しない場合はメトリクスが記録されませんが、その他の動作に影響はありません。
-Flowを使う場合はbindingが1つ増えます。単発のジョブのみを扱う構成では不要です。
+`TSUMUGI_METRICS`のbindingは任意であり、設定しない場合はメトリクスが記録されませんが、その他の動作に影響はありません。
+Flowを利用する場合に限り、追加のbindingが必要です。
 詳細は[設定](/reference/config)と[Flow](/guide/flow)を参照してください。
 
 ::: warning
 Tsumugiを更新した場合はマイグレーションの再適用が必要です。マイグレーションはバージョンによって追加されます。
-`pnpm wrangler d1 migrations apply my-jobs --local`と`--remote`を実行してください。
 未適用のマイグレーションがある場合、REST APIは503になり、応答本文に未適用のファイル名が含まれます。
-ダッシュボードの画面自体は表示されますが、一覧の読み込みが同じ理由で失敗します。
 :::
 
 ## performer
 
-ジョブの処理内容はperformerに記述します。init時に生成される`src/performers/hello.ts`が最小の形です。
+ジョブの処理内容はperformerに記述します。init時に生成される`src/performers/hello.ts`が最小構成の例です。
 
 ```ts
 // src/performers/hello.ts
@@ -69,7 +66,7 @@ npx tsumugi add-performer send-mail
 ```
 
 ファイルの生成と、まとめてexportするファイル(`src/performers/index.ts`)への追記が行われます。
-ここに並べた名前がそのままbinding名になります。
+この名称がbinding名として利用され、payloadの型も決定されます。
 
 ```ts
 // src/performers/index.ts
@@ -113,19 +110,18 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-`performers`はペイロードと必須キーの型を導出するためのもので、実行時の解決には使いません。
+`performers`はペイロードと必須キーの型を導出するためのもので、実行時の解決には利用されません。`defineTsumugi`の引数に渡す必要はありませんが、型の解決のためにexportした名前と一致させる必要があります。
 
-`tsumugi.enqueue`では、bindingからpayloadと必須キーの型が決まります。
-投入の経路は[ジョブの投入](/guide/enqueue#paths)を参照してください。
+`tsumugi.enqueue`では、bindingからpayloadと必須キーの型が決定されます。
+投入経路についての詳細は[ジョブの投入](/guide/enqueue#paths)を参照してください。
 
 `defineTsumugi`の戻り値には、`fetch`と`queue`と`scheduled`のほかに、投入とFlowの開始を行う関数が含まれます。
 全体は[設定](/reference/config#definetsumugi)を参照してください。
-独自の`fetch`を追加する場合は上のようにスプレッドし、処理しなかったパスを`tsumugi.fetch`へ渡します。
 
 ## トークンの設定
 
 認証を設定するまで、REST APIもダッシュボードも404を返します。
-ローカルではinitが生成した`.dev.vars`の`TSUMUGI_TOKEN`が使用されますが、本番環境ではSecretとして設定してください。
+ローカルではinitが生成した`.dev.vars`の`TSUMUGI_TOKEN`が使用されますが、本番環境ではSecretとして設定することを推奨します。
 
 ```bash
 pnpm wrangler secret put TSUMUGI_TOKEN
@@ -137,8 +133,6 @@ pnpm wrangler secret put TSUMUGI_TOKEN
 pnpm wrangler dev
 ```
 
-`/enqueue`にアクセスするとジョブIDが返ります。
-`/`を開くとダッシュボードが表示されます。トークンを入力すると一覧が表示されます。
 
 ## 次に読むもの
 

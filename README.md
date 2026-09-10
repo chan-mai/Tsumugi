@@ -55,7 +55,7 @@ See [Getting Started](https://tsumugi.mq1.dev/guide/getting-started) for what is
 
 Enqueue from any Worker, and Tsumugi orders and dispatches the jobs to your performers.
 
-投入側のWorkerからenqueueを呼び出すと、Tsumugiが実行順序を決めてperformerへ配送します。
+投入側のWorkerからenqueueを呼び出すと、Tsumugiが実行順序を決定し、performerへ配送します。
 
 ![Tsumugi architecture](https://tsumugi.mq1.dev/architecture.png)
 
@@ -80,7 +80,7 @@ export class SendMail extends Performer<{ to: string }, void, {}, Env> {
 
 Export the performers from the top level of the Worker. The binding name is the exported name, and the payload type is derived from the same place.
 
-performerはWorkerのトップレベルからexportします。binding名はexportした名前がそのまま使われ、payloadの型も同じ場所から決まります。
+performerはWorkerのトップレベルからexportします。binding名はexportした名前が利用され、payloadの型も同じ場所から決定されます。
 
 ```ts
 // src/index.ts
@@ -102,13 +102,13 @@ export default tsumugi;
 
 `npx tsumugi init` generates this file, so it rarely needs to be written by hand.
 
-このファイルは`npx tsumugi init`が生成するため、手で書く場面はほとんどありません。
+このファイルは`npx tsumugi init`が生成するため、基本的に手動で編集する必要はありません。
 
 ### 3. Enqueue a job
 
 `enqueue` can be called from any handler. It returns the job ID, and the binding name decides the payload type.
 
-`enqueue`は任意のハンドラから呼び出せます。戻り値はジョブIDで、binding名からpayloadの型が決まります。
+`enqueue`は任意のハンドラから呼び出すことが可能です。戻り値はジョブIDで、binding名からpayloadの型が決定されます。
 
 ```ts
 const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
@@ -116,7 +116,7 @@ const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@e
 
 Common options are passed in the same call.
 
-よく使うオプションは同じ呼び出しで指定します。
+よく使うオプションは呼び出し時に指定可能です。
 
 ```ts
 // 1分後に実行
@@ -133,7 +133,7 @@ await tsumugi.enqueue(env, { binding: 'SendMail', payload, uniqueKey: 'a@example
 
 The dashboard is served at `/` and the REST API under `/api`, both behind the token configured above. Listing, search, retry and cancellation need no code of your own.
 
-`/`にダッシュボード, `/api`にREST APIが用意され、どちらも上で設定したトークンで認証します。一覧, 検索, 再実行, 取り消しは自分でコードを書かずに行えます。
+`/`にダッシュボード, `/api`にREST APIが用意され、どちらも上で設定したトークンで認証します。
 
 |                                                               |                                                               |
 | ------------------------------------------------------------- | ------------------------------------------------------------- |
@@ -148,9 +148,9 @@ Flow, 定期実行, 流量制御, 実行保証, 別Workerへの配置につい�
 
 ## Development
 
-Node.js 22 and pnpm are required. This repository is a pnpm workspace.
+Node.js 22 and pnpm are required.
 
-Node.js 22とpnpmが必要です。このリポジトリはpnpmのワークスペースです。
+Node.js 22とpnpmが必要です。
 
 ```bash
 pnpm install

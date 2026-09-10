@@ -5,7 +5,7 @@ Flowは有向非巡回グラフ(DAG)の定義であり、実行単位はRunで�
 
 ## 定義
 
-`createFlow`に`performers`を渡すと、Flowを定義する関数が返ります。
+`createFlow`に`performers`を渡すと、Flowを定義する関数が返されます。
 binding名とpayloadの型は単発のジョブと同じように検査されます。
 
 ```ts
@@ -36,14 +36,12 @@ const flows = {
 const tsumugi = defineTsumugi({ performers, flows, auth: /* ... */ });
 ```
 
-binding名は[exportした名前](/guide/performer)で解決されるため、`performers`のキーはexport名と一致させます。
+binding名は[exportした名前](/guide/performer)で解決されるため、`performers`のキーはexport名と一致させる必要があります。
 
 `f.node`の第1引数はノードID、第2引数はbinding、`input`は前段の戻り値からpayloadを組み立てる関数です。
 `after`に渡したオブジェクトのキーが、`input`の第2引数のプロパティ名になります。
 
-ノードIDに使用できる文字は英数字とハイフンとアンダースコアです。
-
-依存は変数で指定します。宣言済みのノードしか参照しないので、循環する定義にはなりません。
+ノードIDに使用できる文字は英数字/ハイフン/アンダースコアに限定されます。
 
 ノードには`maxAttempts`、`backoff`、`timeoutMs`、`priority`、`concurrencyKey`など、投入時と同じオプションの指定が可能です。
 
@@ -53,10 +51,10 @@ binding名は[exportした名前](/guide/performer)で解決されるため、`p
 const runId = await tsumugi.start(env, 'GREETINGS', { prefix: 'hello' });
 ```
 
-`input`の型はFlowの型引数から決まります。
+`input`の型はFlowの型引数から決定されます。
 
 `start`の第4引数に`{ id }`を指定するとrunIdが`<flow>:<id>`に固定され、同じIDでの2回目の開始は既存のrunIdを返します。
-リトライを行うHTTPハンドラから呼び出してもRunは増えません。
+リトライを行うHTTPハンドラから呼び出してもRunが重複することはありません。
 
 同じく第4引数の`{ deadlineMs }`でRun全体の[期限](#deadline)を指定できます。
 
@@ -64,7 +62,7 @@ const runId = await tsumugi.start(env, 'GREETINGS', { prefix: 'hello' });
 
 実行時に件数が決まる並列処理は`f.fanOut`で定義します。
 `over`が返した配列の要素ごとに子ノードが1つ作成され、子のノードIDには要素の添字が使われます(`greet:0`, `greet:1`)。
-`key`を指定した場合は添字の代わりにその戻り値を使います。使用できる文字はノードIDと同じです。
+`key`を指定した場合、その戻り値が使用されます。使用できる文字はノードIDと同じです。
 
 後続のノードが受け取るのは集計値です。
 
@@ -74,7 +72,7 @@ const runId = await tsumugi.start(env, 'GREETINGS', { prefix: 'hello' });
 
 子ノードごとの戻り値は後続のノードへ渡されません。個別の結果が必要な場合は、performerからR2やD1へ書き込み、参照を戻り値としてください。
 
-子ノードの失敗は親ノードの失敗として扱いません。後続のノードは`failed`の値で判断されます。
+子ノードの失敗は親ノードの失敗として扱われません。後続のノードは`failed`の値で判断されます。
 
 ## perform内からの追加
 
@@ -96,11 +94,11 @@ class Crawl extends Performer<{ url: string }, void, {}, Env> {
 `spawn`には型検査が適用されません。binding名もpayloadも実行時の値として渡します。
 
 `perform`が失敗した場合、その試行で要求した子ノードは作成されません。再実行時に改めて要求してください。
-service binding越しのリモートperformerからも`spawn`を呼び出せますが、[`await`が必要です](/guide/performer#remote-constraints)。
+service binding越しのリモートperformerからも`spawn`を呼び出せますが、[`await`が必要](/guide/performer#remote-constraints)です。
 
 ## 別のFlowの起動
 
-`f.subflow`は、別のFlowをRunとして起動し、その終端を待ちます。
+`f.subflow`は、別のFlowをRunとして起動し、その終端を待機します。
 
 ```ts
 const REPORTING = flow<{ ids: string[] }>((f) => {
@@ -114,27 +112,27 @@ const PIPELINE = flow<{ prefix: string }>((f) => {
 });
 ```
 
-第2引数にはFlowの定義そのものを渡します。`input`の型は渡したFlowの型引数から決まります。
-起動先は`flows`に登録されている必要があります。登録されていない場合は起動時にエラーになります。
+第2引数にはFlowの定義そのものを渡します。`input`の型は渡したFlowの型引数から決定されます。
+起動先は`flows`に登録されている必要があります。登録されていない場合は起動時にエラーがthrowされます。
 
 子のrunIdは`<子のFlow名>:<親のrunIdのローカル部>-<ノードID>`です。
 
-子の状態がそのままノードの状態になります。`COMPLETED`、`FAILED`、`CANCELLED`のいずれかです。
+子の状態がそのままノードの状態になり、`COMPLETED`、`FAILED`、`CANCELLED`のいずれかです。
 子の戻り値は受け取りません。結果が必要な場合は、performerからR2やD1へ書き込んでください。
 
-親を取り消すと子も取り消されます。
+この状態は親に依存しており、親を取り消すことで子も取り消されます。
 
-入れ子は既定で3段までです。`defineTsumugi`の`runs.maxDepth`で変更可能です。
+入れ子は既定で3段までに制限されています。これは、`defineTsumugi`の`runs.maxDepth`で任意値へ変更可能です。
 
 ## 待ち合わせ
 
 ノードは、自身と子孫のすべてが終わった時点で完了として扱われます。
-`after`で親ノードを指定した後続のノードは、fan-outで展開された子ノードと`spawn`で追加された子孫の完了も待ちます。
+`after`で親ノードを指定した後続のノードは、fan-outで展開された子ノードと`spawn`で追加された子孫の完了も待機します。
 
 ## 発火条件 {#trigger}
 
 既定では、依存がすべて成功した場合にだけノードが実行されます。
-`trigger`を指定すると、依存が失敗した場合の動作を変えられます。
+`trigger`を指定すると、依存が失敗した場合の動作を変更できます。
 
 | 値          | 実行される条件                                              |
 | ----------- | ----------------------------------------------------------- |
@@ -162,7 +160,7 @@ const flows = {
 
 `trigger`は依存を持つノードにのみ指定可能です。`after`が無いノードへの指定はエラーになります。
 
-`'failure'`が数えるのは実際に失敗したノードだけです。
+`'failure'`が数えるのは実際に失敗したノードに限定されます。
 発火条件や`when`で実行されず`SKIPPED`になった依存は失敗として数えないため、後始末のノードも実行されません。
 
 `'failure'`と`'always'`では、失敗した依存に戻り値がありません。
@@ -180,7 +178,7 @@ f.node('alert', 'ALERT', {
 ## 条件分岐 {#when}
 
 入力や前段の結果で経路を選ぶ場合は`when`を指定します。
-`false`を返したノードは`SKIPPED`になり、それを待つ下流のノードも実行されません。
+`false`を返したノードは`SKIPPED`になり、それを待機する下流のノードも実行されません。
 
 ```ts
 f.node('detail', 'DETAIL', {
@@ -201,9 +199,8 @@ f.node('detail', 'DETAIL', {
 `trigger`に`'failure'`か`'always'`を指定した下流は実行されます。
 依存関係のないノードは最後まで実行され、すべてのノードが終わった時点でRunが`FAILED`になります。
 
-Runが`FAILED`になるのは、失敗したノードがある場合です。
-発火条件や`when`で実行されなかっただけのノードは失敗として数えません。
-`trigger: 'failure'`の後始末が成功しても、上流が失敗していればRunは`FAILED`のまま終わります。
+Runが`FAILED`になるのは、失敗したノードがある場合に限り、発火条件や`when`で実行されなかっただけのノードは失敗としてカウントされません。
+`trigger: 'failure'`の後始末が成功しても、上流が失敗していればRunは`FAILED`のまま終了されます。
 
 `SKIPPED`になった理由はノードの`error`に残ります。ダッシュボードの詳細から確認できます。
 
@@ -213,7 +210,7 @@ Runが`FAILED`になるのは、失敗したノードがある場合です。
 ## 取り消し
 
 `cancel`は未実行のノードを停止します。
-実行中のジョブは停止しないので、それらが終わった時点でRunが`CANCELLED`になります。
+実行中のジョブは停止されないため、完了/失敗時点でRunが`CANCELLED`になります。
 
 ## 期限 {#deadline}
 
@@ -228,25 +225,25 @@ const GREETINGS = flow<{ prefix: string }>(
 );
 ```
 
-`deadlineMs`は正の整数(ミリ秒)です。
+`deadlineMs`は正の整数(ミリ秒)を許容します。
 `start`の第4引数の`{ deadlineMs }`を指定した場合はそちらが優先されます。
 
 期限を超過したRunは取り消しと同じ手順で中断されます。
-未実行のノードは`run deadline exceeded`のエラーで`FAILED`になり、実行中のジョブは停止しないので、それらが終わった時点でRunが`FAILED`になります。
-実行中の子のRunは取り消されます。
+未実行のノードは`run deadline exceeded`のエラーで`FAILED`になり、実行中のジョブは停止しないため、完了/失敗時点でRunが`FAILED`になります。
+また、実行中の子のRunは取り消されます。
 
-期限の時点で終わっていなかったRunは、残りのノードがすべて成功しても`FAILED`になります。
+期限の時点で終わっていなかったRunは、残りのノードがすべて成功している場合であっても`FAILED`扱いとなります。
 
-`FAILED`になったRunは通常の失敗と同じように再開可能です。期限は再開の時点から再計算されます。
+`FAILED`になったRunは通常の失敗と同じように再開可能であり、期限は再開の時点から再計算されます。
 
 ## 保持期間
 
 終了したRunは`runs.sweepAfterMs`(既定5分)、`FAILED`のRunは`runs.failedRetentionMs`(既定7日)の経過後に削除されます。
-再開を受け付けるのはこの期間内のみで、経過後の再開の要求は410になります。[RunSettings](/reference/config#runsettings)を参照してください。
+詳細は[RunSettings](/reference/config#runsettings)を参照してください。
 
 ## テスト
 
-`simulateFlow`は、ある入力に対してノードがどの順序で実行され、各ノードにどのpayloadが渡るかを返します。
+`simulateFlow`は、ある入力に対してノードがどの順序で実行され、各ノードにどのpayloadが渡るかを検証するための関数です。performerは実行されません。
 
 ```ts
 import { simulateFlow } from 'tsumugi/testing';
@@ -257,8 +254,8 @@ expect(result.nodes.map((node) => node.id)).toEqual(['list', 'greet:0', 'greet:1
 expect(result.nodes[1].payload).toEqual({ name: 'a' });
 ```
 
-performerは実行しません。各ノードの戻り値は`results`にノードIDとの対応で指定します。
-関数も指定可能です。指定の無いノードの戻り値は`undefined`です。
+各ノードの戻り値は`results`にノードIDとの対応で指定し、関数も指定可能です。
+指定の無いノードの戻り値は`undefined`となります。
 
 `fails`に渡したノードは失敗します。下流は`SKIPPED`、Runは`FAILED`になります。
 

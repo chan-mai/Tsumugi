@@ -8,39 +8,37 @@ Cloudflare Queuesをそのままジョブキューとして使う場合、いく
 
 ### ステータスが管理しづらく、成功したジョブは揮発する
 
-投入したメッセージの現在の状態を問い合わせるAPIがありません。
-成功したメッセージは残らないため、過去の実行を後から参照できません。
+投入したメッセージの現在の状態を問い合わせるAPIがなく、成功したメッセージは残らないため、過去の実行を後から参照することが困難です。
 
-Tsumugiはすべてのジョブの状態をD1の読み取りモデルへ反映します。
+この問題を解決するため、Tsumugiはすべてのジョブの状態をD1の読み取りモデルへ反映しています。
 
-実行中のジョブと終了したジョブが同じテーブルにあるため、一覧も検索も集計も通常のSQLで記述可能です。
+実行中のジョブと終了したジョブが同じテーブルにあるため、一覧も検索も集計も通常のSQLとして記述可能です。
 失敗率や実行時間のような時系列のデータはAnalytics Engineへ記録するため、D1側の削除設定とは独立して保持されます。
 
 ### 排他制御や重複抑制がやりにくい
 
-メッセージから他のメッセージを参照できないため、「同じ顧客のジョブを同時に実行しない」も「同じ内容を二重に投入しない」も自分で実装する必要があります。
+メッセージから他のメッセージを参照できないため、「同じ顧客のジョブを同時に実行しない」も「同じ内容を二重に投入しない」のような処理も自分で実装する必要があります。
 
-Tsumugiはbinding単位で実行中のジョブの状態を管理します。
-`concurrencyKey`を指定するとキー単位で順に実行され、`uniqueKey`を指定すると重複した投入に対して既存のジョブIDが返ります。
+Tsumugiはbinding単位で実行中のジョブの状態を管理しています。
+`concurrencyKey`を明示することでキー単位で順次実行され、`uniqueKey`を明示することで同じキー単位での排他が保証されます。
 
 ### ジョブの種類が増えるほど分岐が増える
 
-consumerはキューに対して1つです。
-ジョブの種類が増えるほど、キューを増やすかconsumer側の分岐が増えるかのどちらかになります。
+consumerはキューに対して1つしか指定できないため、ジョブの種類が増えるほど、キューを増やすかconsumer側の分岐が増えるかのどちらかになってしまいます。
 
-Tsumugiではキューを1本のまま使い、種類をbinding名で分けます。
-binding名はperformerのexport名がそのまま使われ、payloadの型も同じ場所から決まります。
+Tsumugiではキューを1本のまま使い、種類をbinding名で区別しています。
+binding名はperformerのexport名がそのまま使われ、payloadの型も同じ場所から決定されるため、分岐のための冗長な実装は不要です。
 
 ### 希にキューが消失する
 
 Queuesに投入したまま処理されなかった・消失してしまった場合に、それを検知する手段がありません。
 
 Tsumugiは、実行を開始したまま結果が報告されないジョブを検知します。
-事前定義に基づき、`at-least-once`のジョブは再投入し、`at-most-once`のジョブは`STALLED`にして手動での判断を待ちます。
+事前定義に基づき、`at-least-once`のジョブは再投入、`at-most-once`のジョブは`STALLED`にして手動での判断を待つようにもできます。
 
 ## Tsumugiがやること
 
-上の4つは、Queuesの上にDurable ObjectとD1とAnalytics Engineを組み合わせれば解決できますが、その複雑な組み合わせ自体を実装する必要があります。
+上記課題は、Queuesの上にDurable ObjectやD1、Analytics Engineを組み合わせることで解決可能ですが、その複雑な組み合わせ自体を実装する必要があります。
 
 どのDurable Objectへ投入するか、consumerで何を実行するか、状態をいつD1へ書き込むか、リトライを誰が決めるか。
 
@@ -63,9 +61,6 @@ export class SendMail extends Performer<{ to: string }, void, {}, Env> {
 const id = await enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
 ```
 
-上の例のトップレベルの`enqueue`には型の強制が適用されません。
-`defineTsumugi`の戻り値の`tsumugi.enqueue`を使用すると、bindingからpayloadと必須キーの型が決まります。[投入経路](/guide/enqueue#paths)を参照してください。
-
 キューの構成もconsumerの分岐も一覧への反映も、意識する必要はありません。
 リトライ、バックオフ、予約実行、優先度、実行量の制限、重複排除、管理画面は最初から利用できます。
 
@@ -82,10 +77,10 @@ const id = await enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.c
 
 ## 必要なもの
 
-- Workers Paidプラン, SQLite版のDurable ObjectsとQueuesの両方が要求します
-- `compatibility_date`は2025-11-17以降, `ctx.exports`を使うためです
-- D1データベース, 読み取りモデルの置き場でマイグレーションの適用が必要です
-- Analytics Engineは任意, 時系列メトリクスを記録する場合だけ設定します
+- Workers Paidプラン
+- `compatibility_date` 2025-11-17以降
+- D1データベースへのマイグレーション適用が必要です
+- Analytics Engine(時系列メトリクスを記録する場合のみ)
 
 ## 着想
 
