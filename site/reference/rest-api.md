@@ -416,6 +416,7 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
       "cron": "0 3 * * *",
       "time_zone": "Asia/Tokyo",
       "overlap": "skip",
+      "paused": false,
       "next_run_at": 1767722400000,
       "last_run_at": 1767636000000,
       "last_fired_at": 1767636001200,
@@ -438,6 +439,7 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
 | `cron`            | cron式。`everyMs`を指定した場合は`null`                  |
 | `time_zone`       | cronと表示に使うIANAタイムゾーン。固定間隔では`UTC`     |
 | `overlap`         | `skip`または`overlap`                                    |
+| `paused`          | 一時停止中か。停止中は定期の発火なし                     |
 | `next_run_at`     | 次回の実行予定                                           |
 | `last_run_at`     | 直近の発火の予定時刻。一度も発火していない場合は`null`   |
 | `last_fired_at`   | 直近の発火の実時刻。`last_run_at`との差が遅れ            |
@@ -450,6 +452,41 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
 末尾が`_at`の項目はエポックミリ秒です。
 
 `schedules`を定義していない構成では501になります。詳細は[定期実行](/guide/schedule)を参照してください。
+
+## POST /api/schedules/:name/pause
+
+スケジュールを一時停止します。停止中は定期の発火がありません。
+
+```json
+{ "ok": true }
+```
+
+停止前の発火で投入済みのジョブには影響しません。
+
+## POST /api/schedules/:name/resume
+
+一時停止中のスケジュールを再開します。
+
+```json
+{ "ok": true }
+```
+
+停止中に経過した回はすべて破棄され、次回は再開時点から次の境界になります。
+
+## POST /api/schedules/:name/trigger
+
+スケジュールを1回だけ即時に発火します。
+
+```json
+{ "id": "REPORT:nightly-1767650000000-1-manual", "kind": "flow" }
+```
+
+`id`は投入したジョブのIDまたは開始したRunのIDで、`kind`はその区別です。
+
+一時停止中でも可能で、`overlap`の判定は行いません。次回の定期の発火時刻への影響はありません。
+発火に失敗した場合は500とエラー詳細が返され、一覧の`last_error`にも同様の内容が記録されます。
+
+これら全ての操作は`schedules`を定義していない構成では501になります。
 
 ## GET /api/bindings
 

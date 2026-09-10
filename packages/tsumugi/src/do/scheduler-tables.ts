@@ -19,6 +19,8 @@ export const schedule = sqliteTable(
 		timeZone: text('time_zone').notNull().default('UTC'),
 		/** 'skip' | 'overlap', 前回未了時の扱い */
 		overlap: text('overlap').notNull(),
+		/** 一時停止中は1, tickの発火対象から除外 */
+		paused: integer('paused').notNull().default(0),
 		nextRunAt: integer('next_run_at').notNull(),
 		/** 直近発火の予定時刻 */
 		lastRunAt: integer('last_run_at'),

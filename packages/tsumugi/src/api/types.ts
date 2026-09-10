@@ -167,6 +167,8 @@ export type ScheduleSummary = {
 	cron: string | null;
 	time_zone: string;
 	overlap: 'skip' | 'overlap';
+	/** 一時停止中か, 停止中は定期の発火なし */
+	paused: boolean;
 	next_run_at: number;
 	/** 直近発火の予定時刻, last_fired_atとの差が遅延 */
 	last_run_at: number | null;
@@ -179,6 +181,9 @@ export type ScheduleSummary = {
 };
 
 export type SchedulesResponse = { schedules: ScheduleSummary[] };
+
+/** 手動発火の応答, idは投入したジョブまたは開始したRun */
+export type TriggerScheduleResponse = { id: string; kind: 'job' | 'flow' };
 
 /** retry / cancelの応答 */
 export type MutationResponse = { ok: true };

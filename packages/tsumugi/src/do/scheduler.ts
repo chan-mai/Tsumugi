@@ -13,7 +13,7 @@ import { resolveShard } from '../core/shard.js';
 import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput } from './job-shard.js';
 import type { StartInput, StartResult } from './run.js';
-import { SchedulerRepo } from './scheduler-repo.js';
+import { SchedulerRepo, type FiredPatch } from './scheduler-repo.js';
 import type { ScheduleRow } from './scheduler-schema.js';
 
 export type SchedulerEnv = ClientEnv & {
@@ -30,6 +30,9 @@ const TICK_LIMIT = 50;
 /** 正規化した定義のfingerprintを置くsettingのキー */
 const FINGERPRINT_KEY = 'defs_fingerprint';
 
+/** 手動発火の連番を置くsettingのキー, 同一ミリ秒の発火をIDで区別 */
+const MANUAL_SEQ_KEY = 'manual_seq';
+
 /** 一覧RPCが返す1件, RESTとダッシュボードがそのまま表示 */
 export type ScheduleView = {
 	name: string;
@@ -39,6 +42,7 @@ export type ScheduleView = {
 	cron: string | null;
 	time_zone: string;
 	overlap: 'skip' | 'overlap';
+	paused: boolean;
 	next_run_at: number;
 	last_run_at: number | null;
 	last_fired_at: number | null;
@@ -48,6 +52,13 @@ export type ScheduleView = {
 	skipped_count: number;
 	last_error: string | null;
 };
+
+/** 一時停止RPCの結果 */
+export type ScheduleMutationResult = { ok: true } | { ok: false; reason: 'not-found' };
+
+/** 手動発火RPCの結果, 失敗の理由はRESTがそのまま返す */
+export type ScheduleTriggerResult =
+	{ ok: true; kind: 'job' | 'flow'; id: string } | { ok: false; reason: 'not-found' } | { ok: false; reason: 'failed'; error: string };
 
 /** skip判定に使うJob DOの面, DOクラス非参照でDO実装が不要(ADR-0023) */
 interface SchedulerJobStub extends Rpc.DurableObjectBranded {
@@ -69,6 +80,8 @@ export interface TsumugiSchedulerInstance extends Rpc.DurableObjectBranded {
 	clock: Clock;
 	sync(): Promise<void>;
 	list(): Promise<ScheduleView[]>;
+	setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult>;
+	trigger(name: string): Promise<ScheduleTriggerResult>;
 	alarm(): Promise<void>;
 }
 
@@ -136,6 +149,7 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 				cron: row.cron,
 				time_zone: row.time_zone,
 				overlap: row.overlap as 'skip' | 'overlap',
+				paused: row.paused === 1,
 				next_run_at: row.next_run_at,
 				last_run_at: row.last_run_at,
 				last_fired_at: row.last_fired_at,
@@ -145,6 +159,54 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 				skipped_count: row.skipped_count,
 				last_error: row.last_error,
 			}));
+		}
+
+		/**
+		 * 一時停止の切り替え
+		 * 停止中に経過した回は再開時にすべて破棄し、次回は現在から見た次の境界
+		 */
+		async setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult> {
+			const now = this.clock.now();
+			this.#reconcile(now);
+			const row = this.repo.find(name);
+			if (!row) return { ok: false, reason: 'not-found' };
+			// 停止中でない行へのresumeは無変更, 発火待ちの予定は維持
+			const elapsed = !paused && row.paused === 1 && row.next_run_at <= now;
+			this.repo.setPaused(
+				name,
+				paused,
+				elapsed ? nextOccurrence({ everyMs: row.every_ms, cron: row.cron, timeZone: row.time_zone }, row.next_run_at, now) : null,
+				now,
+			);
+			await this.#armNext();
+			return { ok: true };
+		}
+
+		/**
+		 * 手動発火, 一時停止中も対象でoverlapの判定は行わない
+		 * 予定は進めず、次の定期の発火時刻は変わらない
+		 */
+		async trigger(name: string): Promise<ScheduleTriggerResult> {
+			const now = this.clock.now();
+			this.#reconcile(now);
+			const row = this.repo.find(name);
+			const def = Object.hasOwn(schedules, name) ? schedules[name] : undefined;
+			if (!row || !def) return { ok: false, reason: 'not-found' };
+
+			// 連番で同一ミリ秒の再発火もIDを区別, 発火ごとに別実行
+			const seq = Number(this.repo.readSetting(MANUAL_SEQ_KEY) ?? '0') + 1;
+			this.repo.writeSetting(MANUAL_SEQ_KEY, String(seq));
+
+			try {
+				// 通常のlocalIdは数字終端, 末尾-manualの形式と衝突なし
+				const fired = await this.#dispatch(row, def, now, `${name}-${now}-${seq}-manual`);
+				this.repo.markFired(name, fired, null, now);
+				return { ok: true, kind: row.kind as 'job' | 'flow', id: (fired.jobId ?? fired.runId)! };
+			} catch (error) {
+				const message = messageOf(error);
+				this.repo.markError(name, message, null, now);
+				return { ok: false, reason: 'failed', error: message };
+			}
 		}
 
 		async alarm(): Promise<void> {
@@ -166,13 +228,16 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 				// デプロイ直後の自己同期, トラフィックが無くても既存alarmの発火で定義に追いつく
 				this.#reconcile(now);
 
-				for (const row of this.repo.due(now, TICK_LIMIT)) {
-					const def = Object.hasOwn(schedules, row.name) ? schedules[row.name] : undefined;
+				for (const due of this.repo.due(now, TICK_LIMIT)) {
+					const def = Object.hasOwn(schedules, due.name) ? schedules[due.name] : undefined;
 					if (!def) {
 						// reconcileで消えているはずの行への防御, 定義の無い行は発火不能
-						this.repo.remove([row.name]);
+						this.repo.remove([due.name]);
 						continue;
 					}
+					// 前の発火のRPC待ちの間に一時停止や再開が入り得るため直前の行で発火可否を再判定
+					const row = this.repo.find(due.name);
+					if (!row || row.paused === 1 || row.next_run_at > now) continue;
 					await this.#fire(row, def, now);
 				}
 				await this.#armNext();
@@ -226,36 +291,42 @@ export function createSchedulerClass({ schedules, bindings, targets, failureBind
 					return;
 				}
 
-				const resolved = await this.#resolve(def, { scheduledAt: occurrence });
-
-				if (row.kind === 'job') {
-					const binding = def.binding as string;
-					// IDは決定的, 再発火しても同じIDの再投入は既存を返す(ADR-0029)
-					const shard = resolveShard(binding, configOf(bindings, binding)?.shards ?? 1, def.partitionKey);
-					const jobId = formatJobId({ binding, shard, localId: `${row.name}-${occurrence}` });
-					await client.enqueue(this.env, {
-						binding,
-						payload: resolved,
-						id: jobId,
-						...(def.partitionKey !== undefined ? { partitionKey: def.partitionKey } : {}),
-						...jobOptionsOf(def),
-					} as EnqueueInput);
-					this.repo.markFired(row.name, { occurrence, jobId }, next, now);
-				} else {
-					const flow = def.flow as string;
-					const runId = formatRunId({ flow, localId: `${row.name}-${occurrence}` });
-					await this.#runStub(runId).start({
-						flow,
-						input: resolved,
-						...(def.deadlineMs !== undefined ? { deadlineMs: def.deadlineMs } : {}),
-					});
-					this.repo.markFired(row.name, { occurrence, runId }, next, now);
-				}
+				// IDは決定的, 再発火しても同じIDの再投入は既存を返す(ADR-0029)
+				const fired = await this.#dispatch(row, def, occurrence, `${row.name}-${occurrence}`);
+				this.repo.markFired(row.name, fired, next, now);
 			} catch (error) {
 				// 1件の失敗でも他のscheduleは継続, 理由は一覧に表示され外部から確認可能
 				console.error(`tsumugi: schedule ${row.name} failed to fire`, error);
 				this.repo.markError(row.name, messageOf(error), next, now);
 			}
+		}
+
+		/** 投入またはrunの開始, localIdは定期と手動で規則が異なり呼び出し側が決める */
+		async #dispatch(row: ScheduleRow, def: AnyScheduleDef, occurrence: number, localId: string): Promise<FiredPatch> {
+			const resolved = await this.#resolve(def, { scheduledAt: occurrence });
+
+			if (row.kind === 'job') {
+				const binding = def.binding as string;
+				const shard = resolveShard(binding, configOf(bindings, binding)?.shards ?? 1, def.partitionKey);
+				const jobId = formatJobId({ binding, shard, localId });
+				await client.enqueue(this.env, {
+					binding,
+					payload: resolved,
+					id: jobId,
+					...(def.partitionKey !== undefined ? { partitionKey: def.partitionKey } : {}),
+					...jobOptionsOf(def),
+				} as EnqueueInput);
+				return { occurrence, jobId };
+			}
+
+			const flow = def.flow as string;
+			const runId = formatRunId({ flow, localId });
+			await this.#runStub(runId).start({
+				flow,
+				input: resolved,
+				...(def.deadlineMs !== undefined ? { deadlineMs: def.deadlineMs } : {}),
+			});
+			return { occurrence, runId };
 		}
 
 		/** 前回の発火がまだ終端に達していないか, overlap='skip'の判定 */

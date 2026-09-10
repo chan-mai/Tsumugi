@@ -374,6 +374,9 @@ model Schedule {
 	@doc("What happens when the previous occurrence has not finished")
 	overlap: "skip" | "overlap";
 
+	@doc("Whether the schedule is paused. A paused schedule does not fire on its own; occurrences elapsed while paused are discarded on resume.")
+	paused: boolean;
+
 	next_run_at: integer;
 
 	@doc("Scheduled time of the latest firing. The gap to last_fired_at is the delay.")
@@ -437,6 +440,12 @@ model PartiallyApplied {
 @doc("Not available in this deployment")
 model NotImplemented {
 	@statusCode statusCode: 501;
+	@body body: Error;
+}
+
+@doc("The firing failed. The reason is also recorded as last_error of the schedule.")
+model TriggerFailed {
+	@statusCode statusCode: 500;
 	@body body: Error;
 }
 

@@ -30,6 +30,9 @@ const ROUTES: [method: string, path: string][] = [
 	['POST', '/api/jobs/bulk-cancel'],
 	['GET', '/api/metrics'],
 	['GET', '/api/schedules'],
+	['POST', '/api/schedules/nightly/pause'],
+	['POST', '/api/schedules/nightly/resume'],
+	['POST', '/api/schedules/nightly/trigger'],
 	['POST', '/api/bindings/REST/policy'],
 	['POST', '/api/bindings/REST/policy/reset'],
 	['GET', '/'],
@@ -417,6 +420,7 @@ describe('REST API', () => {
 			cron: '0 3 * * *',
 			time_zone: 'Asia/Tokyo',
 			overlap: 'skip',
+			paused: false,
 			next_run_at: T0,
 			last_run_at: null,
 			last_fired_at: null,
@@ -432,6 +436,77 @@ describe('REST API', () => {
 		const res = await app.request('/api/schedules', { headers: authorized }, env as RestEnv);
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ schedules: [schedule] });
+	});
+});
+
+describe('scheduleの操作', () => {
+	const authorized = { authorization: `Bearer ${TOKEN}` };
+
+	/** Scheduler DOの代わり, 呼び出しの記録と結果の差し替え */
+	function appWith() {
+		const calls: [string, boolean][] = [];
+		const app = createRest(bearerAuth(TOKEN), {
+			schedulerFor: () => ({
+				list: async () => [],
+				setPaused: async (name: string, paused: boolean) => {
+					calls.push([name, paused]);
+					return name === 'nightly' ? { ok: true as const } : { ok: false as const, reason: 'not-found' as const };
+				},
+				trigger: async (name: string) =>
+					name === 'nightly'
+						? { ok: true as const, kind: 'flow' as const, id: 'REPORT:nightly-1-manual' }
+						: name === 'broken'
+							? { ok: false as const, reason: 'failed' as const, error: 'payload resolver failed' }
+							: { ok: false as const, reason: 'not-found' as const },
+			}),
+		});
+		return { app, calls };
+	}
+
+	const post = (app: ReturnType<typeof appWith>['app'], path: string) =>
+		app.request(path, { method: 'POST', headers: authorized }, env as RestEnv);
+
+	it('pauseとresumeがDOへ届く', async () => {
+		const { app, calls } = appWith();
+		const paused = await post(app, '/api/schedules/nightly/pause');
+		expect(paused.status).toBe(200);
+		expect(await paused.json()).toEqual({ ok: true });
+
+		const resumed = await post(app, '/api/schedules/nightly/resume');
+		expect(resumed.status).toBe(200);
+		expect(calls).toEqual([
+			['nightly', true],
+			['nightly', false],
+		]);
+	});
+
+	it('不明な名前は404', async () => {
+		const { app } = appWith();
+		for (const action of ['pause', 'resume', 'trigger']) {
+			const res = await post(app, `/api/schedules/missing/${action}`);
+			expect([action, res.status]).toEqual([action, 404]);
+		}
+	});
+
+	it('手動発火は201で発火先のIDを返す', async () => {
+		const { app } = appWith();
+		const res = await post(app, '/api/schedules/nightly/trigger');
+		expect(res.status).toBe(201);
+		expect(await res.json()).toEqual({ id: 'REPORT:nightly-1-manual', kind: 'flow' });
+	});
+
+	it('発火の失敗は500で理由を返す', async () => {
+		const { app } = appWith();
+		const res = await post(app, '/api/schedules/broken/trigger');
+		expect(res.status).toBe(500);
+		expect(await res.json()).toEqual({ error: 'payload resolver failed' });
+	});
+
+	it('schedulesを定義していない構成では501', async () => {
+		for (const action of ['pause', 'resume', 'trigger']) {
+			const res = await call(withAuth, 'POST', `/api/schedules/nightly/${action}`, authorized);
+			expect([action, res.status]).toEqual([action, 501]);
+		}
 	});
 });
 

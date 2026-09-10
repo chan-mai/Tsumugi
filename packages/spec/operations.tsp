@@ -221,6 +221,47 @@ op listSchedules(): {
 	};
 } | Unauthorized | NotImplemented | Unavailable;
 
+@route("/api/schedules/{name}/pause")
+@operationId("pauseSchedule")
+@summary("Pause a schedule")
+@doc("A paused schedule does not fire on its own. Jobs already enqueued by past firings are not affected.")
+@post
+op pauseSchedule(@path @doc("Schedule name") name: string):
+	| MutationAccepted
+	| Unauthorized
+	| NotFound
+	| NotImplemented
+	| Unavailable;
+
+@route("/api/schedules/{name}/resume")
+@operationId("resumeSchedule")
+@summary("Resume a paused schedule")
+@doc("Occurrences elapsed while paused are discarded; the next firing is the next boundary from now.")
+@post
+op resumeSchedule(@path @doc("Schedule name") name: string):
+	| MutationAccepted
+	| Unauthorized
+	| NotFound
+	| NotImplemented
+	| Unavailable;
+
+@route("/api/schedules/{name}/trigger")
+@operationId("triggerSchedule")
+@summary("Fire a schedule once, now")
+@doc("Works while paused and skips the overlap check. The regular next run time does not change.")
+@returnsDoc("Fired. The id is the enqueued job id or the started run id.")
+@post
+op triggerSchedule(@path @doc("Schedule name") name: string): {
+	@statusCode statusCode: 201;
+
+	@body body: {
+		@doc("Job id for kind=job, run id for kind=flow")
+		id: string;
+
+		kind: "job" | "flow";
+	};
+} | Unauthorized | NotFound | NotImplemented | TriggerFailed | Unavailable;
+
 @route("/api/runs")
 @operationId("listRuns")
 @summary("List runs")
