@@ -5,6 +5,7 @@ import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js'
 import { job as readModel } from '../projection/tables.js';
 import { run as runModel, runNode } from '../projection/run-tables.js';
 import { InvalidJobIdError, InvalidRunIdError, parseRunId, shardName, shardNameOf } from '../core/ids.js';
+import { normalizeTraceparent } from '../core/trace.js';
 import type { BulkFailure, MutationResult, TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 import type { Ui } from '../ui/serve.js';
@@ -23,6 +24,7 @@ import type {
 	JobDetail,
 	JobDetailResponse,
 	JobListResponse,
+	JobLogEntry,
 	JobSummary,
 	MutationResponse,
 	RunDetailResponse,
@@ -77,7 +79,11 @@ export type RestOptions<Env extends RestEnv> = {
 export type CreateJobInput = CreateJobRequest;
 
 /** 投入内容の検証, 失敗なら理由を返す */
-export function validateCreateJob(body: unknown, bindings: readonly string[] | undefined): { input: CreateJobInput } | { error: string } {
+export function validateCreateJob(
+	body: unknown,
+	bindings: readonly string[] | undefined,
+	traceparentHeader?: string,
+): { input: CreateJobInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
 	const raw = body as Record<string, unknown>;
 
@@ -107,6 +113,16 @@ export function validateCreateJob(body: unknown, bindings: readonly string[] | u
 	}
 
 	const input: CreateJobInput = { binding: raw.binding, payload: raw.payload };
+	const traceparent = raw.traceparent !== undefined ? raw.traceparent : traceparentHeader;
+	if (traceparent !== undefined) {
+		if (typeof traceparent !== 'string') return { error: 'traceparent must be a string' };
+		try {
+			const normalized = normalizeTraceparent(traceparent);
+			if (normalized !== null) input.traceparent = normalized;
+		} catch (error) {
+			return { error: error instanceof Error ? error.message : 'invalid traceparent' };
+		}
+	}
 	if (typeof raw.maxAttempts === 'number') input.maxAttempts = raw.maxAttempts;
 	if (typeof raw.delayMs === 'number') input.delayMs = raw.delayMs;
 	if (typeof raw.expiresInMs === 'number') input.expiresInMs = raw.expiresInMs;
@@ -395,6 +411,16 @@ export function parseAttempts(raw: unknown): AttemptRecord[] {
 	}
 }
 
+export function parseJobLogs(raw: unknown): JobLogEntry[] {
+	if (typeof raw !== 'string' || raw.length === 0) return [];
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
 /**
  * 1回目で成功したジョブの履歴の構築
  *
@@ -560,7 +586,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
 		}
 
-		const parsed = validateCreateJob(body, bindings);
+		const parsed = validateCreateJob(body, bindings, c.req.header('traceparent'));
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
 		const id = await enqueue(c.env, parsed.input);
@@ -818,6 +844,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			// 実行開始の期限, 経過後は実行されずCANCELLED(#97)
 			expires_at: found.expiresAt,
 			progress: found.progress,
+			traceparent: found.traceparent,
+			logs: parseJobLogs(found.logs),
 			payload: found.payload,
 			// performの戻り値, 成功時のみ入り未完了はnull(#9), payloadと同じくJSON文字列のまま返す
 			result: found.result,

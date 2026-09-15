@@ -46,7 +46,10 @@ op listJobs(
 @summary("Enqueue a job")
 @returnsDoc("Enqueued. On a uniqueKey collision the id of the existing job is returned.")
 @post
-op createJob(@body body: CreateJobRequest): {
+op createJob(
+	@body body: CreateJobRequest,
+	@header @doc("Trace context used when the request body omits traceparent") traceparent?: Traceparent,
+): {
 	@statusCode statusCode: 201;
 
 	@body body: {
@@ -56,7 +59,7 @@ op createJob(@body body: CreateJobRequest): {
 
 @route("/api/jobs/{id}")
 @operationId("getJob")
-@summary("Get a job with its attempt log")
+@summary("Get a job with its trace context, logs, and attempt history")
 @returnsDoc("The job")
 @get
 op getJob(@path @doc("Job id") id: string): {

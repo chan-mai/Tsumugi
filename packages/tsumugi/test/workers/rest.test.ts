@@ -195,6 +195,7 @@ describe('REST API', () => {
 			'expires_at',
 			'guarantee',
 			'id',
+			'logs',
 			'max_attempts',
 			'node_id',
 			'payload',
@@ -205,6 +206,7 @@ describe('REST API', () => {
 			'run_after',
 			'run_id',
 			'state',
+			'traceparent',
 			'unique_key',
 			'updated_at',
 		]);

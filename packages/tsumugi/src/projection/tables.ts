@@ -33,9 +33,11 @@ export const job = sqliteTable(
 		payload: text('payload').notNull(),
 		// performの戻り値, DOのjob.resultをそのまま投影(#9)
 		result: text('result'),
+		traceparent: text('traceparent'),
 		runId: text('run_id'),
 		nodeId: text('node_id'),
 		attemptsLog: text('attempts_log'),
+		logs: text('logs'),
 	},
 	(t) => [
 		index('job_state').on(t.state, t.updatedAt),

@@ -33,6 +33,7 @@ export const job = sqliteTable(
 		payload: text('payload').notNull(),
 		// performの戻り値, 成功時にJSON文字列で入る(#9)
 		result: text('result'),
+		traceparent: text('traceparent'),
 		// v2のDAG用の予約列(ADR-0015), 後からのスキーマ変更が不要なよう最初から配置
 		runId: text('run_id'),
 		nodeId: text('node_id'),
@@ -91,6 +92,18 @@ export const attempt = sqliteTable(
 		error: text('error'),
 	},
 	(t) => [primaryKey({ columns: [t.jobId, t.attempt] })],
+);
+
+export const jobLog = sqliteTable(
+	'job_log',
+	{
+		seq: integer('seq').primaryKey({ autoIncrement: true }),
+		jobId: text('job_id').notNull(),
+		attempt: integer('attempt').notNull(),
+		timestamp: integer('timestamp').notNull(),
+		message: text('message').notNull(),
+	},
+	(t) => [index('job_log_job').on(t.jobId, t.seq)],
 );
 
 /**

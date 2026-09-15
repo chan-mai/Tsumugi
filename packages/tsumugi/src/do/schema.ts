@@ -30,6 +30,7 @@ export const SCHEMA = [
 		payload TEXT NOT NULL,
 		-- performの戻り値, 成功時にJSON文字列で入る(#9), 上限超過や非直列化はnull
 		result TEXT,
+		traceparent TEXT,
 		-- v2のDAG用の予約列(ADR-0015), 後からのスキーマ変更が不要なよう最初から配置
 		run_id TEXT,
 		node_id TEXT
@@ -70,6 +71,14 @@ export const SCHEMA = [
 		error TEXT,
 		PRIMARY KEY (job_id, attempt)
 	)`,
+	`CREATE TABLE IF NOT EXISTS job_log (
+		seq INTEGER PRIMARY KEY AUTOINCREMENT,
+		job_id TEXT NOT NULL,
+		attempt INTEGER NOT NULL,
+		timestamp INTEGER NOT NULL,
+		message TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS job_log_job ON job_log (job_id, seq)`,
 	// Run DOへの通知待ち(ADR-0031), 送信の成功まで削除せず中断しても次のtickで追いつく
 	// D1への投影とは宛先もまとめ方も別で表も分離, 共用は片方の失敗がもう片方を停止
 	`CREATE TABLE IF NOT EXISTS run_notify (
@@ -100,6 +109,7 @@ export function applySchema(sql: SqlStorage): void {
 	ensureColumn(sql, 'job', 'heartbeat_at', 'INTEGER');
 	ensureColumn(sql, 'job', 'progress', 'REAL');
 	ensureColumn(sql, 'job', 'expires_at', 'INTEGER');
+	ensureColumn(sql, 'job', 'traceparent', 'TEXT');
 	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
 }
 
@@ -144,6 +154,7 @@ export type JobRow = {
 	progress: number | null;
 	payload: string;
 	result: string | null;
+	traceparent: string | null;
 	run_id: string | null;
 	node_id: string | null;
 };

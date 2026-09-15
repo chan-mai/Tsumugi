@@ -3,6 +3,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { embedJobId, formatJobId, shardName } from '../core/ids.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
+import { normalizeTraceparent } from '../core/trace.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, FailureNotice, KeyBuckets, Policy, Retention } from '../core/types.js';
 import type { RunStub } from './run.js';
@@ -40,6 +41,7 @@ export type DispatchMessage = {
 	claimRequired: boolean;
 	/** 実行開始の期限, consumerが実行の直前に判定 */
 	expiresAt: number | null;
+	traceparent?: string;
 };
 
 export type ShardEnv = {
@@ -85,6 +87,7 @@ export type ShardSettings = {
 export type EnqueueInput = {
 	binding: string;
 	payload: unknown;
+	traceparent?: string;
 	priority?: number;
 	maxAttempts?: number;
 	concurrencyKey?: string;
@@ -387,13 +390,14 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 上限を回避する唯一の手段で、単発のenqueueもこれを使用
 	 */
 	async enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]> {
+		const traceparents = inputs.map((input) => normalizeTraceparent(input.traceparent));
 		const now = this.clock.now();
 		this.#loadPolicy();
 		// enqueue同梱は静的設定, configure()でpin済みなら無視(#6)
 		if (settings) this.#applySettings(settings, false);
 		const ids: string[] = [];
 
-		for (const input of inputs) {
+		for (const [index, input] of inputs.entries()) {
 			const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createId() });
 
 			// IDを指定した再投入は既存のIDを回答, Run DOの再送での同一ノードのジョブ増加を防止
@@ -426,6 +430,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				expiresAt: input.expiresAt ?? (input.expiresInMs !== undefined ? now + input.expiresInMs : null),
 				createdAt: now,
 				payload: input.payload,
+				traceparent: traceparents[index] ?? null,
 				runId: input.runId ?? null,
 				nodeId: input.nodeId ?? null,
 			});
@@ -530,6 +535,14 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 投影のためのalarm設定, 次のreaper期限まで投影が無いと進捗が数分遅延
 		await this.#armAlarm(now);
 		return true;
+	}
+
+	async log(jobId: string, attempt: number, message: string): Promise<boolean> {
+		if (typeof message !== 'string' || !Number.isInteger(attempt) || attempt < 1) return false;
+		const now = this.clock.now();
+		const result = this.repo.log(jobId, attempt, message, now);
+		if (result === 'stored') await this.#armAlarm(now);
+		return result !== 'rejected';
 	}
 
 	/**
@@ -675,6 +688,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 							payload: this.repo.payloadOf(row),
 							timeoutMs: row.timeout_ms,
 							claimRequired: row.guarantee === 'at-most-once',
+							...(row.traceparent !== null ? { traceparent: row.traceparent } : {}),
 							expiresAt: row.expires_at,
 						},
 					});

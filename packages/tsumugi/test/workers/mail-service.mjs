@@ -4,12 +4,19 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 
 export class SendMail extends WorkerEntrypoint {
 	async perform(payload, ctx) {
+		if (payload?.log) await ctx.log(payload.log);
 		// RPC境界を越える例外の伝播を見るための口
 		if (payload?.fail) throw new Error('intentional failure');
 		// 関数がstubとして越えているかを呼び返して確かめる
 		const spawned = typeof ctx?.spawn === 'function';
 		if (spawned) await ctx.spawn('child', 'MAIL', { to: 'b@example.com' });
-		return { to: payload?.to ?? null, jobId: ctx?.jobId ?? null, keys: Object.keys(ctx ?? {}), spawned };
+		return {
+			to: payload?.to ?? null,
+			jobId: ctx?.jobId ?? null,
+			traceparent: ctx?.traceparent ?? null,
+			keys: Object.keys(ctx ?? {}),
+			spawned,
+		};
 	}
 }
 

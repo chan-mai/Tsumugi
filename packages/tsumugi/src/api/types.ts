@@ -1,4 +1,7 @@
 import type { BlockedBy } from '../core/types.js';
+import type { JobLogEntry } from '../core/log.js';
+
+export type { JobLogEntry };
 
 /**
  * REST APIの要求と応答の型
@@ -41,6 +44,8 @@ export type JobDetail = JobSummary & {
 	expires_at: number | null;
 	/** 実行中のジョブが報告した進捗, 0以上1以下で報告が無ければnull */
 	progress: number | null;
+	traceparent: string | null;
+	logs: JobLogEntry[];
 	payload: string;
 	/** performの戻り値, 成功時のみ入る(#9) */
 	result: string | null;
@@ -65,6 +70,7 @@ export type CreateJobRequest = {
 	priority?: number;
 	concurrencyKey?: string;
 	uniqueKey?: string;
+	traceparent?: string;
 };
 
 export type CreateJobResponse = { id: string };

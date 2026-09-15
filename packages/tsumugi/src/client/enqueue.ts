@@ -1,5 +1,6 @@
 import { shardName } from '../core/ids.js';
 import { resolveShard } from '../core/shard.js';
+import { normalizeTraceparent } from '../core/trace.js';
 import type { Policy } from '../core/types.js';
 import type { EnqueueInput, ShardSettings } from '../do/job-shard.js';
 
@@ -89,6 +90,7 @@ export function createClient<Env extends ClientEnv>(
 	};
 
 	async function enqueueMany(env: Env, inputs: readonly EnqueueInput[]): Promise<string[]> {
+		for (const input of inputs) normalizeTraceparent(input.traceparent);
 		// 宛先DOごとの集約, 逐次の個別RPCはDOの1,000 req/sソフト上限が律速
 		type Group = { stub: DurableObjectStub<JobShardStub>; settings: ShardSettings | undefined; items: EnqueueInput[] };
 		const groups = new Map<string, Group>();

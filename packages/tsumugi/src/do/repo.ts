@@ -1,10 +1,11 @@
 import { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { assertTransition } from '../core/transitions.js';
+import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../core/log.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type { Backoff, DeliveryGuarantee, FailureNotice, JobState, JobView, KeyBuckets, Retention } from '../core/types.js';
 import { applySchema, type AttemptRow, type JobRow } from './schema.js';
-import { attempt, failureNotify, job, keyBucket, outbox, runNotify, setting, uniqueKey } from './tables.js';
+import { attempt, failureNotify, job, jobLog, keyBucket, outbox, runNotify, setting, uniqueKey } from './tables.js';
 
 /**
  * 1試行あたりのエラー本文の上限
@@ -39,6 +40,7 @@ export type NewJob = {
 	expiresAt: number | null;
 	createdAt: number;
 	payload: unknown;
+	traceparent?: string | null;
 	/** DAGのノードとして投入された場合の宛先(ADR-0015) */
 	runId?: string | null;
 	nodeId?: string | null;
@@ -121,6 +123,7 @@ export class JobRepo {
 				progress: null,
 				payload: JSON.stringify(newJob.payload),
 				result: null,
+				traceparent: newJob.traceparent ?? null,
 				runId: newJob.runId ?? null,
 				nodeId: newJob.nodeId ?? null,
 			})
@@ -139,7 +142,7 @@ export class JobRepo {
 		// 試行履歴も同梱, 別経路では冪等性の判定がもう1つ必要(ADR-0028)
 		this.db
 			.insert(outbox)
-			.values({ jobId: id, snapshot: JSON.stringify({ ...row, attempts_log: this.attemptsOf(id) }) })
+			.values({ jobId: id, snapshot: JSON.stringify({ ...row, attempts_log: this.attemptsOf(id), logs: this.logsOf(id) }) })
 			.run();
 		this.writes++;
 	}
@@ -156,6 +159,43 @@ export class JobRepo {
 			finished_at: r.finishedAt,
 			error: r.error,
 		}));
+	}
+
+	logsOf(jobId: string): JobLogEntry[] {
+		const rows = this.db
+			.select({ attempt: jobLog.attempt, timestamp: jobLog.timestamp, message: jobLog.message })
+			.from(jobLog)
+			.where(eq(jobLog.jobId, jobId))
+			.orderBy(asc(jobLog.seq))
+			.limit(LOG_KEEP)
+			.all();
+		this.reads++;
+		return rows;
+	}
+
+	log(id: string, attemptNumber: number, message: string, now: number): 'stored' | 'throttled' | 'rejected' {
+		const row = this.find(id);
+		if (!row || (row.state !== 'QUEUED' && row.state !== 'RUNNING') || row.attempts + 1 !== attemptNumber) return 'rejected';
+		const history = this.db
+			.select({ count: sql<number>`count(*)`, lastAt: sql<number | null>`max(${jobLog.timestamp})` })
+			.from(jobLog)
+			.where(eq(jobLog.jobId, id))
+			.get();
+		this.reads++;
+		if (history?.lastAt !== null && history?.lastAt !== undefined && now - history.lastAt < LOG_MIN_INTERVAL_MS) return 'throttled';
+		this.db
+			.insert(jobLog)
+			.values({ jobId: id, attempt: attemptNumber, timestamp: now, message: message.slice(0, LOG_MAX_CHARS) })
+			.run();
+		this.writes++;
+		const excess = (history?.count ?? 0) + 1 - LOG_KEEP;
+		if (excess > 0) {
+			const oldest = this.db.select({ seq: jobLog.seq }).from(jobLog).where(eq(jobLog.jobId, id)).orderBy(asc(jobLog.seq)).limit(excess);
+			this.db.delete(jobLog).where(inArray(jobLog.seq, oldest)).run();
+			this.writes++;
+		}
+		this.#appendOutbox(id);
+		return 'stored';
 	}
 
 	/**
@@ -295,6 +335,7 @@ export class JobRepo {
 			progress: r.progress,
 			payload: r.payload,
 			result: r.result,
+			traceparent: r.traceparent,
 			run_id: r.runId,
 			node_id: r.nodeId,
 		};
@@ -502,6 +543,8 @@ export class JobRepo {
 
 		// 先に履歴を削除, ジョブ行を消した後では対象を特定できず参照先の無い行が残る
 		this.db.delete(attempt).where(inArray(attempt.jobId, targets)).run();
+		this.writes++;
+		this.db.delete(jobLog).where(inArray(jobLog.jobId, targets)).run();
 		this.writes++;
 
 		// 件数はカーソルから取得, returningでは削除した行を全件転送

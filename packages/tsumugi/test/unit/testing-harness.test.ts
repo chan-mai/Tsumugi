@@ -51,6 +51,18 @@ describe('performerのハーネス', () => {
 		expect(ctx.idempotencyKey).toBe(ctx.jobId);
 		expect(ctx.attempt).toBe(1);
 		expect(ctx.deadlineAt).toBeGreaterThan(Date.now());
+		expect(ctx.traceparent).toBeNull();
+	});
+
+	it('追跡情報を指定して実行ログを取得できる', async () => {
+		const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+		const ctx = createTestContext({ traceparent });
+		for (let i = 0; i < 21; i++) await ctx.log(String(i));
+		await ctx.log('a'.repeat(2_001));
+		expect(ctx.traceparent).toBe(traceparent);
+		expect(ctx.logs).toHaveLength(20);
+		expect(ctx.logs[0]).toBe('2');
+		expect(ctx.logs[19]).toBe('a'.repeat(2_000));
 	});
 
 	it('deadlineAtから中断を構築できる', async () => {
