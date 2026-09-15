@@ -14,22 +14,33 @@ const job = ref<Job | null>(null);
 const attempts = ref<Attempt[]>([]);
 const error = ref<string | null>(null);
 const message = ref<string | null>(null);
+const loading = ref(false);
+let loadSequence = 0;
 
 const { busy, canRetry, canCancel, goneReason, act, reset } = useJobActions(job);
 
 async function load(id: string) {
+	const sequence = ++loadSequence;
+	loading.value = true;
 	try {
 		const loaded = (await getJob(id)).job;
+		if (sequence !== loadSequence || props.jobId !== id) return;
 		job.value = loaded;
+		error.value = null;
 		attempts.value = loaded.attempts_log ?? [];
 	} catch (e) {
+		if (sequence !== loadSequence || props.jobId !== id) return;
 		error.value = e instanceof Error ? e.message : String(e);
+	} finally {
+		if (sequence === loadSequence) loading.value = false;
 	}
 }
 
 watch(
 	() => props.jobId,
 	async (id) => {
+		loadSequence++;
+		loading.value = false;
 		if (!id) return;
 		// 閉じるアニメーションの間に中身が消えないよう、開く時だけ差し替え
 		job.value = null;
@@ -103,13 +114,15 @@ const pretty = (payload: string | undefined) => {
 						<DialogTitle class="mb-4 text-lg font-bold">Job detail</DialogTitle>
 
 						<p v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</p>
-						<p v-else-if="!job" class="text-sm text-muted-foreground">Loading</p>
-						<div v-else class="space-y-4 text-sm">
+						<p v-if="!job && loading" class="text-sm text-muted-foreground">Loading</p>
+						<div v-if="job" class="space-y-4 text-sm">
 							<dl class="grid gap-y-2 sm:grid-cols-[10rem_1fr]">
 								<dt class="text-muted-foreground">Status</dt>
 								<dd><StatusCell :state="job.state" /></dd>
 								<dt class="text-muted-foreground">ID</dt>
 								<dd class="font-mono text-xs break-all">{{ job.id }}</dd>
+								<dt class="text-muted-foreground">Traceparent</dt>
+								<dd class="font-mono text-xs break-all">{{ job.traceparent ?? '-' }}</dd>
 								<dt class="text-muted-foreground">Binding</dt>
 								<dd>{{ job.binding }}</dd>
 								<template v-if="job.run_id">
@@ -165,12 +178,22 @@ const pretty = (payload: string | undefined) => {
 
 							<AttemptLog :attempts="attempts" />
 
+							<div v-if="job.logs?.length">
+								<p class="mb-1 text-muted-foreground">Logs</p>
+								<ol class="space-y-2">
+									<li v-for="(entry, index) in job.logs" :key="index" class="rounded-card border border-border p-3">
+										<p class="mb-1 text-xs text-muted-foreground">Attempt #{{ entry.attempt }} · {{ at(entry.timestamp) }}</p>
+										<pre class="font-mono text-xs break-words whitespace-pre-wrap">{{ entry.message }}</pre>
+									</li>
+								</ol>
+							</div>
+
 							<div class="flex flex-wrap items-center gap-2 border-t border-border pt-4">
 								<button
 									type="button"
 									class="h-8 rounded-card border border-border px-3 text-sm"
 									:class="canRetry ? 'bg-background hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
-									:disabled="busy || !canRetry"
+									:disabled="busy || loading || !canRetry"
 									:title="goneReason"
 									@click="run('retry')"
 								>
@@ -180,13 +203,21 @@ const pretty = (payload: string | undefined) => {
 									type="button"
 									class="h-8 rounded-card border border-border px-3 text-sm"
 									:class="canCancel ? 'bg-background text-destructive hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
-									:disabled="busy || !canCancel"
+									:disabled="busy || loading || !canCancel"
 									title="Only scheduled jobs can be cancelled"
 									@click="run('cancel')"
 								>
 									Cancel
 								</button>
 								<span v-if="message" class="text-xs text-muted-foreground">{{ message }}</span>
+								<button
+									type="button"
+									class="ml-auto h-8 rounded-card border border-border px-3 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground"
+									:disabled="busy || loading"
+									@click="jobId && load(jobId)"
+								>
+									Refresh
+								</button>
 							</div>
 						</div>
 					</DialogPanel>

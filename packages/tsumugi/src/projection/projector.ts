@@ -1,12 +1,13 @@
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import type { JobLogEntry } from '../core/log.js';
 import type { AttemptRow, JobRow } from '../do/schema.js';
 import { job } from './tables.js';
 
 export type OutboxRow = { seq: number; job_id: string; snapshot: string };
 
 /** アウトボックスのスナップショット, ジョブ行に試行履歴を同梱した形(ADR-0028) */
-export type JobSnapshot = JobRow & { attempts_log?: AttemptRow[] };
+export type JobSnapshot = Omit<JobRow, 'traceparent'> & { traceparent?: string | null; attempts_log?: AttemptRow[]; logs?: JobLogEntry[] };
 
 /**
  * 衝突時に更新しない列
@@ -41,10 +42,12 @@ function toValues(snapshot: JobSnapshot, seq: number): typeof job.$inferInsert {
 		payload: snapshot.payload,
 		// 古いスナップショットにはresultが無くnullへ統一(#9)
 		result: snapshot.result ?? null,
+		traceparent: snapshot.traceparent ?? null,
 		runId: snapshot.run_id,
 		nodeId: snapshot.node_id,
 		// 履歴が無いジョブはnull, 空配列では「取得できなかった」と区別不能
 		attemptsLog: snapshot.attempts_log && snapshot.attempts_log.length > 0 ? JSON.stringify(snapshot.attempts_log) : null,
+		logs: snapshot.logs && snapshot.logs.length > 0 ? JSON.stringify(snapshot.logs) : null,
 	};
 }
 

@@ -11,6 +11,10 @@ export type JobContext = {
 	attempt: number;
 	/** ジョブ単位で安定,再実行でも同値 */
 	idempotencyKey: string;
+	// 投入時のW3C traceparent, 未指定はnull
+	traceparent: string | null;
+	// 試行番号付きの実行ログ, 本文2,000文字と最新20件まで保存し最短間隔は1秒
+	log(message: string): Promise<void>;
 	/**
 	 * timeoutが切れる時刻, epochミリ秒
 	 * `AbortSignal`はRPCを越えられず時刻を渡す, 中断が必要なperformerは残り時間から作成
@@ -83,6 +87,7 @@ export type ResultOf<P> = P extends PerformerLike<any, infer R, any> ? Awaited<R
 type HasRequired<R extends Requirements> = true extends R[keyof R] ? true : false;
 
 export type BaseOptions = {
+	traceparent?: string;
 	maxAttempts?: number;
 	backoff?: Backoff;
 	/** 実行開始の遅延, DO alarm管理でQueuesの12時間上限は非適用 */

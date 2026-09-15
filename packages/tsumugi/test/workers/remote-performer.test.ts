@@ -85,6 +85,27 @@ describe('別Workerのperformer(ADR-0026)', () => {
 });
 
 describe('実際のservice binding越し', () => {
+	it.each([false, true])('traceparentとログ関数が別Workerへ渡り記録が残る(fail=%s)', async (fail) => {
+		const { sent, queue } = captureQueue();
+		await install('MAIL#0', queue);
+		const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+		const jobId = await shard('MAIL#0').enqueue({
+			binding: 'MAIL',
+			payload: { log: 'mail started', fail },
+			traceparent,
+		});
+		await runDurableObjectAlarm(shard('MAIL#0'));
+		await handleBatch(makeBatch(sent), env as ConsumerEnv);
+		await runDurableObjectAlarm(shard('MAIL#0'));
+		const row = await env.TSUMUGI_DB.prepare('SELECT state, traceparent, logs, result FROM job WHERE id = ?')
+			.bind(jobId)
+			.first<{ state: string; traceparent: string; logs: string; result: string | null }>();
+		expect(row?.traceparent).toBe(traceparent);
+		expect(row?.state).toBe(fail ? 'SCHEDULED' : 'COMPLETED');
+		expect(JSON.parse(row!.logs)).toEqual([{ attempt: 1, timestamp: T0, message: 'mail started' }]);
+		if (!fail) expect(JSON.parse(row!.result!)).toMatchObject({ traceparent });
+	});
+
 	// 偽のオブジェクトでは直列化もentrypointの解決も通らない,ここだけが本物の経路
 	it('別Workerのentrypointが呼ばれ完了する', async () => {
 		const { sent, queue } = captureQueue();

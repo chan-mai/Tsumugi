@@ -72,8 +72,28 @@ await jobs.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { concurrenc
 | `uniqueKey`      | なし                                        | 重複排除に使う                         |
 | `uniqueForMs`    | 24時間                                      | `uniqueKey`の予約を保持する期間        |
 | `partitionKey`   | なし                                        | 分割している場合の投入先の決定に使う   |
+| `traceparent`    | なし                                        | 投入元のW3C Trace Context             |
 
 `partitionKey`が有効なのは`bindings`の設定を参照する経路のみです。詳細は[投入経路](#paths)を参照してください。
+
+## トレース情報 {#traceparent}
+
+直接のジョブ投入で`traceparent`を指定すると、performerの`ctx.traceparent`へ同じ値が渡されます。
+
+```ts
+await tsumugi.enqueue(env, {
+  binding: 'MAIL',
+  payload: { to: 'a@example.com', subject: 'hi' },
+  traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+});
+```
+
+W3C Trace Contextのversion `00`に対応する55文字の形式を受け付けます。
+各項目には小文字の16進数を使用し、trace-idとparent-idには全桁が0の値を指定できません。不正な値は投入時に検証エラーになります。
+未指定の場合は`ctx.traceparent`が`null`になります。
+
+リトライでも同値を引き継ぎ、ジョブの詳細画面に表示されます。
+`enqueueMany`ではジョブ単位で指定可能です。
 
 ## 予約実行
 

@@ -1,0 +1,2 @@
+ALTER TABLE job ADD COLUMN traceparent TEXT;
+ALTER TABLE job ADD COLUMN logs TEXT;

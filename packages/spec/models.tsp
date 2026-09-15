@@ -46,6 +46,23 @@ model AttemptRecord {
 	error: string | null;
 }
 
+@doc("W3C traceparent version 00 with lowercase hexadecimal and nonzero trace and parent IDs")
+@pattern("^00-(?!0{32}-)[0-9a-f]{32}-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$")
+@minLength(55)
+@maxLength(55)
+scalar Traceparent extends string;
+
+model JobLogEntry {
+	@doc("1-based attempt number")
+	attempt: integer;
+
+	@doc("epoch milliseconds")
+	timestamp: integer;
+
+	@maxLength(2000)
+	message: string;
+}
+
 model JobDetail {
 	...JobSummary;
 	concurrency_key: string | null;
@@ -62,6 +79,16 @@ model JobDetail {
 	@minValue(0)
 	@maxValue(1)
 	progress: numeric | null;
+
+	@doc("W3C traceparent version 00. Null when no trace context was supplied.")
+	@pattern("^00-(?!0{32}-)[0-9a-f]{32}-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$")
+	@minLength(55)
+	@maxLength(55)
+	traceparent: string | null;
+
+	@doc("Latest 20 performer log entries across all attempts, in recording order")
+	@maxItems(20)
+	logs: JobLogEntry[];
 
 	@doc("JSON-encoded string")
 	payload: string;
@@ -99,6 +126,9 @@ model CreateJobRequest {
 	priority?: integer;
 	concurrencyKey?: string;
 	uniqueKey?: string;
+
+	@doc("Trace context propagated to the performer. Takes precedence over the traceparent request header.")
+	traceparent?: Traceparent;
 }
 
 model RunSummary {

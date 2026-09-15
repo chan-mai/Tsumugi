@@ -77,7 +77,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 
 ## GET /api/jobs/:id
 
-1件の詳細を取得します。試行履歴を含むのはこのエンドポイントのみです。
+1件の詳細を取得します。
 
 ```json
 {
@@ -99,7 +99,15 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
     "dispatched_at": 1753000030000,
     "run_after": null,
     "expires_at": null,
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
     "retryable": true,
+    "logs": [
+      {
+        "attempt": 1,
+        "timestamp": 1753000011000,
+        "message": "Payment requested"
+      }
+    ],
     "attempts_log": [
       {
         "attempt": 1,
@@ -117,6 +125,9 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 `run_after`は予約済みジョブの実行予定時刻です。
 `expires_at`は実行開始の期限で、期限を過ぎたジョブは実行されずCANCELLEDになります。at-least-onceの重複配送が期限をまたいだ場合、実行されたジョブがCANCELLEDと記録されることがあります。
 `attempts_log`は新しい試行から順に並びます。
+`logs`は受信順のログで、各項目に試行回数、記録時刻(epochミリ秒)、本文が含まれます。未記録の場合は空配列です。
+リトライを含む1ジョブ全体で最新の20件まで保持し、本文はJavaScriptの文字列長で2,000文字が上限です。保存間隔の下限は1,000msです。
+`traceparent`は投入時に指定したトレース情報で、未指定の場合は`null`になります。
 
 見つからない場合は404です。
 
@@ -133,7 +144,8 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
   "expiresInMs": 600000,
   "priority": 10,
   "concurrencyKey": "domain:example.com",
-  "uniqueKey": "mail:a@example.com:hi"
+  "uniqueKey": "mail:a@example.com:hi",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 }
 ```
 
@@ -141,6 +153,10 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 `performers`にないbindingは受け付けません。投入できても実行時に必ず失敗するためです。
 
 `expiresInMs`は投入時刻からの相対の期限です。期限を過ぎたジョブは実行されずCANCELLEDになります。
+
+`traceparent`は任意。本文に指定が無い場合は`traceparent`ヘッダーを利用し、両方存在する場合は本文を優先します。
+採用した値がW3C Trace Contextのversion `00`の形式に合わない場合は400を返します。形式の詳細は[ジョブの投入](/guide/enqueue#traceparent)を参照してください。
+指定した値はリトライ時にも保持され、performerの`ctx.traceparent`へ渡されます。
 
 指定できるのは上記の項目のみです。`timeoutMs`や`backoff`などは指定できず、既定値が使われます。
 `partitionKey`も指定できないため、分割したbindingへの投入には利用できません。

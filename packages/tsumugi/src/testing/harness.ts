@@ -1,6 +1,8 @@
 import type { JobContext, PerformerLike, Requirements } from '../core/api.js';
 import { assertNodeId } from '../core/flow.js';
+import { LOG_KEEP, LOG_MAX_CHARS } from '../core/log.js';
 import type { SpawnRequest } from '../core/run.js';
+import { normalizeTraceparent } from '../core/trace.js';
 
 /**
  * performerを試すための道具
@@ -10,6 +12,7 @@ import type { SpawnRequest } from '../core/run.js';
  */
 
 export type TestContext = JobContext & {
+	logs: string[];
 	/** performが要求した子, 要求の順に入る(ADR-0032) */
 	spawns: SpawnRequest[];
 	/** `heartbeat`へ渡された進捗, 実行の順に入り省略時はundefined */
@@ -17,6 +20,7 @@ export type TestContext = JobContext & {
 };
 
 export type TestContextOptions = {
+	traceparent?: string;
 	jobId?: string;
 	attempt?: number;
 	idempotencyKey?: string;
@@ -31,9 +35,16 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 	const spawns: SpawnRequest[] = [];
 	// 本番はDOへ送信するが、ここでは実行の記録だけを残す
 	const heartbeats: (number | undefined)[] = [];
+	const logs: string[] = [];
 
 	return {
 		jobId,
+		traceparent: normalizeTraceparent(options.traceparent),
+		logs,
+		log: async (message) => {
+			logs.push(message.slice(0, LOG_MAX_CHARS));
+			if (logs.length > LOG_KEEP) logs.shift();
+		},
 		attempt: options.attempt ?? 1,
 		// 実装と同じくジョブIDをそのまま使用, 再試行を跨いで同値
 		idempotencyKey: options.idempotencyKey ?? jobId,

@@ -1,6 +1,7 @@
 import type { JobContext, PerformerLike, RemoteRef } from '../core/api.js';
 import { assertNodeId } from '../core/flow.js';
 import { shardNameOf } from '../core/ids.js';
+import { LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS } from '../core/log.js';
 import type { SpawnRequest } from '../core/run.js';
 import type { DispatchMessage, TsumugiJobShard } from '../do/job-shard.js';
 
@@ -60,6 +61,37 @@ export function createHeartbeat(
 			},
 		);
 		await Promise.race([sending, new Promise<void>((resolve) => setTimeout(resolve, sendTimeoutMs))]);
+	};
+}
+
+export function createLog(
+	send: (message: string) => Promise<unknown>,
+	now: () => number,
+	minIntervalMs = LOG_MIN_INTERVAL_MS,
+	sendTimeoutMs = 1_000,
+): (message: string) => Promise<void> {
+	let lastAt = Number.NEGATIVE_INFINITY;
+	return async (message) => {
+		if (typeof message !== 'string') return;
+		const at = now();
+		if (at - lastAt < minIntervalMs) return;
+		lastAt = at;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			const sending = Promise.resolve()
+				.then(() => send(message.slice(0, LOG_MAX_CHARS)))
+				.catch((error: unknown) => {
+					console.error('tsumugi: log failed', error);
+				});
+			await Promise.race([
+				sending,
+				new Promise<void>((resolve) => {
+					timer = setTimeout(resolve, sendTimeoutMs);
+				}),
+			]);
+		} finally {
+			if (timer !== undefined) clearTimeout(timer);
+		}
 	};
 }
 
@@ -156,7 +188,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		// jobIdが無い/文字列でない本文はここで拒否, performer実行とreportの対象外
 		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
-		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt } = body;
+		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt, traceparent } = body;
 
 		// 期限切れは実行せず終了(ADR-0047), 滞留から復帰した時のまとめ実行を防止
 		// 報告の失敗時はreaperの判定で期限切れとしてCANCELLEDへ遷移
@@ -203,7 +235,20 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 					}),
 				() => Date.now(),
 			);
-			const ctx = { jobId: stableId, attempt, idempotencyKey: stableId, deadlineAt: Date.now() + timeoutMs, spawn, heartbeat };
+			const log = createLog(
+				(message) => stub.log(stableId, attempt, message),
+				() => Date.now(),
+			);
+			const ctx: JobContext = {
+				jobId: stableId,
+				attempt,
+				idempotencyKey: stableId,
+				traceparent: traceparent ?? null,
+				deadlineAt: Date.now() + timeoutMs,
+				spawn,
+				heartbeat,
+				log,
+			};
 			return Promise.resolve(service.perform(payload, ctx));
 		});
 		ok = true;

@@ -71,6 +71,8 @@ export { SendMail as MAIL } from './performers/send-mail.js';
 | `idempotencyKey` | ジョブ単位で一定の値、再実行でも同じ値           |
 | `deadlineAt`     | タイムアウトが切れる時刻、epochミリ秒            |
 | `heartbeat`      | 実行中であることを報告する関数                   |
+| `log`            | 処理途中のメッセージを保存する非同期関数         |
+| `traceparent`    | 投入時のトレース情報。未指定の場合は`null`       |
 | `spawn`          | Flowのノードとして実行中に子ノードを追加する関数 |
 
 at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください。
@@ -112,6 +114,35 @@ class Import extends Performer<{ rows: string[] }, void, {}, Env> {
 
 実行間隔には5秒の下限があります。これより短い間隔で実行しても、報告は5秒に1回までに制限されます。
 報告に失敗しても例外にはならず、報告が無いジョブと同様に扱われます。
+
+### ログ
+
+`ctx.log(message)`で処理途中のメッセージを保存できます。呼び出しには`await`が必要です。
+
+```ts
+await ctx.log('Import started');
+await importRows(payload.rows);
+await ctx.log('Import completed');
+```
+
+ログは呼び出し時に保存され、ジョブの詳細画面に試行回数、記録時刻、本文が取得できます。
+保存に成功した記録は、performerが異常終了した場合も残ります。
+
+1ジョブあたり最新の20件まで保存され、超過した古い記録は削除されます。
+本文はJavaScriptの文字列長で2,000文字まで制限され、超過分は切り捨てられます。
+リトライした場合においても、保存済みのログは引き継がれ、件数はジョブ全体で制限されます。
+
+保存間隔の下限/送信待機の上限は1,000msです。
+保存に失敗した場合、`console.error`へ出力され、ジョブの処理は継続します。
+古い試行や終了したジョブからの呼び出しは保存されません。
+
+### トレース情報
+
+直接のジョブ投入で指定した`traceparent`は`ctx.traceparent`から取得可能です。未指定の場合は`null`になります。
+リトライ時も投入時と同値が参照されます。
+
+トレースSDKを使用する場合は、この値を親のコンテキストとしてspanを作成してください。
+投入時の形式は[ジョブの投入](/guide/enqueue#traceparent)を参照してください。
 
 ## 失敗の通知
 
