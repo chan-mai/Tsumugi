@@ -261,7 +261,7 @@ export class JobRepo {
 	 *
 	 * 作成順の単一の読み取り範囲では実行中と未到来のジョブが範囲を占有し、後から入った実行可能ジョブが選考に入らない
 	 * 実行可能な候補を独立した範囲で読むことで、実行中がlimitを超えても投入候補が範囲に残る
-	 * 実行可能ジョブ自体がlimitを超える滞留は解消不能, 作成順の範囲を超えた分は次tick以降で処理
+	 * 実行可能ジョブ自体がlimitを超える滞留は解消不能, 到来順の範囲を超えた分は次tick以降で処理
 	 *
 	 * readyCountは有界判定用, limit到達なら残りがある可能性が高く即座に再実行
 	 */
@@ -275,11 +275,12 @@ export class JobRepo {
 			.limit(limit)
 			.all();
 		// 実行可能(SCHEDULED且つrun_after<=now): 投入候補, 実行中と未到来のジョブによる範囲の占有なし
+		// 到来順はjob_dueで解決, 滞留時も読み取りはlimit件まで(#104)
 		const ready = this.db
 			.select()
 			.from(job)
 			.where(and(eq(job.state, 'SCHEDULED'), lte(job.runAfter, now)))
-			.orderBy(asc(job.createdAt), asc(job.id))
+			.orderBy(asc(job.runAfter), asc(job.id))
 			.limit(limit)
 			.all();
 		// 未到来(run_after>now)の最も早い1件: futureRunAfterのalarm設定用, 全件は不要
@@ -562,6 +563,7 @@ export class JobRepo {
 	 * 失敗ジョブだけが残る状態で短い間隔のalarm設定を続けると、無意味な書き込みが増え続ける
 	 *
 	 * 3つの集計を1文へまとめた形はクエリビルダで表現できず、生SQLのまま維持
+	 * next_dueは状態ごとのMINへ分割しjob_terminalの先頭1件で解決(#104), 多引数min()はNULLを含むとNULL
 	 */
 	sweepState(now: number, retention: Retention): { jobs: boolean; uniqueKeys: boolean; nextDueAt: number | null } {
 		const row = this.sql
@@ -571,8 +573,11 @@ export class JobRepo {
 						(state IN ('COMPLETED', 'CANCELLED') AND updated_at < ?1)
 						OR (state IN ('FAILED', 'STALLED') AND updated_at < ?2)) AS jobs,
 					EXISTS(SELECT 1 FROM unique_key WHERE expires_at <= ?3) AS unique_keys,
-					(SELECT MIN(CASE WHEN state IN ('FAILED', 'STALLED') THEN updated_at + ?5 ELSE updated_at + ?4 END)
-					 FROM job WHERE state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED')) AS next_due`,
+					(SELECT MIN(due) FROM (
+						SELECT MIN(updated_at) + ?4 AS due FROM job WHERE state = 'COMPLETED'
+						UNION ALL SELECT MIN(updated_at) + ?4 FROM job WHERE state = 'CANCELLED'
+						UNION ALL SELECT MIN(updated_at) + ?5 FROM job WHERE state = 'FAILED'
+						UNION ALL SELECT MIN(updated_at) + ?5 FROM job WHERE state = 'STALLED')) AS next_due`,
 				now - retention.doneMs,
 				now - retention.failedMs,
 				now,

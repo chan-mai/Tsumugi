@@ -51,3 +51,4 @@
 - [ADR-0046](0046-per-cron-time-zone.md) - cronタイムゾーンをスケジュール単位で指定する
 - [ADR-0047](0047-job-expiration.md) - ジョブの期限切れは投入直前と実行直前に判定しCANCELLEDへ集約する
 - [ADR-0048](0048-job-logs-and-traceparent.md) - ジョブごとのログを件数制限付きで保存しtraceparentを引き継ぐ
+- [ADR-0049](0049-ready-window-by-run-after.md) - 投入候補の読み取り範囲を到来順にする
