@@ -55,17 +55,17 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "@clack/prompts": "^1.7.0",
-    "@cloudflare/workers-types": "^5.20260820.1",
+    "@clack/prompts": "^1.8.1",
+    "@cloudflare/workers-types": "^5.20261006.1",
     "@tsumugi/dashboard": "workspace:*",
     "@tsumugi/spec": "workspace:*",
-    "publint": "^0.3.24",
-    "tsdown": "^0.22.14",
+    "publint": "^0.3.25",
+    "tsdown": "^0.23.0",
     "unrun": "^0.3.1"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",
-    "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.3"
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4.13.13"
   }
 }
