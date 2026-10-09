@@ -40,7 +40,10 @@ export const job = sqliteTable(
 	},
 	(t) => [
 		// tickが最初に実行するクエリ, 実行可能なジョブの抽出に使用
-		index('job_active').on(t.state, t.runAfter),
+		// idまで含めORDER BY run_after, idをインデックスで解決(#104)
+		index('job_due').on(t.state, t.runAfter, t.id),
+		// sweepの次回時刻を状態ごとのMINで取得
+		index('job_terminal').on(t.state, t.updatedAt),
 		index('job_concurrency_key').on(t.concurrencyKey, t.state),
 		index('job_run').on(t.runId, t.nodeId),
 	],

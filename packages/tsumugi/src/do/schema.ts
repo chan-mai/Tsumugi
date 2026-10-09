@@ -36,7 +36,10 @@ export const SCHEMA = [
 		node_id TEXT
 	)`,
 	// tickが最初に実行するクエリ, 実行可能なジョブの抽出に使用
-	`CREATE INDEX IF NOT EXISTS job_active ON job (state, run_after)`,
+	// idまで含めORDER BY run_after, idをインデックスで解決(#104)
+	`CREATE INDEX IF NOT EXISTS job_due ON job (state, run_after, id)`,
+	// sweepの次回時刻を状態ごとのMINで取得
+	`CREATE INDEX IF NOT EXISTS job_terminal ON job (state, updated_at)`,
 	`CREATE INDEX IF NOT EXISTS job_concurrency_key ON job (concurrency_key, state)`,
 	`CREATE INDEX IF NOT EXISTS job_run ON job (run_id, node_id)`,
 	// 重複排除(ADR-0021 / ADR-0022), ジョブ本体ではなくキーだけを一定期間保持
@@ -111,6 +114,8 @@ export function applySchema(sql: SqlStorage): void {
 	ensureColumn(sql, 'job', 'expires_at', 'INTEGER');
 	ensureColumn(sql, 'job', 'traceparent', 'TEXT');
 	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
+	// job_dueが先頭列を含み代替
+	sql.exec(`DROP INDEX IF EXISTS job_active`);
 }
 
 /** 既存の表に無い列の追加, 冪等化のため先に有無を確認 */
