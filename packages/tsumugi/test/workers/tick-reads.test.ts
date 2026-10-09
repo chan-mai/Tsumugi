@@ -54,6 +54,12 @@ describe('tickの読み取り行数', () => {
 			const cursor = repo.sql.exec(text, ...(params as SqlStorageValue[]));
 			expect(cursor.toArray()).toHaveLength(LIMIT);
 			expect(cursor.rowsRead).toBeLessThan(N / 2);
+
+			// seedのcreated_atはIDの逆順, 作成順へ戻ると検出
+			const { jobs, readyCount } = repo.scheduleWindow(T0, LIMIT);
+			expect(readyCount).toBe(LIMIT);
+			const ids = jobs.map((j) => j.id);
+			expect(ids).toEqual([...ids].sort());
 		});
 	});
 
