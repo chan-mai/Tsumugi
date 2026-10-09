@@ -518,7 +518,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			runAfter: next.runAfter,
 			dispatchedAt: null,
 		});
-		await this.#armAlarm(next.runAfter);
+		// 枠の解放を即時反映, 再試行時刻は次tickで再設定
+		await this.#armAlarm(now);
 	}
 
 	/**

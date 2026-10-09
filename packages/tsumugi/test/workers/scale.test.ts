@@ -304,6 +304,20 @@ describe('同時実行数待ちでの即時の再実行(#103)', () => {
 		expect(sent).toHaveLength(1);
 		expect(await alarmOf('CAP2#0')).not.toBe(T0);
 	});
+
+	it('失敗報告で再試行へ戻ると空いた枠のため即時に再実行する', async () => {
+		const { queue, sent } = captureQueue();
+		await install('CAP3#0', T0, queue);
+		await shard('CAP3#0').configure({ policy: { concurrency: 10, perKeyConcurrency: 10 } });
+		await shard('CAP3#0').enqueueMany(Array.from({ length: 250 }, (_, i) => ({ binding: 'CAP3', payload: { i } })));
+		for (let i = 0; i < 3; i++) await runDurableObjectAlarm(shard('CAP3#0'));
+		expect(sent).toHaveLength(10);
+
+		// 再試行時刻のalarmでは、バックオフの間に空いた枠へ投入なし
+		await install('CAP3#0', T0 + 1_000, queue);
+		await shard('CAP3#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		expect(await alarmOf('CAP3#0')).toBe(T0 + 1_000);
+	});
 });
 
 describe('トークンバケットの永続化(ADR-0009)', () => {
