@@ -274,6 +274,38 @@ describe('投入候補の読み取り範囲(ADR-0019 / ADR-0020, #4)', () => {
 	});
 });
 
+describe('同時実行数待ちでの即時の再実行(#103)', () => {
+	const alarmOf = (name: string) =>
+		runInDurableObject(shard(name), (instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>);
+
+	it('concurrencyが埋まり候補が残っていても即時の再実行はしない', async () => {
+		const { queue, sent } = captureQueue();
+		await install('CAP1#0', T0, queue);
+		await shard('CAP1#0').configure({ policy: { concurrency: 10, perKeyConcurrency: 10 } });
+		await shard('CAP1#0').enqueueMany(Array.from({ length: 250 }, (_, i) => ({ binding: 'CAP1', payload: { i } })));
+
+		// 投影の残りを処理し終えるまで数tick, その後は完了報告まで待機
+		for (let i = 0; i < 3; i++) await runDurableObjectAlarm(shard('CAP1#0'));
+
+		expect(sent).toHaveLength(10);
+		expect(await alarmOf('CAP1#0')).not.toBe(T0);
+	});
+
+	it('perKeyConcurrencyが埋まり候補が残っていても即時の再実行はしない', async () => {
+		const { queue, sent } = captureQueue();
+		await install('CAP2#0', T0, queue);
+		await shard('CAP2#0').configure({ policy: { concurrency: 300, perKeyConcurrency: 1 } });
+		await shard('CAP2#0').enqueueMany(
+			Array.from({ length: 250 }, (_, i) => ({ binding: 'CAP2', payload: { i }, concurrencyKey: 'cust-a' })),
+		);
+
+		for (let i = 0; i < 3; i++) await runDurableObjectAlarm(shard('CAP2#0'));
+
+		expect(sent).toHaveLength(1);
+		expect(await alarmOf('CAP2#0')).not.toBe(T0);
+	});
+});
+
 describe('トークンバケットの永続化(ADR-0009)', () => {
 	const bucketOf = (name: string) =>
 		runInDurableObject(shard(name), (instance) => (instance as any).repo.readSetting('rate_bucket') as string | undefined);
