@@ -103,6 +103,9 @@ describe('リトライ', () => {
 		const row = await rowOf('BOOM', jobId);
 		expect(row.attempts).toBe(1);
 		expect(row.run_after).toBe(T0 + 5_000);
+		// 報告直後は枠の解放で即時, 次のtickで再試行時刻へ設定
+		expect(await alarmOf('BOOM')).toBe(T0);
+		await runDurableObjectAlarm(shard('BOOM'));
 		expect(await alarmOf('BOOM')).toBe(T0 + 5_000);
 	});
 
