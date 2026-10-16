@@ -14,14 +14,14 @@
     "format:check": "prettier --check ."
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@types/node": "^26.6.4",
-    "drizzle-orm": "^0.45.3",
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "@types/node": "^26.6.5",
+    "drizzle-orm": "^0.45.4",
     "fast-check": "^4.10.2",
-    "prettier": "^3.9.9",
+    "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.147.0"
+    "wrangler": "^4.149.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
