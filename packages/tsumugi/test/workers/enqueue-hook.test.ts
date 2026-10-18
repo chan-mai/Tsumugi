@@ -1,6 +1,7 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createClient } from '../../src/client/enqueue.js';
+import { formatJobId } from '../../src/core/ids.js';
 
 /**
  * 投入時の既定値フック(#96)
@@ -18,16 +19,6 @@ const install = (name: string) =>
 			send: async () => {},
 			sendBatch: async () => {},
 		};
-	});
-
-const timeoutsOf = (name: string, payloadLike: string | null) =>
-	runInDurableObject(shard(name), (instance) => {
-		const sql = (instance as any).repo.sql as SqlStorage;
-		const rows =
-			payloadLike === null
-				? sql.exec<{ timeout_ms: number }>(`SELECT timeout_ms FROM job`).toArray()
-				: sql.exec<{ timeout_ms: number }>(`SELECT timeout_ms FROM job WHERE payload LIKE ?`, `%${payloadLike}%`).toArray();
-		return rows.map((r) => r.timeout_ms);
 	});
 
 interface RunFace extends Rpc.DurableObjectBranded {
@@ -75,12 +66,18 @@ describe('投入時の既定値フック(#96)', () => {
 		const schedulerNamespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 		const scheduler = schedulerNamespace.get(schedulerNamespace.idFromName('scheduler'));
 		await scheduler.sync();
-		// 最短の定義が1分間隔, 発火のために時計を前進
-		const ahead = Date.now() + 2 * 60_000;
+		const nextRunAt = await runInDurableObject(
+			scheduler,
+			(instance) => ((instance as any).repo.find('poll-names') as { next_run_at: number }).next_run_at,
+		);
+		// poll-namesの間隔が5分, 初回時刻を超えるため時計を前進
+		const ahead = Date.now() + 6 * 60_000;
 		await runInDurableObject(scheduler, (instance) => void ((instance as any).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 
 		// poll-namesがListNamesへ投入, 定期実行の経路にも既定値が届く
-		expect(await timeoutsOf('ListNames#0', null)).toContain(45_000);
+		const jobId = formatJobId({ binding: 'ListNames', shard: 0, localId: `poll-names-${nextRunAt}` });
+		const row = await runInDurableObject(shard('ListNames#0'), (instance) => (instance as any).repo.find(jobId) as { timeout_ms: number });
+		expect(row.timeout_ms).toBe(45_000);
 	});
 });
