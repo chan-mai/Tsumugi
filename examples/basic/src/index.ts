@@ -60,6 +60,9 @@ const tsumugi = defineTsumugi({
 	performers,
 	flows,
 	onFailure: 'NotifyFailure',
+	// statesは明示必須
+	onSettled: { binding: 'NotifySettled', states: ['FAILED', 'CANCELLED', 'STALLED'] },
+	onEnqueue: (input) => (input.binding === 'ListNames' ? { timeoutMs: 45_000 } : undefined),
 	schedules: {
 		// 固定間隔, 前回が終わっていなければ発火なし
 		'poll-names': { binding: 'ListNames', payload: { prefix: 'poll' }, everyMs: 5 * 60 * 1000 },

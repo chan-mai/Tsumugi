@@ -254,3 +254,58 @@ export class NotifyFailure extends Performer<FailureNotice, void, {}, Env> {
 ただし通知先のbinding自身の失敗は通知されません。これは意図的なものであり、通知が無限に連鎖しないための仕様です。
 
 `onFailure`を指定する前に発生した失敗は通知されません。
+
+## 終端の通知 {#settled-notification}
+
+`onSettled`を指定すると、失敗に限らず終端に達したジョブを任意のperformerへ通知することが可能です。
+対象の状態は`states`で明示します。通常、これは省略することができません。
+
+```ts
+const tsumugi = defineTsumugi({
+  performers,
+  onSettled: {
+    binding: 'NotifySettled',
+    states: ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'],
+  },
+});
+```
+
+`states`に指定できるのは`COMPLETED` `FAILED` `CANCELLED` `STALLED`の4状態に限定されます。
+`COMPLETED`を含めると完了したジョブと同数の通知ジョブが投入されるため、流量を確認したうえで指定してください。
+
+通知先のperformerは`SettledNotice`を受け取ります。
+
+| 名前          | 内容                                                        |
+| ------------- | ----------------------------------------------------------- |
+| `jobId`       | 終端に達したジョブのID                                      |
+| `binding`     | 終端に達したジョブのbinding                                 |
+| `state`       | 終端の状態                                                  |
+| `attempts`    | 実行した回数                                                |
+| `maxAttempts` | 試行回数の上限                                              |
+| `error`       | 最後の試行が残した理由(失敗の終端以外/記録が無い場合は`null`) |
+| `result`      | `perform`の戻り値(`COMPLETED`以外/保存上限超過は`null`)  |
+| `runId`       | 投入元のRun(単発投入ジョブは`null`)                   |
+| `nodeId`      | 投入元のノード(単発投入ジョブは`null`)                |
+| `settledAt`   | 終端に達した時刻(epoch ms)                                  |
+
+通知先のbinding自身と`onFailure`の通知先のbindingの遷移は通知されません。
+`onFailure`と併用した場合、`states`に含めた`FAILED`と`STALLED`は両方の宛先へ通知されます。
+
+`onSettled`を指定する前に発生した遷移は通知されません。
+
+## 投入時の既定値 {#enqueue-hook}
+
+`onEnqueue`を指定すると、投入のたびに実行オプションの既定値を付与できます。
+呼び出し側が明示した値が常に優先され、未指定のキーだけが補完されます。
+
+```ts
+const tsumugi = defineTsumugi({
+  performers,
+  onEnqueue: (input) => (input.binding === 'SlowJob' ? { timeoutMs: 300_000 } : undefined),
+});
+```
+
+付与できるのは実行オプション(`traceparent` `priority` `maxAttempts` `backoff` `timeoutMs` `guarantee` `delayMs` `runAt` `expiresAt` `expiresInMs` `concurrencyKey`)のみに限定され、宛先と識別子は変更できません。
+
+`onFailure`と`onSettled`の通知ジョブの投入には適用されません。
+別Workerからの投入に適用する場合は、その[`createClient`](/guide/client)に同じフックを渡してください。

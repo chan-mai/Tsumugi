@@ -127,6 +127,16 @@ export const failureNotify = sqliteTable('failure_notify', {
 	payload: text('payload').notNull(),
 });
 
+/**
+ * 終端の通知待ち(#96)
+ * 失敗の通知とは対象も宛先も別で表も分離
+ */
+export const settledNotify = sqliteTable('settled_notify', {
+	seq: integer('seq').primaryKey({ autoIncrement: true }),
+	jobId: text('job_id').notNull(),
+	payload: text('payload').notNull(),
+});
+
 export const runNotify = sqliteTable(
 	'run_notify',
 	{

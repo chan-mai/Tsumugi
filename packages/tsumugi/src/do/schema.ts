@@ -96,6 +96,13 @@ export const SCHEMA = [
 		job_id TEXT NOT NULL,
 		payload TEXT NOT NULL
 	)`,
+	// 終端の通知待ち(#96), 投入の成功まで削除せず中断しても次のtickで追いつく
+	// 失敗の通知と分離, 共用は片方の投入失敗がもう片方を停止
+	`CREATE TABLE IF NOT EXISTS settled_notify (
+		seq INTEGER PRIMARY KEY AUTOINCREMENT,
+		job_id TEXT NOT NULL,
+		payload TEXT NOT NULL
+	)`,
 	// D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
 	// D1書き込みの成功まで削除せず、失敗時もカーソルが進まず次回で追いつく
 	`CREATE TABLE IF NOT EXISTS outbox (

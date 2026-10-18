@@ -5,7 +5,18 @@ import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
 import { normalizeTraceparent } from '../core/trace.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
-import type { Backoff, BlockedBy, Bucket, DeliveryGuarantee, FailureNotice, KeyBuckets, Policy, Retention } from '../core/types.js';
+import type {
+	Backoff,
+	BlockedBy,
+	Bucket,
+	DeliveryGuarantee,
+	FailureNotice,
+	KeyBuckets,
+	Policy,
+	Retention,
+	SettledNotice,
+	SettledTarget,
+} from '../core/types.js';
 import type { RunStub } from './run.js';
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
@@ -82,6 +93,8 @@ export type ShardSettings = {
 	failedRetentionMs?: number;
 	/** 失敗を知らせる先のbinding(#30), nullは解除, 省略は現状維持 */
 	failureBinding?: string | null;
+	/** 終端を知らせる宛先と対象(#96), nullは解除, 省略は現状維持 */
+	settled?: SettledTarget | null;
 };
 
 export type EnqueueInput = {
@@ -161,6 +174,9 @@ const SWEEP_LIMIT = 200;
 
 /** 1回のtickで投入する失敗の通知の上限(#30) */
 const FAILURE_NOTIFY_LIMIT = 200;
+
+/** 1回のtickで投入する終端の通知の上限(#96) */
+const SETTLED_NOTIFY_LIMIT = 200;
 
 /** 宛先を置く設定のキー(#30) */
 const FAILURE_BINDING_KEY = 'failure_binding';
@@ -358,8 +374,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 宛先はpolicyのpinと分離, 流量を固定したshardにも後から追加した宛先が届く(#30)
 		// 省略された場合は今の宛先を維持, 投入の経路ごとに宛先の有無が別
 		if (settings.failureBinding !== undefined) this.#writeFailureBinding(settings.failureBinding);
+		if (settings.settled !== undefined) this.repo.writeSettledTarget(settings.settled);
 		if (!pinned && this.repo.readSetting('settings_pinned') === '1') return;
-		const { failureBinding: _ignored, ...rest } = settings;
+		const { failureBinding: _ignored, settled: _ignoredSettled, ...rest } = settings;
 		const encoded = JSON.stringify(rest);
 		this.policy = { ...DEFAULT_POLICY, ...rest.policy };
 		this.retention = retentionOf(rest);
@@ -723,6 +740,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const projected = await this.#project();
 		const notified = await this.#notifyRuns();
 		const notifiedFailures = await this.#notifyFailures();
+		const notifiedSettled = await this.#notifySettled();
 		const { deleted, retryAt } = this.#sweep(now);
 
 		// 上限まで読んだなら残りがある可能性が高く、即座に自分を再起動
@@ -738,6 +756,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			deleted >= SWEEP_LIMIT ||
 			notified >= NOTIFY_LIMIT ||
 			notifiedFailures >= FAILURE_NOTIFY_LIMIT ||
+			notifiedSettled >= SETTLED_NOTIFY_LIMIT ||
 			this.repo.countOutbox() > 0;
 		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt].filter((v): v is number => v !== null);
 		const next = candidates.length > 0 ? Math.min(...candidates) : null;
@@ -846,6 +865,52 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			await namespace.get(namespace.idFromName(shardName(target, 0))).enqueueMany(inputs);
 		}
 		this.repo.deleteFailureThrough(rows[rows.length - 1]!.seq);
+		return rows.length;
+	}
+
+	/**
+	 * 未送信の終端の通知を通知先のperformerへ投入(#96)
+	 *
+	 * 投入の成功後に削除, 失敗時はカーソルが進まず次のtickで再送
+	 * 宛先自身とonFailure宛先の遷移は対象外, 自己循環と相互連鎖の防止
+	 */
+	async #notifySettled(): Promise<number> {
+		const rows = this.repo.settledBatch(SETTLED_NOTIFY_LIMIT);
+		if (rows.length === 0) return 0;
+
+		const target = this.repo.settledTarget();
+		if (target === null) {
+			// 宛先が無い間に記録されたぶんは破棄, 残すと設定後に古い通知がまとめて届く
+			this.repo.deleteSettledThrough(rows[rows.length - 1]!.seq);
+			return rows.length;
+		}
+
+		const notices = rows.map((row) => JSON.parse(row.payload) as SettledNotice);
+		const inputs: EnqueueInput[] = notices
+			// onFailure宛先の遷移も対象外, 2つの宛先が互いを通知し続ける連鎖の防止(#96)
+			.filter((notice) => notice.binding !== target.binding && notice.binding !== this.#failureBinding)
+			.map((notice) => ({
+				binding: target.binding,
+				payload: notice,
+				// 同じ通知の二重投入は無し, 再送でも同じIDで既存が返る(ADR-0029)
+				// 状態もIDへ含める, リトライ後の別の終端が同じattemptsでも別の通知
+				id: formatJobId({
+					binding: target.binding,
+					shard: 0,
+					localId: `settled-${embedJobId(notice.jobId)}-${notice.attempts}-${notice.state.toLowerCase()}`,
+				}),
+			}));
+
+		if (inputs.length > 0) {
+			const namespace = this.env.JOB_SHARD;
+			if (!namespace) {
+				// 自分自身のbindingが無い構成, 削除せず残して設定後に配送(ADR-0013)
+				console.error('tsumugi: cannot notify the settled job, JOB_SHARD binding is not configured');
+				return 0;
+			}
+			await namespace.get(namespace.idFromName(shardName(target.binding, 0))).enqueueMany(inputs);
+		}
+		this.repo.deleteSettledThrough(rows[rows.length - 1]!.seq);
 		return rows.length;
 	}
 

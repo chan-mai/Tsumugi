@@ -14,6 +14,8 @@ const tsumugi = defineTsumugi({
   retention,
   metrics,
   onFailure,
+  onSettled,
+  onEnqueue,
 });
 ```
 
@@ -31,6 +33,8 @@ const tsumugi = defineTsumugi({
 | `retention`  |      | 一覧の保持設定                                                 |
 | `metrics`    |      | Analytics Engineの読み取り設定。未設定の場合はメトリクスが無効 |
 | `onFailure`  |      | 失敗したジョブを知らせるbinding名。未設定の場合は通知しない    |
+| `onSettled`  |      | 終端に達したジョブを知らせる宛先と対象の状態                   |
+| `onEnqueue`  |      | 投入のたびに実行オプションの既定値を付与するフック             |
 
 ### 戻り値
 
@@ -97,6 +101,35 @@ const tsumugi = defineTsumugi({
 
 指定できるのは`FailureNotice`を受け取れるperformerのみです。
 通知される条件と`FailureNotice`の内容は[失敗の通知](/guide/execution#failure-notification)を参照してください。
+
+## onSettled
+
+終端に達したジョブを知らせる宛先と対象の状態を指定します。
+
+```ts
+const tsumugi = defineTsumugi({
+  performers,
+  onSettled: { binding: 'NotifySettled', states: ['COMPLETED', 'FAILED'] },
+});
+```
+
+`binding`に指定できるのは`SettledNotice`を受け取れるperformerのみです。
+`states`は終端の4状態(`COMPLETED` `FAILED` `CANCELLED` `STALLED`)から明示し、省略できません。
+通知される条件と`SettledNotice`の内容は[終端の通知](/guide/execution#settled-notification)を参照してください。
+
+## onEnqueue
+
+投入のたびに実行オプションの既定値を付与するフックを指定します。
+
+```ts
+const tsumugi = defineTsumugi({
+  performers,
+  onEnqueue: (input) => (input.binding === 'SlowJob' ? { timeoutMs: 300_000 } : undefined),
+});
+```
+
+呼び出し側が明示した値が優先されます。
+適用される経路と付与できるキーは[投入時の既定値](/guide/execution#enqueue-hook)を参照してください。
 
 ## RunSettings
 

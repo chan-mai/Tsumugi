@@ -39,7 +39,7 @@ export type { Clock } from '../do/clock.js';
 export { TsumugiTimeoutError } from '../queue/consumer.js';
 export type { ConsumerEnv, PerformerCtor, PerformerRegistry, PerformerService, PerformerSource } from '../queue/consumer.js';
 export { createClient } from '../client/enqueue.js';
-export type { ClientEnv, CommonSettings, JobShardStub, TsumugiClient } from '../client/enqueue.js';
+export type { ClientEnv, CommonSettings, EnqueueDefaults, EnqueueHook, JobShardStub, TsumugiClient } from '../client/enqueue.js';
 export { remote, isRemoteRef } from '../core/api.js';
 export { Performer } from '../performer/entrypoint.js';
 export type {

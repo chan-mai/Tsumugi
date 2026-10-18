@@ -139,6 +139,8 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 
 		// 先頭ノードを投入まで進めてから, 失敗の通知だけを手で届ける
 		await settleRun(runId);
+		// dispatchを明示的に実行して破棄
+		await runDurableObjectAlarm(shard('ListNames'));
 		sent.length = 0;
 		const jobId = await jobIdOf(runId, 'list');
 		if (jobId === null) throw new Error('the first node has no job id');

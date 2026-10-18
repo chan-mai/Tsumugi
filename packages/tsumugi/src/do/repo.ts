@@ -3,9 +3,20 @@ import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlit
 import { assertTransition } from '../core/transitions.js';
 import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../core/log.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
-import type { Backoff, DeliveryGuarantee, FailureNotice, JobState, JobView, KeyBuckets, Retention } from '../core/types.js';
+import type {
+	Backoff,
+	DeliveryGuarantee,
+	FailureNotice,
+	JobState,
+	JobView,
+	KeyBuckets,
+	Retention,
+	SettledNotice,
+	SettledState,
+	SettledTarget,
+} from '../core/types.js';
 import { applySchema, type AttemptRow, type JobRow } from './schema.js';
-import { attempt, failureNotify, job, jobLog, keyBucket, outbox, runNotify, setting, uniqueKey } from './tables.js';
+import { attempt, failureNotify, job, jobLog, keyBucket, outbox, runNotify, setting, settledNotify, uniqueKey } from './tables.js';
 
 /**
  * 1試行あたりのエラー本文の上限
@@ -52,6 +63,9 @@ const NOTIFIABLE: readonly JobState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'ST
 /** 外部へ知らせる状態(#30), 再試行で回復する途中の失敗は対象外 */
 const FAILURES: readonly JobState[] = ['FAILED', 'STALLED'];
 
+/** 終端の通知の宛先と対象を置く設定のキー(#96) */
+const SETTLED_TARGET_KEY = 'settled_target';
+
 const toView = (row: JobRow): JobView => ({
 	id: row.id,
 	state: row.state as JobView['state'],
@@ -92,6 +106,8 @@ export class JobRepo {
 	writes = 0;
 	/** 読み取りを行うクエリの回数 */
 	reads = 0;
+	/** 終端の通知の宛先と対象(#96), undefinedは未読 */
+	#settledTarget: SettledTarget | null | undefined;
 
 	constructor(storage: DurableObjectStorage) {
 		this.sql = storage.sql;
@@ -389,6 +405,7 @@ export class JobRepo {
 		if (!row) return false;
 		this.#appendOutbox(id);
 		if (FAILURES.includes(to)) this.#appendFailure(id, to as FailureNotice['state'], patch.error ?? null, patch.now);
+		if (NOTIFIABLE.includes(to)) this.#appendSettled(id, to as SettledState, patch.error ?? null, patch.now);
 		// 終端の捕捉を1箇所に集約, 遷移の呼び出し側ごとの実装は必ずどこかで漏れる
 		if (row.runId !== null && row.nodeId !== null && NOTIFIABLE.includes(to)) {
 			this.appendNotify(row.runId, {
@@ -489,6 +506,83 @@ export class JobRepo {
 		const row = this.db
 			.select({ c: sql<number>`count(*)` })
 			.from(failureNotify)
+			.get();
+		this.reads++;
+		return row?.c ?? 0;
+	}
+
+	/**
+	 * 終端の通知の宛先と対象(#96), 設定から読みインスタンス生存中はキャッシュ
+	 * `compareAndSet`は`#loadPolicy`を経ない経路からも呼ばれ, 読み込みはここで保証
+	 */
+	settledTarget(): SettledTarget | null {
+		if (this.#settledTarget === undefined) {
+			const raw = this.readSetting(SETTLED_TARGET_KEY);
+			this.#settledTarget = raw !== undefined ? (JSON.parse(raw) as SettledTarget) : null;
+		}
+		return this.#settledTarget;
+	}
+
+	/** 内容が同じなら書き込みなし, enqueueごとの書き込み増加の回避 */
+	writeSettledTarget(value: SettledTarget | null): void {
+		this.#settledTarget = value;
+		const stored = this.readSetting(SETTLED_TARGET_KEY);
+		if (value === null) {
+			if (stored !== undefined) this.deleteSetting(SETTLED_TARGET_KEY);
+			return;
+		}
+		const encoded = JSON.stringify(value);
+		if (stored !== encoded) this.writeSetting(SETTLED_TARGET_KEY, encoded);
+	}
+
+	/**
+	 * 終端の通知待ちへ追加(#96)
+	 * 通知先が読む材料をここで確定, 送信時のジョブの再取得は削除済みで不可
+	 * 宛先未設定と対象外の状態は記録しない, 完了を対象にした時の書き込み増加の抑制
+	 */
+	#appendSettled(id: string, state: SettledState, error: string | null, now: number): void {
+		const target = this.settledTarget();
+		if (target === null || !target.states.includes(state)) return;
+		const row = this.find(id);
+		if (!row) return;
+		// 宛先自身の遷移は記録しない
+		if (row.binding === target.binding) return;
+		const notice: SettledNotice = {
+			jobId: id,
+			binding: row.binding,
+			state,
+			attempts: row.attempts,
+			maxAttempts: row.max_attempts,
+			// 失敗の終端だけ直近の試行から補完
+			error: error ?? (FAILURES.includes(state) ? (this.attemptsOf(id)[0]?.error ?? null) : null),
+			result: row.result !== null ? JSON.parse(row.result) : null,
+			runId: row.run_id,
+			nodeId: row.node_id,
+			settledAt: now,
+		};
+		this.db
+			.insert(settledNotify)
+			.values({ jobId: id, payload: JSON.stringify(notice) })
+			.run();
+		this.writes++;
+	}
+
+	settledBatch(limit: number): { seq: number; payload: string }[] {
+		const rows = this.db.select().from(settledNotify).orderBy(asc(settledNotify.seq)).limit(limit).all();
+		this.reads++;
+		return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
+	}
+
+	/** 投入が成功してから呼ぶ, 失敗時はカーソルを維持 */
+	deleteSettledThrough(seq: number): void {
+		this.db.delete(settledNotify).where(lte(settledNotify.seq, seq)).run();
+		this.writes++;
+	}
+
+	countSettledNotify(): number {
+		const row = this.db
+			.select({ c: sql<number>`count(*)` })
+			.from(settledNotify)
 			.get();
 		this.reads++;
 		return row?.c ?? 0;

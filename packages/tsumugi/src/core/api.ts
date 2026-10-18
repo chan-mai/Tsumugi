@@ -1,5 +1,5 @@
 import type { SpawnRequest } from './run.js';
-import type { Backoff, DeliveryGuarantee, FailureNotice } from './types.js';
+import type { Backoff, DeliveryGuarantee, FailureNotice, SettledNotice } from './types.js';
 
 /** performerがキーの指定を必須と宣言するための印, ADR-0010 (ランタイムDSLではなく型で強制) */
 export type Requirements = { concurrencyKey?: true; uniqueKey?: true };
@@ -77,6 +77,15 @@ export type PayloadOf<P> = P extends PerformerLike<infer T, any, any> ? T : neve
  */
 export type FailurePerformer<M extends Performers> = {
 	[K in keyof M]: FailureNotice extends PayloadOf<M[K]> ? K : never;
+}[keyof M] &
+	string;
+
+/**
+ * 終端の通知先に使えるbinding(#96)
+ * `SettledNotice`を受け取れるperformerのみ許可, 取り違えると通知が必ず失敗
+ */
+export type SettledPerformer<M extends Performers> = {
+	[K in keyof M]: SettledNotice extends PayloadOf<M[K]> ? K : never;
 }[keyof M] &
 	string;
 export type ReqOf<P> = P extends PerformerLike<any, any, infer R> ? R : {};

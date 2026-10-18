@@ -1,7 +1,7 @@
 import { shardName } from '../core/ids.js';
 import { resolveShard } from '../core/shard.js';
 import { normalizeTraceparent } from '../core/trace.js';
-import type { Policy } from '../core/types.js';
+import type { Policy, SettledTarget } from '../core/types.js';
 import type { EnqueueInput, ShardSettings } from '../do/job-shard.js';
 
 /**
@@ -52,12 +52,13 @@ export const configOf = (bindings: Record<string, BindingConfig>, binding: strin
 /** binding個別の設定と全体で共通の設定を1つにまとめる, DOへ渡る形は1つ */
 function settingsOf(config: BindingConfig | undefined, common: CommonSettings): ShardSettings | undefined {
 	const hasBinding = config?.policy || config?.sweepAfterMs !== undefined || config?.failedRetentionMs !== undefined;
-	if (!hasBinding && common.failureBinding === undefined) return undefined;
+	if (!hasBinding && common.failureBinding === undefined && common.settled === undefined) return undefined;
 	return {
 		...(config?.policy ? { policy: config.policy } : {}),
 		...(config?.sweepAfterMs !== undefined ? { sweepAfterMs: config.sweepAfterMs } : {}),
 		...(config?.failedRetentionMs !== undefined ? { failedRetentionMs: config.failedRetentionMs } : {}),
 		...(common.failureBinding !== undefined ? { failureBinding: common.failureBinding } : {}),
+		...(common.settled !== undefined ? { settled: common.settled } : {}),
 	};
 }
 
@@ -69,7 +70,81 @@ export type CommonSettings = {
 	 * 宛先を持たない経路からも省略が届き、未指定と解除を区別
 	 */
 	failureBinding?: string | null;
+	/**
+	 * 終端を知らせる宛先と対象(#96)
+	 * nullは解除, 省略はDOが今持つ値を変えない
+	 */
+	settled?: SettledTarget | null;
 };
+
+/** onEnqueueで付与できる実行オプション, 宛先と識別子は対象外 */
+export type EnqueueDefaults = Partial<
+	Pick<
+		EnqueueInput,
+		| 'traceparent'
+		| 'priority'
+		| 'maxAttempts'
+		| 'backoff'
+		| 'timeoutMs'
+		| 'guarantee'
+		| 'delayMs'
+		| 'runAt'
+		| 'expiresAt'
+		| 'expiresInMs'
+		| 'concurrencyKey'
+	>
+>;
+
+/**
+ * 投入のたびに既定値を付与するフック(#96)
+ * 返した値のうち呼び出し側が明示していないキーのみ適用
+ */
+export type EnqueueHook = (input: Readonly<EnqueueInput>) => EnqueueDefaults | undefined;
+
+/** フックが付与できるキーの列挙, 戻り値に紛れた対象外のキーは無視 */
+const DEFAULTABLE_KEYS = [
+	'traceparent',
+	'priority',
+	'maxAttempts',
+	'backoff',
+	'timeoutMs',
+	'guarantee',
+	'delayMs',
+	'runAt',
+	'expiresAt',
+	'expiresInMs',
+	'concurrencyKey',
+] as const;
+
+/** 排他のオプションの組, 片方が決まればもう片方の既定値は破棄 */
+const EXCLUSIVE_PAIRS: readonly (readonly [keyof EnqueueDefaults, keyof EnqueueDefaults])[] = [
+	['delayMs', 'runAt'],
+	['expiresAt', 'expiresInMs'],
+];
+
+/** 既定値の適用, 明示値が優先でundefinedのキーだけを補完 */
+function applyDefaults(input: EnqueueInput, defaults: EnqueueDefaults | undefined): EnqueueInput {
+	if (!defaults) return input;
+	const merged: EnqueueInput = { ...input };
+	const blocked = new Set<keyof EnqueueDefaults>();
+	for (const [a, b] of EXCLUSIVE_PAIRS) {
+		if (input[a] !== undefined || input[b] !== undefined) {
+			blocked.add(a);
+			blocked.add(b);
+		}
+	}
+	for (const key of DEFAULTABLE_KEYS) {
+		if (blocked.has(key)) continue;
+		const value = defaults[key];
+		if (value === undefined || merged[key] !== undefined) continue;
+		(merged as Record<string, unknown>)[key] = value;
+		for (const [a, b] of EXCLUSIVE_PAIRS) {
+			if (key === a) blocked.add(b);
+			if (key === b) blocked.add(a);
+		}
+	}
+	return merged;
+}
 
 /**
  * 投入専用のクライアント
@@ -78,6 +153,7 @@ export type CommonSettings = {
 export function createClient<Env extends ClientEnv>(
 	bindings: Record<string, BindingConfig> = {},
 	common: CommonSettings = {},
+	hooks: { onEnqueue?: EnqueueHook } = {},
 ): TsumugiClient<Env> {
 	const shardOf = (env: Env, binding: string, partitionKey: string | undefined) => {
 		const config = configOf(bindings, binding);
@@ -89,7 +165,10 @@ export function createClient<Env extends ClientEnv>(
 		};
 	};
 
-	async function enqueueMany(env: Env, inputs: readonly EnqueueInput[]): Promise<string[]> {
+	async function enqueueMany(env: Env, rawInputs: readonly EnqueueInput[]): Promise<string[]> {
+		// フックは宛先解決より前に適用, traceparentの検証もフックの付与分を含めて実施
+		const onEnqueue = hooks.onEnqueue;
+		const inputs = onEnqueue ? rawInputs.map((input) => applyDefaults(input, onEnqueue(input))) : rawInputs;
 		for (const input of inputs) normalizeTraceparent(input.traceparent);
 		// 宛先DOごとの集約, 逐次の個別RPCはDOの1,000 req/sソフト上限が律速
 		type Group = { stub: DurableObjectStub<JobShardStub>; settings: ShardSettings | undefined; items: EnqueueInput[] };
