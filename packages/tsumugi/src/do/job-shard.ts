@@ -73,9 +73,10 @@ export interface FailureNotifyStub extends Rpc.DurableObjectBranded {
 
 /**
  * retry / cancelの結果
+ * `requested`は取り消しを要求として受理した状態(ADR-0052), 遷移は応答か期限で確定
  * `gone`は保持期間を過ぎてDOから消えた状態, 一覧はD1由来で画面には残存(ADR-0027)
  */
-export type MutationResult = { ok: true } | { ok: false; reason: 'invalid-state' | 'gone' };
+export type MutationResult = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' };
 
 /** まとめて処理した結果, 失敗の理由は個別のretry / cancelと同じ区別 */
 export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' };
@@ -506,6 +507,14 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			return;
 		}
 
+		// 取り消し要求後の失敗報告はリトライせず確定(ADR-0052)
+		// 中断に応じたperformerのthrowが再試行されると要求の意図に反する
+		if (row.cancel_requested_at !== null) {
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'CANCELLED', { now, attempts, error: outcome.error ?? null });
+			await this.#armAlarm(now);
+			return;
+		}
+
 		const next = nextAttempt({
 			attempts,
 			maxAttempts: row.max_attempts,
@@ -545,14 +554,15 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * reaperの無応答判定の起点をここへ移動, 所要時間が入力で変わるジョブでのtimeoutMsの最長化が不要
 	 * 進捗の画面表示用に投影にも追加, 報告の間隔はconsumer側で制限
 	 */
-	async heartbeat(jobId: string, progress?: number): Promise<boolean> {
+	async heartbeat(jobId: string, progress?: number): Promise<{ accepted: boolean; cancelRequested: boolean }> {
 		const now = this.clock.now();
 		// 範囲外は破棄, 保存すると画面の進捗が100%を超過
 		const clamped = typeof progress === 'number' && Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : null;
-		if (!this.repo.heartbeat(jobId, now, clamped)) return false;
+		const result = this.repo.heartbeat(jobId, now, clamped);
+		if (!result.accepted) return result;
 		// 投影のためのalarm設定, 次のreaper期限まで投影が無いと進捗が数分遅延
 		await this.#armAlarm(now);
-		return true;
+		return result;
 	}
 
 	async log(jobId: string, attempt: number, message: string): Promise<boolean> {
@@ -566,9 +576,16 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/**
 	 * at-most-onceのジョブの実行権
 	 * Queues自体がat-least-onceで重複配送があり、単一SQLのrowsWritten判定で実行権を1つに限定(ADR-0007)
+	 * 取り消し要求済みは実行を開始せず終了, CASの条件に要求が含まれず先に確認(ADR-0052)
 	 */
 	async claim(jobId: string): Promise<boolean> {
-		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now: this.clock.now() });
+		const now = this.clock.now();
+		const row = this.repo.find(jobId);
+		if (row && row.cancel_requested_at !== null) {
+			if (this.repo.compareAndSet(jobId, ['QUEUED'], 'CANCELLED', { now })) await this.#armAlarm(now);
+			return false;
+		}
+		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now });
 	}
 
 	/**
@@ -587,10 +604,12 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 */
 	async retry(jobId: string): Promise<MutationResult> {
 		const now = this.clock.now();
+		// 要求の明示クリア, 残すと再投入の直後に取り消しが確定(#95)
 		const ok = this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', {
 			now,
 			runAfter: now,
 			dispatchedAt: null,
+			cancelRequestedAt: null,
 		});
 		if (ok) {
 			await this.#armAlarm(now);
@@ -618,18 +637,28 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
-	 * 実行前のジョブの取り消し
-	 * QUEUED以降はconsumerが実行を開始した可能性があり、未取り消しでの成功返却を回避(ADR-0012)
+	 * ジョブの取り消し
+	 * SCHEDULEDは即時CANCELLED, QUEUED/RUNNINGは協調的な要求として記録(ADR-0052)
+	 * 要求の有無はheartbeatの戻り値に含まれ、応答か要求後reaperGraceMsの経過で確定
 	 */
 	async cancel(jobId: string): Promise<MutationResult> {
 		const now = this.clock.now();
-		const ok = this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now });
+		const result = this.#cancelOne(jobId, now);
 		// 投影のためのtick起動, alarmなしでは動きが無いシャードの読み取りモデルが取り消し前のまま残存
-		if (ok) {
-			await this.#armAlarm(now);
-			return { ok: true };
-		}
-		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
+		// 要求の場合は応答期限のalarmもtickが設定
+		if (result.ok) await this.#armAlarm(now);
+		return result;
+	}
+
+	/** 1件の取り消し判定, cancel()とmutateMany()で共用 */
+	#cancelOne(jobId: string, now: number): MutationResult {
+		if (this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now })) return { ok: true };
+		if (this.repo.requestCancel(jobId, now)) return { ok: true, requested: true };
+		const row = this.repo.find(jobId);
+		if (!row) return { ok: false, reason: 'gone' };
+		// 要求済みへの再要求は冪等に受理
+		if (row.cancel_requested_at !== null && (row.state === 'QUEUED' || row.state === 'RUNNING')) return { ok: true, requested: true };
+		return { ok: false, reason: 'invalid-state' };
 	}
 
 	/**
@@ -645,12 +674,21 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const failed: BulkFailure[] = [];
 
 		for (const jobId of jobIds) {
-			const applied =
-				action === 'retry'
-					? this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', { now, runAfter: now, dispatchedAt: null })
-					: this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now });
-			if (applied) ok.push(jobId);
-			else failed.push({ id: jobId, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' });
+			if (action === 'retry') {
+				const applied = this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', {
+					now,
+					runAfter: now,
+					dispatchedAt: null,
+					cancelRequestedAt: null,
+				});
+				if (applied) ok.push(jobId);
+				else failed.push({ id: jobId, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' });
+				continue;
+			}
+			// 要求として受理したぶんもokに含める, 確定の有無は読み取りモデルで判別可能(ADR-0052)
+			const result = this.#cancelOne(jobId, now);
+			if (result.ok) ok.push(jobId);
+			else failed.push({ id: jobId, reason: result.reason });
 		}
 
 		if (ok.length > 0) await this.#armAlarm(now);
@@ -716,6 +754,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 					// 無応答の期限切れも対象, QUEUED / RUNNINGからも遷移(ADR-0047)
 					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', { now });
 					break;
+				case 'cancel':
+					// 取り消し要求後の確定, 応答期限の経過と回収後の残留が対象(ADR-0052)
+					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', { now });
+					break;
 				case 'reap':
 					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'SCHEDULED', {
 						now,
@@ -749,7 +791,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 投入も期限切れも無いtickは同時実行数待ちで範囲が不変, 再実行は完了報告で代替(#103)
 		// 投影待ちの残りも確認, tickのawait中に入った報告やclaimは投影されないまま残る
 		const blockedOnTokens = output.blocked.tokens || output.blocked.perKeyTokens;
-		const progressed = output.decisions.some((d) => d.type === 'dispatch' || d.type === 'expire');
+		const progressed = output.decisions.some((d) => d.type === 'dispatch' || d.type === 'expire' || d.type === 'cancel');
 		const hasMore =
 			(readyCount >= TICK_LIMIT && !blockedOnTokens && progressed) ||
 			projected >= PROJECTION_LIMIT ||

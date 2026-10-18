@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { assertTransition } from '../core/transitions.js';
 import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../core/log.js';
@@ -80,6 +80,7 @@ const toView = (row: JobRow): JobView => ({
 	heartbeatAt: row.heartbeat_at,
 	guarantee: row.guarantee as DeliveryGuarantee,
 	timeoutMs: row.timeout_ms,
+	cancelRequestedAt: row.cancel_requested_at,
 });
 
 /**
@@ -353,6 +354,7 @@ export class JobRepo {
 			payload: r.payload,
 			result: r.result,
 			traceparent: r.traceparent,
+			cancel_requested_at: r.cancelRequestedAt,
 			run_id: r.runId,
 			node_id: r.nodeId,
 		};
@@ -378,6 +380,8 @@ export class JobRepo {
 			error?: string | null;
 			/** performの中で要求された子(ADR-0032) */
 			spawns?: readonly SpawnRequest[];
+			/** 取り消し要求の明示クリア(#95), 手動リトライ専用で既定は維持 */
+			cancelRequestedAt?: null;
 		},
 	): boolean {
 		for (const state of from) assertTransition(state, to);
@@ -391,6 +395,8 @@ export class JobRepo {
 		if (patch.result !== undefined) set.result = patch.result;
 		// 現在値を読まずに加算, 成功報告の経路での読み取り増加の回避
 		if (patch.countAttempt) set.attempts = sql`${job.attempts} + 1`;
+		// 要求は既定で遷移後も維持, 回収(reap)後の再投入を防止(#95)
+		if (patch.cancelRequestedAt !== undefined) set.cancelRequestedAt = patch.cancelRequestedAt;
 
 		// 更新できた行を受け取って成否を判定, drizzleのrunに影響行数の返却は無い
 		// 宛先も同じreturningで受ける, 遷移のたびの再読なしで通知の要否を判定可能(ADR-0031)
@@ -424,8 +430,9 @@ export class JobRepo {
 	 * performerからの生存報告
 	 * 実行中のジョブにのみ適用, 終端に達した後の遅れた報告は対象外
 	 * 進捗も同じUPDATEで更新, 別文では書き込みが1回増加
+	 * 取り消し要求の有無も同じRETURNINGに含める, 別の読み取りは不要(#95)
 	 */
-	heartbeat(id: string, now: number, progress: number | null): boolean {
+	heartbeat(id: string, now: number, progress: number | null): { accepted: boolean; cancelRequested: boolean } {
 		const set: Record<string, unknown> = { heartbeatAt: now };
 		if (progress !== null) set.progress = progress;
 
@@ -433,11 +440,30 @@ export class JobRepo {
 			.update(job)
 			.set(set)
 			.where(and(eq(job.id, id), inArray(job.state, ['QUEUED', 'RUNNING'])))
+			.returning({ id: job.id, cancelRequestedAt: job.cancelRequestedAt })
+			.all();
+		this.writes++;
+		const row = updated[0];
+		if (!row) return { accepted: false, cancelRequested: false };
+		// 進捗の画面表示には投影が必要, 書き込みの増加は報告側の間隔制限で削減
+		this.#appendOutbox(id);
+		return { accepted: true, cancelRequested: row.cancelRequestedAt !== null };
+	}
+
+	/**
+	 * 取り消しの要求(#95), 遷移せず要求の時刻だけを記録
+	 * 実行中のジョブにのみ適用, 要求済みの行は更新せず冪等
+	 */
+	requestCancel(id: string, now: number): boolean {
+		const updated = this.db
+			.update(job)
+			.set({ cancelRequestedAt: now, updatedAt: now })
+			.where(and(eq(job.id, id), inArray(job.state, ['QUEUED', 'RUNNING']), isNull(job.cancelRequestedAt)))
 			.returning({ id: job.id })
 			.all();
 		this.writes++;
 		if (updated.length === 0) return false;
-		// 進捗の画面表示には投影が必要, 書き込みの増加は報告側の間隔制限で削減
+		// 要求中の表示には投影が必要
 		this.#appendOutbox(id);
 		return true;
 	}
@@ -447,6 +473,7 @@ export class JobRepo {
 	 *
 	 * 状態を変えず`compareAndSet`は使用不可, 遷移表にSCHEDULED->SCHEDULEDは無い(ADR-0012)
 	 * 条件付きUPDATEである点は同様で、SCHEDULED以外なら更新行が無く失敗と判定可能
+	 * 取り消し要求済みは拒否, runAfterの後ろ倒しで取り消しの確定が遅延(#95)
 	 */
 	reschedule(id: string, runAfter: number, priority: number | undefined, now: number): boolean {
 		const set: Record<string, unknown> = { runAfter, updatedAt: now };
@@ -455,7 +482,7 @@ export class JobRepo {
 		const updated = this.db
 			.update(job)
 			.set(set)
-			.where(and(eq(job.id, id), eq(job.state, 'SCHEDULED')))
+			.where(and(eq(job.id, id), eq(job.state, 'SCHEDULED'), isNull(job.cancelRequestedAt)))
 			.returning({ id: job.id })
 			.all();
 		this.writes++;

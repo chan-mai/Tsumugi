@@ -387,6 +387,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const subflows: SubflowStart[] = [];
 			// このtickで既に決めたノード, 投入はまとめて行い判断済みでもPENDINGのまま残る
 			const handled = new Set<string>();
+			// 取り消しを要求し終端の通知を待つノード, 決定が残っても再実行の対象外(ADR-0052)
+			const waiting = new Set<string>();
 			let deferred = 0;
 
 			// 中断の連鎖は1回のadvanceでは1段しか進まない, 進みが止まるまで反復して1 tickで解決
@@ -412,6 +414,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						inputs,
 						starting,
 						subflows,
+						waiting,
 						deadlineError,
 					});
 					for (const id of applied) touched.add(id);
@@ -464,9 +467,14 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			if (notified && (await this.#sweep(now))) return;
 
 			// 中断の決定と投影の残りがあるうちは即座に再実行
+			// 通知待ちのノードの決定は対象外, 次の起動はnotifyが担う(ADR-0052)
 			// 投影待ちも確認, tickのawait中に入った通知は投影されないまま残る
 			const hasMore =
-				deferred > 0 || projected >= PROJECTION_LIMIT || settled.decisions.length > 0 || this.repo.countOutbox() > 0 || !notified;
+				deferred > 0 ||
+				projected >= PROJECTION_LIMIT ||
+				settled.decisions.some((decision) => !waiting.has(decision.id)) ||
+				this.repo.countOutbox() > 0 ||
+				!notified;
 			if (hasMore) await this.#armAlarm(now);
 			else if (settled.state === 'RUNNING') await this.#armDeadline(now);
 			else await this.#armSweep(now);
@@ -483,11 +491,13 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				inputs: EnqueueInput[];
 				starting: string[];
 				subflows: SubflowStart[];
+				/** 取り消しを要求し終端の通知を待つノード(ADR-0052) */
+				waiting: Set<string>;
 				/** 期限超過による中断の理由, 取り消しではnull(ADR-0039) */
 				deadlineError: string | null;
 			},
 		): Promise<string[]> {
-			const { definitions, runInput, runId, now, inputs, starting, subflows, deadlineError } = context;
+			const { definitions, runInput, runId, now, inputs, starting, subflows, waiting, deadlineError } = context;
 			const row = this.repo.findNode(decision.id);
 			if (!row) return [];
 
@@ -560,15 +570,19 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					if (row.child_run_id !== null) {
 						// 子のcancelは要求の受理までで、終端に達したかは子からの通知で確定
 						await this.#runStub(row.child_run_id).cancel();
+						waiting.add(row.id);
 						return [];
 					}
 					if (row.job_id === null || row.state === 'PENDING') {
 						this.repo.updateNode(row.id, terminal, now);
 						return [row.id];
 					}
-					// QUEUED以降は拒否される, 拒否後は通知を待機(ADR-0012)
+					// QUEUED以降は協調的な要求の受理まで, 終端はジョブからの通知で確定(ADR-0052)
 					const result = await this.#jobStub(row.job_id).cancel(row.job_id);
-					if (!result.ok) return [];
+					if (!result.ok || result.requested) {
+						waiting.add(row.id);
+						return [];
+					}
 					this.repo.updateNode(row.id, terminal, now);
 					return [row.id];
 				}

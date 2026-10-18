@@ -28,6 +28,8 @@ export const job = sqliteTable(
 		runAfter: integer('run_after'),
 		/** 実行開始の期限, 経過後は実行されずCANCELLED */
 		expiresAt: integer('expires_at'),
+		/** 取り消し要求の時刻(#95) */
+		cancelRequestedAt: integer('cancel_requested_at'),
 		/** 実行中のジョブが報告した進捗, 0以上1以下 */
 		progress: real('progress'),
 		payload: text('payload').notNull(),

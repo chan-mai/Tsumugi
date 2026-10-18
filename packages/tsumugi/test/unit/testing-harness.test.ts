@@ -125,6 +125,7 @@ describe('公開している純粋関数', () => {
 					heartbeatAt: null,
 					guarantee: 'at-least-once',
 					timeoutMs: 1_000,
+					cancelRequestedAt: null,
 				},
 			],
 			policy: {

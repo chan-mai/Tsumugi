@@ -89,8 +89,8 @@ op rescheduleJob(
 
 @route("/api/jobs/{id}/cancel")
 @operationId("cancelJob")
-@summary("Cancel a job that has not started")
-@doc("Accepted for SCHEDULED jobs only. From QUEUED onwards execution may already have begun.")
+@summary("Cancel a job")
+@doc("A SCHEDULED job is cancelled immediately. For a QUEUED or RUNNING job the cancellation is recorded as a cooperative request (requested: true in the response): the performer observes it through heartbeat, and the job settles when it responds or the grace period passes.")
 @post
 op cancelJob(@path @doc("Job id") id: string): MutationResponses | BadJobId | Unauthorized | Unavailable;
 
@@ -107,8 +107,8 @@ op bulkRetryJobs(@body body: BulkRequest): {
 
 @route("/api/jobs/bulk-cancel")
 @operationId("bulkCancelJobs")
-@summary("Cancel several jobs that have not started")
-@doc("Accepts SCHEDULED jobs. Jobs in any other state are reported in failed.")
+@summary("Cancel several jobs")
+@doc("Accepts SCHEDULED, QUEUED and RUNNING jobs. A cooperative request counts as ok. Jobs in any other state are reported in failed.")
 @returnsDoc("Processed, including partial refusals")
 @post
 op bulkCancelJobs(@body body: BulkRequest): {

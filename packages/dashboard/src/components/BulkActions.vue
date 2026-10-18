@@ -4,7 +4,7 @@ import { ref } from 'vue';
 import { bulkAction } from '../api';
 
 /** 一括操作が受け付ける状態, サーバ側の制限を操作前に提示 */
-const TARGET_STATES = { retry: ['FAILED', 'STALLED'], cancel: ['SCHEDULED'] } as const;
+const TARGET_STATES = { retry: ['FAILED', 'STALLED'], cancel: ['SCHEDULED', 'QUEUED', 'RUNNING'] } as const;
 
 const props = defineProps<{ ids: string[] }>();
 const emit = defineEmits<{ changed: []; message: [text: string] }>();

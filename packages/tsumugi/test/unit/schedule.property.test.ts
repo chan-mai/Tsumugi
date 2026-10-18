@@ -141,6 +141,7 @@ describe('schedule()の不変条件', () => {
 			reap: 'SCHEDULED',
 			stall: 'STALLED',
 			fail: 'FAILED',
+			cancel: 'CANCELLED',
 		};
 		fc.assert(
 			fc.property(scheduleInput, (input) => {
@@ -191,13 +192,27 @@ describe('schedule()の不変条件', () => {
 		);
 	});
 
-	it('dispatchとexpire以外の決定があればnextAlarmAtはnowになる', () => {
-		// expireは同じtickで遷移が完結, 続きのtickの要求なし
+	it('dispatch, expire, cancel以外の決定があればnextAlarmAtはnowになる', () => {
+		// expireとcancelは同じtickで遷移が完結, 続きのtickの要求なし
 		fc.assert(
 			fc.property(scheduleInput, (input) => {
 				const out = schedule(input);
-				if (out.decisions.some((d) => d.type !== 'dispatch' && d.type !== 'expire')) {
+				if (out.decisions.some((d) => d.type !== 'dispatch' && d.type !== 'expire' && d.type !== 'cancel')) {
 					expect(out.nextAlarmAt).toBe(input.now);
+				}
+			}),
+			{ numRuns: RUNS },
+		);
+	});
+
+	it('取り消し要求済みのジョブはdispatchされない', () => {
+		// 要求はreapでは消えず、SCHEDULEDへ戻った後も投入せずcancelで終了(#95)
+		fc.assert(
+			fc.property(scheduleInput, (input) => {
+				const out = schedule(input);
+				const byId = activeById(input);
+				for (const d of out.decisions) {
+					if (d.type === 'dispatch') expect(byId.get(d.id)!.cancelRequestedAt).toBeNull();
 				}
 			}),
 			{ numRuns: RUNS },
