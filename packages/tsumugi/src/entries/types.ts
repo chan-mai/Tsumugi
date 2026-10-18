@@ -14,6 +14,9 @@ export type {
 	RateLimit,
 	ScheduleInput,
 	ScheduleOutput,
+	SettledNotice,
+	SettledState,
+	SettledTarget,
 } from '../core/types.js';
 export type { JobAddress, RunAddress } from '../core/ids.js';
 export type { CronSpec } from '../core/cron.js';
@@ -67,5 +70,6 @@ export type {
 	Performers,
 	PerformersOf,
 	Requirements,
+	SettledPerformer,
 	TypedEnqueueInput,
 } from '../core/api.js';

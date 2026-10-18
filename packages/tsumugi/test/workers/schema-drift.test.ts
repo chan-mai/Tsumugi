@@ -1,7 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
 import { describe, expect, it } from 'vitest';
-import { attempt, job, outbox, setting, uniqueKey } from '../../src/do/tables.js';
+import { attempt, failureNotify, job, outbox, setting, settledNotify, uniqueKey } from '../../src/do/tables.js';
 import { schedule, schedulerSetting } from '../../src/do/scheduler-tables.js';
 import { job as readModel } from '../../src/projection/tables.js';
 
@@ -25,7 +25,7 @@ describe('DDLとDrizzle定義の一致', () => {
 				.sort();
 		});
 
-	for (const table of [job, attempt, uniqueKey, setting, outbox]) {
+	for (const table of [job, attempt, uniqueKey, setting, outbox, failureNotify, settledNotify]) {
 		const config = getTableConfig(table);
 
 		it(`${config.name}の列が一致する`, async () => {

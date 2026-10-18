@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createId } from '@paralleldrive/cuid2';
-import type { BindingConfig, ClientEnv } from '../client/enqueue.js';
+import type { BindingConfig, ClientEnv, EnqueueHook } from '../client/enqueue.js';
 import { configOf, createClient } from '../client/enqueue.js';
 import {
 	assertDeadlineMs,
@@ -24,7 +24,7 @@ import {
 	type SpawnRequest,
 } from '../core/run.js';
 import { resolveShard } from '../core/shard.js';
-import type { Retention } from '../core/types.js';
+import type { Retention, SettledTarget } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
@@ -133,6 +133,10 @@ export type RunOptions = {
 	settings?: RunSettings;
 	/** 失敗を知らせる先のbinding(#30), ノードとして投入するジョブにも同じ宛先が必要 */
 	failureBinding?: string | null;
+	/** 終端を知らせる宛先と対象(#96), ノードとして投入するジョブにも同じ値が必要 */
+	settled?: SettledTarget | null;
+	/** 投入のたびに既定値を付与するフック(#96), ノードの投入にも適用 */
+	onEnqueue?: EnqueueHook;
 };
 
 /**
@@ -141,7 +145,7 @@ export type RunOptions = {
  * 進行の判断は`core/run.ts`の純粋関数が担当、ここはSQLiteとの仲介のみ(ADR-0018)
  * flow定義は写像関数を含みDOへ保存不可、クロージャで受けたコードから取得(ADR-0030)
  */
-export function createRunClass({ flows, bindings, settings = {}, failureBinding }: RunOptions): RunClass {
+export function createRunClass({ flows, bindings, settings = {}, failureBinding, settled, onEnqueue }: RunOptions): RunClass {
 	const maxNodes = settings.maxNodes ?? DEFAULT_MAX_NODES;
 	const maxDepth = settings.maxDepth ?? DEFAULT_MAX_DEPTH;
 	// flow定義から名前を取得, subflowノードは定義そのものを持ちここで名前へ変換
@@ -150,7 +154,14 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding 
 		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
 		failedMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 	};
-	const client = createClient<RunEnv>(bindings, failureBinding === undefined ? {} : { failureBinding });
+	const client = createClient<RunEnv>(
+		bindings,
+		{
+			...(failureBinding === undefined ? {} : { failureBinding }),
+			...(settled === undefined ? {} : { settled }),
+		},
+		onEnqueue ? { onEnqueue } : {},
+	);
 
 	return class TsumugiRun extends DurableObject<RunEnv> {
 		/** テストからの差し替え用にpublic */

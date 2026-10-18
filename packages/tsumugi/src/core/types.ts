@@ -71,6 +71,39 @@ export type FailureNotice = {
 	failedAt: number;
 };
 
+/** 終端の4状態(ADR-0012), 通知の対象になりうる範囲 */
+export type SettledState = 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'STALLED';
+
+/**
+ * 終端の通知の宛先と対象(#96)
+ * 投入のたびに設定としてDOへ届ける, 宛先と対象は常に一体で更新
+ */
+export type SettledTarget = {
+	binding: string;
+	/** 通知する終端状態, 明示必須でCOMPLETEDの暗黙の大量通知を防止 */
+	states: readonly SettledState[];
+};
+
+/**
+ * 終端に達したジョブの知らせ(#96)
+ * 通知先のperformerが受け取るpayload, ジョブの明細は読み取りモデルから取得可能
+ */
+export type SettledNotice = {
+	jobId: string;
+	binding: string;
+	state: SettledState;
+	attempts: number;
+	maxAttempts: number;
+	/** 最後の試行の理由, 失敗の終端以外と記録なしはnull */
+	error: string | null;
+	/** performの戻り値, COMPLETED以外と保存上限超過はnull */
+	result: unknown;
+	/** 投入元のrun, 単発で投入したジョブはnull */
+	runId: string | null;
+	nodeId: string | null;
+	settledAt: number;
+};
+
 export type Bucket = { tokens: number; refilledAt: number };
 
 /** concurrencyKey別のバケット, tokens上限のキーは除外 */

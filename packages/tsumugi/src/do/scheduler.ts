@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { configOf, createClient, type BindingConfig, type ClientEnv } from '../client/enqueue.js';
+import { configOf, createClient, type BindingConfig, type ClientEnv, type EnqueueHook } from '../client/enqueue.js';
 import { formatJobId, formatRunId, shardNameOf } from '../core/ids.js';
 import {
 	normalizeSchedules,
@@ -10,6 +10,7 @@ import {
 	type ScheduleContext,
 } from '../core/recurring.js';
 import { resolveShard } from '../core/shard.js';
+import type { SettledTarget } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput } from './job-shard.js';
 import type { StartInput, StartResult } from './run.js';
@@ -95,6 +96,10 @@ export type SchedulerOptions = {
 	targets: { bindings: readonly string[]; flows: readonly string[] };
 	/** 失敗を知らせる先のbinding(#30), 定期実行で投入するジョブにも同じ宛先が必要 */
 	failureBinding?: string | null;
+	/** 終端を知らせる宛先と対象(#96), 定期実行で投入するジョブにも同じ値が必要 */
+	settled?: SettledTarget | null;
+	/** 投入のたびに既定値を付与するフック(#96), 定期実行の投入にも適用 */
+	onEnqueue?: EnqueueHook;
 };
 
 /** Job DOの非終端の状態, 前回がこのいずれかならskip */
@@ -109,14 +114,28 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * 定義はコードのclosureから取得し、DOは次回時刻と直近の観測だけを持つ
  * 発火は決定的IDで冪等にし、二重発火は既存の重複排除(ADR-0029)で無効化
  */
-export function createSchedulerClass({ schedules, bindings, targets, failureBinding }: SchedulerOptions): SchedulerClass {
+export function createSchedulerClass({
+	schedules,
+	bindings,
+	targets,
+	failureBinding,
+	settled,
+	onEnqueue,
+}: SchedulerOptions): SchedulerClass {
 	// 定義の誤りはdefineTsumugiの時点でエラー, 発火まで発覚しないと定期実行が警告なく停止
 	const { schedules: normalized, fingerprint } = normalizeSchedules(schedules, {
 		bindings: targets.bindings,
 		flows: targets.flows,
 		shardsOf: (binding) => configOf(bindings, binding)?.shards ?? 1,
 	});
-	const client = createClient<SchedulerEnv>(bindings, failureBinding === undefined ? {} : { failureBinding });
+	const client = createClient<SchedulerEnv>(
+		bindings,
+		{
+			...(failureBinding === undefined ? {} : { failureBinding }),
+			...(settled === undefined ? {} : { settled }),
+		},
+		onEnqueue ? { onEnqueue } : {},
+	);
 
 	return class TsumugiScheduler extends DurableObject<SchedulerEnv> {
 		/** テストからの差し替え用にpublic */

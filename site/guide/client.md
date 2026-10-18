@@ -42,7 +42,6 @@ export default {
 ## 設定を揃える
 
 `shards`を2以上に設定している場合、投入側にも同じ設定が必要になります。
-これは、分割数が一致しない場合に投入先のDurable Objectが変わるためです。
 
 ```ts
 const jobs = createClient<Env>({
@@ -51,6 +50,22 @@ const jobs = createClient<Env>({
 ```
 
 `policy`と保持期間もここで指定可能です。本体側と同じ値を指定してください。
+
+## 投入時の既定値
+
+第3引数に`onEnqueue`を含めることにより、投入のたびに実行オプションの既定値を付与できます。
+本体の`defineTsumugi`に指定したフックは別Workerからの投入には適用されないため、必要な場合は同じフックを指定してください
+
+
+```ts
+const jobs = createClient<Env>(
+  {},
+  {},
+  { onEnqueue: (input) => (input.binding === 'MAIL' ? { timeoutMs: 120_000 } : undefined) },
+);
+```
+
+動作の詳細は[投入時の既定値](/guide/execution#enqueue-hook)を参照してください。
 
 ## API
 

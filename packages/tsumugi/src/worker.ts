@@ -1,6 +1,8 @@
 import { createId } from '@paralleldrive/cuid2';
 import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
-import { configOf, createClient, type BindingConfig, type ClientEnv } from './client/enqueue.js';
+import { configOf, createClient, type BindingConfig, type ClientEnv, type EnqueueHook } from './client/enqueue.js';
+import { TERMINAL_STATES } from './core/transitions.js';
+import type { SettledState } from './core/types.js';
 import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
 import { createRunClass, type RunClass, type RunSettings, type StartResult } from './do/run.js';
@@ -14,7 +16,7 @@ import {
 } from './do/scheduler.js';
 import type { AnySchedules, ScheduleDefs } from './core/recurring.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry, type PerformerSource } from './queue/consumer.js';
-import type { EnvOf, FailurePerformer, JobQueue, Performers, PerformersOf, TypedEnqueueInput } from './core/api.js';
+import type { EnvOf, FailurePerformer, JobQueue, Performers, PerformersOf, SettledPerformer, TypedEnqueueInput } from './core/api.js';
 import type { Flows, InputOf } from './core/flow.js';
 import type { AuthMiddleware } from './api/auth.js';
 import { createRest, type RestEnv } from './api/rest.js';
@@ -78,6 +80,19 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	 * 通知そのものの失敗は通知の対象外, 自分を呼び続ける循環の防止
 	 */
 	onFailure?: string;
+	/**
+	 * 終端に達したジョブを知らせる宛先と対象の状態(#96)
+	 * statesに含めた終端のジョブが`SettledNotice`をpayloadとして届く
+	 * 宛先自身とonFailure宛先の遷移は対象外, 自己循環と相互連鎖の防止
+	 * onFailureと併用するとFAILED/STALLEDは両方へ届く
+	 */
+	onSettled?: { binding: string; states: readonly SettledState[] };
+	/**
+	 * 投入のたびに既定値を付与するフック(#96)
+	 * 呼び出し側の明示値が優先, worker/Run DO/Scheduler DOの投入に適用
+	 * onFailure/onSettledの通知ジョブの投入には非適用
+	 */
+	onEnqueue?: EnqueueHook;
 	/**
 	 * 定期実行の定義(ADR-0040)
 	 * 指定した場合のみScheduler DOのエクスポートとbindingが必要
@@ -165,12 +180,24 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		flows?: F;
 		schedules?: ScheduleDefs<NoInfer<PerformersOf<R>>, NoInfer<F>>;
 		onFailure?: FailurePerformer<NoInfer<PerformersOf<R>>>;
-	} & Omit<TsumugiConfig<any>, 'performers' | 'flows' | 'schedules' | 'onFailure'>,
+		onSettled?: { binding: SettledPerformer<NoInfer<PerformersOf<R>>>; states: readonly [SettledState, ...SettledState[]] };
+	} & Omit<TsumugiConfig<any>, 'performers' | 'flows' | 'schedules' | 'onFailure' | 'onSettled'>,
 ): Tsumugi<EnvOf<R>, PerformersOf<R>, F> {
 	type Env = ConsumerEnv & RestEnv & RunNamespaceEnv & SchedulerNamespaceEnv;
-	// 失敗の通知先は投入のたびにDOへ送る, bindingを問わず同じ値(#30)
-	// 宛先は常に渡す, onFailure解除後に既存のshardが古い宛先へ送り続けるのを防止(#30)
-	const client = createClient<Env>(config.bindings ?? {}, { failureBinding: config.onFailure ?? null });
+	// statesの空や不正値は起動時に拒否, 発火まで発覚しないと通知が警告なく欠落
+	if (config.onSettled) {
+		if (config.onSettled.states.length === 0) throw new Error('onSettled.states must not be empty');
+		for (const state of config.onSettled.states) {
+			if (!TERMINAL_STATES.includes(state)) throw new Error(`onSettled.states contains an invalid state: ${state}`);
+		}
+	}
+	// 通知の設定は投入のたびにDOへ送る, bindingを問わず同じ値(#30 / #96)
+	// 常に渡す, 設定の解除後に既存のshardが古い宛先へ送り続けるのを防止(#30)
+	const client = createClient<Env>(
+		config.bindings ?? {},
+		{ failureBinding: config.onFailure ?? null, settled: config.onSettled ?? null },
+		config.onEnqueue ? { onEnqueue: config.onEnqueue } : {},
+	);
 	// 公開の型はperformersから推論, 実行時はEnvを問わず内部のみ緩い型を使用
 	const performers = config.performers as unknown as PerformerRegistry<Env>;
 	const flows: Flows = config.flows ?? {};
@@ -191,6 +218,8 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		bindings: config.bindings ?? {},
 		targets: { bindings: Object.keys(performers), flows: Object.keys(flows) },
 		failureBinding: config.onFailure ?? null,
+		settled: config.onSettled ?? null,
+		...(config.onEnqueue ? { onEnqueue: config.onEnqueue } : {}),
 	});
 
 	// Workersに起動フックが無く、最初の呼び出しを起動とみなして検証(ADR-0036)
@@ -330,6 +359,8 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 			bindings: config.bindings ?? {},
 			...(config.runs ? { settings: config.runs } : {}),
 			failureBinding: config.onFailure ?? null,
+			settled: config.onSettled ?? null,
+			...(config.onEnqueue ? { onEnqueue: config.onEnqueue } : {}),
 		}),
 		// schedule定義を参照するクラス, 同上(ADR-0040)
 		schedulerClass,

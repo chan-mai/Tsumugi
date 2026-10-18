@@ -52,3 +52,5 @@
 - [ADR-0047](0047-job-expiration.md) - ジョブの期限切れは投入直前と実行直前に判定しCANCELLEDへ集約する
 - [ADR-0048](0048-job-logs-and-traceparent.md) - ジョブごとのログを件数制限付きで保存しtraceparentを引き継ぐ
 - [ADR-0049](0049-ready-window-by-run-after.md) - 投入候補の読み取り範囲を到来順にする
+- [ADR-0050](0050-settled-notification-with-explicit-states.md) - 終端の通知は対象の状態を明示して投入する
+- [ADR-0051](0051-enqueue-hook-as-defaults.md) - 投入時のフックは既定値の付与として持つ
