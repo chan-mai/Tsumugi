@@ -1,4 +1,4 @@
-import { and, asc, desc as sqlDesc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, desc as sqlDesc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
@@ -636,6 +636,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			const clause = and(
 				...[
 					inArray(readModel.state, [...states]),
+					action === 'cancel' ? isNull(readModel.cancelRequestedAt) : undefined,
 					binding ? eq(readModel.binding, binding) : undefined,
 					uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
 					concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
