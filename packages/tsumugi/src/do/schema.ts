@@ -31,6 +31,8 @@ export const SCHEMA = [
 		-- performの戻り値, 成功時にJSON文字列で入る(#9), 上限超過や非直列化はnull
 		result TEXT,
 		traceparent TEXT,
+		-- 取り消し要求の時刻(#95), 協調的な中断の起点
+		cancel_requested_at INTEGER,
 		-- v2のDAG用の予約列(ADR-0015), 後からのスキーマ変更が不要なよう最初から配置
 		run_id TEXT,
 		node_id TEXT
@@ -120,6 +122,7 @@ export function applySchema(sql: SqlStorage): void {
 	ensureColumn(sql, 'job', 'progress', 'REAL');
 	ensureColumn(sql, 'job', 'expires_at', 'INTEGER');
 	ensureColumn(sql, 'job', 'traceparent', 'TEXT');
+	ensureColumn(sql, 'job', 'cancel_requested_at', 'INTEGER');
 	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
 	// job_dueが先頭列を含み代替
 	sql.exec(`DROP INDEX IF EXISTS job_active`);
@@ -167,6 +170,7 @@ export type JobRow = {
 	payload: string;
 	result: string | null;
 	traceparent: string | null;
+	cancel_requested_at: number | null;
 	run_id: string | null;
 	node_id: string | null;
 };

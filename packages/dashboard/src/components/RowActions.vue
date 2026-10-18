@@ -57,7 +57,7 @@ async function run(kind: 'retry' | 'cancel') {
 						type="button"
 						class="w-full rounded-sm border-none px-2 py-1.5 text-left"
 						:class="[active && canCancel ? 'bg-accent' : '', canCancel ? 'text-destructive' : 'cursor-not-allowed text-muted-foreground']"
-						title="Only scheduled jobs can be cancelled"
+						title="Scheduled jobs are cancelled immediately, running jobs receive a request"
 						@click="canCancel && run('cancel')"
 					>
 						Cancel

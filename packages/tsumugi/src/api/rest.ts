@@ -250,7 +250,8 @@ export const BULK_LIMIT_MAX = 200;
  */
 export const BULK_STATES = {
 	retry: ['FAILED', 'STALLED'],
-	cancel: ['SCHEDULED'],
+	// QUEUED / RUNNINGは協調的な要求として受理(ADR-0052)
+	cancel: ['SCHEDULED', 'QUEUED', 'RUNNING'],
 } as const;
 
 /**
@@ -843,6 +844,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			run_after: found.runAfter,
 			// 実行開始の期限, 経過後は実行されずCANCELLED(#97)
 			expires_at: found.expiresAt,
+			// 取り消し要求の時刻(#95), 要求なしはnull
+			cancel_requested_at: found.cancelRequestedAt,
 			progress: found.progress,
 			traceparent: found.traceparent,
 			logs: parseJobLogs(found.logs),
@@ -914,9 +917,9 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.post('/api/jobs/:id/cancel', async (c) => {
 		const id = c.req.param('id');
 		try {
-			// SCHEDULED以外は取り消し不可(ADR-0012)
+			// SCHEDULEDは即時, QUEUED / RUNNINGは要求の受理(ADR-0052)
 			const result = await stubOf(c.env, id).cancel(id);
-			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
+			if (result.ok) return c.json({ ok: true, ...(result.requested ? { requested: true } : {}) } satisfies MutationResponse, 200);
 			const { body, status } = refusal(result);
 			return c.json(body, status);
 		} catch (error) {

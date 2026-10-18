@@ -19,7 +19,9 @@ describe('一括操作の対象の検証', () => {
 
 	it('未指定なら操作が受け付ける状態すべてを対象にする', () => {
 		expect(validateBulk({}, 'retry')).toEqual({ input: { kind: 'filter', states: ['FAILED', 'STALLED'], limit: BULK_LIMIT_MAX } });
-		expect(validateBulk({}, 'cancel')).toEqual({ input: { kind: 'filter', states: ['SCHEDULED'], limit: BULK_LIMIT_MAX } });
+		expect(validateBulk({}, 'cancel')).toEqual({
+			input: { kind: 'filter', states: ['SCHEDULED', 'QUEUED', 'RUNNING'], limit: BULK_LIMIT_MAX },
+		});
 	});
 
 	it('受け付ける状態の中からなら1つに限定できる', () => {
@@ -31,7 +33,9 @@ describe('一括操作の対象の検証', () => {
 	it('操作が受け付けない状態を拒否する', () => {
 		// 対象が減らないと残り件数を追う繰り返しが終わらない
 		expect(validateBulk({ state: 'RUNNING' }, 'retry')).toEqual({ error: 'state must be one of FAILED, STALLED for retry' });
-		expect(validateBulk({ state: 'FAILED' }, 'cancel')).toEqual({ error: 'state must be one of SCHEDULED for cancel' });
+		expect(validateBulk({ state: 'FAILED' }, 'cancel')).toEqual({
+			error: 'state must be one of SCHEDULED, QUEUED, RUNNING for cancel',
+		});
 	});
 
 	it('抽出条件を引き継ぐ', () => {

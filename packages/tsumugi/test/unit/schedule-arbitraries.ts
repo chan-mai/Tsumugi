@@ -35,6 +35,9 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 	// 期限の境界(NOW)をまたぐよう幅を取る, nullは無期限
 	const expiresAt = fc.oneof(fc.constant(null), fc.integer({ min: NOW - 10_000, max: NOW + 10_000 }));
 
+	// 取り消し要求(#95)は応答期限(要求+grace)の境界をまたぐよう幅を取る, nullは要求なし
+	const cancelRequestedAt = fc.oneof(fc.constant(null), fc.integer({ min: NOW - 60_000, max: NOW }));
+
 	const scheduled = fc.record({
 		...common,
 		state: fc.constant('SCHEDULED' as const),
@@ -42,6 +45,7 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 		expiresAt,
 		dispatchedAt: fc.constant(null),
 		heartbeatAt: fc.constant(null),
+		cancelRequestedAt,
 	});
 
 	// QUEUED / RUNNINGはdispatchedAtを持つ, 無応答判定の境界をまたぐよう幅を取る
@@ -52,6 +56,7 @@ function jobOf(id: string): fc.Arbitrary<JobView> {
 		expiresAt,
 		dispatchedAt: fc.integer({ min: NOW - 600_000, max: NOW }),
 		heartbeatAt: fc.constant(null),
+		cancelRequestedAt,
 	});
 
 	return fc.oneof(scheduled, inFlight);

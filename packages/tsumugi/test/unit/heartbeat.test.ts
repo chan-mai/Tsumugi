@@ -8,6 +8,7 @@ function harness() {
 	const heartbeat = createHeartbeat(
 		async (progress) => {
 			sent.push(progress);
+			return { accepted: true, cancelRequested: false };
 		},
 		() => at,
 	);
@@ -48,7 +49,7 @@ describe('生存報告の間引き', () => {
 			},
 			() => 0,
 		);
-		await expect(heartbeat()).resolves.toBeUndefined();
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: false });
 	});
 
 	it('送信が滞っても待機は上限で切り上げる', async () => {
@@ -59,6 +60,61 @@ describe('生存報告の間引き', () => {
 			HEARTBEAT_MIN_INTERVAL_MS,
 			10,
 		);
-		await expect(heartbeat()).resolves.toBeUndefined();
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: false });
+	});
+});
+
+describe('取り消し要求の伝達(#95)', () => {
+	function cancellable(initial: boolean) {
+		let requested = initial;
+		let at = 1_000_000;
+		const heartbeat = createHeartbeat(
+			async () => ({ accepted: true, cancelRequested: requested }),
+			() => at,
+		);
+		return { heartbeat, advance: (ms: number) => (at += ms), request: () => void (requested = true) };
+	}
+
+	it('応答のcancelRequestedがそのまま戻り値になる', async () => {
+		const { heartbeat, advance, request } = cancellable(false);
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: false });
+		request();
+		advance(HEARTBEAT_MIN_INTERVAL_MS);
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: true });
+	});
+
+	it('一度trueになれば間引かれた報告でも戻り値はtrue', async () => {
+		const { heartbeat, advance } = cancellable(true);
+		await heartbeat();
+		advance(1_000);
+		// 下限未満で送信は無く戻り値は直近の結果
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: true });
+	});
+
+	it('不受理の応答はcancelRequestedをtrueにする', async () => {
+		const heartbeat = createHeartbeat(
+			async () => ({ accepted: false, cancelRequested: false }),
+			() => 0,
+		);
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: true });
+	});
+
+	it('待機の上限を超えた応答は次の報告の戻り値に反映される', async () => {
+		let release: (() => void) | undefined;
+		let at = 1_000_000;
+		const heartbeat = createHeartbeat(
+			() =>
+				new Promise((resolve) => {
+					release = () => resolve({ accepted: true, cancelRequested: true });
+				}),
+			() => at,
+			HEARTBEAT_MIN_INTERVAL_MS,
+			10,
+		);
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: false });
+		release!();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		at += HEARTBEAT_MIN_INTERVAL_MS;
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: true });
 	});
 });

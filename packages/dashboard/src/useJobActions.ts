@@ -11,7 +11,8 @@ export function useJobActions(source: Ref<{ state: string; retryable?: boolean }
 	const gone = ref(false);
 
 	const canRetry = computed(() => !gone.value && !busy.value && source.value?.retryable !== false);
-	const canCancel = computed(() => !gone.value && !busy.value && source.value?.state === 'SCHEDULED');
+	// QUEUED/RUNNINGは協調的な要求として受理される(ADR-0052)
+	const canCancel = computed(() => !gone.value && !busy.value && ['SCHEDULED', 'QUEUED', 'RUNNING'].includes(source.value?.state ?? ''));
 
 	/** retryableはサーバの近似, 実際に消えているかは操作して410が返って初めて判明 */
 	const goneReason = computed(() =>

@@ -29,7 +29,7 @@ describe('生存報告(#35)', () => {
 		await runInDurableObject(stub, (instance) => {
 			(instance as any).clock = { now: () => T0 + 30_000 };
 		});
-		expect(await stub.heartbeat(jobId, 0.4)).toBe(true);
+		expect(await stub.heartbeat(jobId, 0.4)).toEqual({ accepted: true, cancelRequested: false });
 
 		const row = await rowOf(stub, jobId);
 		expect(row.heartbeat_at).toBe(T0 + 30_000);
@@ -74,7 +74,7 @@ describe('生存報告(#35)', () => {
 		const jobId = await queued('HBD#0');
 		await stub.report(jobId, { ok: true });
 
-		expect(await stub.heartbeat(jobId, 0.5)).toBe(false);
+		expect(await stub.heartbeat(jobId, 0.5)).toEqual({ accepted: false, cancelRequested: false });
 		expect((await rowOf(stub, jobId)).progress).toBeNull();
 	});
 

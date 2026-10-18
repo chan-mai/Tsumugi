@@ -165,6 +165,11 @@ const pretty = (payload: string | undefined) => {
 									<dt class="text-muted-foreground">Expires at</dt>
 									<dd>{{ at(job.expires_at) }}</dd>
 								</template>
+								<!-- 取り消し要求を受けたジョブでのみ埋まる(ADR-0052) -->
+								<template v-if="job.cancel_requested_at !== null && job.cancel_requested_at !== undefined">
+									<dt class="text-muted-foreground">Cancel requested at</dt>
+									<dd>{{ at(job.cancel_requested_at) }}</dd>
+								</template>
 								<dt class="text-muted-foreground">Started at</dt>
 								<dd>{{ at(job.dispatched_at) }}</dd>
 								<dt class="text-muted-foreground">Updated at</dt>
@@ -204,7 +209,7 @@ const pretty = (payload: string | undefined) => {
 									class="h-8 rounded-card border border-border px-3 text-sm"
 									:class="canCancel ? 'bg-background text-destructive hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
 									:disabled="busy || loading || !canCancel"
-									title="Only scheduled jobs can be cancelled"
+									title="Scheduled jobs are cancelled immediately, running jobs receive a request"
 									@click="run('cancel')"
 								>
 									Cancel

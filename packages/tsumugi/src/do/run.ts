@@ -566,9 +566,9 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						this.repo.updateNode(row.id, terminal, now);
 						return [row.id];
 					}
-					// QUEUED以降は拒否される, 拒否後は通知を待機(ADR-0012)
+					// QUEUED以降は協調的な要求の受理まで, 終端はジョブからの通知で確定(ADR-0052)
 					const result = await this.#jobStub(row.job_id).cancel(row.job_id);
-					if (!result.ok) return [];
+					if (!result.ok || result.requested) return [];
 					this.repo.updateNode(row.id, terminal, now);
 					return [row.id];
 				}

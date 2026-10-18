@@ -189,6 +189,7 @@ describe('REST API', () => {
 			'attempts',
 			'attempts_log',
 			'binding',
+			'cancel_requested_at',
 			'concurrency_key',
 			'created_at',
 			'dispatched_at',
@@ -401,9 +402,18 @@ describe('REST API', () => {
 		expect(Object.values(byState).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
 	});
 
+	it('実行中のジョブのcancelは要求として受理される', async () => {
+		const jobId = await seedJob();
+		// QUEUED以降は協調的な要求(ADR-0052), 200で受理しrequestedで区別
+		const res = await call(withAuth, 'POST', `/api/jobs/${encodeURIComponent(jobId)}/cancel`, authorized);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true, requested: true });
+	});
+
 	it('取り消せない状態のcancelは409を返す', async () => {
 		const jobId = await seedJob();
-		// QUEUED以降は実行済みの可能性があり取り消し不可
+		await shard('REST#0').report(jobId, { ok: true });
+		// 終端のジョブは取り消し不可
 		const res = await call(withAuth, 'POST', `/api/jobs/${encodeURIComponent(jobId)}/cancel`, authorized);
 		expect(res.status).toBe(409);
 	});
@@ -598,6 +608,8 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 
 	it('状態が違うだけなら409', async () => {
 		const jobId = await seedJob();
+		// 終端にして取り消し不可の状態を作る, QUEUEDのままでは要求として受理される(ADR-0052)
+		await shard('REST#0').report(jobId, { ok: true });
 		const res = await post(withAuth, `/api/jobs/${encodeURIComponent(jobId)}/cancel`);
 		expect(res.status).toBe(409);
 	});

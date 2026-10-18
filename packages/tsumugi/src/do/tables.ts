@@ -34,6 +34,8 @@ export const job = sqliteTable(
 		// performの戻り値, 成功時にJSON文字列で入る(#9)
 		result: text('result'),
 		traceparent: text('traceparent'),
+		// 取り消し要求の時刻(#95)
+		cancelRequestedAt: integer('cancel_requested_at'),
 		// v2のDAG用の予約列(ADR-0015), 後からのスキーマ変更が不要なよう最初から配置
 		runId: text('run_id'),
 		nodeId: text('node_id'),

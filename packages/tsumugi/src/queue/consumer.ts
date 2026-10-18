@@ -39,28 +39,35 @@ export const HEARTBEAT_SEND_TIMEOUT_MS = 1_000;
 
 /**
  * 間隔制限付きの生存報告の作成
- * 直前の送信からの経過が下限に満たない要求は送信せず破棄
- * 送信の失敗は破棄, 報告が届かなくてもreaperが回収するだけで実行自体は継続
- * 送信の待機には上限があり、超えた分は結果を待たず破棄
+ * 直前の送信からの経過が下限に満たない要求は送信せず戻り値は直近の結果のまま
+ * 送信の失敗は破棄, 報告が無くてもreaperが回収するだけで実行自体は継続
+ * 送信の待機には上限があり、超えた分は結果を待たず戻り値を確定し応答は次回へ反映
+ *
+ * 取り消し要求(#95)は一度trueになれば以後もtrue
+ * 不受理(accepted=false)もtrueとして扱う, この試行の報告はもう記録されず継続する意味が無い
  */
 export function createHeartbeat(
-	send: (progress?: number) => Promise<unknown>,
+	send: (progress?: number) => Promise<{ accepted: boolean; cancelRequested: boolean }>,
 	now: () => number,
 	minIntervalMs = HEARTBEAT_MIN_INTERVAL_MS,
 	sendTimeoutMs = HEARTBEAT_SEND_TIMEOUT_MS,
-): (progress?: number) => Promise<void> {
+): (progress?: number) => Promise<{ cancelRequested: boolean }> {
 	let lastAt = Number.NEGATIVE_INFINITY;
+	let cancelRequested = false;
 	return async (progress) => {
 		const at = now();
-		if (at - lastAt < minIntervalMs) return;
+		if (at - lastAt < minIntervalMs) return { cancelRequested };
 		lastAt = at;
 		const sending = Promise.resolve(send(progress)).then(
-			() => undefined,
+			(ack) => {
+				if (ack.cancelRequested || !ack.accepted) cancelRequested = true;
+			},
 			(error: unknown) => {
 				console.error('tsumugi: heartbeat failed', error);
 			},
 		);
 		await Promise.race([sending, new Promise<void>((resolve) => setTimeout(resolve, sendTimeoutMs))]);
+		return { cancelRequested };
 	};
 }
 
@@ -230,8 +237,9 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 			// DOが受理した報告だけ期限を再計測, timeoutMsが報告間隔として機能
 			const heartbeat = createHeartbeat(
 				(progress) =>
-					stub.heartbeat(stableId, progress).then((accepted) => {
-						if (accepted) touch();
+					stub.heartbeat(stableId, progress).then((ack) => {
+						if (ack.accepted) touch();
+						return ack;
 					}),
 				() => Date.now(),
 			);

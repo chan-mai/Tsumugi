@@ -24,6 +24,7 @@ const row = (over: Partial<JobRow> = {}): JobRow => ({
 	dispatched_at: T0 + 1_000,
 	heartbeat_at: null,
 	traceparent: null,
+	cancel_requested_at: null,
 	progress: null,
 	payload: '{}',
 	result: null,

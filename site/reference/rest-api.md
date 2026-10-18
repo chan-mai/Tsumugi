@@ -99,6 +99,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
     "dispatched_at": 1753000030000,
     "run_after": null,
     "expires_at": null,
+    "cancel_requested_at": null,
     "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
     "retryable": true,
     "logs": [
@@ -124,6 +125,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 `result`はperformの戻り値で、成功時のみ値が含まれます。それ以外はnullです。
 `run_after`は予約済みジョブの実行予定時刻です。
 `expires_at`は実行開始の期限で、期限を過ぎたジョブは実行されずCANCELLEDになります。at-least-onceの重複配送が期限をまたいだ場合、実行されたジョブがCANCELLEDと記録されることがあります。
+`cancel_requested_at`は[実行中の取り消し](/guide/execution#cancellation)を要求した時刻で、要求が無ければ`null`です。
 `attempts_log`は新しい試行から順に並びます。
 `logs`は受信順のログで、各項目に試行回数、記録時刻(epochミリ秒)、本文が含まれます。未記録の場合は空配列です。
 リトライを含む1ジョブ全体で最新の20件まで保持し、本文はJavaScriptの文字列長で2,000文字が上限です。保存間隔の下限は1,000msです。
@@ -185,11 +187,18 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 
 ## POST /api/jobs/:id/cancel
 
-ジョブを取り消します。対象は`SCHEDULED`のジョブのみです。
+ジョブを取り消します。対象は`SCHEDULED` `QUEUED` `RUNNING`のジョブです。
 
-`QUEUED`以降は既に実行されている可能性があるため409を返します。
+`SCHEDULED`は即時に`CANCELLED`になります。
+`QUEUED`以降は既に実行されている可能性があるため、取り消し要求として受理され、応答に`requested: true`が含まれます。
+ジョブは要求への応答か期限の経過で確定します。詳細は[実行中の取り消し](/guide/execution#cancellation)を参照してください。
 
-返る状態は`retry`と同様です。
+```json
+{ "ok": true, "requested": true }
+```
+
+終端に達したジョブへは409になります。それ以外の応答は`retry`と同様です。
+要求済みのジョブへの再要求は、再び`requested: true`で受理されます。
 
 ## POST /api/jobs/bulk-retry
 
@@ -222,8 +231,11 @@ IDで指定する場合は`ids`のみを渡します。
 
 `ids`を指定した場合、他の条件は無視されます。
 
-条件で指定し`state`を省略した場合、`bulk-retry`は`FAILED`と`STALLED`、`bulk-cancel`は`SCHEDULED`を対象とします。
+条件で指定し`state`を省略した場合、`bulk-retry`は`FAILED`と`STALLED`、`bulk-cancel`は`SCHEDULED` `QUEUED` `RUNNING`を対象とします。
 これ以外の状態を指定した場合は400を返します。対象が減らず、繰り返しても終わらないためです。
+
+`bulk-cancel`では、取り消し要求として受理したぶんも`ok`に含まれます。
+要求済みのジョブは確定するまで一覧の対象に残り続けますが、再要求は冪等で二重には処理されません。
 
 ### レスポンス
 
@@ -634,9 +646,10 @@ runIdの形式が不正な場合は400です。
 
 ## POST /api/runs/:id/cancel
 
-未実行のノードを停止します。実行中のジョブは停止しないので、それらが終わるまで待ちます。
+未実行のノードを停止し、投入済みのノードへは[取り消し要求](/guide/execution#cancellation)を送ります。
+実行自体は停止しないので、各ジョブが要求に応じるか応答の期限が過ぎるまで待ちます。
 
-取り消しできるのは`RUNNING`のRunのみです。それ以外は409になります。
+取り消しが可能なものは`RUNNING`のRunに限定されます。
 runIdの形式が不正な場合は400です。
 
 ## GET /api/openapi.json
