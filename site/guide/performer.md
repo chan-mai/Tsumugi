@@ -186,10 +186,19 @@ class SyncUser extends Performer<{ userId: string }, void, {}, Env> {
 
 次回の実行時刻を指定する場合は`{ retryAt }`にepochミリ秒を渡します。この試行に限り、`backoff`による間隔の代わりに指定した時刻で再試行されます。
 
+`Retry-After`の値は秒数またはHTTP-dateであるため、それぞれを時刻へ変換します。
+
 ```ts
 if (res.status === 429) {
-  const seconds = Number(res.headers.get('Retry-After') ?? '60');
-  await ctx.fail({ retryAt: Date.now() + seconds * 1_000 });
+  const header = res.headers.get('Retry-After') ?? '';
+  const date = Date.parse(header);
+  // 解釈できない場合は60秒後
+  const retryAt = /^\d+$/.test(header)
+    ? Date.now() + Number(header) * 1_000
+    : Number.isNaN(date)
+      ? Date.now() + 60_000
+      : date;
+  await ctx.fail({ retryAt });
   throw new Error('rate limited');
 }
 ```
