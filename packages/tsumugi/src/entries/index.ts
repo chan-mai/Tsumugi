@@ -47,6 +47,7 @@ export type {
 	EnqueueItem,
 	EnqueueOptions,
 	EnvOf,
+	FailOptions,
 	JobContext,
 	JobQueue,
 	Performers,

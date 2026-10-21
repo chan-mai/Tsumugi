@@ -65,6 +65,7 @@ export type {
 	FailurePerformer,
 	EnqueueOptions,
 	EnvOf,
+	FailOptions,
 	JobContext,
 	JobQueue,
 	Performers,

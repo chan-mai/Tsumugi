@@ -15,9 +15,15 @@ export function nextAttempt(args: {
 	now: number;
 	/** 0以上1未満, jitter有効時のみ使用 */
 	rand?: number;
+	/** performer指定の次回時刻(#91), 過去は現在へ丸め */
+	retryAt?: number;
 }): NextAttempt {
-	const { attempts, maxAttempts, backoff, now, rand = 0.5 } = args;
+	const { attempts, maxAttempts, backoff, now, rand = 0.5, retryAt } = args;
 	if (attempts >= maxAttempts) return { kind: 'exhausted' };
+	if (retryAt !== undefined) {
+		const runAfter = Math.max(now, retryAt);
+		return { kind: 'retry', runAfter, delayMs: runAfter - now };
+	}
 
 	const base =
 		backoff.kind === 'fixed'

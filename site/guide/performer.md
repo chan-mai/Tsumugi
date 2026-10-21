@@ -74,6 +74,7 @@ export { SendMail as MAIL } from './performers/send-mail.js';
 | `log`            | 処理途中のメッセージを保存する非同期関数         |
 | `traceparent`    | 投入時のトレース情報。未指定の場合は`null`       |
 | `spawn`          | Flowのノードとして実行中に子ノードを追加する関数 |
+| `fail`           | 失敗した試行の再試行の扱いを指定する関数         |
 
 at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください。
 
@@ -161,6 +162,40 @@ class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, vo
 発生した例外のメッセージは試行履歴に保存され、ダッシュボードの詳細画面に表示されます。
 本文は2,000文字で打ち切られ、1ジョブあたり20件まで保持されます。
 
+### 再試行の扱いを指定する {#fail}
+
+`ctx.fail()`を実行してからthrowすると、その試行の再試行の扱いを指定できます。
+
+再試行しても結果が変わらない失敗には`{ retry: false }`を指定します。試行回数が残っていても再試行せず`FAILED`になります。
+
+```ts
+class SyncUser extends Performer<{ userId: string }, void, {}, Env> {
+  async perform(payload: { userId: string }, ctx: JobContext): Promise<void> {
+    const res = await fetch(`https://api.example.com/users/${payload.userId}`);
+    if (res.status === 404) {
+      await ctx.fail({ retry: false });
+      throw new Error(`user not found: ${payload.userId}`);
+    }
+  }
+}
+```
+
+次回の実行時刻を指定する場合は`{ retryAt }`にepochミリ秒を渡します。この試行に限り、`backoff`による間隔の代わりに指定した時刻で再試行されます。
+
+```ts
+if (res.status === 429) {
+  const seconds = Number(res.headers.get('Retry-After') ?? '60');
+  await ctx.fail({ retryAt: Date.now() + seconds * 1_000 });
+  throw new Error('rate limited');
+}
+```
+
+`retryAt`を指定した場合も試行回数として数えられ、`maxAttempts`に達していれば`FAILED`になります。
+指定した時刻が期限(`expiresAt`)を越える場合は`CANCELLED`になり、過去の時刻を指定した場合は直ちに再試行の対象になります。
+
+指定はthrowで終えた試行にのみ適用され、`perform`が正常に終了した場合は完了として扱われます。
+複数回実行した場合は最後の指定が有効になります。形式が不正な値を渡すと`ctx.fail()`が例外を投げます。
+
 ## キーを必須にする {#required-keys}
 
 第3型引数に`{ concurrencyKey: true }`または`{ uniqueKey: true }`を指定すると、そのperformerへの投入時にキーの指定が必須になります。
@@ -234,6 +269,8 @@ const performers = { ...local, MAIL: remote<SendMail>() };
 await ctx.spawn('child', 'MAIL', payload);
 ```
 
+`ctx.fail`も同様に`await`が必要です。`await`せずにthrowすると、指定が反映されない場合があります。
+
 
 ## テスト
 
@@ -255,6 +292,7 @@ else console.error(result.error);
 `runPerformer`が要求するのは`perform`のみのため、`this.env`を使わないperformerは`perform`を持つ通常のオブジェクトでも検証できます。
 
 `runPerformer`は例外を再送出せず、成功と失敗を同じ形式で返します。
+`ctx.fail()`へ渡した指定は`createTestContext()`が返す文脈の`fails`に、実行した順で記録されます。
 
 ### 実行文脈を差し替える
 

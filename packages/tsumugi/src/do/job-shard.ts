@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createId } from '@paralleldrive/cuid2';
 import { embedJobId, formatJobId, shardName } from '../core/ids.js';
+import type { FailOptions } from '../core/api.js';
 import { nextAttempt } from '../core/backoff.js';
 import { schedule } from '../core/schedule.js';
 import { normalizeTraceparent } from '../core/trace.js';
@@ -461,9 +462,13 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/**
 	 * consumerからの完了報告
 	 * 失敗ならバックオフを計算してSCHEDULEDへ, 試行回数を使い切っていればFAILED
+	 * performerの`ctx.fail`の指定はバックオフの計算より優先(#91)
 	 * リトライ方針はここが持ち、Queuesの`max_retries`は非適用(ADR-0004)
 	 */
-	async report(jobId: string, outcome: { ok: boolean; error?: string; result?: unknown; spawns?: readonly SpawnRequest[] }): Promise<void> {
+	async report(
+		jobId: string,
+		outcome: { ok: boolean; error?: string; result?: unknown; spawns?: readonly SpawnRequest[]; fail?: FailOptions },
+	): Promise<void> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
 		// 報告を受け付けられる状態かをここで判定
@@ -506,14 +511,20 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			return;
 		}
 
-		const next = nextAttempt({
-			attempts,
-			maxAttempts: row.max_attempts,
-			backoff: JSON.parse(row.backoff) as Backoff,
-			now,
-			// 乱数はここで作成してcoreへ渡す, coreは純粋に維持(ADR-0018)
-			rand: Math.random(),
-		});
+		// retry: falseは試行回数の残りに関わらず確定(#91)
+		const fail = outcome.fail;
+		const next =
+			fail && 'retry' in fail
+				? ({ kind: 'exhausted' } as const)
+				: nextAttempt({
+						attempts,
+						maxAttempts: row.max_attempts,
+						backoff: JSON.parse(row.backoff) as Backoff,
+						now,
+						// 乱数はここで作成してcoreへ渡す, coreは純粋に維持(ADR-0018)
+						rand: Math.random(),
+						...(fail ? { retryAt: fail.retryAt } : {}),
+					});
 
 		if (next.kind === 'exhausted') {
 			// 理由はRun DOへ送信, ノード表示から参照不能だと失敗の原因がジョブ側にのみ残存(ADR-0031)
