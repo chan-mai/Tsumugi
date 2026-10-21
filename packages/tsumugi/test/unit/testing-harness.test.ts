@@ -81,6 +81,15 @@ describe('performerのハーネス', () => {
 		expect(result).toEqual({ ok: true, value: 'c1' });
 	});
 
+	it('failの指定を順に記録し本番と同じ条件で検証する', () => {
+		const ctx = createTestContext();
+		ctx.fail({ retry: false });
+		ctx.fail({ retryAt: 1_000 });
+		expect(ctx.fails).toEqual([{ retry: false }, { retryAt: 1_000 }]);
+		expect(() => ctx.fail({ retryAt: Number.NaN })).toThrow(TypeError);
+		expect(() => ctx.fail({ retry: true } as never)).toThrow(TypeError);
+	});
+
 	it('spawnのIDを本番と同じ条件で検証する', () => {
 		const ctx = createTestContext();
 		ctx.spawn('child', 'Greet', {});

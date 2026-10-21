@@ -1,4 +1,4 @@
-import type { JobContext, PerformerLike, Requirements } from '../core/api.js';
+import { toFailOptions, type FailOptions, type JobContext, type PerformerLike, type Requirements } from '../core/api.js';
 import { assertNodeId } from '../core/flow.js';
 import { LOG_KEEP, LOG_MAX_CHARS } from '../core/log.js';
 import type { SpawnRequest } from '../core/run.js';
@@ -19,6 +19,8 @@ export type TestContext = JobContext & {
 	heartbeats: (number | undefined)[];
 	/** 実行の途中から取り消し要求を模擬, 以後のheartbeatの戻り値がcancelRequested: trueになる(#95) */
 	requestCancel(): void;
+	/** `fail`の指定, 実行順に記録し本番は最後が有効(#91) */
+	fails: FailOptions[];
 };
 
 export type TestContextOptions = {
@@ -41,6 +43,7 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 	const heartbeats: (number | undefined)[] = [];
 	const logs: string[] = [];
 	let cancelRequested = options.cancelRequested ?? false;
+	const fails: FailOptions[] = [];
 
 	return {
 		jobId,
@@ -67,6 +70,11 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 			// consumerと同じID検証
 			assertNodeId(id);
 			spawns.push({ id, binding, payload, ...(options ? { options } : {}) });
+		},
+		fails,
+		// consumerと同じ形式検証
+		fail: (options) => {
+			fails.push(toFailOptions(options));
 		},
 	};
 }

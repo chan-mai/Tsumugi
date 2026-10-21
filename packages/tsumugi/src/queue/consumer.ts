@@ -1,4 +1,4 @@
-import type { JobContext, PerformerLike, RemoteRef } from '../core/api.js';
+import { toFailOptions, type FailOptions, type JobContext, type PerformerLike, type RemoteRef } from '../core/api.js';
 import { assertNodeId } from '../core/flow.js';
 import { shardNameOf } from '../core/ids.js';
 import { LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS } from '../core/log.js';
@@ -188,6 +188,8 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 	let result: unknown;
 	// performの中で要求された子, 完了報告に同梱して送信(ADR-0031)
 	const spawns: SpawnRequest[] = [];
+	// ctx.failの指定, 失敗の報告にのみ同梱(#91)
+	let fail: FailOptions | undefined;
 
 	try {
 		// 分割代入もtryの中, 本文がnull等で壊れていても例外によるackの欠落を防止(ADR-0004)
@@ -256,6 +258,9 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 				spawn,
 				heartbeat,
 				log,
+				fail: (options) => {
+					fail = toFailOptions(options);
+				},
 			};
 			return Promise.resolve(service.perform(payload, ctx));
 		});
@@ -277,9 +282,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		// 失敗した試行のspawnは非送信, 再実行で再度要求が届く(ADR-0032)
 		const outcome = ok
 			? { ok: true, result, ...(spawns.length > 0 ? { spawns } : {}) }
-			: failure === undefined
-				? { ok: false }
-				: { ok: false, error: failure };
+			: { ok: false, ...(failure === undefined ? {} : { error: failure }), ...(fail ? { fail } : {}) };
 		await shardStub(env, jobId).report(jobId, outcome);
 	} catch (error) {
 		// 報告が失われるとジョブはQUEUEDのまま残る, reaperが無応答として回収

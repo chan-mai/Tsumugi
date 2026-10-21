@@ -55,4 +55,22 @@ describe('nextAttempt', () => {
 		const b = nextAttempt({ attempts: 1, maxAttempts: 5, backoff, now: T0 });
 		expect(a).toEqual(b);
 	});
+
+	it('retryAtの指定はbackoffより優先する(#91)', () => {
+		// 429のRetry-Afterを指数遅延で上書きすると指定時刻より前に再試行
+		const backoff: Backoff = { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 60_000, jitter: true };
+		const r = nextAttempt({ attempts: 1, maxAttempts: 5, backoff, now: T0, rand: 0, retryAt: T0 + 30_000 });
+		expect(r).toEqual({ kind: 'retry', runAfter: T0 + 30_000, delayMs: 30_000 });
+	});
+
+	it('過去のretryAtは現在時刻へ丸める', () => {
+		const backoff: Backoff = { kind: 'fixed', delayMs: 1_000 };
+		const r = nextAttempt({ attempts: 1, maxAttempts: 5, backoff, now: T0, retryAt: T0 - 5_000 });
+		expect(r).toEqual({ kind: 'retry', runAfter: T0, delayMs: 0 });
+	});
+
+	it('retryAtを指定しても試行回数の上限は適用する', () => {
+		const backoff: Backoff = { kind: 'fixed', delayMs: 1_000 };
+		expect(nextAttempt({ attempts: 3, maxAttempts: 3, backoff, now: T0, retryAt: T0 + 1_000 })).toEqual({ kind: 'exhausted' });
+	});
 });

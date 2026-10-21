@@ -39,7 +39,30 @@ export type JobContext = {
 	 * 別Workerのperformerでは`await`が必要, RPC呼び出しはperformの終了に間に合わない(ADR-0037)
 	 */
 	spawn(id: string, binding: string, payload: unknown, options?: SpawnRequest['options']): void | Promise<void>;
+	/**
+	 * この試行が失敗した場合の再試行の指定(#91)
+	 * `retry: false`は試行回数の残りに関わらずFAILED, `retryAt`はbackoffに代わる次回の実行時刻
+	 * throwで終えた試行のみ適用, 正常returnは完了(COMPLETED)の扱い
+	 * 複数回の呼び出しは最後の指定が有効
+	 *
+	 * 別Workerのperformerでは`await`が必要, RPC呼び出しはperformの終了に間に合わない(ADR-0037)
+	 */
+	fail(options: FailOptions): void | Promise<void>;
 };
+
+/**
+ * 失敗した試行の扱い(#91)
+ * `retryAt`はepochミリ秒, 試行回数の上限と期限は通常の再試行と同じく適用
+ */
+export type FailOptions = { retry: false } | { retryAt: number };
+
+/** 形式検証と複製, RPC経由の値の参照は不保持 */
+export function toFailOptions(options: unknown): FailOptions {
+	const value = options as Partial<{ retry: unknown; retryAt: unknown }> | null | undefined;
+	if (value?.retry === false) return { retry: false };
+	if (typeof value?.retryAt === 'number' && Number.isFinite(value.retryAt)) return { retryAt: value.retryAt };
+	throw new TypeError('invalid fail options: expected { retry: false } or { retryAt: <epoch ms> }');
+}
 
 /**
  * 型の導出に使うperformerの面
