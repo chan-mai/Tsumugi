@@ -13,6 +13,9 @@ model Error {
 
 model Mutation {
 	ok: true;
+
+	@doc("Present when the cancellation was accepted as a cooperative request for a QUEUED or RUNNING job. The job settles when the performer responds or the grace period passes.")
+	requested?: true;
 }
 
 model JobSummary {
@@ -74,6 +77,9 @@ model JobDetail {
 
 	@doc("Deadline of dispatching. Once it passes the job is cancelled instead of executed. Null when no deadline is set.")
 	expires_at: integer | null;
+
+	@doc("When cancellation was requested for a queued or running job. Null when no request was made.")
+	cancel_requested_at: integer | null;
 
 	@doc("Progress reported by the performer while running. Null until it reports.")
 	@minValue(0)

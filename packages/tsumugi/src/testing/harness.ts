@@ -17,6 +17,8 @@ export type TestContext = JobContext & {
 	spawns: SpawnRequest[];
 	/** `heartbeat`へ渡された進捗, 実行の順に入り省略時はundefined */
 	heartbeats: (number | undefined)[];
+	/** 実行の途中から取り消し要求を模擬, 以後のheartbeatの戻り値がcancelRequested: trueになる(#95) */
+	requestCancel(): void;
 	/** `fail`の指定, 実行順に記録し本番は最後が有効(#91) */
 	fails: FailOptions[];
 };
@@ -28,6 +30,8 @@ export type TestContextOptions = {
 	idempotencyKey?: string;
 	/** timeoutが切れる時刻, 既定は現在時刻から60秒後 */
 	deadlineAt?: number;
+	/** 最初から取り消し要求済みとして扱う(#95) */
+	cancelRequested?: boolean;
 };
 
 /** `JobContext`の構築 */
@@ -38,6 +42,7 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 	// 本番はDOへ送信するが、ここでは実行の記録だけを残す
 	const heartbeats: (number | undefined)[] = [];
 	const logs: string[] = [];
+	let cancelRequested = options.cancelRequested ?? false;
 	const fails: FailOptions[] = [];
 
 	return {
@@ -56,6 +61,10 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 		heartbeats,
 		heartbeat: async (progress) => {
 			heartbeats.push(progress);
+			return { cancelRequested };
+		},
+		requestCancel: () => {
+			cancelRequested = true;
 		},
 		spawn: (id, binding, payload, options) => {
 			// consumerと同じID検証

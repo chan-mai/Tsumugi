@@ -111,6 +111,15 @@ describe('performerからの失敗の扱いの指定(#91)', () => {
 		expect(row).toMatchObject({ state: 'SCHEDULED', runAfter: T0 + 120_000 });
 	});
 
+	it('取り消し要求後はretryAtを指定してもCANCELLEDになる(ADR-0052)', async () => {
+		const { row } = await runOnce('CXAT#0', { binding: 'CXAT', payload: {}, maxAttempts: 5 }, async (ctx) => {
+			expect(await shard('CXAT#0').cancel(ctx.jobId)).toEqual({ ok: true, requested: true });
+			ctx.fail({ retryAt: T0 + 120_000 });
+			throw new Error('intentional failure');
+		});
+		expect(row.state).toBe('CANCELLED');
+	});
+
 	it('不正な指定はperformの例外になりbackoffに従い再試行される', async () => {
 		const { row } = await runOnce(
 			'BAD#0',

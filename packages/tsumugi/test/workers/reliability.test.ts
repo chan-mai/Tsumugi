@@ -240,7 +240,7 @@ describe('cancel (ADR-0012)', () => {
 		expect(await stateOf('BOOM', jobId)).toBe('CANCELLED');
 	});
 
-	it('QUEUED以降は取り消せない, 実行済みの可能性があり成功を返さない', async () => {
+	it('QUEUED以降は即時に遷移しない, 取り消しは要求として受理される', async () => {
 		const clock = fixedClock(T0);
 		const { queue } = captureQueue();
 		await install('BOOM', clock, queue);
@@ -249,8 +249,8 @@ describe('cancel (ADR-0012)', () => {
 		await runDurableObjectAlarm(shard('BOOM'));
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 
-		// 状態違いであってDOから消えたのではない, 区別できることをここでも固定(ADR-0027)
-		expect(await shard('BOOM').cancel(jobId)).toEqual({ ok: false, reason: 'invalid-state' });
+		// 実行済みの可能性があり即時のCANCELLEDにはしない, 協調的な要求として受理(ADR-0052)
+		expect(await shard('BOOM').cancel(jobId)).toEqual({ ok: true, requested: true });
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 	});
 });

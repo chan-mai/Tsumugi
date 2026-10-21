@@ -42,6 +42,8 @@ export type JobDetail = JobSummary & {
 	run_after: number | null;
 	/** 実行開始の期限, 経過後は実行されずCANCELLED, 無期限はnull */
 	expires_at: number | null;
+	/** 取り消し要求の時刻(#95), 要求が無ければnull */
+	cancel_requested_at: number | null;
 	/** 実行中のジョブが報告した進捗, 0以上1以下で報告が無ければnull */
 	progress: number | null;
 	traceparent: string | null;
@@ -191,8 +193,8 @@ export type SchedulesResponse = { schedules: ScheduleSummary[] };
 /** 手動発火の応答, idは投入したジョブまたは開始したRun */
 export type TriggerScheduleResponse = { id: string; kind: 'job' | 'flow' };
 
-/** retry / cancelの応答 */
-export type MutationResponse = { ok: true };
+/** retry / cancelの応答, requestedは協調的な取り消し要求の受理(ADR-0052) */
+export type MutationResponse = { ok: true; requested?: true };
 
 /** 4xx / 5xxで返る本文 */
 export type ErrorResponse = { error: string };

@@ -1,4 +1,4 @@
-# ADR-0052:失敗した試行の再試行の扱いをperformerが`ctx.fail`で指定する
+# ADR-0053:失敗した試行の再試行の扱いをperformerが`ctx.fail`で指定する
 
 ## 状況
 

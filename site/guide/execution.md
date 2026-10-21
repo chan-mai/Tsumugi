@@ -22,8 +22,8 @@
 
 ```text
 SCHEDULED → QUEUED, CANCELLED
-QUEUED    → RUNNING(at-most-onceのみ), COMPLETED, FAILED, SCHEDULED, STALLED
-RUNNING   → COMPLETED, FAILED, SCHEDULED, STALLED
+QUEUED    → RUNNING(at-most-onceのみ), COMPLETED, FAILED, SCHEDULED, STALLED, CANCELLED
+RUNNING   → COMPLETED, FAILED, SCHEDULED, STALLED, CANCELLED
 COMPLETED → なし
 CANCELLED → なし
 FAILED    → SCHEDULED
@@ -32,7 +32,8 @@ STALLED   → SCHEDULED
 
 `FAILED`と`STALLED`から`SCHEDULED`へ戻る遷移は、ダッシュボードやREST APIからの手動リトライに限ります。
 
-取り消しが可能なのは`SCHEDULED`の場合のみであり、既に実行されている可能性を排除するため、原則として`QUEUED`以降は取り消しの要求を受け付けません。
+`QUEUED`以降から`CANCELLED`への遷移は、期限切れと[実行中の取り消し](#cancellation)の確定に限られます。
+`SCHEDULED`の取り消しは即時に反映され、`QUEUED`以降の取り消しは要求として記録された後にこの遷移で確定します。
 
 ## リトライ
 
@@ -164,6 +165,31 @@ performerには期限が`ctx.deadlineAt`として渡るため、中断に応じ�
 さらに`reaperGraceMs`(既定30秒)だけ結果が報告されない状態が続いたジョブは、無応答として扱われます。
 `at-most-once`のジョブは、試行回数に関わらず`STALLED`になります。
 `at-least-once`のジョブは、試行回数が残っていれば再投入され、そうでない場合は`FAILED`として扱われます。
+
+## 実行中の取り消し {#cancellation}
+
+`QUEUED`以降のジョブの取り消しは、協調的な要求として扱われます。
+ダッシュボードまたは[POST /api/jobs/:id/cancel](/reference/rest-api#post-api-jobs-id-cancel)から要求でき、応答には`requested: true`が含まれます。
+
+要求は`ctx.heartbeat()`の戻り値としてperformerへ通知されます。
+中断に応じる場合は例外をthrowして終了してください。要求後の失敗報告はリトライされず`CANCELLED`で確定します。
+
+```ts
+const { cancelRequested } = await ctx.heartbeat(progress);
+if (cancelRequested) throw new Error('cancelled');
+```
+
+挙動は次のとおりです。
+
+- 要求より先に成功が報告された場合は`COMPLETED`のまま残り、結果も保持されます
+- 応答が無いまま要求から`reaperGraceMs`(既定30秒)が経過すると`CANCELLED`で確定します
+- `deadlineAt`と同じく実行そのものは停止できません。応じないperformerの実行は継続し得ますが、確定後の報告は破棄されます
+- 要求はリトライ待ちへ戻った後も残り、再投入されずに`CANCELLED`で確定します
+- 要求済みのジョブは`reschedule`を受け付けません
+- `at-most-once`のジョブは実行開始前であれば実行権を通知せず`CANCELLED`扱いになります
+
+`heartbeat`を実行しないperformerへ要求は通知されませんが、その場合も要求から`reaperGraceMs`で確定します。
+また、要求から観測までには仕様上許容される数秒の遅延があります。
 
 ## shard {#shard}
 

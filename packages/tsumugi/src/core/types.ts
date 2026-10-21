@@ -32,6 +32,8 @@ export type JobView = {
 	guarantee: DeliveryGuarantee;
 	/** 実行のタイムアウト, reaperの無応答判定の基準 */
 	timeoutMs: number;
+	/** 取り消し要求の時刻(#95), 要求が無ければnull */
+	cancelRequestedAt: number | null;
 };
 
 export type RateLimit = { tokens: number; intervalMs: number };
@@ -118,7 +120,9 @@ export type Decision =
 	/** 無応答のat-most-onceジョブ, 再投入せずSTALLEDへ */
 	| { type: 'stall'; id: string }
 	/** 無応答かつ試行回数の枯渇, FAILEDへ */
-	| { type: 'fail'; id: string; reason: 'exhausted' };
+	| { type: 'fail'; id: string; reason: 'exhausted' }
+	/** 取り消し要求済み(#95), 実行や再投入をせずCANCELLEDへ */
+	| { type: 'cancel'; id: string };
 
 export type ScheduleInput = {
 	now: number;

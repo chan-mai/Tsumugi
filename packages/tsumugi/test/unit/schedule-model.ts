@@ -11,10 +11,15 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 	const { now, jobs, policy } = input;
 
 	// 回収されるジョブ(無応答のQUEUED/RUNNING)は同時実行数から外れる
+	// 取り消し要求への応答期限(要求+grace)の到来も同様に外れる(#95)
 	const reaped = new Set(
 		jobs
 			.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && j.dispatchedAt !== null)
-			.filter((j) => now >= j.dispatchedAt! + j.timeoutMs + policy.reaperGraceMs)
+			.filter(
+				(j) =>
+					now >= j.dispatchedAt! + j.timeoutMs + policy.reaperGraceMs ||
+					(j.cancelRequestedAt !== null && now >= j.cancelRequestedAt + policy.reaperGraceMs),
+			)
 			.map((j) => j.id),
 	);
 
@@ -25,9 +30,10 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 		if (j.concurrencyKey !== null) keyInFlight.set(j.concurrencyKey, (keyInFlight.get(j.concurrencyKey) ?? 0) + 1);
 	}
 
-	// 期限を過ぎたジョブは投入の候補にならない(ADR-0047)
+	// 期限を過ぎたジョブ(ADR-0047)と取り消し要求済みのジョブ(#95)は投入の候補にならない
 	const ready = jobs
 		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now && (j.expiresAt === null || now < j.expiresAt))
+		.filter((j) => j.cancelRequestedAt === null)
 		.map((j) => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 

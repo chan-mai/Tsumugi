@@ -24,9 +24,13 @@ export type JobContext = {
 	 * 実行中であることをDOへ報告
 	 * 報告のあいだは無応答判定とtimeoutの起点が最後の報告時刻に移り、timeoutMsの最長所要時間への調整が不要
 	 * `progress`は0以上1以下, 範囲外は両端へ丸め、非数は進捗なしの扱い
-	 * 実行間隔には下限があり、下限に満たない要求は送信せず破棄
+	 * 実行間隔には下限があり、下限に満たない要求は送信せず戻り値は最後の結果のまま
+	 *
+	 * `cancelRequested`は取り消し要求の有無(#95), 一度trueになれば以後もtrue
+	 * この試行の報告が記録されない状態(回収済みや終端)もtrueになり、継続する意味が無いことを示す
+	 * 中断に応じる場合はthrowで終える, 正常returnは完了(COMPLETED)の扱い
 	 */
-	heartbeat(progress?: number): Promise<void>;
+	heartbeat(progress?: number): Promise<{ cancelRequested: boolean }>;
 	/**
 	 * 実行中のノードの下に子ノードを追加(ADR-0032)
 	 * 要求はperformの完了報告に同梱, 失敗した試行の要求は破棄

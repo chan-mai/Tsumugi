@@ -54,4 +54,5 @@
 - [ADR-0049](0049-ready-window-by-run-after.md) - 投入候補の読み取り範囲を到来順にする
 - [ADR-0050](0050-settled-notification-with-explicit-states.md) - 終端の通知は対象の状態を明示して投入する
 - [ADR-0051](0051-enqueue-hook-as-defaults.md) - 投入時のフックは既定値の付与として持つ
-- [ADR-0052](0052-performer-fail-options.md) - 失敗した試行の再試行の扱いをperformerが`ctx.fail`で指定する
+- [ADR-0052](0052-cooperative-cancellation.md) - 実行中のジョブの取り消しは協調的な要求として扱う
+- [ADR-0053](0053-performer-fail-options.md) - 失敗した試行の再試行の扱いをperformerが`ctx.fail`で指定する

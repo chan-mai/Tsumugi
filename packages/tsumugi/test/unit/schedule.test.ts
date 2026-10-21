@@ -28,6 +28,7 @@ const job = (over: Partial<JobView> & { id: string }): JobView => ({
 	heartbeatAt: null,
 	guarantee: 'at-least-once',
 	timeoutMs: 60_000,
+	cancelRequestedAt: null,
 	...over,
 });
 
@@ -571,5 +572,79 @@ describe('投入が止まった制約の報告(ADR-0009, #10)', () => {
 	it('自由に投入できるときは全てfalse', () => {
 		const out = schedule({ now: T0, jobs: [job({ id: 'a' })], policy: policy(), bucket: unlimited });
 		expect(out.blocked).toEqual({ paused: false, capacity: false, tokens: false, perKey: false, perKeyTokens: false });
+	});
+});
+
+describe('取り消し要求(#95 / ADR-0052)', () => {
+	const dispatched = (over: Partial<JobView> & { id: string }) => job({ state: 'QUEUED', dispatchedAt: T0, timeoutMs: 60_000, ...over });
+
+	it('応答期限の前は変更せずnextAlarmAtへ期限を含める', () => {
+		const out = schedule({
+			now: T0 + 10_000,
+			jobs: [dispatched({ id: 'a', cancelRequestedAt: T0 + 5_000 })],
+			policy: policy({ reaperGraceMs: 30_000 }),
+			bucket: unlimited,
+		});
+		expect(out.decisions).toEqual([]);
+		// 無応答判定(T0+90_000)より早い
+		expect(out.nextAlarmAt).toBe(T0 + 5_000 + 30_000);
+	});
+
+	it('応答期限を過ぎたらcancelを発行する', () => {
+		const out = schedule({
+			now: T0 + 5_000 + 30_000,
+			jobs: [dispatched({ id: 'a', cancelRequestedAt: T0 + 5_000 })],
+			policy: policy({ reaperGraceMs: 30_000 }),
+			bucket: unlimited,
+		});
+		expect(out.decisions).toEqual([{ type: 'cancel', id: 'a' }]);
+	});
+
+	it('期限切れが要求より優先される', () => {
+		// どちらもCANCELLEDで帰結は同じ, 理由の区別だけを固定(ADR-0047)
+		const out = schedule({
+			now: T0 + 35_000,
+			jobs: [dispatched({ id: 'a', cancelRequestedAt: T0 + 5_000, expiresAt: T0 + 20_000 })],
+			policy: policy({ reaperGraceMs: 30_000 }),
+			bucket: unlimited,
+		});
+		expect(out.decisions).toEqual([{ type: 'expire', id: 'a' }]);
+	});
+
+	it('at-most-onceも試行回数の枯渇も要求があればcancelで終了する', () => {
+		const out = schedule({
+			now: T0 + 60_000 + 30_000,
+			jobs: [
+				dispatched({ id: 'amo', guarantee: 'at-most-once', cancelRequestedAt: T0 }),
+				dispatched({ id: 'spent', attempts: 3, cancelRequestedAt: T0 }),
+			],
+			policy: policy(),
+			bucket: unlimited,
+		});
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'amo' });
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'spent' });
+	});
+
+	it('要求済みのSCHEDULEDは投入せずcancelで終了する', () => {
+		// 回収のCASと要求が交錯した残留分の検証
+		const out = schedule({
+			now: T0,
+			jobs: [job({ id: 'a', cancelRequestedAt: T0 - 1_000 })],
+			policy: policy(),
+			bucket: unlimited,
+		});
+		expect(ids(out.decisions, 'dispatch')).toEqual([]);
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'a' });
+	});
+
+	it('cancelしたぶんの枠は同じtickで解放される', () => {
+		const out = schedule({
+			now: T0 + 30_000,
+			jobs: [dispatched({ id: 'busy', cancelRequestedAt: T0 }), job({ id: 'next', runAfter: T0 })],
+			policy: policy({ concurrency: 1, reaperGraceMs: 30_000 }),
+			bucket: unlimited,
+		});
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'busy' });
+		expect(ids(out.decisions, 'dispatch')).toEqual(['next']);
 	});
 });

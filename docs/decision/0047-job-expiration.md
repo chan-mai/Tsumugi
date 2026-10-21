@@ -10,7 +10,7 @@
 ## 決定
 
 投入時のオプションに`expiresAt`(絶対時刻)と`expiresInMs`(投入時刻からの相対)を追加する
-両方の指定は`expiresAt`を優先する,`runAt`と`delayMs`の関係と同じ
+両方の指定は`expiresAt`を優先する,`runAt`と`delayMs`の関係と同様
 
 期限切れは新しい状態を足さずCANCELLEDへ集約する
 run期限がFAILEDと印で表した(ADR-0039)のと同じく、7状態(ADR-0012)を維持する
@@ -33,6 +33,7 @@ consumerの報告が失敗してackだけが残った場合も、DO内の判定�
 遷移表にはQUEUED / RUNNINGからCANCELLEDへの遷移を追加する
 利用はconsumerの実行直前の判定、無応答の回収、期限を越える再試行の中止に限定する
 `cancel()`が受け付けるのは従来通りSCHEDULEDのみ(ADR-0012)
+(ADR-0052でQUEUED / RUNNINGへの`cancel()`は協調的な要求として受理する形になり、この遷移は取り消し要求後の確定にも使われる)
 
 ## 帰結
 
