@@ -1,4 +1,4 @@
-import type { BlockedBy } from '../core/types.js';
+import type { BlockedBy, Policy } from '../core/types.js';
 import type { JobLogEntry } from '../core/log.js';
 
 export type { JobLogEntry };
@@ -77,22 +77,12 @@ export type StatsResponse = {
 
 export type BindingsResponse = { bindings: string[] };
 
-type DiagnosticsEntry = { active: number; outbox: number; blocked: BlockedBy; policy: PolicyView };
+type DiagnosticsEntry = { active: number; outbox: number; blocked: BlockedBy; policy: Policy };
 export type DiagnosticsResponse = { shard: number; bindings: Record<string, DiagnosticsEntry> };
 
-export type PolicyView = {
-	paused: boolean;
-	concurrency: number;
-	perKeyConcurrency: number;
-	rate: { tokens: number; intervalMs: number } | null;
-	perKeyRate: { tokens: number; intervalMs: number } | null;
-	agingIntervalMs: number | null;
-	reaperGraceMs: number;
-};
-
 /** 指定項目のみ現設定へ上書き */
-export type UpdatePolicyRequest = Partial<PolicyView>;
-export type UpdatePolicyResponse = { binding: string; shards: number; policy: PolicyView };
+export type UpdatePolicyRequest = Partial<Policy>;
+export type UpdatePolicyResponse = { binding: string; shards: number; policy: Policy };
 
 /** 一部shardのみ反映時の応答(#27), 同一要求の再送で残りへ反映(冪等) */
 export type PartialPolicyResponse = { error: string; binding: string; shards: number; failed: number[] };
@@ -117,7 +107,7 @@ export type RunDetail = RunSummary & {
 	retryable: boolean;
 };
 
-export type RunNodeView = {
+export type RunNode = {
 	id: string;
 	binding: string;
 	state: string;
@@ -137,7 +127,7 @@ export type RunNodeView = {
 };
 
 export type RunListResponse = { runs: RunSummary[]; total: number };
-export type RunDetailResponse = { run: RunDetail; nodes: RunNodeView[] };
+export type RunDetailResponse = { run: RunDetail; nodes: RunNode[] };
 export type FlowsResponse = { flows: string[] };
 
 export type StartRunRequest = {
@@ -149,7 +139,7 @@ export type StartRunRequest = {
 };
 export type StartRunResponse = { id: string };
 
-export type ScheduleSummary = {
+export type Schedule = {
 	name: string;
 	kind: 'job' | 'flow';
 	target: string;
@@ -169,7 +159,7 @@ export type ScheduleSummary = {
 	last_error: string | null;
 };
 
-export type SchedulesResponse = { schedules: ScheduleSummary[] };
+export type SchedulesResponse = { schedules: Schedule[] };
 
 export type TriggerScheduleResponse = { id: string; kind: 'job' | 'flow' };
 

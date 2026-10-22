@@ -7,22 +7,22 @@ import type {
 	JobDetail,
 	JobSummary,
 	RunDetail,
-	RunNodeView,
+	RunNode,
 	RunSummary,
-	ScheduleSummary,
+	Schedule,
 	StartRunRequest,
 	DiagnosticsResponse,
 	MetricsResponse,
-	PolicyView,
 	TriggerScheduleResponse,
 	UpdatePolicyRequest,
 } from '../../tsumugi/src/api/types.js';
+import type { Policy } from '../../tsumugi/src/core/types.js';
+
+export type { Policy, RunNode, Schedule };
 
 export type Job = JobSummary & Partial<JobDetail>;
 export type Attempt = AttemptRecord;
 export type Run = RunSummary & Partial<RunDetail>;
-export type RunNode = RunNodeView;
-export type Schedule = ScheduleSummary;
 
 declare global {
 	interface Window {
@@ -210,7 +210,6 @@ export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): 
 	return { ok: body.ok ?? [], failed: body.failed ?? [] };
 };
 
-export type Policy = PolicyView;
 export type BindingDiagnostics = DiagnosticsResponse['bindings'][string];
 
 export const getDiagnostics = () => call<DiagnosticsResponse>('/api/diagnostics');
