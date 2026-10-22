@@ -11,8 +11,8 @@ const SCHEDULER_SCHEMA = [
 		time_zone TEXT NOT NULL DEFAULT 'UTC',
 		overlap TEXT NOT NULL,
 		paused INTEGER NOT NULL DEFAULT 0,
-		next_run_at INTEGER NOT NULL,
-		last_run_at INTEGER,
+		next_occurrence_at INTEGER NOT NULL,
+		last_occurrence_at INTEGER,
 		-- 予定との差で遅延観測
 		last_fired_at INTEGER,
 		last_job_id TEXT,
@@ -23,7 +23,7 @@ const SCHEDULER_SCHEMA = [
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
 	)`,
-	`CREATE INDEX IF NOT EXISTS schedule_next ON schedule (next_run_at)`,
+	`CREATE INDEX IF NOT EXISTS schedule_next ON schedule (next_occurrence_at)`,
 	`CREATE TABLE IF NOT EXISTS setting (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
@@ -31,6 +31,19 @@ const SCHEDULER_SCHEMA = [
 ] as const;
 
 export function applySchedulerSchema(sql: SqlStorage): void {
+	// 旧列名の既存DO, 索引も追従
+	const existing = new Set(
+		sql
+			.exec<{ name: string }>(`SELECT name FROM pragma_table_info('schedule')`)
+			.toArray()
+			.map((row) => row.name),
+	);
+	for (const [from, to] of [
+		['next_run_at', 'next_occurrence_at'],
+		['last_run_at', 'last_occurrence_at'],
+	] as const) {
+		if (existing.has(from)) sql.exec(`ALTER TABLE schedule RENAME COLUMN ${from} TO ${to}`);
+	}
 	for (const statement of SCHEDULER_SCHEMA) sql.exec(statement);
 	const added = ensureColumns(sql, 'schedule', [
 		['time_zone', "TEXT NOT NULL DEFAULT 'UTC'"],
@@ -49,8 +62,8 @@ export type ScheduleRow = {
 	time_zone: string;
 	overlap: string;
 	paused: number;
-	next_run_at: number;
-	last_run_at: number | null;
+	next_occurrence_at: number;
+	last_occurrence_at: number | null;
 	last_fired_at: number | null;
 	last_job_id: string | null;
 	last_run_id: string | null;

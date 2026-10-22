@@ -148,9 +148,9 @@ export type Schedule = {
 	time_zone: string;
 	overlap: 'skip' | 'overlap';
 	paused: boolean;
-	next_run_at: number;
+	next_occurrence_at: number;
 	/** 直近発火の予定時刻, last_fired_atとの差が遅延 */
-	last_run_at: number | null;
+	last_occurrence_at: number | null;
 	last_fired_at: number | null;
 	last_job_id: string | null;
 	last_run_id: string | null;

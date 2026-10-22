@@ -101,18 +101,18 @@ describe('定期実行(ADR-0040)', () => {
 			cron: null,
 			time_zone: 'UTC',
 			overlap: 'skip',
-			next_run_at: base + POLL_MS,
-			last_run_at: null,
+			next_occurrence_at: base + POLL_MS,
+			last_occurrence_at: null,
 			skipped_count: 0,
 		});
-		expect(await rowOf('ping-hello')).toMatchObject({ overlap: 'overlap', next_run_at: base + PING_MS });
+		expect(await rowOf('ping-hello')).toMatchObject({ overlap: 'overlap', next_occurrence_at: base + PING_MS });
 		// UTC12時は東京21時, 次の東京3時はUTC18時
 		expect(await rowOf('nightly')).toMatchObject({
 			kind: 'flow',
 			target: 'GREETINGS',
 			cron: '0 3 * * *',
 			time_zone: 'Asia/Tokyo',
-			next_run_at: nightlyOf(base),
+			next_occurrence_at: nightlyOf(base),
 		});
 
 		expect(await alarmOf()).toBe(base + PING_MS);
@@ -129,11 +129,11 @@ describe('定期実行(ADR-0040)', () => {
 		const base = day(12);
 		await sync(base);
 		await runInDurableObject(inside(), (instance) => {
-			(instance as any).repo.sql.exec(`UPDATE schedule SET next_run_at = ? WHERE name = 'nightly'`, base + 15 * 60 * 60 * 1000);
+			(instance as any).repo.sql.exec(`UPDATE schedule SET next_occurrence_at = ? WHERE name = 'nightly'`, base + 15 * 60 * 60 * 1000);
 		});
 
 		await callSync();
-		expect(await rowOf('nightly')).toMatchObject({ next_run_at: nightlyOf(base) });
+		expect(await rowOf('nightly')).toMatchObject({ next_occurrence_at: nightlyOf(base) });
 	});
 
 	it('タイムゾーンの変更をタイミング変更として次回へ反映する', async () => {
@@ -141,14 +141,14 @@ describe('定期実行(ADR-0040)', () => {
 		await sync(base);
 		await runInDurableObject(inside(), (instance) => {
 			(instance as any).repo.sql.exec(
-				`UPDATE schedule SET time_zone = 'UTC', next_run_at = ? WHERE name = 'nightly'`,
+				`UPDATE schedule SET time_zone = 'UTC', next_occurrence_at = ? WHERE name = 'nightly'`,
 				base + 15 * 60 * 60 * 1000,
 			);
 			(instance as any).repo.sql.exec('DELETE FROM setting');
 		});
 
 		await callSync();
-		expect(await rowOf('nightly')).toMatchObject({ time_zone: 'Asia/Tokyo', next_run_at: nightlyOf(base) });
+		expect(await rowOf('nightly')).toMatchObject({ time_zone: 'Asia/Tokyo', next_occurrence_at: nightlyOf(base) });
 	});
 
 	it('旧スキーマをUTCで補完し既存のnext_run_atを維持する', async () => {
@@ -188,7 +188,7 @@ describe('定期実行(ADR-0040)', () => {
 
 		await legacy.sync();
 		const rows = (await legacy.list()) as ScheduleView[];
-		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_run_at: existingNext });
+		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_occurrence_at: existingNext });
 	});
 
 	it('NULLのtime_zoneをUTCへ補正し既存のnext_run_atを維持する', async () => {
@@ -229,7 +229,7 @@ describe('定期実行(ADR-0040)', () => {
 
 		await legacy.sync();
 		const rows = (await legacy.list()) as ScheduleView[];
-		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_run_at: existingNext });
+		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_occurrence_at: existingNext });
 	});
 
 	it('予定時刻に決定的なIDでジョブを投入する', async () => {
@@ -241,11 +241,11 @@ describe('定期実行(ADR-0040)', () => {
 		const jobId = jobIdOf('ListNames', 'poll-names', occurrence);
 		expect(await jobStateOf('ListNames', jobId)).toBeDefined();
 		expect(await rowOf('poll-names')).toMatchObject({
-			last_run_at: occurrence,
+			last_occurrence_at: occurrence,
 			last_fired_at: occurrence,
 			last_job_id: jobId,
 			last_error: null,
-			next_run_at: occurrence + POLL_MS,
+			next_occurrence_at: occurrence + POLL_MS,
 		});
 	});
 
@@ -281,8 +281,8 @@ describe('定期実行(ADR-0040)', () => {
 		expect(await rowOf('poll-names')).toMatchObject({
 			skipped_count: 1,
 			last_skipped_at: first + POLL_MS,
-			last_run_at: first,
-			next_run_at: first + POLL_MS * 2,
+			last_occurrence_at: first,
+			next_occurrence_at: first + POLL_MS * 2,
 		});
 	});
 
@@ -296,7 +296,7 @@ describe('定期実行(ADR-0040)', () => {
 		await tickAt(first + POLL_MS);
 
 		expect(await fired('ListNames', 'poll-names', first + POLL_MS)).toBe(true);
-		expect(await rowOf('poll-names')).toMatchObject({ skipped_count: 0, last_run_at: first + POLL_MS });
+		expect(await rowOf('poll-names')).toMatchObject({ skipped_count: 0, last_occurrence_at: first + POLL_MS });
 	});
 
 	it('重ねる指定は前回が残っていても発火する', async () => {
@@ -308,7 +308,7 @@ describe('定期実行(ADR-0040)', () => {
 
 		expect(await fired('Hello', 'ping-hello', first)).toBe(true);
 		expect(await fired('Hello', 'ping-hello', first + PING_MS)).toBe(true);
-		expect(await rowOf('ping-hello')).toMatchObject({ skipped_count: 0, last_run_at: first + PING_MS });
+		expect(await rowOf('ping-hello')).toMatchObject({ skipped_count: 0, last_occurrence_at: first + PING_MS });
 	});
 
 	it('取り逃した周期は1回に集約して位相を保つ', async () => {
@@ -323,8 +323,8 @@ describe('定期実行(ADR-0040)', () => {
 		expect(await fired('Hello', 'ping-hello', first + PING_MS * 2)).toBe(false);
 		expect(await fired('Hello', 'ping-hello', first + PING_MS * 3)).toBe(false);
 		expect(await rowOf('ping-hello')).toMatchObject({
-			last_run_at: first + PING_MS,
-			next_run_at: first + PING_MS * 4,
+			last_occurrence_at: first + PING_MS,
+			next_occurrence_at: first + PING_MS * 4,
 		});
 	});
 
@@ -346,8 +346,8 @@ describe('定期実行(ADR-0040)', () => {
 		const row = await rowOf('nightly');
 		expect(row?.last_error).toContain('RUN binding is not configured');
 		// 未更新時は同じ行が先頭に残存、他scheduleが発火不能
-		expect(row?.next_run_at).toBe(occurrence + 24 * 60 * 60 * 1000);
-		expect(row?.last_run_at).toBeNull();
+		expect(row?.next_occurrence_at).toBe(occurrence + 24 * 60 * 60 * 1000);
+		expect(row?.last_occurrence_at).toBeNull();
 	});
 
 	it('1件の失敗が他のscheduleの発火を止めない', async () => {
@@ -378,10 +378,10 @@ describe('定期実行(ADR-0040)', () => {
 
 		const runId = `GREETINGS:nightly-${occurrence}`;
 		expect(await rowOf('nightly')).toMatchObject({
-			last_run_at: occurrence,
+			last_occurrence_at: occurrence,
 			last_run_id: runId,
 			last_job_id: null,
-			next_run_at: occurrence + 24 * 60 * 60 * 1000,
+			next_occurrence_at: occurrence + 24 * 60 * 60 * 1000,
 		});
 
 		const row = await runRowOf(runId);
@@ -415,7 +415,7 @@ describe('一時停止と手動発火', () => {
 		const first = base + PING_MS;
 		await tickAt(first);
 		expect(await fired('Hello', 'ping-hello', first)).toBe(false);
-		expect(await rowOf('ping-hello')).toMatchObject({ paused: 1, next_run_at: first, skipped_count: 0 });
+		expect(await rowOf('ping-hello')).toMatchObject({ paused: 1, next_occurrence_at: first, skipped_count: 0 });
 	});
 
 	it('再開は停止中に経過した回を破棄し次の境界だけを予定する', async () => {
@@ -429,7 +429,7 @@ describe('一時停止と手動発火', () => {
 		});
 		await inside().setPaused('ping-hello', false);
 
-		expect(await rowOf('ping-hello')).toMatchObject({ paused: 0, next_run_at: base + PING_MS * 4 });
+		expect(await rowOf('ping-hello')).toMatchObject({ paused: 0, next_occurrence_at: base + PING_MS * 4 });
 		expect(await fired('Hello', 'ping-hello', base + PING_MS)).toBe(false);
 		expect(await alarmOf()).toBe(base + PING_MS * 4);
 	});
@@ -439,7 +439,7 @@ describe('一時停止と手動発火', () => {
 		await sync(base);
 		await inside().setPaused('poll-names', true);
 		await inside().setPaused('poll-names', false);
-		expect(await rowOf('poll-names')).toMatchObject({ paused: 0, next_run_at: base + POLL_MS });
+		expect(await rowOf('poll-names')).toMatchObject({ paused: 0, next_occurrence_at: base + POLL_MS });
 	});
 
 	it('停止中でない行へのresumeは発火待ちの予定を破棄しない', async () => {
@@ -449,7 +449,7 @@ describe('一時停止と手動発火', () => {
 			(instance as any).clock = { now: () => base + PING_MS + 1_000 };
 		});
 		await inside().setPaused('ping-hello', false);
-		expect(await rowOf('ping-hello')).toMatchObject({ paused: 0, next_run_at: base + PING_MS });
+		expect(await rowOf('ping-hello')).toMatchObject({ paused: 0, next_occurrence_at: base + PING_MS });
 	});
 
 	it('手動発火はジョブを投入し次回の予定を進めない', async () => {
@@ -459,10 +459,10 @@ describe('一時停止と手動発火', () => {
 		expect(await inside().trigger('poll-names')).toEqual({ ok: true, kind: 'job', id: jobId });
 		expect(await jobStateOf('ListNames', jobId)).toBeDefined();
 		expect(await rowOf('poll-names')).toMatchObject({
-			last_run_at: base,
+			last_occurrence_at: base,
 			last_fired_at: base,
 			last_job_id: jobId,
-			next_run_at: base + POLL_MS,
+			next_occurrence_at: base + POLL_MS,
 		});
 	});
 
@@ -518,7 +518,7 @@ describe('一時停止と手動発火', () => {
 		expect(result).toMatchObject({ ok: false, reason: 'failed' });
 		const row = await rowOf('nightly');
 		expect(row?.last_error).toContain('RUN binding is not configured');
-		expect(row?.next_run_at).toBe(nightlyOf(base));
+		expect(row?.next_occurrence_at).toBe(nightlyOf(base));
 	});
 
 	it('同一時刻の手動発火は連番で区別し別に発火する', async () => {
@@ -563,6 +563,6 @@ describe('一時停止と手動発火', () => {
 
 		expect(await fired('Hello', 'ping-hello', base + PING_MS)).toBe(true);
 		expect(await fired('ListNames', 'poll-names', base + POLL_MS)).toBe(false);
-		expect(await rowOf('poll-names')).toMatchObject({ paused: 1, next_run_at: base + POLL_MS });
+		expect(await rowOf('poll-names')).toMatchObject({ paused: 1, next_occurrence_at: base + POLL_MS });
 	});
 });

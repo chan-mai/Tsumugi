@@ -76,9 +76,9 @@ function duration(ms: number): string {
 const at = (value: number | null, timeZone: string) => (value === null ? '' : formatTimestamp(value, timeZone));
 
 const delay = (row: Schedule) =>
-	row.last_run_at === null || row.last_fired_at === null || row.last_fired_at <= row.last_run_at
+	row.last_occurrence_at === null || row.last_fired_at === null || row.last_fired_at <= row.last_occurrence_at
 		? ''
-		: `+${duration(row.last_fired_at - row.last_run_at)}`;
+		: `+${duration(row.last_fired_at - row.last_occurrence_at)}`;
 
 const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
 const LINK = 'block border-none p-0 font-mono text-xs break-all underline underline-offset-2 hover:text-foreground';
@@ -120,9 +120,9 @@ const BTN = 'h-8 rounded-card border border-border px-3 text-sm hover:bg-accent 
 						<td class="p-4 align-middle tabular-nums">{{ interval(row) }}</td>
 						<td class="p-4 align-middle text-muted-foreground">{{ row.overlap }}</td>
 						<!-- 停止中の予定時刻は再開時に再計算 -->
-						<td class="p-4 align-middle tabular-nums">{{ row.paused ? '-' : at(row.next_run_at, row.time_zone) }}</td>
+						<td class="p-4 align-middle tabular-nums">{{ row.paused ? '-' : at(row.next_occurrence_at, row.time_zone) }}</td>
 						<td class="p-4 align-middle tabular-nums">
-							{{ at(row.last_run_at, row.time_zone) }}
+							{{ at(row.last_occurrence_at, row.time_zone) }}
 							<span v-if="delay(row)" class="text-xs text-muted-foreground">{{ delay(row) }}</span>
 							<button v-if="row.last_job_id" type="button" :class="LINK" @click="emit('job', row.last_job_id)">
 								{{ row.last_job_id }}

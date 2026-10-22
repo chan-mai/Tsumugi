@@ -416,10 +416,10 @@ model Schedule {
 	@doc("Whether the schedule is paused. A paused schedule does not fire on its own; occurrences elapsed while paused are discarded on resume.")
 	paused: boolean;
 
-	next_run_at: integer;
+	next_occurrence_at: integer;
 
 	@doc("Scheduled time of the latest firing. The gap to last_fired_at is the delay.")
-	last_run_at: integer | null;
+	last_occurrence_at: integer | null;
 
 	@doc("When the latest firing actually happened")
 	last_fired_at: integer | null;

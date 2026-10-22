@@ -42,8 +42,8 @@ export type ScheduleView = {
 	time_zone: string;
 	overlap: 'skip' | 'overlap';
 	paused: boolean;
-	next_run_at: number;
-	last_run_at: number | null;
+	next_occurrence_at: number;
+	last_occurrence_at: number | null;
 	last_fired_at: number | null;
 	last_job_id: string | null;
 	last_run_id: string | null;
@@ -151,8 +151,8 @@ export function createSchedulerClass({
 				time_zone: row.time_zone,
 				overlap: row.overlap as 'skip' | 'overlap',
 				paused: row.paused === 1,
-				next_run_at: row.next_run_at,
-				last_run_at: row.last_run_at,
+				next_occurrence_at: row.next_occurrence_at,
+				last_occurrence_at: row.last_occurrence_at,
 				last_fired_at: row.last_fired_at,
 				last_job_id: row.last_job_id,
 				last_run_id: row.last_run_id,
@@ -168,11 +168,11 @@ export function createSchedulerClass({
 			const row = this.repo.find(name);
 			if (!row) return { ok: false, reason: 'not-found' };
 			// 非停止行へのresumeは予定維持
-			const elapsed = !paused && row.paused === 1 && row.next_run_at <= now;
+			const elapsed = !paused && row.paused === 1 && row.next_occurrence_at <= now;
 			this.repo.setPaused(
 				name,
 				paused,
-				elapsed ? nextOccurrence({ everyMs: row.every_ms, cron: row.cron, timeZone: row.time_zone }, row.next_run_at, now) : null,
+				elapsed ? nextOccurrence({ everyMs: row.every_ms, cron: row.cron, timeZone: row.time_zone }, row.next_occurrence_at, now) : null,
 				now,
 			);
 			await this.#armNext();
@@ -233,7 +233,7 @@ export function createSchedulerClass({
 					}
 					// 前回発火のRPC待ち中の一時停止, 再開を考慮し直前の行で再判定
 					const row = this.repo.find(due.name);
-					if (!row || row.paused === 1 || row.next_run_at > now) continue;
+					if (!row || row.paused === 1 || row.next_occurrence_at > now) continue;
 					await this.#fire(row, def, now);
 				}
 				await this.#armNext();
@@ -274,7 +274,7 @@ export function createSchedulerClass({
 
 		// 失敗時も次回へ進行, 先頭行の残存による他schedule停止防止
 		async #fire(row: ScheduleRow, def: AnyScheduleDef, now: number): Promise<void> {
-			const occurrence = row.next_run_at;
+			const occurrence = row.next_occurrence_at;
 			const next = nextOccurrence({ everyMs: row.every_ms, cron: row.cron, timeZone: row.time_zone }, occurrence, now);
 
 			try {
@@ -362,7 +362,7 @@ export function createSchedulerClass({
 function timingMatchesSpec(row: ScheduleRow, spec: NormalizedSchedule): boolean {
 	if (row.every_ms !== spec.everyMs || row.cron !== spec.cron || row.time_zone !== spec.timeZone) return false;
 	if (spec.cron === null) return true;
-	return nextOccurrence(spec, null, row.next_run_at - 1) === row.next_run_at;
+	return nextOccurrence(spec, null, row.next_occurrence_at - 1) === row.next_occurrence_at;
 }
 
 function rowMatchesSpec(row: ScheduleRow, spec: NormalizedSchedule): boolean {

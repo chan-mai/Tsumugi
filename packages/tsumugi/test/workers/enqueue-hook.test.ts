@@ -60,16 +60,16 @@ describe('投入時の既定値フック(#96)', () => {
 		const schedulerNamespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 		const scheduler = schedulerNamespace.get(schedulerNamespace.idFromName('scheduler'));
 		await scheduler.sync();
-		const nextRunAt = await runInDurableObject(
+		const nextOccurrenceAt = await runInDurableObject(
 			scheduler,
-			(instance) => ((instance as any).repo.find('poll-names') as { next_run_at: number }).next_run_at,
+			(instance) => ((instance as any).repo.find('poll-names') as { next_occurrence_at: number }).next_occurrence_at,
 		);
 		// poll-names間隔5分, 初回時刻超過まで時計を前進
 		const ahead = Date.now() + 6 * 60_000;
 		await runInDurableObject(scheduler, (instance) => void ((instance as any).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 
-		const jobId = formatJobId({ binding: 'ListNames', shard: 0, localId: `poll-names-${nextRunAt}` });
+		const jobId = formatJobId({ binding: 'ListNames', shard: 0, localId: `poll-names-${nextOccurrenceAt}` });
 		const row = await runInDurableObject(shard('ListNames#0'), (instance) => (instance as any).repo.find(jobId) as { timeout_ms: number });
 		expect(row.timeout_ms).toBe(45_000);
 	});

@@ -12,8 +12,8 @@ export const schedule = sqliteTable(
 		timeZone: text('time_zone').notNull().default('UTC'),
 		overlap: text('overlap').notNull(),
 		paused: integer('paused').notNull().default(0),
-		nextRunAt: integer('next_run_at').notNull(),
-		lastRunAt: integer('last_run_at'),
+		nextOccurrenceAt: integer('next_occurrence_at').notNull(),
+		lastOccurrenceAt: integer('last_occurrence_at'),
 		// 予定との差で遅延観測
 		lastFiredAt: integer('last_fired_at'),
 		lastJobId: text('last_job_id'),
@@ -24,7 +24,7 @@ export const schedule = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 	},
-	(t) => [index('schedule_next').on(t.nextRunAt)],
+	(t) => [index('schedule_next').on(t.nextOccurrenceAt)],
 );
 
 export const schedulerSetting = sqliteTable('setting', {
