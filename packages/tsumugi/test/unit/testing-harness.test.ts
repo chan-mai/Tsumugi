@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { JobContext } from '../../src/core/api.js';
-import { createTestContext, fixedClock, nextAttempt, runPerformer, schedule } from '../../src/entries/testing.js';
+import { createTestContext, fixedClock, nextAttempt, runPerformer, planDispatch } from '../../src/entries/testing.js';
 
 const greet = {
 	perform: (payload: { name: string }): string => `hello, ${payload.name}`,
@@ -114,7 +114,7 @@ describe('公開している純粋関数', () => {
 	});
 
 	it('ポリシーの挙動を利用者が試せる', () => {
-		const out = schedule({
+		const out = planDispatch({
 			now: 0,
 			jobs: [
 				{
@@ -154,7 +154,7 @@ describe('testingサブパスの公開API', () => {
 		// 依存遮断はsize-check.mjsがdist成果物で検査, ここは公開APIの固定
 		const loaded = await import('../../src/entries/testing.js');
 		expect(Object.keys(loaded)).toEqual(
-			expect.arrayContaining(['createTestContext', 'runPerformer', 'fixedClock', 'nextAttempt', 'schedule']),
+			expect.arrayContaining(['createTestContext', 'runPerformer', 'fixedClock', 'nextAttempt', 'planDispatch']),
 		);
 	});
 });

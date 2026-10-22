@@ -1,4 +1,4 @@
-import type { Bucket, Decision, JobView, KeyBuckets, Policy, RateLimit, ScheduleInput, ScheduleOutput } from './types.js';
+import type { Bucket, Decision, JobView, KeyBuckets, Policy, RateLimit, DispatchInput, DispatchOutput } from './types.js';
 
 export function effectivePriority(job: JobView, now: number, agingIntervalMs: number | null): number {
 	if (agingIntervalMs === null || agingIntervalMs <= 0) return job.priority;
@@ -41,7 +41,7 @@ const minOf = (values: readonly (number | null)[]): number | null =>
  * 回収で空いた枠は同tickで他ジョブへ割当, 無応答ジョブの枠占有防止
  * 回収後も実行継続の可能性あり, 停止と遅延が区別不能で同時実行上限は非厳密
  */
-export function schedule(input: ScheduleInput): ScheduleOutput {
+export function planDispatch(input: DispatchInput): DispatchOutput {
 	const { now, jobs, policy } = input;
 	const decisions: Decision[] = [];
 	let bucket = refill(input.bucket, policy.rate, now);

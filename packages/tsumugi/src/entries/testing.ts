@@ -1,4 +1,4 @@
-export { schedule, effectivePriority } from '../core/schedule.js';
+export { planDispatch, effectivePriority } from '../core/dispatch.js';
 export { nextAttempt } from '../core/backoff.js';
 export type { NextAttempt } from '../core/backoff.js';
 export { ACTIVE_STATES, TERMINAL_STATES, TRANSITIONS, canTransition, isActive, isTerminal } from '../core/transitions.js';

@@ -4,7 +4,7 @@ import { embedJobId, formatJobId, shardName } from '../core/ids.js';
 import type { FailOptions } from '../core/api.js';
 import { nextAttempt } from '../core/backoff.js';
 import { retentionOf } from '../core/retention.js';
-import { schedule } from '../core/schedule.js';
+import { planDispatch } from '../core/dispatch.js';
 import { normalizeTraceparent } from '../core/trace.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type {
@@ -172,7 +172,7 @@ const FAILURE_BINDING_KEY = 'failure_binding';
 const BUCKET_KEY = 'rate_bucket';
 
 /**
- * 判断は`core/schedule.ts`の純粋関数, 本クラスはSQLite入出力のみ(ADR-0018)
+ * 判断は`core/dispatch.ts`の純粋関数, 本クラスはSQLite入出力のみ(ADR-0018)
  * 時刻は`this.clock`経由, `Date.now()`直接呼び出しはテスト不能
  */
 export class TsumugiJobShard extends DurableObject<ShardEnv> {
@@ -644,7 +644,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 						),
 					];
 		const keyBuckets = this.repo.readKeyBuckets(readyKeys);
-		const output = schedule({ now, jobs, policy: this.policy, bucket: this.#bucket, keyBuckets });
+		const output = planDispatch({ now, jobs, policy: this.policy, bucket: this.#bucket, keyBuckets });
 		this.#bucket = output.bucket;
 		this.#persistBucket(output.bucket);
 		this.#persistKeyBuckets(keyBuckets, output.keyBuckets, now);

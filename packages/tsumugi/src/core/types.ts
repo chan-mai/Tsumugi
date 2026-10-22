@@ -105,7 +105,7 @@ export type Decision =
 	/** 取り消し要求済み(#95), 実行や再投入をせずCANCELLEDへ */
 	| { type: 'cancel'; id: string };
 
-export type ScheduleInput = {
+export type DispatchInput = {
 	now: number;
 	jobs: readonly JobView[];
 	policy: Policy;
@@ -126,7 +126,7 @@ export type BlockedBy = {
 	perKeyTokens: boolean;
 };
 
-export type ScheduleOutput = {
+export type DispatchOutput = {
 	decisions: Decision[];
 	bucket: Bucket;
 	keyBuckets: KeyBuckets;

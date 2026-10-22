@@ -1,11 +1,11 @@
-import type { ScheduleInput } from '../../src/core/types.js';
+import type { DispatchInput } from '../../src/core/types.js';
 
 /**
- * schedule()のdispatch決定の参照モデル, 仕様の用語(同時実行数 / トークン / キー上限 / 優先度)のみで記述
+ * planDispatch()のdispatch決定の参照モデル, 仕様の用語(同時実行数 / トークン / キー上限 / 優先度)のみで記述
  * 実装の写しでは実装と検査の誤りが相殺, 実装は非参照
  * reaperとnextAlarmAtは対象外
  */
-export function expectedDispatchIds(input: ScheduleInput): string[] {
+export function expectedDispatchIds(input: DispatchInput): string[] {
 	const { now, jobs, policy } = input;
 
 	const reaped = new Set(
@@ -68,7 +68,7 @@ function agedPriority(priority: number, createdAt: number, now: number, agingInt
 }
 
 // スケジューラのrefillと同式
-function refilledTokens(input: ScheduleInput): number {
+function refilledTokens(input: DispatchInput): number {
 	const rate = input.policy.rate!;
 	const elapsed = Math.max(0, input.now - input.bucket.refilledAt);
 	return Math.min(rate.tokens, input.bucket.tokens + elapsed * (rate.tokens / rate.intervalMs));
