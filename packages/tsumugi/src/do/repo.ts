@@ -695,7 +695,11 @@ export class JobRepo {
 	 * DOはシングルスレッドで検査と挿入が追加処理なしで不可分
 	 */
 	reserveUniqueKey(key: string, jobId: string, expiresAt: number, now: number): string | null {
-		this.db.delete(uniqueKey).where(lte(uniqueKey.expiresAt, now)).run();
+		// 同じキーの期限切れのみ削除(他キーはtickで)
+		this.db
+			.delete(uniqueKey)
+			.where(and(eq(uniqueKey.key, key), lte(uniqueKey.expiresAt, now)))
+			.run();
 		this.writes++;
 
 		const inserted = this.db

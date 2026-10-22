@@ -643,7 +643,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const ok = this.repo.reschedule(jobId, patch.runAfter, patch.priority, now);
 		if (ok) {
 			// 前倒しと後ろ倒しの両方に対応, alarm再設定なしでは早めた予定で発火が無い
-			await this.#armAlarm(Math.min(patch.runAfter, now));
+			await this.#armAlarm(now);
 			return { ok: true };
 		}
 		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
@@ -765,12 +765,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 					});
 					break;
 				}
+				// expireは無応答の期限切れも対象, QUEUED / RUNNINGからも遷移(ADR-0047)
 				case 'expire':
-					// 無応答の期限切れも対象, QUEUED / RUNNINGからも遷移(ADR-0047)
-					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', { now });
-					break;
+				// cancelは取り消し要求後の確定, 応答期限の経過と回収後の残留が対象(ADR-0052)
 				case 'cancel':
-					// 取り消し要求後の確定, 応答期限の経過と回収後の残留が対象(ADR-0052)
 					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', { now });
 					break;
 				case 'reap':
