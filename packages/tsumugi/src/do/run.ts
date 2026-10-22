@@ -275,6 +275,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			}
 
 			if (touched.length > 0) {
+				this.repo.appendRunOutbox();
 				this.repo.appendNodeOutbox(runId, touched);
 				await this.#armAlarm(now);
 			}
@@ -294,6 +295,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			if (!row || row.child_run_id !== childRunId || state === 'RUNNING') return;
 
 			this.repo.updateNode(nodeId, { state, ...(state === 'FAILED' ? { error: `child run failed: ${childRunId}` } : {}) }, now);
+			this.repo.appendRunOutbox();
 			this.repo.appendNodeOutbox(run.id, [nodeId]);
 			await this.#armAlarm(now);
 		}

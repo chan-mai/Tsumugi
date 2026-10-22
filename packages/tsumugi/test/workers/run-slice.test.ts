@@ -273,6 +273,30 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stub.cancel()).toEqual({ ok: false, reason: 'invalid-state' });
 	});
 
+	it('決定の無い完了通知でもrunの進捗がD1へ投影される(ADR-0008)', async () => {
+		const runId = 'GREETINGS:progress1';
+		await installQueues();
+		await runStub(runId).start({ flow: 'GREETINGS', input: { prefix: 'pg' } });
+		await settleRun(runId);
+		sent.length = 0;
+
+		// listの完了でfan-outの子3つを展開, 実行の配送なし
+		const listJob = await jobIdOf(runId, 'list');
+		await runStub(runId).notify([
+			{ nodeId: 'list', jobId: listJob!, state: 'COMPLETED', result: JSON.stringify({ names: ['a', 'b', 'c'] }), error: null },
+		]);
+		await settleRun(runId);
+		sent.length = 0;
+
+		// 兄弟が実行中で新しい決定は出ない完了
+		const childJob = await jobIdOf(runId, 'greet:0');
+		await runStub(runId).notify([{ nodeId: 'greet:0', jobId: childJob!, state: 'COMPLETED', result: null, error: null }]);
+		await settleRun(runId);
+
+		const row = await env.TSUMUGI_DB.prepare('SELECT node_done FROM run WHERE id = ?').bind(runId).first<{ node_done: number }>();
+		expect(row?.node_done).toBe(2);
+	});
+
 	it('runとノードがD1へ投影される(ADR-0008)', async () => {
 		const runId = 'GREETINGS:slice2';
 		await installQueues();
