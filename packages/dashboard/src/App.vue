@@ -258,8 +258,12 @@ async function detectFeatures() {
 	hasSchedules.value = available(schedules);
 }
 
-/** トークンを入れ直した後の再読込, 認証で隠れていたタブもここで戻る */
+/**
+ * トークンを入れ直した後の再読込, 認証で隠れていたタブもここで戻る
+ * jobs / runs以外のタブは再マウント時に自前で読み込み, 401なら再びトークン入力へ
+ */
 function reload() {
+	unauthorized.value = false;
 	load();
 	detectFeatures();
 }
