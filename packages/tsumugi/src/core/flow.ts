@@ -36,7 +36,7 @@ type PartialDepsOf<A extends Refs> = { [K in keyof A]: DepsOf<A>[K] | undefined 
  */
 export type NodeTrigger = 'success' | 'failure' | 'always';
 
-export const NODE_TRIGGERS: readonly NodeTrigger[] = ['success', 'failure', 'always'];
+const NODE_TRIGGERS: readonly NodeTrigger[] = ['success', 'failure', 'always'];
 
 type NodeBindings<M extends Performers> = { [K in keyof M]: ReqOf<M[K]>['uniqueKey'] extends true ? never : K }[keyof M];
 
@@ -95,7 +95,7 @@ type SubflowShape<Input, ChildInput, Deps> = {
 	when?: (input: Input, deps: Deps) => boolean;
 };
 
-export type SubflowOptions<Input, A extends Refs, ChildInput> =
+type SubflowOptions<Input, A extends Refs, ChildInput> =
 	| (SubflowShape<Input, ChildInput, DepsOf<A>> & { after?: A; trigger?: 'success' })
 	| (SubflowShape<Input, ChildInput, PartialDepsOf<A>> & { after?: A; trigger: 'failure' | 'always' });
 
@@ -121,12 +121,12 @@ export type FlowBuilder<M extends Performers, Input> = {
 	): NodeRef<void>;
 };
 
-export type InputFn = (input: unknown, deps: Record<string, unknown>) => unknown;
-export type OverFn = (input: unknown, deps: Record<string, unknown>) => readonly unknown[];
-export type ItemFn = (item: unknown, input: unknown, index: number) => unknown;
-export type ChildKeyFn = (item: unknown, index: number) => string;
-export type ConcurrencyKeyFn = (input: unknown, deps: Record<string, unknown>) => string;
-export type WhenFn = (input: unknown, deps: Record<string, unknown>) => boolean;
+type InputFn = (input: unknown, deps: Record<string, unknown>) => unknown;
+type OverFn = (input: unknown, deps: Record<string, unknown>) => readonly unknown[];
+type ItemFn = (item: unknown, input: unknown, index: number) => unknown;
+type ChildKeyFn = (item: unknown, index: number) => string;
+type ConcurrencyKeyFn = (input: unknown, deps: Record<string, unknown>) => string;
+type WhenFn = (input: unknown, deps: Record<string, unknown>) => boolean;
 
 /** 関数の保持はここのみ */
 export type FlowNode = {

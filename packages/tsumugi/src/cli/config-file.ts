@@ -4,7 +4,7 @@ import type { CliDeps } from './index.js';
 /** jsoncはwrangler.json含む */
 export type ConfigFormat = 'jsonc' | 'toml';
 
-export type WranglerConfig = { path: string; file: string; format: ConfigFormat };
+type WranglerConfig = { path: string; file: string; format: ConfigFormat };
 
 // wrangler本体と同じ優先順位, json系が先
 const CANDIDATES: readonly { file: string; format: ConfigFormat }[] = [

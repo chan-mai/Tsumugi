@@ -77,7 +77,7 @@ export type StatsResponse = {
 
 export type BindingsResponse = { bindings: string[] };
 
-export type DiagnosticsEntry = { active: number; outbox: number; blocked: BlockedBy; policy: PolicyView };
+type DiagnosticsEntry = { active: number; outbox: number; blocked: BlockedBy; policy: PolicyView };
 export type DiagnosticsResponse = { shard: number; bindings: Record<string, DiagnosticsEntry> };
 
 export type PolicyView = {
@@ -178,7 +178,7 @@ export type MutationResponse = { ok: true; requested?: true };
 
 export type ErrorResponse = { error: string };
 
-export type BindingMetricsView = {
+type BindingMetricsView = {
 	binding: string;
 	total: number;
 	failed: number;
@@ -191,7 +191,7 @@ export type BindingMetricsView = {
 };
 
 /** 1時間ごとの推移 */
-export type MetricsPointView = {
+type MetricsPointView = {
 	/** 区間の開始時刻, epochミリ秒 */
 	at: number;
 	total: number;

@@ -12,7 +12,7 @@ const COLUMNS = {
 	durationMs: 'double2',
 } as const;
 
-export type MetricsConfig = {
+type MetricsConfig = {
 	accountId: string;
 	/** Analytics Engine読み取り権限付きAPIトークン */
 	apiToken: string;
@@ -23,7 +23,7 @@ export type MetricsConfig = {
 /** secretは実行時に`env`から取得 */
 export type MetricsResolver<Env = any> = (env: Env) => MetricsConfig | undefined;
 
-export type MetricsQuery = {
+type MetricsQuery = {
 	/** 遡る時間数, 既定24, 最大720 */
 	hours: number;
 	binding?: string;

@@ -3,7 +3,7 @@ import type { ConfigFormat } from './config-file.js';
 // 形式は`examples/basic`と同一(ADR-0036)
 
 /** `ctx.exports`で自己参照service binding解決可能な日付以降 */
-export const COMPATIBILITY_DATE = '2026-07-01';
+const COMPATIBILITY_DATE = '2026-07-01';
 
 const indent = (text: string, prefix: string): string =>
 	text

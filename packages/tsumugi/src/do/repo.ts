@@ -29,9 +29,9 @@ export const ERROR_MAX_CHARS = 2_000;
 export const RESULT_MAX_CHARS = 8_192;
 
 /** スナップショット肥大防止 */
-export const ATTEMPT_KEEP = 20;
+const ATTEMPT_KEEP = 20;
 
-export type NewJob = {
+type NewJob = {
 	id: string;
 	binding: string;
 	priority: number;

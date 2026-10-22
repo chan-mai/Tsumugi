@@ -90,7 +90,7 @@ export type NormalizedSchedule = {
 	overlap: 'skip' | 'overlap';
 };
 
-export type NormalizeContext = {
+type NormalizeContext = {
 	bindings: readonly string[];
 	flows: readonly string[];
 	shardsOf: (binding: string) => number;

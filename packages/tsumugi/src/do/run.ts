@@ -52,7 +52,7 @@ const NOTIFY_RETRY_MS = 5_000;
 export const DEFAULT_MAX_NODES = 10_000;
 
 // ノード数上限は親子別集計(ADR-0035)
-export const DEFAULT_MAX_DEPTH = 3;
+const DEFAULT_MAX_DEPTH = 3;
 
 export type RunSettings = {
 	/** 1つのrunに入るノード数の上限(ADR-0035) */
@@ -91,7 +91,7 @@ export interface RunStub extends Rpc.DurableObjectBranded {
 }
 
 // 型展開過多の回避で使用分のみ宣言
-export interface RunPeerStub extends Rpc.DurableObjectBranded {
+interface RunPeerStub extends Rpc.DurableObjectBranded {
 	start(input: StartInput): Promise<StartResult>;
 	state(): Promise<RunState | null>;
 	cancel(): Promise<MutationResult>;
@@ -115,7 +115,7 @@ export interface TsumugiRunInstance extends Rpc.DurableObjectBranded {
 /** `createRunClass`の戻り値, wranglerのclass_nameはそのエクスポート名 */
 export type RunClass = new (ctx: DurableObjectState, env: RunEnv) => TsumugiRunInstance;
 
-export type RunOptions = {
+type RunOptions = {
 	flows: Flows;
 	bindings: Record<string, BindingConfig>;
 	settings?: RunSettings;

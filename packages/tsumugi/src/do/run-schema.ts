@@ -4,7 +4,7 @@ import { ensureColumns } from './columns.js';
  * run 1件につき1インスタンス, `run`は常に1行(ADR-0029)
  * 終端runも投影完了まで残存, 保持期間後にDOごと削除(ADR-0034)
  */
-export const RUN_SCHEMA = [
+const RUN_SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS run (
 		id TEXT PRIMARY KEY,
 		flow TEXT NOT NULL,

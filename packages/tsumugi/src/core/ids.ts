@@ -23,7 +23,7 @@ export function embedJobId(jobId: string): string {
 	return jobId.replace(/_/g, '_0').replace(/#/g, '_1').replace(/:/g, '_2');
 }
 
-export function assertValidBinding(binding: string): void {
+function assertValidBinding(binding: string): void {
 	if (!BINDING_PATTERN.test(binding)) {
 		throw new InvalidJobIdError(`invalid binding name: ${JSON.stringify(binding)} (alphanumeric, must start with a letter or underscore)`);
 	}

@@ -42,5 +42,3 @@ export const job = sqliteTable(
 		index('job_concurrency_key').on(t.concurrencyKey, t.updatedAt),
 	],
 );
-
-export type ReadModelJob = typeof job.$inferSelect;

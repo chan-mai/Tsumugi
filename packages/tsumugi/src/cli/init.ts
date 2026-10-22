@@ -5,7 +5,7 @@ import { detectWranglerConfig, readWorkerName, type ConfigFormat } from './confi
 import type { CliDeps } from './index.js';
 import { BARREL_HEADER, devVarsFile, exportLine, indexFile, performerFile, wranglerConfigFile } from './templates.js';
 
-export type InitOptions = {
+type InitOptions = {
 	name?: string | undefined;
 	format?: ConfigFormat | undefined;
 };

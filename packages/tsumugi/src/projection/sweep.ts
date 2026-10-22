@@ -13,7 +13,7 @@ export type SweepOptions = {
 };
 
 export const DEFAULT_RETENTION_MS = DEFAULT_FAILED_RETENTION_MS;
-export const DEFAULT_SWEEP_LIMIT = 1_000;
+const DEFAULT_SWEEP_LIMIT = 1_000;
 
 export async function sweepReadModel(db: D1Database, now: number, options: SweepOptions = {}): Promise<number> {
 	const before = now - (options.olderThanMs ?? DEFAULT_RETENTION_MS);

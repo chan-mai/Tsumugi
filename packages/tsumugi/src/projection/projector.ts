@@ -6,7 +6,7 @@ import { job } from './tables.js';
 
 export type OutboxRow = { seq: number; job_id: string; snapshot: string };
 
-export type JobSnapshot = Omit<JobRow, 'traceparent'> & { traceparent?: string | null; attempts_log?: AttemptRow[]; logs?: JobLogEntry[] };
+type JobSnapshot = Omit<JobRow, 'traceparent'> & { traceparent?: string | null; attempts_log?: AttemptRow[]; logs?: JobLogEntry[] };
 
 // 衝突時の非更新列, `id`と`created_at`はジョブの同一性
 // `binding`と`guarantee`は投入時確定で不変

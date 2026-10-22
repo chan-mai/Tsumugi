@@ -55,6 +55,3 @@ export const runNode = sqliteTable(
 	},
 	(t) => [primaryKey({ columns: [t.runId, t.nodeId] }), index('run_node_run').on(t.runId, t.position)],
 );
-
-export type ReadModelRun = typeof run.$inferSelect;
-export type ReadModelRunNode = typeof runNode.$inferSelect;

@@ -19,7 +19,7 @@ export const EXPECTED_MIGRATIONS = [
  * 検査結果, `missing`は適用漏れ, `unavailable`はD1一時障害で判定不可(#8)
  * 両者の区別は適用済み環境への誤った復旧手順案内の防止
  */
-export type MigrationStatus = { ok: true } | { ok: false; missing: string[] } | { ok: false; unavailable: true };
+type MigrationStatus = { ok: true } | { ok: false; missing: string[] } | { ok: false; unavailable: true };
 
 const UNAVAILABLE_TTL_MS = 5_000;
 

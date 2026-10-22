@@ -22,7 +22,7 @@ export type ConsumerEnv = {
 
 export const HEARTBEAT_MIN_INTERVAL_MS = 5_000;
 
-export const HEARTBEAT_SEND_TIMEOUT_MS = 1_000;
+const HEARTBEAT_SEND_TIMEOUT_MS = 1_000;
 
 /** 送信失敗は破棄, 報告欠落時もreaperの検出のみで実行は継続 */
 export function createHeartbeat(
@@ -104,7 +104,7 @@ export class TsumugiTimeoutError extends Error {
 	}
 }
 
-export function shardStub<Env extends ConsumerEnv>(env: Env, jobId: string): DurableObjectStub<TsumugiJobShard> {
+function shardStub<Env extends ConsumerEnv>(env: Env, jobId: string): DurableObjectStub<TsumugiJobShard> {
 	return env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardNameOf(jobId)));
 }
 

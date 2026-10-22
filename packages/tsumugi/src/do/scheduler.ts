@@ -69,7 +69,7 @@ interface SchedulerRunStub extends Rpc.DurableObjectBranded {
 }
 
 // 匿名クラス推論ではprotected混入で宣言出力不可
-export interface TsumugiSchedulerInstance extends Rpc.DurableObjectBranded {
+interface TsumugiSchedulerInstance extends Rpc.DurableObjectBranded {
 	/** テストからの差し替え用にpublic */
 	clock: Clock;
 	sync(): Promise<void>;
@@ -82,7 +82,7 @@ export interface TsumugiSchedulerInstance extends Rpc.DurableObjectBranded {
 /** `createSchedulerClass`の戻り値, wranglerのclass_nameはそのエクスポート名 */
 export type SchedulerClass = new (ctx: DurableObjectState, env: SchedulerEnv) => TsumugiSchedulerInstance;
 
-export type SchedulerOptions = {
+type SchedulerOptions = {
 	schedules: AnySchedules;
 	bindings: Record<string, BindingConfig>;
 	targets: { bindings: readonly string[]; flows: readonly string[] };

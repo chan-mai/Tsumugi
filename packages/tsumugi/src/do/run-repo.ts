@@ -25,7 +25,7 @@ export type NewNode = {
 	options?: string;
 };
 
-export type NodePatch = {
+type NodePatch = {
 	state?: NodeState;
 	jobId?: string | null;
 	childRunId?: string | null;

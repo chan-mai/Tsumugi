@@ -75,7 +75,7 @@ export interface FailureNotifyStub extends Rpc.DurableObjectBranded {
 export type MutationResult = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' };
 
 export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' };
-export type BulkResult = { ok: string[]; failed: BulkFailure[] };
+type BulkResult = { ok: string[]; failed: BulkFailure[] };
 
 export type ShardSettings = {
 	policy?: Partial<Policy>;

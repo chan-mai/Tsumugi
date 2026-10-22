@@ -12,9 +12,9 @@ export type MissingBinding = {
 	reason: 'absent' | 'invalid';
 };
 
-export type ConfigStatus = { ok: true } | { ok: false; missing: MissingBinding[] };
+type ConfigStatus = { ok: true } | { ok: false; missing: MissingBinding[] };
 
-export type ValidateInput = {
+type ValidateInput = {
 	performers: PerformerRegistry<any>;
 	flows?: Flows;
 	schedules?: Record<string, unknown>;

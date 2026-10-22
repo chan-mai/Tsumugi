@@ -137,7 +137,7 @@ export function validateCreateJob(
 	return { input };
 }
 
-export type RescheduleInput = { runAfter: number; priority?: number };
+type RescheduleInput = { runAfter: number; priority?: number };
 
 export function validateReschedule(body: unknown, now: number): { input: RescheduleInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
@@ -183,10 +183,10 @@ export function validateStartRun(body: unknown, flows: readonly string[]): { inp
 	return { input };
 }
 
-export type UpdatePolicyInput = UpdatePolicyRequest;
+type UpdatePolicyInput = UpdatePolicyRequest;
 
 // 省略と明示的nullを区別
-export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { error: string } {
+function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
 	const raw = body as Record<string, unknown>;
 
@@ -239,14 +239,14 @@ export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { 
 export const BULK_LIMIT_MAX = 200;
 
 // 個別retry / cancelの受理状態と同一, 拡大時はDO側で拒否される要求のみ増加
-export const BULK_STATES = {
+const BULK_STATES = {
 	retry: ['FAILED', 'STALLED'],
 	// QUEUED / RUNNINGは協調的な要求として受理(ADR-0052)
 	cancel: ['SCHEDULED', 'QUEUED', 'RUNNING'],
 } as const;
 
 // 画面はID列挙, 一覧外の件数を扱う利用者は条件指定
-export type BulkTarget =
+type BulkTarget =
 	| { kind: 'ids'; ids: string[] }
 	| {
 			kind: 'filter';
@@ -344,7 +344,7 @@ export function parsePaging(url: URL): { limit: number; offset: number } {
 	};
 }
 
-export type JobFilters = {
+type JobFilters = {
 	id?: string;
 	uniqueKey?: string;
 	concurrencyKey?: string;
@@ -377,7 +377,7 @@ export function parseJobFilters(url: URL): JobFilters {
 }
 
 /** 破損行でも詳細画面は表示 */
-export function parseAfter(raw: unknown): string[] {
+function parseAfter(raw: unknown): string[] {
 	if (typeof raw !== 'string' || raw.length === 0) return [];
 	try {
 		const parsed = JSON.parse(raw) as string[];
@@ -388,7 +388,7 @@ export function parseAfter(raw: unknown): string[] {
 }
 
 /** 破損時も詳細画面は表示 */
-export function parseAttempts(raw: unknown): AttemptRecord[] {
+function parseAttempts(raw: unknown): AttemptRecord[] {
 	if (typeof raw !== 'string' || raw.length === 0) return [];
 	try {
 		const parsed = JSON.parse(raw) as AttemptRecord[];
@@ -398,7 +398,7 @@ export function parseAttempts(raw: unknown): AttemptRecord[] {
 	}
 }
 
-export function parseJobLogs(raw: unknown): JobLogEntry[] {
+function parseJobLogs(raw: unknown): JobLogEntry[] {
 	if (typeof raw !== 'string' || raw.length === 0) return [];
 	try {
 		const parsed: unknown = JSON.parse(raw);

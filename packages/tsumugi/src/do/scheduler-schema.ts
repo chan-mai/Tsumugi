@@ -1,7 +1,7 @@
 import { ensureColumns } from './columns.js';
 
 /** 全scheduleの状態を1テーブルに保持, 定義はコード側(ADR-0040) */
-export const SCHEDULER_SCHEMA = [
+const SCHEDULER_SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS schedule (
 		name TEXT PRIMARY KEY,
 		kind TEXT NOT NULL,
