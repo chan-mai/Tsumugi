@@ -15,6 +15,7 @@ import type {
 	SettledState,
 	SettledTarget,
 } from '../core/types.js';
+import { chunk } from './bind.js';
 import { applySchema, type AttemptRow, type JobRow } from './schema.js';
 import { attempt, failureNotify, job, jobLog, keyBucket, outbox, runNotify, setting, settledNotify, uniqueKey } from './tables.js';
 
@@ -770,14 +771,13 @@ export class JobRepo {
 
 	/** キー別バケットの読み出し(ADR-0045), 対象は投入候補のキーのみで有界 */
 	readKeyBuckets(keys: readonly string[]): KeyBuckets {
-		if (keys.length === 0) return {};
-		const rows = this.db
-			.select()
-			.from(keyBucket)
-			.where(inArray(keyBucket.key, [...keys]))
-			.all();
-		this.reads++;
-		return Object.fromEntries(rows.map((r) => [r.key, { tokens: r.tokens, refilledAt: r.refilledAt }]));
+		const buckets: KeyBuckets = {};
+		for (const part of chunk(keys, 1)) {
+			const rows = this.db.select().from(keyBucket).where(inArray(keyBucket.key, part)).all();
+			this.reads++;
+			for (const r of rows) buckets[r.key] = { tokens: r.tokens, refilledAt: r.refilledAt };
+		}
+		return buckets;
 	}
 
 	writeKeyBuckets(buckets: KeyBuckets): void {
@@ -792,12 +792,10 @@ export class JobRepo {
 	}
 
 	deleteKeyBuckets(keys: readonly string[]): void {
-		if (keys.length === 0) return;
-		this.db
-			.delete(keyBucket)
-			.where(inArray(keyBucket.key, [...keys]))
-			.run();
-		this.writes++;
+		for (const part of chunk(keys, 1)) {
+			this.db.delete(keyBucket).where(inArray(keyBucket.key, part)).run();
+			this.writes++;
+		}
 	}
 
 	/** 上限到達行の削除, tokensが0以上の行はintervalMs以内に上限へ回復 */

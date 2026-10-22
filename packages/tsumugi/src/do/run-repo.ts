@@ -2,25 +2,12 @@ import { asc, eq, getTableColumns, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
 import type { NodeTrigger } from '../core/flow.js';
+import { chunk } from './bind.js';
 import { applyRunSchema, type NodeRow, type RunRow } from './run-schema.js';
 import { node, run, runOutbox } from './run-tables.js';
 
-/** 1文に渡せるバインド変数の上限, 101個目でSQLITE_ERROR */
-const BIND_LIMIT = 100;
-
 const NODE_COLUMNS = Object.keys(getTableColumns(node)).length;
 const OUTBOX_COLUMNS = Object.keys(getTableColumns(runOutbox)).length;
-
-/**
- * バインド変数の上限に収まる件数へ分ける
- * fan-outの展開は件数が実行時に確定し、1文にまとめると上限を超過
- */
-function chunk<T>(items: readonly T[], perItem: number): T[][] {
-	const size = Math.max(1, Math.floor(BIND_LIMIT / perItem));
-	const parts: T[][] = [];
-	for (let i = 0; i < items.length; i += size) parts.push(items.slice(i, i + size));
-	return parts;
-}
 
 export type NewNode = {
 	id: string;
