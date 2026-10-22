@@ -6,7 +6,6 @@ const T0 = 2_400_000_000_000;
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
-/** QUEUEDまで進めたジョブを1件用意 */
 async function queued(name: string): Promise<string> {
 	const stub = shard(name);
 	await runInDurableObject(stub, (instance) => {
@@ -36,6 +35,18 @@ describe('生存報告(#35)', () => {
 		expect(row.progress).toBeCloseTo(0.4);
 	});
 
+	it('報告ごとに即時のtickを起動せず投影のalarmを数秒後に設定する', async () => {
+		const stub = shard('HBG#0');
+		const jobId = await queued('HBG#0');
+		await runInDurableObject(stub, async (instance) => {
+			(instance as any).clock = { now: () => T0 + 30_000 };
+			await (instance as any).ctx.storage.deleteAlarm();
+		});
+		await stub.heartbeat(jobId, 0.5);
+		const alarm = await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.getAlarm());
+		expect(alarm).toBe(T0 + 33_000);
+	});
+
 	it('範囲外の進捗を0以上1以下へ丸める', async () => {
 		const stub = shard('HBB#0');
 		const jobId = await queued('HBB#0');
@@ -48,7 +59,7 @@ describe('生存報告(#35)', () => {
 	});
 
 	it('報告のあいだreaperが回収しない', async () => {
-		// timeoutMsは60秒だが、報告が続く限り無応答とは判定されない状態の確認
+		// timeoutMs 60秒でも報告継続中は無応答判定なし
 		const stub = shard('HBC#0');
 		const jobId = await queued('HBC#0');
 
@@ -61,7 +72,7 @@ describe('生存報告(#35)', () => {
 		}
 		expect((await rowOf(stub, jobId)).state).toBe('QUEUED');
 
-		// 報告が途絶えるとtimeoutMs + reaperGraceMsで回収
+		// 報告停止後はtimeoutMs + reaperGraceMsでreaper処理
 		await runInDurableObject(stub, (instance) => {
 			(instance as any).clock = { now: () => T0 + 180_000 + 90_000 };
 		});
@@ -79,7 +90,7 @@ describe('生存報告(#35)', () => {
 	});
 
 	it('遷移で前の試行の報告を消去する', async () => {
-		// 残すと再実行後のreaperの期限が前の試行の報告で延びる
+		// 残存時は前試行の報告で再実行後のreaper期限が延長
 		const stub = shard('HBE#0');
 		const jobId = await queued('HBE#0');
 		await stub.heartbeat(jobId, 0.7);
@@ -92,7 +103,7 @@ describe('生存報告(#35)', () => {
 	});
 
 	it('実行中の進捗が読み取りモデルへ投影される', async () => {
-		// 画面で進行中か停止かを判別するために必要
+		// 画面での進行中/停止の判別用
 		const stub = shard('HBF#0');
 		const jobId = await queued('HBF#0');
 		await stub.heartbeat(jobId, 0.25);

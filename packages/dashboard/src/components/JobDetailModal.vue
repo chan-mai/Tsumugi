@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue';
+import ModalShell from './ModalShell.vue';
 import { ref, watch } from 'vue';
 import AttemptLog from './AttemptLog.vue';
 import StatusCell from './StatusCell.vue';
@@ -42,7 +42,7 @@ watch(
 		loadSequence++;
 		loading.value = false;
 		if (!id) return;
-		// 閉じるアニメーションの間に中身が消えないよう、開く時だけ差し替え
+		// 閉じるアニメーション中の内容消失防止、開く時のみ差し替え
 		job.value = null;
 		attempts.value = [];
 		error.value = null;
@@ -55,7 +55,7 @@ watch(
 async function run(kind: 'retry' | 'cancel') {
 	if (!props.jobId) return;
 	message.value = await act(kind, props.jobId);
-	// 投影は数秒遅れ即時には変わらないが、反映され次第この再読込で追いつく
+	// 投影の数秒遅延で未反映の場合あり
 	await load(props.jobId);
 	emit('changed');
 }
@@ -73,161 +73,115 @@ const pretty = (payload: string | undefined) => {
 </script>
 
 <template>
-	<TransitionRoot :show="jobId !== null" as="template">
-		<Dialog class="relative z-30" @close="emit('close')">
-			<TransitionChild
-				as="template"
-				enter="duration-200 ease-out"
-				enter-from="opacity-0"
-				enter-to="opacity-100"
-				leave="duration-150 ease-in"
-				leave-from="opacity-100"
-				leave-to="opacity-0"
-			>
-				<div class="fixed inset-0 bg-black/30" aria-hidden="true" />
-			</TransitionChild>
-
-			<div class="fixed inset-0 flex items-center justify-center p-4">
-				<TransitionChild
-					as="template"
-					enter="duration-200 ease-out"
-					enter-from="opacity-0 scale-95"
-					enter-to="opacity-100 scale-100"
-					leave="duration-150 ease-in"
-					leave-from="opacity-100 scale-100"
-					leave-to="opacity-0 scale-95"
-				>
-					<DialogPanel
-						class="relative max-h-[85vh] w-full max-w-2xl overflow-auto rounded-card border border-border bg-background p-4 shadow-lg sm:p-6"
-					>
+	<ModalShell :open="jobId !== null" title="Job detail" width="2xl" @close="emit('close')">
+		<p v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</p>
+		<p v-if="!job && loading" class="text-sm text-muted-foreground">Loading</p>
+		<div v-if="job" class="space-y-4 text-sm">
+			<dl class="grid gap-y-2 sm:grid-cols-[10rem_1fr]">
+				<dt class="text-muted-foreground">Status</dt>
+				<dd><StatusCell :state="job.state" /></dd>
+				<dt class="text-muted-foreground">ID</dt>
+				<dd class="font-mono text-xs break-all">{{ job.id }}</dd>
+				<dt class="text-muted-foreground">Traceparent</dt>
+				<dd class="font-mono text-xs break-all">{{ job.traceparent ?? '-' }}</dd>
+				<dt class="text-muted-foreground">Binding</dt>
+				<dd>{{ job.binding }}</dd>
+				<template v-if="job.run_id">
+					<dt class="text-muted-foreground">Run</dt>
+					<dd>
 						<button
 							type="button"
-							aria-label="Close"
-							class="absolute top-4 right-4 flex size-8 items-center justify-center rounded-card border-none text-muted-foreground hover:bg-accent"
-							@click="emit('close')"
+							class="border-none font-mono text-xs break-all underline underline-offset-2 hover:text-foreground"
+							@click="emit('run', job.run_id)"
 						>
-							<svg viewBox="0 0 16 16" class="size-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-								<path d="M4 4l8 8M12 4l-8 8" />
-							</svg>
+							{{ job.run_id }}
 						</button>
+						<span v-if="job.node_id" class="ml-1 text-xs text-muted-foreground">{{ job.node_id }}</span>
+					</dd>
+				</template>
+				<dt class="text-muted-foreground">Attempts</dt>
+				<dd class="tabular-nums">{{ job.attempts }} / {{ job.max_attempts }}</dd>
+				<template v-if="job.progress !== null && job.progress !== undefined">
+					<dt class="text-muted-foreground">Progress</dt>
+					<dd class="flex items-center gap-2">
+						<span class="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+							<span class="block h-full rounded-full bg-primary" :style="{ width: `${Math.round(job.progress * 100)}%` }" />
+						</span>
+						<span class="tabular-nums">{{ Math.round(job.progress * 100) }}%</span>
+					</dd>
+				</template>
+				<dt class="text-muted-foreground">Guarantee</dt>
+				<dd>{{ job.guarantee ?? '-' }}</dd>
+				<dt class="text-muted-foreground">Priority</dt>
+				<dd class="tabular-nums">{{ job.priority }}</dd>
+				<dt class="text-muted-foreground">Concurrency key</dt>
+				<dd>{{ job.concurrency_key ?? '-' }}</dd>
+				<dt class="text-muted-foreground">Unique key</dt>
+				<dd>{{ job.unique_key ?? '-' }}</dd>
+				<dt class="text-muted-foreground">Created at</dt>
+				<dd>{{ at(job.created_at) }}</dd>
+				<template v-if="job.expires_at !== null && job.expires_at !== undefined">
+					<dt class="text-muted-foreground">Expires at</dt>
+					<dd>{{ at(job.expires_at) }}</dd>
+				</template>
+				<template v-if="job.cancel_requested_at !== null && job.cancel_requested_at !== undefined">
+					<dt class="text-muted-foreground">Cancel requested at</dt>
+					<dd>{{ at(job.cancel_requested_at) }}</dd>
+				</template>
+				<dt class="text-muted-foreground">Started at</dt>
+				<dd>{{ at(job.dispatched_at) }}</dd>
+				<dt class="text-muted-foreground">Updated at</dt>
+				<dd>{{ at(job.updated_at) }}</dd>
+			</dl>
 
-						<DialogTitle class="mb-4 text-lg font-bold">Job detail</DialogTitle>
-
-						<p v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</p>
-						<p v-if="!job && loading" class="text-sm text-muted-foreground">Loading</p>
-						<div v-if="job" class="space-y-4 text-sm">
-							<dl class="grid gap-y-2 sm:grid-cols-[10rem_1fr]">
-								<dt class="text-muted-foreground">Status</dt>
-								<dd><StatusCell :state="job.state" /></dd>
-								<dt class="text-muted-foreground">ID</dt>
-								<dd class="font-mono text-xs break-all">{{ job.id }}</dd>
-								<dt class="text-muted-foreground">Traceparent</dt>
-								<dd class="font-mono text-xs break-all">{{ job.traceparent ?? '-' }}</dd>
-								<dt class="text-muted-foreground">Binding</dt>
-								<dd>{{ job.binding }}</dd>
-								<template v-if="job.run_id">
-									<dt class="text-muted-foreground">Run</dt>
-									<dd>
-										<button
-											type="button"
-											class="border-none font-mono text-xs break-all underline underline-offset-2 hover:text-foreground"
-											@click="emit('run', job.run_id)"
-										>
-											{{ job.run_id }}
-										</button>
-										<span v-if="job.node_id" class="ml-1 text-xs text-muted-foreground">{{ job.node_id }}</span>
-									</dd>
-								</template>
-								<dt class="text-muted-foreground">Attempts</dt>
-								<dd class="tabular-nums">{{ job.attempts }} / {{ job.max_attempts }}</dd>
-								<!-- 報告するperformerでのみ埋まる -->
-								<template v-if="job.progress !== null && job.progress !== undefined">
-									<dt class="text-muted-foreground">Progress</dt>
-									<dd class="flex items-center gap-2">
-										<span class="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
-											<span class="block h-full rounded-full bg-primary" :style="{ width: `${Math.round(job.progress * 100)}%` }" />
-										</span>
-										<span class="tabular-nums">{{ Math.round(job.progress * 100) }}%</span>
-									</dd>
-								</template>
-								<dt class="text-muted-foreground">Guarantee</dt>
-								<dd>{{ job.guarantee ?? '-' }}</dd>
-								<dt class="text-muted-foreground">Priority</dt>
-								<dd class="tabular-nums">{{ job.priority }}</dd>
-								<dt class="text-muted-foreground">Concurrency key</dt>
-								<dd>{{ job.concurrency_key ?? '-' }}</dd>
-								<dt class="text-muted-foreground">Unique key</dt>
-								<dd>{{ job.unique_key ?? '-' }}</dd>
-								<dt class="text-muted-foreground">Created at</dt>
-								<dd>{{ at(job.created_at) }}</dd>
-								<!-- 期限を設定したジョブでのみ埋まる -->
-								<template v-if="job.expires_at !== null && job.expires_at !== undefined">
-									<dt class="text-muted-foreground">Expires at</dt>
-									<dd>{{ at(job.expires_at) }}</dd>
-								</template>
-								<!-- 取り消し要求を受けたジョブでのみ埋まる(ADR-0052) -->
-								<template v-if="job.cancel_requested_at !== null && job.cancel_requested_at !== undefined">
-									<dt class="text-muted-foreground">Cancel requested at</dt>
-									<dd>{{ at(job.cancel_requested_at) }}</dd>
-								</template>
-								<dt class="text-muted-foreground">Started at</dt>
-								<dd>{{ at(job.dispatched_at) }}</dd>
-								<dt class="text-muted-foreground">Updated at</dt>
-								<dd>{{ at(job.updated_at) }}</dd>
-							</dl>
-
-							<div>
-								<p class="mb-1 text-muted-foreground">Payload</p>
-								<pre class="overflow-auto rounded-card bg-muted p-3 text-xs">{{ pretty(job.payload) }}</pre>
-							</div>
-
-							<AttemptLog :attempts="attempts" />
-
-							<div v-if="job.logs?.length">
-								<p class="mb-1 text-muted-foreground">Logs</p>
-								<ol class="space-y-2">
-									<li v-for="(entry, index) in job.logs" :key="index" class="rounded-card border border-border p-3">
-										<p class="mb-1 text-xs text-muted-foreground">Attempt #{{ entry.attempt }} · {{ at(entry.timestamp) }}</p>
-										<pre class="font-mono text-xs break-words whitespace-pre-wrap">{{ entry.message }}</pre>
-									</li>
-								</ol>
-							</div>
-
-							<div class="flex flex-wrap items-center gap-2 border-t border-border pt-4">
-								<button
-									type="button"
-									class="h-8 rounded-card border border-border px-3 text-sm"
-									:class="canRetry ? 'bg-background hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
-									:disabled="busy || loading || !canRetry"
-									:title="goneReason"
-									@click="run('retry')"
-								>
-									Retry
-								</button>
-								<button
-									type="button"
-									class="h-8 rounded-card border border-border px-3 text-sm"
-									:class="canCancel ? 'bg-background text-destructive hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
-									:disabled="busy || loading || !canCancel"
-									title="Scheduled jobs are cancelled immediately, running jobs receive a request"
-									@click="run('cancel')"
-								>
-									Cancel
-								</button>
-								<span v-if="message" class="text-xs text-muted-foreground">{{ message }}</span>
-								<button
-									type="button"
-									class="ml-auto h-8 rounded-card border border-border px-3 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground"
-									:disabled="busy || loading"
-									@click="jobId && load(jobId)"
-								>
-									Refresh
-								</button>
-							</div>
-						</div>
-					</DialogPanel>
-				</TransitionChild>
+			<div>
+				<p class="mb-1 text-muted-foreground">Payload</p>
+				<pre class="overflow-auto rounded-card bg-muted p-3 text-xs">{{ pretty(job.payload) }}</pre>
 			</div>
-		</Dialog>
-	</TransitionRoot>
+
+			<AttemptLog :attempts="attempts" />
+
+			<div v-if="job.logs?.length">
+				<p class="mb-1 text-muted-foreground">Logs</p>
+				<ol class="space-y-2">
+					<li v-for="(entry, index) in job.logs" :key="index" class="rounded-card border border-border p-3">
+						<p class="mb-1 text-xs text-muted-foreground">Attempt #{{ entry.attempt }} · {{ at(entry.timestamp) }}</p>
+						<pre class="font-mono text-xs break-words whitespace-pre-wrap">{{ entry.message }}</pre>
+					</li>
+				</ol>
+			</div>
+
+			<div class="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+				<button
+					type="button"
+					class="h-8 rounded-card border border-border px-3 text-sm"
+					:class="canRetry ? 'bg-background hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
+					:disabled="busy || loading || !canRetry"
+					:title="goneReason"
+					@click="run('retry')"
+				>
+					Retry
+				</button>
+				<button
+					type="button"
+					class="h-8 rounded-card border border-border px-3 text-sm"
+					:class="canCancel ? 'bg-background text-destructive hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
+					:disabled="busy || loading || !canCancel"
+					title="Scheduled jobs are cancelled immediately, running jobs receive a request"
+					@click="run('cancel')"
+				>
+					Cancel
+				</button>
+				<span v-if="message" class="text-xs text-muted-foreground">{{ message }}</span>
+				<button
+					type="button"
+					class="ml-auto h-8 rounded-card border border-border px-3 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground"
+					:disabled="busy || loading"
+					@click="jobId && load(jobId)"
+				>
+					Refresh
+				</button>
+			</div>
+		</div>
+	</ModalShell>
 </template>

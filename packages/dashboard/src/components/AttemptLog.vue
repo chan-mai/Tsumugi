@@ -7,15 +7,13 @@ const props = defineProps<{ attempts: Attempt[] }>();
 
 const at = (value: number | null) => (value === null ? '-' : formatTimestamp(value));
 
-/** 開始が取れていない試行では所要も出せない */
 const durationOf = (a: Attempt) => (a.started_at === null ? '-' : `${a.finished_at - a.started_at} ms`);
 
-/** 古い順に整列, 1回目から読むほうが経過を追いやすい */
 const ordered = () => [...props.attempts].sort((x, y) => x.attempt - y.attempt);
 </script>
 
 <template>
-	<!-- 1回で成功したジョブは履歴を持たない, 節ごと非表示にしないと欠落に見える -->
+	<!-- 1回で成功時は履歴なし, 欠落誤認防止に節ごと非表示 -->
 	<div v-if="attempts.length > 0">
 		<p class="mb-1 text-muted-foreground">Result</p>
 		<div class="space-y-3">

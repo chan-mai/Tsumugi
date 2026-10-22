@@ -1,27 +1,28 @@
-// 応答の型はtsumugi側が持つ, 二重に書くとREST APIの変更に画面が追随不能
-// 型のみの取り込みなのでビルド時には消える
+import { ref } from 'vue';
+
+// 応答型はtsumugi側で定義, 二重定義はREST API変更への追随漏れ要因
 import type {
 	AttemptRecord,
 	CreateJobRequest,
 	JobDetail,
 	JobSummary,
 	RunDetail,
-	RunNodeView,
+	RunNode,
 	RunSummary,
-	ScheduleSummary,
+	Schedule,
 	StartRunRequest,
 	DiagnosticsResponse,
-	PolicyView,
+	MetricsResponse,
 	TriggerScheduleResponse,
 	UpdatePolicyRequest,
 } from '../../tsumugi/src/api/types.js';
+import type { Policy } from '../../tsumugi/src/core/types.js';
 
-/** 一覧と詳細を同じ型で扱う, 詳細でだけ返る列は任意 */
+export type { Policy, RunNode, Schedule };
+
 export type Job = JobSummary & Partial<JobDetail>;
 export type Attempt = AttemptRecord;
 export type Run = RunSummary & Partial<RunDetail>;
-export type RunNode = RunNodeView;
-export type Schedule = ScheduleSummary;
 
 declare global {
 	interface Window {
@@ -29,13 +30,10 @@ declare global {
 	}
 }
 
-/** 設定されていればトークン入力を表示可能, Cloudflare Access等では不要でnull */
+/** Cloudflare Access等ではnull */
 export const tokenCookie = () => window.__TSUMUGI__?.tokenCookie ?? null;
 
-/**
- * 401の判別
- * instanceofはミニファイやバンドル境界で壊れやすく値で保持
- */
+/** 401判別用, ミニファイ, バンドル境界でのinstanceof不一致対策に値で保持 */
 export class UnauthorizedError extends Error {
 	readonly unauthorized = true;
 
@@ -49,20 +47,32 @@ export function isUnauthorized(error: unknown): boolean {
 	return typeof error === 'object' && error !== null && (error as { unauthorized?: unknown }).unauthorized === true;
 }
 
-/** httpsの時だけSecureを付与, wrangler devはhttpで動作し常時付与では開発時に保存不能 */
+/** httpsのみSecure付与, http動作のwrangler devでの保存失敗対策 */
 export const cookieAttributes = (protocol: string): string => `path=/; SameSite=Strict${protocol === 'https:' ? '; Secure' : ''}`;
 
+// どの画面の401もトークン入力へ切替
+export const unauthorized = ref(false);
+// トークン保存前に発行した要求の401は対象外
+let authGeneration = 0;
+
+function markUnauthorized(generation: number): never {
+	if (generation === authGeneration) unauthorized.value = true;
+	throw new UnauthorizedError();
+}
+
 export function saveToken(value: string): void {
+	authGeneration++;
 	const name = tokenCookie();
 	if (!name) return;
 	document.cookie = `${name}=${encodeURIComponent(value)}; ${cookieAttributes(location.protocol)}`;
 }
 
-async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function call<T>(path: string, init: RequestInit = {}, Unavailable?: new () => Error): Promise<T> {
+	const generation = authGeneration;
 	const res = await fetch(path, { ...init, credentials: 'same-origin' });
-	if (res.status === 401) throw new UnauthorizedError();
+	if (res.status === 401) markUnauthorized(generation);
+	if (res.status === 501 && Unavailable) throw new Unavailable();
 	if (!res.ok) {
-		// サーバが理由を返す場合はそのまま表示, 数字だけでは対処が不明
 		const body = (await res.json().catch(() => ({}))) as { error?: string };
 		throw new Error(body.error ?? `${res.status}`);
 	}
@@ -71,13 +81,11 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export type MutationOutcome = { ok: boolean; gone: boolean; message: string };
 
-/**
- * retry / cancelの結果
- * 410は保持期間を過ぎてDOから消えた状態, 一覧には残るが操作の成功は二度と無い
- */
+// 410は保持期間経過でDOから削除済み, 一覧に残存しても操作不可
 async function mutate(path: string): Promise<MutationOutcome> {
+	const generation = authGeneration;
 	const res = await fetch(path, { method: 'POST', credentials: 'same-origin' });
-	if (res.status === 401) throw new UnauthorizedError();
+	if (res.status === 401) markUnauthorized(generation);
 	if (res.ok) return { ok: true, gone: false, message: 'Accepted' };
 
 	const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -152,21 +160,8 @@ export const startRun = (input: StartRunInput) =>
 		body: JSON.stringify(input),
 	});
 
-export type BindingMetrics = {
-	binding: string;
-	total: number;
-	failed: number;
-	failureRate: number;
-	avgDurationMs: number;
-	maxDurationMs: number;
-	p95DurationMs: number;
-	avgAttempts: number;
-};
+export type Metrics = MetricsResponse;
 
-export type MetricsPoint = { at: number; total: number; failed: number; avgDurationMs: number };
-export type Metrics = { hours: number; bindings: BindingMetrics[]; series: MetricsPoint[] };
-
-/** 未設定の構成では501が返る, 画面はそれを受けてタブを非表示 */
 export class MetricsUnavailableError extends Error {
 	readonly unavailable = true;
 }
@@ -174,36 +169,27 @@ export class MetricsUnavailableError extends Error {
 export const getMetrics = async (params: { hours: number; binding?: string }): Promise<Metrics> => {
 	const query = new URLSearchParams({ hours: String(params.hours) });
 	if (params.binding) query.set('binding', params.binding);
-	const res = await fetch(`/api/metrics?${query}`, { credentials: 'same-origin' });
-	if (res.status === 401) throw new UnauthorizedError();
-	if (res.status === 501) throw new MetricsUnavailableError();
-	const body = (await res.json().catch(() => ({}))) as Partial<Metrics> & { error?: string };
-	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	const body = await call<Partial<Metrics>>(`/api/metrics?${query}`, {}, MetricsUnavailableError);
 	return { hours: body.hours ?? params.hours, bindings: body.bindings ?? [], series: body.series ?? [] };
 };
 
 export const isMetricsUnavailable = (error: unknown): boolean =>
 	typeof error === 'object' && error !== null && (error as { unavailable?: unknown }).unavailable === true;
 
-/** schedulesを定義していない構成では501が返る, 画面はそれを受けてタブを非表示 */
 export class SchedulesUnavailableError extends Error {
 	readonly unavailable = true;
 }
 
 export const listSchedules = async (): Promise<Schedule[]> => {
-	const res = await fetch('/api/schedules', { credentials: 'same-origin' });
-	if (res.status === 401) throw new UnauthorizedError();
-	if (res.status === 501) throw new SchedulesUnavailableError();
-	const body = (await res.json().catch(() => ({}))) as { schedules?: Schedule[]; error?: string };
-	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	const body = await call<{ schedules?: Schedule[] }>('/api/schedules', {}, SchedulesUnavailableError);
 	return body.schedules ?? [];
 };
 
-/** 停止中に経過した回は再開時に破棄される */
+/** 停止中に経過した回は再開時に破棄 */
 export const setSchedulePaused = (name: string, paused: boolean) =>
 	call<{ ok: true }>(`/api/schedules/${encodeURIComponent(name)}/${paused ? 'pause' : 'resume'}`, { method: 'POST' });
 
-/** 手動発火, 一時停止中も対象で次回の予定は変わらない */
+/** 一時停止中も可, 次回予定は不変 */
 export const triggerSchedule = (name: string) =>
 	call<TriggerScheduleResponse>(`/api/schedules/${encodeURIComponent(name)}/trigger`, { method: 'POST' });
 
@@ -212,30 +198,23 @@ export type BulkInput = { ids: string[] };
 export type BulkOutcome = {
 	ok: string[];
 	failed: { id: string; reason: string }[];
-	/** 上限で除外した残りの見積り, 0になるまで反復 */
-	remaining: number;
 };
 
-/** 選択したジョブの一括処理, 状態の判定はサーバ側が担当 */
+/** 状態判定はサーバ側 */
 export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): Promise<BulkOutcome> => {
-	const res = await fetch(`/api/jobs/bulk-${action}`, {
+	const body = await call<Partial<BulkOutcome>>(`/api/jobs/bulk-${action}`, {
 		method: 'POST',
-		credentials: 'same-origin',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-	if (res.status === 401) throw new UnauthorizedError();
-	const body = (await res.json().catch(() => ({}))) as Partial<BulkOutcome> & { error?: string };
-	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-	return { ok: body.ok ?? [], failed: body.failed ?? [], remaining: body.remaining ?? 0 };
+	return { ok: body.ok ?? [], failed: body.failed ?? [] };
 };
 
-export type Policy = PolicyView;
 export type BindingDiagnostics = DiagnosticsResponse['bindings'][string];
 
 export const getDiagnostics = () => call<DiagnosticsResponse>('/api/diagnostics');
 
-/** 渡した項目だけを重ねる, 省略した項目は変わらない(#27) */
+/** 省略項目は不変(#27) */
 export const updatePolicy = (binding: string, patch: UpdatePolicyRequest) =>
 	call<{ binding: string; shards: number; policy: Policy }>(`/api/bindings/${encodeURIComponent(binding)}/policy`, {
 		method: 'POST',
@@ -243,11 +222,10 @@ export const updatePolicy = (binding: string, patch: UpdatePolicyRequest) =>
 		body: JSON.stringify(patch),
 	});
 
-/** 実行時の設定を破棄して静的設定へ復帰(#27) */
+/** 静的設定へ復帰(#27) */
 export const resetPolicy = (binding: string) =>
 	call<{ ok: true }>(`/api/bindings/${encodeURIComponent(binding)}/policy/reset`, { method: 'POST' });
 
-export const getStats = () => call<{ byState: Record<string, number> }>('/api/stats');
 export const getBindings = () => call<{ bindings: string[] }>('/api/bindings');
 export const getJob = (id: string) => call<{ job: Job }>(`/api/jobs/${encodeURIComponent(id)}`);
 export const retryJob = (id: string) => mutate(`/api/jobs/${encodeURIComponent(id)}/retry`);

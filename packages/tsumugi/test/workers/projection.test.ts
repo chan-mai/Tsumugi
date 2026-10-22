@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { project, type OutboxRow } from '../../src/projection/projector.js';
+import { project, toStatements, type OutboxRow } from '../../src/projection/projector.js';
 
 const T0 = 2_100_000_000_000;
 
@@ -38,7 +38,6 @@ describe('D1への投影(ADR-0008)', () => {
 
 		const row = await readD1(jobId);
 		expect(row).toMatchObject({ id: jobId, state: 'QUEUED' });
-		// 投影が済んだアウトボックスは消える
 		expect(await outboxCount('PROJ#0')).toBe(0);
 	});
 
@@ -48,7 +47,6 @@ describe('D1への投影(ADR-0008)', () => {
 		await runDurableObjectAlarm(shard('PROJ2#0'));
 		const first = await readD1(jobId);
 
-		// アウトボックスが二重に読まれた状況を再現
 		const rows: OutboxRow[] = [{ seq: first!.seq, job_id: jobId, snapshot: JSON.stringify({ ...(await snapshotOf('PROJ2#0', jobId)) }) }];
 		await project(env.TSUMUGI_DB, rows);
 		await project(env.TSUMUGI_DB, rows);
@@ -62,13 +60,29 @@ describe('D1への投影(ADR-0008)', () => {
 		await runDurableObjectAlarm(shard('PROJ3#0'));
 		const current = await readD1(jobId);
 
-		// 順序が入れ替わって古い状態が遅れて届いた状況
 		const stale = await snapshotOf('PROJ3#0', jobId);
 		await project(env.TSUMUGI_DB, [{ seq: 1, job_id: jobId, snapshot: JSON.stringify({ ...stale, state: 'SCHEDULED' }) }]);
 
 		const after = await readD1(jobId);
 		expect(after!.state).toBe(current!.state);
 		expect(after!.seq).toBe(current!.seq);
+	});
+
+	it('同じジョブの複数スナップショットは最大seqの1件のみ書き込む', async () => {
+		await install('PROJ5#0', T0);
+		const jobId = await shard('PROJ5#0').enqueue({ binding: 'PROJ5', payload: {} });
+		await runDurableObjectAlarm(shard('PROJ5#0'));
+		const snapshot = await snapshotOf('PROJ5#0', jobId);
+		const base = (await readD1(jobId))!.seq;
+
+		const rows: OutboxRow[] = [
+			{ seq: base + 2, job_id: jobId, snapshot: JSON.stringify({ ...snapshot, state: 'COMPLETED' }) },
+			{ seq: base + 1, job_id: jobId, snapshot: JSON.stringify({ ...snapshot, state: 'RUNNING' }) },
+		];
+		expect(toStatements(env.TSUMUGI_DB, rows)).toHaveLength(1);
+		await project(env.TSUMUGI_DB, rows);
+
+		expect(await readD1(jobId)).toMatchObject({ state: 'COMPLETED', seq: base + 2 });
 	});
 
 	it('D1への書き込みが失敗したらカーソルを進めない', async () => {
@@ -85,9 +99,7 @@ describe('D1への投影(ADR-0008)', () => {
 		expect(before).toBeGreaterThan(0);
 		await runDurableObjectAlarm(shard('PROJ4#0'));
 
-		// 投影に失敗してもアウトボックスは残り,次のtickで追いつく
 		expect(await outboxCount('PROJ4#0')).toBeGreaterThanOrEqual(before);
-		// tickが停止しないよう次のalarmが再設定されている
 		const alarm = await runInDurableObject(shard('PROJ4#0'), (_i, state) => state.storage.getAlarm());
 		expect(alarm).not.toBeNull();
 	});

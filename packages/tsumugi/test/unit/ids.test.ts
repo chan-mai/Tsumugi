@@ -23,7 +23,7 @@ describe('ジョブIDの往復', () => {
 });
 
 describe('不正なbindingを拒否する', () => {
-	// 区切り文字の混入でparseが壊れる, ここが崩れるとID体系全体が崩れる
+	// 区切り文字混入でparse不能, ID体系全体の前提
 	it.each(['MA#IL', 'MA:IL', 'MAIL#0', '', '1MAIL', 'MA IL', 'MA-IL', 'メール'])('%oを拒否する', (binding) => {
 		expect(() => formatJobId({ binding, shard: 0, localId: 'abc' })).toThrow(InvalidJobIdError);
 	});

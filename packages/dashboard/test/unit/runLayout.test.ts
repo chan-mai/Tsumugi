@@ -2,12 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { RunNode } from '../../src/api';
 import { HANDLE_TOP, MAX_CHIPS, runLayout, type ChildData, type TaskData } from '../../src/components/graph/runLayout';
 
-/**
- * グラフの配置
- *
- * 描画の実寸に依らず座標が決まるので,ここで形を固定できる
- */
-
 const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 	binding: 'GREET',
 	state: 'COMPLETED',
@@ -16,6 +10,7 @@ const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 	origin: 'static',
 	after: [],
 	job_id: null,
+	child_run_id: null,
 	result: null,
 	error: null,
 	position: 0,
@@ -43,7 +38,7 @@ describe('Runのグラフの配置', () => {
 		expect(chip?.type).toBe('child');
 		expect(chip?.parentNode).toBe('greet');
 		expect(chip?.extent).toBe('parent');
-		// 親の下での名前だけを出す
+		// 親の下での名前のみ表示
 		expect((chip?.data as ChildData).label).toBe('0');
 	});
 
@@ -65,7 +60,6 @@ describe('Runのグラフの配置', () => {
 			for (let i = 1; i < route.length; i++) {
 				const previous = route[i - 1]!;
 				const current = route[i]!;
-				// 斜めの区間を作らない
 				expect(previous.x === current.x || previous.y === current.y).toBe(true);
 			}
 		}
@@ -91,7 +85,7 @@ describe('Runのグラフの配置', () => {
 		const measured = Number.parseFloat(taskOf(runLayout(nodes, new Map([['a', 200]])), 'a')!.style.height);
 
 		expect(measured).toBeGreaterThan(estimated);
-		// 上下の内側余白のぶんだけ中身より高い
+		// 上下の内側余白分だけ中身より高い
 		expect(measured).toBe(200 + 24);
 	});
 
@@ -124,7 +118,6 @@ describe('Runのグラフの配置', () => {
 				b: n.position.y + Number.parseFloat(n.style.height),
 			}));
 
-		// a->cはbの列を越すので, bに当たらないことを経路の全区間で見る
 		const route = result.edges.find((edge) => edge.id === 'a->c')!.data.route;
 		for (let i = 1; i < route.length; i++) {
 			const from = route[i - 1]!;

@@ -19,12 +19,13 @@ describe('一覧の抽出条件', () => {
 	});
 
 	it('空文字は指定なしとして扱う', () => {
-		// 入力欄を空にした状態がそのまま送られてくる
+		// 空の入力欄の値がそのまま送信
 		expect(parse('?id=&unique_key=')).toEqual({});
 	});
 
-	it('数値にならない期間を無視する', () => {
-		// 400にすると入力の途中で画面が止まる
+	it('整数にならない期間を無視する', () => {
+		expect(parse('?created_from=1.5')).toEqual({});
+		// 400では入力途中で画面停止
 		expect(parse('?created_from=yesterday')).toEqual({});
 		expect(parse('?created_to=')).toEqual({});
 	});

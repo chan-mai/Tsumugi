@@ -1,4 +1,4 @@
-// enqueueするだけのWorker向け, DO実装をバンドルさせないため本体とは分ける
+// enqueue専用Worker向け, DO実装のバンドル回避用に本体と分離
 export { createClient } from '../client/enqueue.js';
 export type {
 	BindingConfig,

@@ -1,13 +1,9 @@
 import type { ConfigFormat } from './config-file.js';
 
-/**
- * initとadd-performerが生成する内容(ADR-0036)
- *
- * 形は`examples/basic`と同一, 純粋な文字列関数のみを配置
- */
+// 形式は`examples/basic`と同一(ADR-0036)
 
-/** `ctx.exports`で自己参照のservice bindingを解決できる日付以降を指定 */
-export const COMPATIBILITY_DATE = '2026-07-01';
+/** `ctx.exports`で自己参照service binding解決可能な日付以降 */
+const COMPATIBILITY_DATE = '2026-07-01';
 
 const indent = (text: string, prefix: string): string =>
 	text
@@ -15,7 +11,6 @@ const indent = (text: string, prefix: string): string =>
 		.map((line) => (line.length === 0 ? line : prefix + line))
 		.join('\n');
 
-/** wrangler設定の全体, 断片の前後を形式ごとの定型で包む */
 export function wranglerConfigFile(name: string, fragment: string, format: ConfigFormat): string {
 	if (format === 'toml') {
 		return [
@@ -42,7 +37,7 @@ export function wranglerConfigFile(name: string, fragment: string, format: Confi
 	].join('\n');
 }
 
-/** Workerの最小構成, flowを使わない形(getting-startedと同じ) */
+/** getting-startedと同一内容 */
 export function indexFile(): string {
 	return `import { bearerAuth, defineTsumugi } from 'tsumugi';
 import { ui } from 'tsumugi/ui';
@@ -76,7 +71,6 @@ export default {
 `;
 }
 
-/** performer 1つにつき1ファイル, payloadは編集の起点になるプレースホルダ */
 export function performerFile(className: string): string {
 	return `import { Performer } from 'tsumugi/performer';
 
@@ -94,7 +88,6 @@ export const BARREL_HEADER = `// performerのバレル, ここに並べた名前
 
 export const exportLine = (className: string, fileBase: string): string => `export { ${className} } from './${fileBase}.js';\n`;
 
-/** ローカル開発用のトークン, 本番は`wrangler secret put`で設定 */
 export function devVarsFile(): string {
 	return 'TSUMUGI_TOKEN="dev-token"\n';
 }

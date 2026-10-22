@@ -4,22 +4,17 @@ import { LOG_KEEP, LOG_MAX_CHARS } from '../core/log.js';
 import type { SpawnRequest } from '../core/run.js';
 import { normalizeTraceparent } from '../core/trace.js';
 
-/**
- * performerを試すための道具
- *
- * DOもQueuesも起動せずにperformを直接呼ぶ
- * DOを含む検証は`@cloudflare/vitest-pool-workers`の領域で対象外
- */
+// DOを含む検証は`@cloudflare/vitest-pool-workers`の対象
 
 export type TestContext = JobContext & {
 	logs: string[];
-	/** performが要求した子, 要求の順に入る(ADR-0032) */
+	/** performが要求した子, 要求順(ADR-0032) */
 	spawns: SpawnRequest[];
-	/** `heartbeat`へ渡された進捗, 実行の順に入り省略時はundefined */
+	/** `heartbeat`へ渡された進捗, 実行順, 省略時はundefined */
 	heartbeats: (number | undefined)[];
-	/** 実行の途中から取り消し要求を模擬, 以後のheartbeatの戻り値がcancelRequested: trueになる(#95) */
+	/** 実行途中の取り消し要求の模擬, 以後のheartbeatはcancelRequested: true(#95) */
 	requestCancel(): void;
-	/** `fail`の指定, 実行順に記録し本番は最後が有効(#91) */
+	/** `fail`の指定, 実行順, 本番は最後が有効(#91) */
 	fails: FailOptions[];
 };
 
@@ -28,18 +23,16 @@ export type TestContextOptions = {
 	jobId?: string;
 	attempt?: number;
 	idempotencyKey?: string;
-	/** timeoutが切れる時刻, 既定は現在時刻から60秒後 */
+	/** timeout期限時刻, 既定は現在時刻+60秒 */
 	deadlineAt?: number;
-	/** 最初から取り消し要求済みとして扱う(#95) */
+	/** 開始時点で取り消し要求済み(#95) */
 	cancelRequested?: boolean;
 };
 
-/** `JobContext`の構築 */
 export function createTestContext(options: TestContextOptions = {}): TestContext {
 	const jobId = options.jobId ?? 'TEST#0:testjob000000000000000000';
-	// 本番と同じく保持のみ, 実際の投入はDO側で発生(ADR-0031)
+	// 本番と同じく保持のみ, 投入はDO側(ADR-0031)
 	const spawns: SpawnRequest[] = [];
-	// 本番はDOへ送信するが、ここでは実行の記録だけを残す
 	const heartbeats: (number | undefined)[] = [];
 	const logs: string[] = [];
 	let cancelRequested = options.cancelRequested ?? false;
@@ -54,7 +47,7 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 			if (logs.length > LOG_KEEP) logs.shift();
 		},
 		attempt: options.attempt ?? 1,
-		// 実装と同じくジョブIDをそのまま使用, 再試行を跨いで同値
+		// 本番と同じくジョブID, 再試行間で同値
 		idempotencyKey: options.idempotencyKey ?? jobId,
 		deadlineAt: options.deadlineAt ?? Date.now() + 60_000,
 		spawns,
@@ -81,10 +74,6 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 
 export type PerformResult<Result> = { ok: true; value: Result } | { ok: false; error: unknown };
 
-/**
- * performを呼び、例外を投げずに結果として返す
- * 本番では例外がそのままリトライの判断材料, 投げたか否かを同じ形で確認可能
- */
 export async function runPerformer<Payload, Result, Req extends Requirements>(
 	performer: PerformerLike<Payload, Result, Req>,
 	payload: Payload,

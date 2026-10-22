@@ -18,7 +18,7 @@ describe('投入内容の検証', () => {
 	});
 
 	it('未登録のbindingを拒否する', () => {
-		// 投入はできても実行時に必ず失敗し, 入口で拒否
+		// 投入可能でも実行時に必ず失敗
 		expect(ok({ binding: 'NOPE', payload: {} })).toEqual({ error: 'unknown binding: NOPE' });
 	});
 
@@ -38,17 +38,18 @@ describe('投入内容の検証', () => {
 	});
 
 	it('数値でない指定を拒否する', () => {
-		expect(ok({ binding: 'MAIL', payload: {}, maxAttempts: '3' })).toEqual({ error: 'maxAttempts must be a number' });
-		expect(ok({ binding: 'MAIL', payload: {}, delayMs: Number.NaN })).toEqual({ error: 'delayMs must be a number' });
-		expect(ok({ binding: 'MAIL', payload: {}, priority: Number.POSITIVE_INFINITY })).toEqual({ error: 'priority must be a number' });
+		expect(ok({ binding: 'MAIL', payload: {}, maxAttempts: '3' })).toEqual({ error: 'maxAttempts must be an integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, delayMs: Number.NaN })).toEqual({ error: 'delayMs must be an integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, priority: Number.POSITIVE_INFINITY })).toEqual({ error: 'priority must be an integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, delayMs: 1.5 })).toEqual({ error: 'delayMs must be an integer' });
 	});
 
 	it('範囲外の指定を拒否する', () => {
 		expect(ok({ binding: 'MAIL', payload: {}, maxAttempts: 0 })).toEqual({ error: 'maxAttempts must be at least 1' });
 		expect(ok({ binding: 'MAIL', payload: {}, delayMs: -1 })).toEqual({ error: 'delayMs must not be negative' });
 		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: 0 })).toEqual({ error: 'expiresInMs must be a positive integer' });
-		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: 1.5 })).toEqual({ error: 'expiresInMs must be a positive integer' });
-		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: '60000' })).toEqual({ error: 'expiresInMs must be a number' });
+		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: 1.5 })).toEqual({ error: 'expiresInMs must be an integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: '60000' })).toEqual({ error: 'expiresInMs must be an integer' });
 	});
 
 	it('キーは文字列でなければ拒否する', () => {
@@ -96,7 +97,7 @@ describe('投入内容の検証', () => {
 	});
 
 	it('登録一覧が空なら何も受け付けない', () => {
-		// 空はperformerが1件も無い状態, 投入できても実行時に必ず失敗
+		// 空はperformer0件, 投入可能でも実行時に必ず失敗
 		expect(validateCreateJob({ binding: 'ANY', payload: {} }, [])).toEqual({ error: 'unknown binding: ANY' });
 	});
 });
@@ -118,7 +119,7 @@ describe('実行時刻の変更内容の検証', () => {
 	});
 
 	it('runAtとdelayMsの同時指定を拒否する', () => {
-		// どちらを優先するかが仕様として決まらない
+		// 優先順位が仕様上未定
 		expect(check({ runAt: 2_000_000, delayMs: 5_000 })).toEqual({ error: 'runAt and delayMs are mutually exclusive' });
 	});
 
@@ -131,9 +132,10 @@ describe('実行時刻の変更内容の検証', () => {
 	});
 
 	it('数値でない指定を拒否する', () => {
-		expect(check({ runAt: '2000000' })).toEqual({ error: 'runAt must be a number' });
-		expect(check({ delayMs: Number.NaN })).toEqual({ error: 'delayMs must be a number' });
-		expect(check({ runAt: 1, priority: 'high' })).toEqual({ error: 'priority must be a number' });
+		expect(check({ runAt: '2000000' })).toEqual({ error: 'runAt must be an integer' });
+		expect(check({ delayMs: Number.NaN })).toEqual({ error: 'delayMs must be an integer' });
+		expect(check({ runAt: 1, priority: 'high' })).toEqual({ error: 'priority must be an integer' });
+		expect(check({ runAt: 1.5 })).toEqual({ error: 'runAt must be an integer' });
 	});
 
 	it('オブジェクトでない本文を拒否する', () => {

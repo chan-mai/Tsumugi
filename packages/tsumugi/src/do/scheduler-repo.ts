@@ -4,17 +4,13 @@ import type { NormalizedSchedule } from '../core/recurring.js';
 import { applySchedulerSchema, type ScheduleRow } from './scheduler-schema.js';
 import { schedule, schedulerSetting, type ScheduleRecord } from './scheduler-tables.js';
 
-/** 発火の記録, jobとflowで使用する列が入れ替わる */
 export type FiredPatch = {
 	occurrence: number;
 	jobId?: string;
 	runId?: string;
 };
 
-/**
- * Scheduler DOのSQLiteとの仲介
- * 次回時刻の計算はcore/recurring.tsが持ち、ここは読み書きのみ(ADR-0018)
- */
+/** SQLite読み書きのみ, 次回時刻計算はcore/recurring.ts(ADR-0018) */
 export class SchedulerRepo {
 	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
 	readonly sql: SqlStorage;
@@ -42,7 +38,7 @@ export class SchedulerRepo {
 		return record === undefined ? undefined : this.#toRow(record);
 	}
 
-	insert(spec: NormalizedSchedule, nextRunAt: number, now: number): void {
+	insert(spec: NormalizedSchedule, nextOccurrenceAt: number, now: number): void {
 		this.db
 			.insert(schedule)
 			.values({
@@ -53,15 +49,14 @@ export class SchedulerRepo {
 				cron: spec.cron,
 				timeZone: spec.timeZone,
 				overlap: spec.overlap,
-				nextRunAt,
+				nextOccurrenceAt,
 				createdAt: now,
 				updatedAt: now,
 			})
 			.run();
 	}
 
-	/** 定義変更の反映, 間隔が変わった場合だけnextRunAtを渡して更新 */
-	updateSpec(spec: NormalizedSchedule, nextRunAt: number | null, now: number): void {
+	updateSpec(spec: NormalizedSchedule, nextOccurrenceAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
 			.set({
@@ -71,7 +66,7 @@ export class SchedulerRepo {
 				cron: spec.cron,
 				timeZone: spec.timeZone,
 				overlap: spec.overlap,
-				...(nextRunAt !== null ? { nextRunAt } : {}),
+				...(nextOccurrenceAt !== null ? { nextOccurrenceAt } : {}),
 				updatedAt: now,
 			})
 			.where(eq(schedule.name, spec.name))
@@ -86,72 +81,67 @@ export class SchedulerRepo {
 			.run();
 	}
 
-	/** 発火時刻を迎えた行, 予定の早い順に有界で読む, 一時停止中は対象外 */
 	due(now: number, limit: number): ScheduleRow[] {
 		return this.db
 			.select()
 			.from(schedule)
-			.where(and(lte(schedule.nextRunAt, now), eq(schedule.paused, 0)))
-			.orderBy(asc(schedule.nextRunAt), asc(schedule.name))
+			.where(and(lte(schedule.nextOccurrenceAt, now), eq(schedule.paused, 0)))
+			.orderBy(asc(schedule.nextOccurrenceAt), asc(schedule.name))
 			.limit(limit)
 			.all()
 			.map(this.#toRow);
 	}
 
-	/** 次のalarmを設定する時刻, 一時停止中を除き行が無ければnull */
 	minNextRunAt(): number | null {
 		const row = this.db
-			.select({ min: sql<number | null>`min(${schedule.nextRunAt})` })
+			.select({ min: sql<number | null>`min(${schedule.nextOccurrenceAt})` })
 			.from(schedule)
 			.where(eq(schedule.paused, 0))
 			.get();
 		return row?.min ?? null;
 	}
 
-	/** 一時停止の切り替え, 再開で予定が経過済みならnextRunAtで再計算値を受ける */
-	setPaused(name: string, paused: boolean, nextRunAt: number | null, now: number): void {
+	setPaused(name: string, paused: boolean, nextOccurrenceAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
-			.set({ paused: paused ? 1 : 0, ...(nextRunAt !== null ? { nextRunAt } : {}), updatedAt: now })
+			.set({ paused: paused ? 1 : 0, ...(nextOccurrenceAt !== null ? { nextOccurrenceAt } : {}), updatedAt: now })
 			.where(eq(schedule.name, name))
 			.run();
 	}
 
-	/** 発火の記録, nextRunAtがnullなら手動発火で予定を進めない */
-	markFired(name: string, fired: FiredPatch, nextRunAt: number | null, now: number): void {
+	markFired(name: string, fired: FiredPatch, nextOccurrenceAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
 			.set({
-				lastRunAt: fired.occurrence,
+				lastOccurrenceAt: fired.occurrence,
 				lastFiredAt: now,
 				lastJobId: fired.jobId ?? null,
 				lastRunId: fired.runId ?? null,
 				lastError: null,
-				...(nextRunAt !== null ? { nextRunAt } : {}),
+				...(nextOccurrenceAt !== null ? { nextOccurrenceAt } : {}),
 				updatedAt: now,
 			})
 			.where(eq(schedule.name, name))
 			.run();
 	}
 
-	markSkipped(name: string, nextRunAt: number, now: number): void {
+	markSkipped(name: string, nextOccurrenceAt: number, now: number): void {
 		this.db
 			.update(schedule)
 			.set({
 				lastSkippedAt: now,
 				skippedCount: sql`${schedule.skippedCount} + 1`,
-				nextRunAt,
+				nextOccurrenceAt,
 				updatedAt: now,
 			})
 			.where(eq(schedule.name, name))
 			.run();
 	}
 
-	/** 失敗の記録, nextRunAtがnullなら行を進めず次のtickで再試行 */
-	markError(name: string, message: string, nextRunAt: number | null, now: number): void {
+	markError(name: string, message: string, nextOccurrenceAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
-			.set({ lastError: message, ...(nextRunAt !== null ? { nextRunAt } : {}), updatedAt: now })
+			.set({ lastError: message, ...(nextOccurrenceAt !== null ? { nextOccurrenceAt } : {}), updatedAt: now })
 			.where(eq(schedule.name, name))
 			.run();
 	}
@@ -166,8 +156,8 @@ export class SchedulerRepo {
 			time_zone: record.timeZone,
 			overlap: record.overlap,
 			paused: record.paused,
-			next_run_at: record.nextRunAt,
-			last_run_at: record.lastRunAt,
+			next_occurrence_at: record.nextOccurrenceAt,
+			last_occurrence_at: record.lastOccurrenceAt,
 			last_fired_at: record.lastFiredAt,
 			last_job_id: record.lastJobId,
 			last_run_id: record.lastRunId,

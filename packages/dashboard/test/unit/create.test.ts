@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createJob, startRun } from '../../src/api';
 
-// 502や503はWorkerの手前でHTMLが返り得る, 本文がJSONでなくても状態コードで失敗を示す
+// 502, 503はWorker手前のHTML応答の場合あり
 const htmlResponse = (status: number) => new Response('<html>Bad Gateway</html>', { status, headers: { 'content-type': 'text/html' } });
 
 describe('投入と開始の失敗', () => {

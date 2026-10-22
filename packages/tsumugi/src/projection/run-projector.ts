@@ -1,16 +1,12 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { NodeSnapshot, RunSnapshot } from '../do/run-repo.js';
+import { latestPerKey } from './projector.js';
 import { run, runNode } from './run-tables.js';
 
 export type RunOutboxRow = { seq: number; kind: string; target: string; snapshot: string };
 
-/**
- * runの読み取りモデルへの投影(ADR-0008)
- *
- * ジョブ側と同じく`excluded.seq > seq`で古い状態の上書きを防止
- * 同じ範囲を何度処理しても結果は不変で、送信の再試行が安全
- */
+// ジョブ側と同じく`excluded.seq > seq`で古い状態の上書き防止, 送信再試行も安全
 function toRunValues(snapshot: RunSnapshot, seq: number): typeof run.$inferInsert {
 	return {
 		id: snapshot.id,
@@ -53,7 +49,7 @@ type Upsert = ReturnType<typeof toStatements>[number];
 
 export function toStatements(db: D1Database, rows: readonly RunOutboxRow[]) {
 	const d = drizzle(db);
-	return rows.map((row) => {
+	return latestPerKey(rows, (row) => `${row.kind}:${row.target}`).map((row) => {
 		if (row.kind === 'run') {
 			const values = toRunValues(JSON.parse(row.snapshot) as RunSnapshot, row.seq);
 			const { id: _id, createdAt: _createdAt, flow: _flow, ...mutable } = values;
@@ -84,18 +80,4 @@ export async function projectRun(db: D1Database, rows: readonly RunOutboxRow[]):
 	if (rows.length === 0) return;
 	const statements = toStatements(db, rows);
 	await drizzle(db).batch(statements as [Upsert, ...Upsert[]]);
-}
-
-/** 画面の詳細で使用, 1つのrunのノードを並び順で取得 */
-export function nodesOf(db: D1Database, runId: string) {
-	return drizzle(db).select().from(runNode).where(eq(runNode.runId, runId)).orderBy(runNode.position);
-}
-
-/** ジョブからの参照用, runIdとnodeIdの組で1件取得 */
-export function nodeOf(db: D1Database, runId: string, nodeId: string) {
-	return drizzle(db)
-		.select()
-		.from(runNode)
-		.where(and(eq(runNode.runId, runId), eq(runNode.nodeId, nodeId)))
-		.limit(1);
 }

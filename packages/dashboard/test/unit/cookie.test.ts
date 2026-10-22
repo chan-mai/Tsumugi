@@ -7,7 +7,7 @@ describe('トークンcookieの属性', () => {
 	});
 
 	it('httpでは付けない', () => {
-		// wrangler devはhttpで動くので, 付けるとブラウザが保存しない
+		// http動作のwrangler devでは付与時に保存失敗
 		expect(cookieAttributes('http:')).toBe('path=/; SameSite=Strict');
 	});
 });

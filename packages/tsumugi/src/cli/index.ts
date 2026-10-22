@@ -8,12 +8,7 @@ import { clackPrompts } from './clack.js';
 import { init } from './init.js';
 import { runTui } from './tui.js';
 
-/**
- * 専用CLIの入口(ADR-0036)
- *
- * ファイル入出力とwranglerの実行は`CliDeps`で受け取る
- * 単体テストはメモリ実装へ差し替え、実際の書き込みや子プロセスを伴わず検査
- */
+// ファイル入出力とwrangler実行は`CliDeps`経由, テストはメモリ実装で検査(ADR-0036)
 
 export type CliFs = {
 	exists(path: string): boolean;
@@ -23,20 +18,16 @@ export type CliFs = {
 	mkdir(path: string): void;
 };
 
-/** 子プロセスの結果, 失敗もthrowせず値で返す */
+/** 失敗も例外でなく値 */
 export type RunResult = { ok: boolean; stdout: string; stderr: string };
 
 export type CliDeps = {
 	fs: CliFs;
-	/** wranglerの実行, 実体は`npx wrangler`のspawnSync */
 	wrangler(args: readonly string[]): RunResult;
 	log(line: string): void;
 	error(line: string): void;
-	/** 生成パスの基点 */
 	cwd: string;
-	/** `--version`が出す文字列 */
 	version: string;
-	/** 対話モードへ入れるか, パイプ実行では入らない */
 	isTty: boolean;
 };
 
@@ -59,7 +50,6 @@ const OPTIONS = {
 	format: { type: 'string' },
 } as const;
 
-/** 引数を解釈してコマンドへ分配, テストはここが入口 */
 export function main(argv: readonly string[], deps: CliDeps): number {
 	let parsed: { values: { help?: boolean; version?: boolean; name?: string; format?: string }; positionals: string[] };
 	try {
@@ -114,10 +104,10 @@ export function main(argv: readonly string[], deps: CliDeps): number {
 	return 1;
 }
 
-/** バンドル後は`dist/cli.js`からパッケージルートのpackage.jsonを指す */
+// バンドル後の`dist/cli.js`基準でパッケージルートのpackage.json
 const packageVersion = (): string => {
 	try {
-		// workers-typesのURL型と衝突し、URLオブジェクトを経由せず文字列で解決
+		// workers-typesのURL型との衝突回避で文字列パス解決
 		const path = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
 		const parsed = JSON.parse(readFileSync(path, 'utf8')) as { version?: string };
 		return parsed.version ?? 'unknown';
@@ -144,11 +134,9 @@ const nodeDeps = (): CliDeps => ({
 	isTty: process.stdin.isTTY === true && process.stdout.isTTY === true,
 });
 
-/** binの入口, 予期しない例外もexit codeへ変換 */
 export async function runCli(argv: readonly string[]): Promise<number> {
 	const deps = nodeDeps();
 	try {
-		// 引数なしのTTYは対話モード, パイプやCIではmainがusageを表示
 		if (argv.length === 0 && deps.isTty) return await runTui(clackPrompts(), deps);
 		return main(argv, deps);
 	} catch (cause) {

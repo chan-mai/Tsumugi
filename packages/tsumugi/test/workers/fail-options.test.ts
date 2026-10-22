@@ -46,7 +46,6 @@ const rowOf = (name: string, id: string) =>
 		};
 	});
 
-/** 1回分の実行, 投入からconsumerの報告まで */
 async function runOnce(name: string, input: EnqueueInput, perform: (ctx: JobContext) => Promise<unknown>) {
 	const { sent, queue } = captureQueue();
 	await runInDurableObject(shard(name), (instance) => {

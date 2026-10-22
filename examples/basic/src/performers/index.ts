@@ -1,4 +1,4 @@
-// ここに並べた名前がそのままbinding名になる
+// export名がそのままbinding名
 export { Hello } from './hello.js';
 export { Boom } from './boom.js';
 export { Slow } from './slow.js';

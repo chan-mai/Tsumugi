@@ -44,7 +44,6 @@ describe('DOの終端ジョブ削除', () => {
 		await shard('SWEEP#0').report(sent[0]!.jobId, { ok: true });
 		expect(await stateOf('SWEEP#0', jobId)).toBe('COMPLETED');
 
-		// 削除の間隔は過ぎているが保持期間の手前のため対象外
 		await install('SWEEP#0', T0 + 5 * 60 * 1000, queue);
 		await runDurableObjectAlarm(shard('SWEEP#0'));
 		expect(await stateOf('SWEEP#0', jobId)).toBe('COMPLETED');
@@ -55,7 +54,7 @@ describe('DOの終端ジョブ削除', () => {
 	});
 
 	it('削除の間隔より短い間ではDELETEを実行しない', async () => {
-		// tickは完了報告のたびに実行され、毎回のDELETEは消すものが無くても書き込みが増える
+		// tickは完了報告ごとに実行, 対象なしのDELETEも書き込み増加
 		const { queue } = captureQueue();
 		await install('SWEEP5#0', T0, queue);
 		await shard('SWEEP5#0').enqueue({ binding: 'SWEEP5', payload: {} });
@@ -74,7 +73,6 @@ describe('DOの終端ジョブ削除', () => {
 		await install('SWEEP2#0', T0, queue);
 		await shard('SWEEP2#0').configure({ sweepAfterMs: 1 });
 
-		// 実行が長引いているだけのジョブの削除は禁止
 		const jobId = await shard('SWEEP2#0').enqueue({ binding: 'SWEEP2', payload: {}, timeoutMs: 10 ** 12 });
 		await runDurableObjectAlarm(shard('SWEEP2#0'));
 
@@ -88,7 +86,6 @@ describe('DOの終端ジョブ削除', () => {
 		await install('SWEEP3#0', T0, queue);
 		const first = await shard('SWEEP3#0').enqueue({ binding: 'SWEEP3', payload: {}, uniqueKey: 'k', uniqueForMs: 1_000 });
 
-		// enqueueが途絶えてもtickが削除し、期限後は同じキーで成功
 		await install('SWEEP3#0', T0 + 2_000, queue);
 		await runDurableObjectAlarm(shard('SWEEP3#0'));
 
@@ -108,7 +105,6 @@ describe('DOの終端ジョブ削除', () => {
 });
 
 describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
-	/** 失敗させてFAILEDまで進める */
 	async function failJob(name: string, binding: string, now: number, queue: { sent: DispatchMessage[]; queue: unknown }) {
 		await install(name, now, queue.queue);
 		const jobId = await shard(name).enqueue({ binding, payload: {}, maxAttempts: 1 });
@@ -130,12 +126,10 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 		expect(await stateOf('SPLIT#0', failed)).toBe('FAILED');
 		expect(await stateOf('SPLIT#0', done)).toBe('COMPLETED');
 
-		// 済んだ側の保持だけを過ぎた時点
 		await install('SPLIT#0', T0 + 120_000, q.queue);
 		await runDurableObjectAlarm(shard('SPLIT#0'));
 
 		expect(await stateOf('SPLIT#0', done)).toBeUndefined();
-		// 手動リトライを受け付ける期間の内の削除は禁止
 		expect(await stateOf('SPLIT#0', failed)).toBe('FAILED');
 	});
 
@@ -151,7 +145,7 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 	});
 
 	it('既定では失敗ジョブが5分では消えない', async () => {
-		// 既定を短いままにすると一覧に見えるのに再開できないジョブが出る
+		// 既定が短いと一覧表示中でも再開不能なジョブが発生
 		const q = captureQueue();
 		const failed = await failJob('SPLIT3#0', 'SPLIT3', T0, q);
 
@@ -161,7 +155,7 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 	});
 
 	it('次に対象が出る時刻へalarmを設定する', async () => {
-		// 一定間隔で起動すると, 失敗ジョブだけが残る間ずっと何もしない書き込みが積まれる
+		// 固定間隔起動では失敗ジョブ残存中に無用な書き込みが累積
 		const q = captureQueue();
 		await install('SPLIT4#0', T0, q.queue);
 		await shard('SPLIT4#0').configure({ sweepAfterMs: 1_000, failedRetentionMs: 60 * 60 * 1000 });
@@ -171,13 +165,12 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 		await runDurableObjectAlarm(shard('SPLIT4#0'));
 
 		const alarm = await runInDurableObject(shard('SPLIT4#0'), (_i, state) => state.storage.getAlarm());
-		// 失敗ジョブの期限は投入時刻+1時間, 短い間隔での起動は禁止
 		expect(alarm).toBeGreaterThan(T0 + 30 * 60 * 1000);
 	});
 });
 
 describe('状態を変える操作はalarmを設定する', () => {
-	// 設定しないとアウトボックスが滞留し、200を返した直後の読み取りモデルが古いまま残る
+	// 未設定時はアウトボックス滞留、200応答直後の読み取りモデルが古いまま
 	const alarmOf = (name: string) => runInDurableObject(shard(name), (_i, state) => state.storage.getAlarm());
 
 	it('cancelがalarmを設定する', async () => {
@@ -185,7 +178,7 @@ describe('状態を変える操作はalarmを設定する', () => {
 		await install('CANCEL#0', T0, queue);
 
 		const jobId = await shard('CANCEL#0').enqueue({ binding: 'CANCEL', payload: {}, delayMs: 60 * 60 * 1000 });
-		// 投入直後のalarmは投影のためのnow, 1回実行すると次は実行予定時刻
+		// 投入直後のalarmは投影用now, 1回実行後は実行予定時刻
 		await runDurableObjectAlarm(shard('CANCEL#0'));
 		expect(await alarmOf('CANCEL#0')).toBe(T0 + 60 * 60 * 1000);
 
@@ -239,5 +232,92 @@ describe('読み取りモデルの終端ジョブ削除', () => {
 		for (let i = 0; i < 5; i++) await insert(`RM#0:bulk${i}`, 'FAILED', T0 - 30 * DAY);
 		const removed = await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 7 * DAY, limit: 2 });
 		expect(removed).toBe(2);
+	});
+
+	it('失敗ジョブはbindingごとのDOの保持期間まで残す', async () => {
+		const insertAs = (id: string, binding: string, state: string, updatedAt: number) =>
+			env.TSUMUGI_DB.prepare(
+				`INSERT INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, created_at, updated_at, payload)
+				 VALUES (?, 1, ?, ?, 0, 1, 3, 'at-least-once', ?, ?, '{}')`,
+			)
+				.bind(id, binding, state, updatedAt, updatedAt)
+				.run();
+		await insertAs('LONG#0:failed', 'LONG', 'FAILED', T0 - 10 * DAY);
+		await insertAs('LONG#0:stalled', 'LONG', 'STALLED', T0 - 10 * DAY);
+		await insertAs('LONG#0:failed-old', 'LONG', 'FAILED', T0 - 15 * DAY);
+		await insertAs('LONG#0:done', 'LONG', 'COMPLETED', T0 - 10 * DAY);
+		await insertAs('PLAIN#0:failed', 'PLAIN', 'FAILED', T0 - 10 * DAY);
+
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 1 * DAY }, { jobs: { LONG: 14 * DAY } });
+
+		expect(await exists('LONG#0:failed')).toBe(true);
+		expect(await exists('LONG#0:stalled')).toBe(true);
+		expect(await exists('LONG#0:failed-old')).toBe(false);
+		expect(await exists('LONG#0:done')).toBe(false);
+		// 未指定bindingは既定7日
+		expect(await exists('PLAIN#0:failed')).toBe(false);
+	});
+
+	it('既定では失敗ジョブを7日まで残す', async () => {
+		await insert('RM#0:failed-recent', 'FAILED', T0 - 3 * DAY);
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 1 * DAY });
+		expect(await exists('RM#0:failed-recent')).toBe(true);
+	});
+});
+
+describe('読み取りモデルの終端run削除', () => {
+	const insertRun = async (id: string, state: string, updatedAt: number) => {
+		await env.TSUMUGI_DB.prepare(
+			`INSERT INTO run (id, seq, flow, state, input, node_total, node_done, node_failed, created_at, updated_at)
+			 VALUES (?, 1, 'F', ?, '{}', 1, 1, 0, ?, ?)`,
+		)
+			.bind(id, state, updatedAt, updatedAt)
+			.run();
+		await env.TSUMUGI_DB.prepare(
+			`INSERT INTO run_node (run_id, node_id, seq, binding, state, container, origin, after, position, created_at, updated_at)
+			 VALUES (?, 'a', 1, 'B', ?, 0, 'static', '[]', 0, ?, ?)`,
+		)
+			.bind(id, state, updatedAt, updatedAt)
+			.run();
+	};
+	const count = async (table: 'run' | 'run_node', column: 'id' | 'run_id', id: string) =>
+		(await env.TSUMUGI_DB.prepare(`SELECT count(*) AS c FROM ${table} WHERE ${column} = ?`).bind(id).first<{ c: number }>())!.c;
+
+	it('保持期間を過ぎた終端runとそのノードを削除する', async () => {
+		await insertRun('F:old', 'COMPLETED', T0 - 8 * DAY);
+		await insertRun('F:recent', 'FAILED', T0 - 1 * DAY);
+		await insertRun('F:running', 'RUNNING', T0 - 100 * DAY);
+
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 7 * DAY });
+
+		expect([await count('run', 'id', 'F:old'), await count('run_node', 'run_id', 'F:old')]).toEqual([0, 0]);
+		expect([await count('run', 'id', 'F:recent'), await count('run_node', 'run_id', 'F:recent')]).toEqual([1, 1]);
+		expect([await count('run', 'id', 'F:running'), await count('run_node', 'run_id', 'F:running')]).toEqual([1, 1]);
+	});
+
+	it('FAILEDのrunはRun DOの保持期間まで残す', async () => {
+		await insertRun('F:failed', 'FAILED', T0 - 8 * DAY);
+		await insertRun('F:failed-old', 'FAILED', T0 - 15 * DAY);
+
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 7 * DAY }, { runs: 14 * DAY });
+
+		expect([await count('run', 'id', 'F:failed'), await count('run_node', 'run_id', 'F:failed')]).toEqual([1, 1]);
+		expect([await count('run', 'id', 'F:failed-old'), await count('run_node', 'run_id', 'F:failed-old')]).toEqual([0, 0]);
+	});
+
+	it('ノードが上限より多いrunも全ノードを削除する', async () => {
+		await insertRun('F:wide', 'COMPLETED', T0 - 8 * DAY);
+		for (let i = 0; i < 4; i++) {
+			await env.TSUMUGI_DB.prepare(
+				`INSERT INTO run_node (run_id, node_id, seq, binding, state, container, origin, after, position, created_at, updated_at)
+				 VALUES ('F:wide', ?, 1, 'B', 'COMPLETED', 0, 'static', '[]', 0, 0, 0)`,
+			)
+				.bind(`b${i}`)
+				.run();
+		}
+
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 7 * DAY, limit: 2 });
+
+		expect([await count('run', 'id', 'F:wide'), await count('run_node', 'run_id', 'F:wide')]).toEqual([0, 0]);
 	});
 });

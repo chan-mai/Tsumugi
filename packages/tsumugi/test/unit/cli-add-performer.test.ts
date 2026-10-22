@@ -3,7 +3,7 @@ import { addPerformer, performerNames } from '../../src/cli/add-performer.js';
 import { makeDeps, type Harness } from './cli-harness.js';
 
 // バレルは利用者の手書き行と同居
-// 追記が既存行を破損すると全performerが解決不能になり、不変条件をここで検査
+// 既存行破損で全performerが解決不能
 
 const BARREL = "export { Hello } from './hello.js';\n";
 
@@ -97,7 +97,7 @@ describe('重複と前提の検査', () => {
 
 describe('service bindingの断片', () => {
 	it('自分のWorker名を相手側の断片へ埋める', () => {
-		// 別のWorkerから使う場合のみ必要, 自分の設定には何も追加しない(ADR-0037)
+		// 別Workerから使う場合のみ必要, 自Workerの設定は変更なし(ADR-0037)
 		const { deps, fs, logs } = withProject();
 		fs.write('/proj/wrangler.jsonc', '{ "name": "my-jobs" }');
 		expect(addPerformer('send-mail', deps)).toBe(0);

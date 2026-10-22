@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { JobContext } from '../../src/core/api.js';
-import { createTestContext, fixedClock, nextAttempt, runPerformer, schedule } from '../../src/entries/testing.js';
+import { createTestContext, fixedClock, nextAttempt, runPerformer, planDispatch } from '../../src/entries/testing.js';
 
 const greet = {
 	perform: (payload: { name: string }): string => `hello, ${payload.name}`,
@@ -12,7 +12,6 @@ const boom = {
 	},
 };
 
-/** timeoutに協調するperformer, `deadlineAt`から自分でsignalを作る(ADR-0037) */
 const interruptible = {
 	perform: async (_payload: unknown, ctx: JobContext): Promise<string> => {
 		const remain = ctx.deadlineAt - Date.now();
@@ -24,7 +23,6 @@ const interruptible = {
 	},
 };
 
-/** concurrencyKey必須のperformer, ハーネスが必須キー付きも受けられることの型テスト */
 class Charge {
 	declare readonly __requirements?: { concurrencyKey: true };
 	async perform(payload: { customerId: string }): Promise<string> {
@@ -39,7 +37,7 @@ describe('performerのハーネス', () => {
 	});
 
 	it('例外は投げずに結果として返る', async () => {
-		// 本番では例外がそのままリトライの判断材料, 投げたか否かを同じ形で確認可能
+		// 本番では例外がリトライ判断の材料, 送出有無を同じ形で確認
 		const result = await runPerformer(boom, {});
 		expect(result.ok).toBe(false);
 		expect(result.ok === false && result.error).toBeInstanceOf(Error);
@@ -47,7 +45,6 @@ describe('performerのハーネス', () => {
 
 	it('文脈の既定値が実装と揃っている', () => {
 		const ctx = createTestContext();
-		// idempotencyKeyはジョブID, 再試行を跨いで同値
 		expect(ctx.idempotencyKey).toBe(ctx.jobId);
 		expect(ctx.attempt).toBe(1);
 		expect(ctx.deadlineAt).toBeGreaterThan(Date.now());
@@ -76,7 +73,7 @@ describe('performerのハーネス', () => {
 	});
 
 	it('必須キー付きperformerも渡せる', async () => {
-		// 必須キーの印を持つperformerもハーネスが受けられること自体が型テスト
+		// 必須キー付きperformerを渡せること自体が型テスト
 		const result = await runPerformer(new Charge(), { customerId: 'c1' });
 		expect(result).toEqual({ ok: true, value: 'c1' });
 	});
@@ -117,7 +114,7 @@ describe('公開している純粋関数', () => {
 	});
 
 	it('ポリシーの挙動を利用者が試せる', () => {
-		const out = schedule({
+		const out = planDispatch({
 			now: 0,
 			jobs: [
 				{
@@ -154,10 +151,10 @@ describe('公開している純粋関数', () => {
 
 describe('testingサブパスの公開API', () => {
 	it('ハーネスと純粋関数の入口を公開する', async () => {
-		// 依存遮断はsize-check.mjsがdist成果物で担保, ここは公開面の固定
+		// 依存遮断はsize-check.mjsがdist成果物で検査, ここは公開APIの固定
 		const loaded = await import('../../src/entries/testing.js');
 		expect(Object.keys(loaded)).toEqual(
-			expect.arrayContaining(['createTestContext', 'runPerformer', 'fixedClock', 'nextAttempt', 'schedule']),
+			expect.arrayContaining(['createTestContext', 'runPerformer', 'fixedClock', 'nextAttempt', 'planDispatch']),
 		);
 	});
 });

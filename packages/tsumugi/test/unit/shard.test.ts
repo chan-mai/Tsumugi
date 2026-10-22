@@ -25,7 +25,6 @@ describe('hashToShard', () => {
 	it('偏りすぎない', () => {
 		const counts = [0, 0, 0, 0];
 		for (let i = 0; i < 1000; i++) counts[hashToShard(`cust-${i}`, 4)]!++;
-		// 完全な均等は求めないが、1つのshardに寄りすぎていないこと
 		for (const count of counts) expect(count).toBeGreaterThan(150);
 	});
 });
@@ -36,7 +35,7 @@ describe('resolveShard (ADR-0011)', () => {
 	});
 
 	it('分割しているのにpartitionKeyが無ければ拒否する', () => {
-		// エラーにせず0番へ割り当てると、キー単位の制御も重複排除も警告なく無効化
+		// 0番への割り当てではキー単位の制御, 重複排除が警告なく無効化
 		expect(() => resolveShard('MAIL', 4, undefined)).toThrow(InvalidJobIdError);
 	});
 

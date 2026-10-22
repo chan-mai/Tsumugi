@@ -227,7 +227,7 @@ await tsumugi.jobs(env).enqueue('CHARGE', payload, { concurrencyKey: 'customer:c
 ```
 
 ::: warning
-トップレベルの`enqueue(env, input)`と`createClient()`では必須化が適用されません。
+`createClient()`では必須化が適用されません。
 [投入経路](/guide/enqueue#paths)を参照してください。
 :::
 
@@ -321,18 +321,18 @@ const ctx = createTestContext({ deadlineAt: Date.now() + 50 });
 await runPerformer(performer, payload, ctx);
 ```
 
-### スケジューラとバックオフ
+### 投入判定(スケジューラ)とバックオフ
 
 時刻と乱数は引数で渡すため、fake timersは不要です。
 
 ```ts
-import { fixedClock, nextAttempt, schedule } from 'tsumugi/testing';
+import { fixedClock, nextAttempt, planDispatch } from 'tsumugi/testing';
 
 // 3回目の再試行の時刻
 nextAttempt({ attempts: 3, maxAttempts: 5, backoff, now: Date.now() });
 
 // このポリシーで投入される件数
-schedule({ now, jobs, policy, bucket });
+planDispatch({ now, jobs, policy, bucket });
 ```
 
 ### Durable Objectを経由するテスト

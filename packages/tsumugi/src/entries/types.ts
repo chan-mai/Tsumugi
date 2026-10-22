@@ -1,4 +1,3 @@
-// 型のみのエントリ, ランタイムコードなし
 export type { JobLogEntry } from '../core/log.js';
 export type {
 	ActiveState,
@@ -12,8 +11,8 @@ export type {
 	KeyBuckets,
 	Policy,
 	RateLimit,
-	ScheduleInput,
-	ScheduleOutput,
+	DispatchInput,
+	DispatchOutput,
 	SettledNotice,
 	SettledState,
 	SettledTarget,

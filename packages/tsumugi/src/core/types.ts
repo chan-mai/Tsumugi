@@ -1,18 +1,14 @@
-/** ADR-0012の状態機械 */
 export type JobState = 'SCHEDULED' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'STALLED';
 
-/** 稼働中の状態,スケジューラが扱う対象 */
 export type ActiveState = 'SCHEDULED' | 'QUEUED' | 'RUNNING';
 
-/** ADR-0006,既定はat-least-once */
+/** 既定はat-least-once(ADR-0006) */
 export type DeliveryGuarantee = 'at-least-once' | 'at-most-once';
 
-/** ADR-0020, 純粋性維持でジッタ用の乱数は引数渡し */
 export type Backoff =
 	| { kind: 'fixed'; delayMs: number; jitter?: boolean }
 	| { kind: 'exponential'; baseMs: number; factor: number; maxMs: number; jitter?: boolean };
 
-/** スケジューラが判断に使うジョブの射影,ペイロードは不要 */
 export type JobView = {
 	id: string;
 	state: ActiveState;
@@ -20,48 +16,40 @@ export type JobView = {
 	attempts: number;
 	maxAttempts: number;
 	concurrencyKey: string | null;
-	/** SCHEDULEDが実行可能になる時刻 */
 	runAfter: number;
-	/** 実行開始の期限, 経過後は実行せず終了, 無期限はnull */
+	/** 実行開始期限, 経過後は実行せず終了 */
 	expiresAt: number | null;
 	createdAt: number;
 	/** QUEUEDへの遷移時刻, SCHEDULEDならnull */
 	dispatchedAt: number | null;
-	/** performerからの最後の生存報告, 一度も無ければnull */
 	heartbeatAt: number | null;
 	guarantee: DeliveryGuarantee;
-	/** 実行のタイムアウト, reaperの無応答判定の基準 */
 	timeoutMs: number;
-	/** 取り消し要求の時刻(#95), 要求が無ければnull */
 	cancelRequestedAt: number | null;
 };
 
 export type RateLimit = { tokens: number; intervalMs: number };
 
-/** ADR-0009の3軸+ ADR-0045のキー単位レート+ ADR-0020のエージング */
 export type Policy = {
 	/** 投入の一時停止(#27), 実行中の回収とエージングは継続 */
 	paused: boolean;
 	concurrency: number;
-	/** concurrencyKey単位の同時実行上限,キーがnullのジョブには非適用 */
+	/** concurrencyKeyがnullのジョブには非適用 */
 	perKeyConcurrency: number;
 	rate: RateLimit | null;
-	/** concurrencyKey単位のトークンバケット,全キー一律,キーがnullのジョブには非適用 */
+	/** 全キー一律, concurrencyKeyがnullのジョブには非適用 */
 	perKeyRate: RateLimit | null;
-	/** nullでエージング無効, ADR-0020の既定は有効 */
+	/** nullでエージング無効, 既定は有効(ADR-0020) */
 	agingIntervalMs: number | null;
-	/** timeoutMs経過後さらにこの時間応答が無ければ回収 */
+	/** timeoutMs経過後の回収猶予 */
 	reaperGraceMs: number;
 };
 
-/**
- * 失敗したジョブの知らせ(#30)
- * 通知先のperformerが受け取るpayload, ジョブの明細は読み取りモデルから取得可能
- */
+/** 失敗通知のpayload(#30), ジョブ明細は読み取りモデルから取得 */
 export type FailureNotice = {
 	jobId: string;
 	binding: string;
-	/** FAILEDかSTALLED, 再試行で回復する途中の失敗は対象外 */
+	/** 再試行途中の失敗は対象外 */
 	state: 'FAILED' | 'STALLED';
 	attempts: number;
 	maxAttempts: number;
@@ -73,23 +61,16 @@ export type FailureNotice = {
 	failedAt: number;
 };
 
-/** 終端の4状態(ADR-0012), 通知の対象になりうる範囲 */
 export type SettledState = 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'STALLED';
 
-/**
- * 終端の通知の宛先と対象(#96)
- * 投入のたびに設定としてDOへ届ける, 宛先と対象は常に一体で更新
- */
+/** 投入ごとにDOへ送信, 宛先と対象は常に一体で更新(#96) */
 export type SettledTarget = {
 	binding: string;
 	/** 通知する終端状態, 明示必須でCOMPLETEDの暗黙の大量通知を防止 */
 	states: readonly SettledState[];
 };
 
-/**
- * 終端に達したジョブの知らせ(#96)
- * 通知先のperformerが受け取るpayload, ジョブの明細は読み取りモデルから取得可能
- */
+/** 終端通知のpayload(#96), ジョブ明細は読み取りモデルから取得 */
 export type SettledNotice = {
 	jobId: string;
 	binding: string;
@@ -108,12 +89,12 @@ export type SettledNotice = {
 
 export type Bucket = { tokens: number; refilledAt: number };
 
-/** concurrencyKey別のバケット, tokens上限のキーは除外 */
+/** tokens上限のキーは除外 */
 export type KeyBuckets = Record<string, Bucket>;
 
 export type Decision =
 	| { type: 'dispatch'; id: string }
-	/** 期限切れのSCHEDULED, 実行せずCANCELLEDへ */
+	/** 期限切れでCANCELLEDへ, 無応答のQUEUED, RUNNINGも対象(ADR-0047) */
 	| { type: 'expire'; id: string }
 	/** 無応答のat-least-onceジョブの再投入, SCHEDULEDへ */
 	| { type: 'reap'; id: string; attempts: number }
@@ -124,19 +105,16 @@ export type Decision =
 	/** 取り消し要求済み(#95), 実行や再投入をせずCANCELLEDへ */
 	| { type: 'cancel'; id: string };
 
-export type ScheduleInput = {
+export type DispatchInput = {
 	now: number;
-	/** SCHEDULED/QUEUED/RUNNINGのみ, 終端状態は対象外 */
 	jobs: readonly JobView[];
 	policy: Policy;
 	bucket: Bucket;
-	/** キー別バケット, 省略時は全キーtokens上限の扱い */
+	/** 省略時は全キーtokens上限扱い */
 	keyBuckets?: KeyBuckets;
 };
 
-/** 投入が止まった制約, どの軸で停止したか(#10) */
 export type BlockedBy = {
-	/** paused: 一時停止中で投入なし(#27) */
 	paused: boolean;
 	/** concurrency: 同時実行の上限に到達 */
 	capacity: boolean;
@@ -148,24 +126,18 @@ export type BlockedBy = {
 	perKeyTokens: boolean;
 };
 
-export type ScheduleOutput = {
+export type DispatchOutput = {
 	decisions: Decision[];
 	bucket: Bucket;
-	/** 消費後のキー別バケット */
 	keyBuckets: KeyBuckets;
-	/** 次のスケジューラ起動時刻, 不要ならnull */
 	nextAlarmAt: number | null;
-	/** どの制約で投入が止まったか, 緩和対象の外部からの判断用(#10) */
+	/** 外部での緩和対象判断用(#10) */
 	blocked: BlockedBy;
 };
 
-/**
- * DOに終端ジョブを残す時間(ADR-0027)
- * 済んだジョブと再開余地のあるジョブは役割が別, 保持時間も別の値
- */
 export type Retention = {
 	/** COMPLETED / CANCELLED */
-	doneMs: number;
+	sweepAfterMs: number;
 	/** FAILED / STALLED, 手動リトライを受け付ける期間 */
-	failedMs: number;
+	failedRetentionMs: number;
 };

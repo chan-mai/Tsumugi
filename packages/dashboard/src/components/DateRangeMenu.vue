@@ -2,11 +2,9 @@
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
 import { computed } from 'vue';
 
-/** 作成日時の範囲, epochミリ秒でnullは未指定 */
 const props = defineProps<{ from: number | null; to: number | null }>();
 const emit = defineEmits<{ 'update:from': [value: number | null]; 'update:to': [value: number | null] }>();
 
-/** `input[type=date]`が読む`YYYY-MM-DD`, ローカル時刻で構築 */
 function toDateInput(value: number | null): string {
 	if (value === null) return '';
 	const at = new Date(value);
@@ -14,7 +12,7 @@ function toDateInput(value: number | null): string {
 	return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
-/** 下限はその日の0時, 上限はその日の終わり, 同じ日の選択で0件になるのを防止 */
+// 上限は当日終端, 同日選択時の0件防止
 function fromDateInput(text: string, edge: 'start' | 'end'): number | null {
 	if (!text) return null;
 	const [year, month, day] = text.split('-').map(Number);

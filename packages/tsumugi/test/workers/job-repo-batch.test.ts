@@ -2,12 +2,8 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import type { JobRepo } from '../../src/do/repo.js';
 
-/**
- * キー別バケットの一括処理がバインド変数の上限に収まること(ADR-0045)
- *
- * 対象キーはtickの投入候補から決まり、最大TICK_LIMIT件
- * 1文の変数は100個までで、分割なしでは101キー目でSQLITE_ERROR
- */
+// 対象キーはtick投入候補から決定, 最大TICK_LIMIT件(ADR-0045)
+// 1文のバインド変数上限100, 分割なしでは101キー目でSQLITE_ERROR
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 

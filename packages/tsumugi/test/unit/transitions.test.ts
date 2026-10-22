@@ -12,10 +12,7 @@ import type { JobState } from '../../src/core/types.js';
 
 const ALL: readonly JobState[] = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 
-/**
- * 許可される遷移をテスト側に独立して書き下し実装の表と突き合わせる
- * 実装の表をimportして比較すると同義反復になるため意図的に二重管理
- */
+// 許可遷移をテスト側で独立に記述し実装の表と照合, importでの比較は同義反復
 const ALLOWED = new Set([
 	'SCHEDULED->QUEUED',
 	'SCHEDULED->CANCELLED',
@@ -65,7 +62,7 @@ describe('遷移表(ADR-0012)', () => {
 	});
 
 	it('QUEUED / RUNNINGからのCANCELLEDは期限切れ用に許可(ADR-0047)', () => {
-		// cancel APIは従来通りSCHEDULEDのみを受け付ける, 制限はAPI側が持つ
+		// cancel APIの受付はSCHEDULEDのみ, 制限はAPI側
 		expect(canTransition('SCHEDULED', 'CANCELLED')).toBe(true);
 		expect(canTransition('QUEUED', 'CANCELLED')).toBe(true);
 		expect(canTransition('RUNNING', 'CANCELLED')).toBe(true);

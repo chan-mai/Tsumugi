@@ -4,14 +4,10 @@ import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { NodeEvent } from '../../src/core/run.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
-/**
- * 条件分岐と失敗時の継続(ADR-0041)
- *
- * flowの定義はexamples/basicが持つ(BRANCHED), Run DOはそこから引く(ADR-0030)
- * cleanupはtrigger=failure, auditはtrigger=always, detailはwhenで経路を選ぶ
- */
+// flow定義はexamples/basic(BRANCHED), Run DOが参照(ADR-0030, ADR-0041)
+// cleanupはtrigger=failure, auditはtrigger=always, detailはwhenで経路選択
 
-/** 面をそのまま使うと型の展開が深くなりTS2589に抵触, 使う分だけを宣言 */
+// DO型直接参照でTS2589発生, 使用メソッドのみ宣言
 interface RunFace extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown }): Promise<{ id: string; created: boolean }>;
 	notify(events: readonly NodeEvent[]): Promise<void>;
@@ -29,7 +25,6 @@ const performers = {
 	Report: { perform: async (_payload: { total: number; failed: number }): Promise<void> => {} },
 };
 
-/** DOが送ったメッセージを保持してconsumerへ手で渡す */
 const sent: DispatchMessage[] = [];
 const queue = {
 	send: async (body: DispatchMessage) => void sent.push(body),
@@ -60,7 +55,6 @@ async function installQueues(): Promise<void> {
 	}
 }
 
-/** Job DOとRun DOのalarmを交互に発火させ, 進みが止まるまで回す */
 async function settle(runId: string): Promise<void> {
 	for (let i = 0; i < 10; i++) {
 		await installQueues();
@@ -88,7 +82,6 @@ const stateOf = (runId: string) =>
 const jobIdOf = (runId: string, nodeId: string) =>
 	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.job_id as string | null);
 
-/** 進みが止まるまでRun DOのtickだけを回す */
 async function settleRun(runId: string): Promise<void> {
 	let previous = '';
 	for (let i = 0; i < 8; i++) {
@@ -112,9 +105,8 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 			detail: 'COMPLETED',
 			audit: 'COMPLETED',
 		});
-		// 省略の理由が残る, 状態だけでは判別不能
+		// 状態のみでは判別不能、省略理由を記録
 		expect(await errorOf(runId, 'cleanup')).toBe('no dependency failed');
-		// 分岐で選択されなかっただけでrunは成功
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
@@ -137,9 +129,7 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 		await installQueues();
 		await stub.start({ flow: 'BRANCHED', input: { prefix: 'ng', verbose: true } });
 
-		// 先頭ノードを投入まで進めてから, 失敗の通知だけを手で届ける
 		await settleRun(runId);
-		// dispatchを明示的に実行して破棄
 		await runDurableObjectAlarm(shard('ListNames'));
 		sent.length = 0;
 		const jobId = await jobIdOf(runId, 'list');
@@ -149,14 +139,11 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 
 		expect(await nodesOf(runId)).toEqual({
 			list: 'FAILED',
-			// 失敗時だけ実行される後処理と、成否を問わない監査は実行
 			cleanup: 'COMPLETED',
 			audit: 'COMPLETED',
-			// 成功を待つノードは省略
 			detail: 'SKIPPED',
 		});
 		expect(await errorOf(runId, 'detail')).toBe('a dependency did not succeed');
-		// 後始末が成功しても失敗した事実は消えない
 		expect(await stateOf(runId)).toBe('FAILED');
 	});
 });

@@ -3,7 +3,6 @@ import { InvalidCronError, nextCronAt, parseCron } from '../../src/core/cron.js'
 
 const at = (iso: string) => Date.parse(iso);
 
-/** 式とafterからISO文字列へ, 期待値を読める形で書くため */
 const next = (expression: string, after: string, timeZone?: string) =>
 	new Date(nextCronAt(parseCron(expression), at(after), timeZone)).toISOString();
 
@@ -71,9 +70,9 @@ describe('次回時刻の計算', () => {
 	});
 
 	it('日と曜日の両方に制限がある場合はOR判定になる', () => {
-		// 2026-01-05は月曜, 13日より先の金曜(1/9)が当たる
+		// 2026-01-05は月曜, 13日より先の金曜(1/9)が該当
 		expect(next('0 0 13 * 5', '2026-01-05T12:00:00Z')).toBe('2026-01-09T00:00:00.000Z');
-		// 金曜より先に13日が来る位置から
+		// 金曜より13日が先の位置から開始
 		expect(next('0 0 13 * 5', '2026-01-11T12:00:00Z')).toBe('2026-01-13T00:00:00.000Z');
 	});
 
@@ -85,7 +84,7 @@ describe('次回時刻の計算', () => {
 	});
 
 	it('曜日だけの指定は日と独立に適用される', () => {
-		// 2026-01-05は月曜なので次の月曜は1/12
+		// 2026-01-05は月曜, 次の月曜は1/12
 		expect(next('0 9 * * 1', '2026-01-05T10:00:00Z')).toBe('2026-01-12T09:00:00.000Z');
 	});
 

@@ -6,7 +6,6 @@ import { SEARCH_FIELDS as FIELDS, type SearchField } from '../search';
 const props = defineProps<{ field: SearchField; value: string }>();
 const emit = defineEmits<{ 'update:field': [value: SearchField]; 'update:value': [value: string] }>();
 
-// 入力の途中では問い合わせなし, 確定時にだけ親へ渡す
 const draft = ref(props.value);
 watch(
 	() => props.value,
@@ -61,7 +60,6 @@ function clear() {
 							close();
 						"
 					>
-						<!-- 選択は排他でチェックボックスは置かず, 選択中の項目にだけ印を表示 -->
 						<span class="flex size-4 shrink-0 items-center justify-center">
 							<svg
 								v-if="props.field === option.key"

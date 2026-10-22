@@ -1,22 +1,17 @@
-// 利用者が自分のperformerやポリシーをテストするための道具
-// スケジューラは時刻も乱数も引数で受け取る純粋関数で、そのまま公開可能(ADR-0018)
-export { schedule, effectivePriority } from '../core/schedule.js';
+export { planDispatch, effectivePriority } from '../core/dispatch.js';
 export { nextAttempt } from '../core/backoff.js';
 export type { NextAttempt } from '../core/backoff.js';
 export { ACTIVE_STATES, TERMINAL_STATES, TRANSITIONS, canTransition, isActive, isTerminal } from '../core/transitions.js';
 
-// runの進行判断も同じく純粋関数, flowの検証に使用
 export { advance, isNodeTerminal } from '../core/run.js';
 export type { AdvanceInput, AdvanceOutput, NodeView, RunDecision } from '../core/run.js';
 
-// performerを直接呼ぶためのハーネス
 export { createTestContext, runPerformer } from '../testing/harness.js';
 export type { PerformResult, TestContext, TestContextOptions } from '../testing/harness.js';
 
-// flow定義を通しで動かす, 実行順と各ノードのpayloadを確かめる
 export { simulateFlow } from '../testing/flow.js';
 export type { ResultSource, SimulatedNode, SimulateOptions, SimulationResult } from '../testing/flow.js';
 
-// Workersには時間を進めるAPIが無くfake timersもDOでは無効, 時計は注入して明示的に更新
+// Workersに時刻操作APIなし, DOでfake timers無効, 時計は注入し明示更新
 export { fixedClock } from '../do/clock.js';
 export type { Clock } from '../do/clock.js';

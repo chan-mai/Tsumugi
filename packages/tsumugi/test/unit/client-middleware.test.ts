@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { createClient } from '../../src/client/enqueue.js';
 import type { EnqueueInput } from '../../src/do/job-shard.js';
 
-/** 投入された内容を捕まえる偽のDO namespace */
 function capture() {
 	const calls: { inputs: readonly EnqueueInput[]; settings: unknown }[] = [];
 	const stub = {
@@ -39,7 +38,7 @@ describe('onEnqueueによる既定値の付与(#96)', () => {
 		const { calls, env } = capture();
 		const client = createClient({}, {}, { onEnqueue: () => ({ priority: 5 }) });
 
-		// 型上は渡せない明示のundefinedもJSからは届く
+		// 型上不可の明示undefinedもJSからは渡り得る
 		await client.enqueue(env, { binding: 'A', payload: {}, priority: undefined } as unknown as EnqueueInput);
 
 		expect(calls[0]!.inputs[0]).toMatchObject({ priority: 5 });
@@ -49,20 +48,18 @@ describe('onEnqueueによる既定値の付与(#96)', () => {
 		const { calls, env } = capture();
 		const client = createClient({}, {}, { onEnqueue: () => ({ delayMs: 1_000, runAt: 999, expiresAt: 10, expiresInMs: 20 }) });
 
-		// runAtが明示済み, delayMsの既定値は非適用
 		await client.enqueue(env, { binding: 'A', payload: {}, runAt: 123 });
 
 		const input = calls[0]!.inputs[0]!;
 		expect(input.runAt).toBe(123);
 		expect(input.delayMs).toBeUndefined();
-		// 明示が無い排他の組はフック先頭のキーのみ適用
 		expect(input.expiresAt).toBe(10);
 		expect(input.expiresInMs).toBeUndefined();
 	});
 
 	it('宛先と識別子はフックで変更できない', async () => {
 		const { calls, env } = capture();
-		// 型上は返せないキーも実行時には紛れ得る, 列挙に無いキーは無視
+		// 型上不可のキーも実行時は混入し得る
 		const client = createClient({}, {}, { onEnqueue: () => ({ binding: 'B', id: 'X#0:hijack', payload: { x: 1 } }) as never });
 
 		await client.enqueue(env, { binding: 'A', payload: {} });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue';
+import ModalShell from './ModalShell.vue';
 import { computed, ref, watch } from 'vue';
 import RunGraph from './RunGraph.vue';
 import StatusCell from './StatusCell.vue';
@@ -14,7 +14,7 @@ const nodes = ref<RunNode[]>([]);
 const error = ref<string | null>(null);
 const message = ref<string | null>(null);
 const busy = ref(false);
-/** 親子のrunを素早く移動した時、前のrunの応答で上書きしないための連番 */
+// 親子run間の高速移動時の旧応答上書き防止用連番
 let loadSequence = 0;
 
 const canRetry = computed(() => run.value?.retryable === true);
@@ -39,7 +39,7 @@ watch(
 	async (id) => {
 		loadSequence++;
 		if (!id) return;
-		// 閉じるアニメーションの間に中身が消えないよう、開く時だけ差し替え
+		// 閉じるアニメーション中の内容消失防止、開く時のみ差し替え
 		run.value = null;
 		nodes.value = [];
 		error.value = null;
@@ -54,11 +54,10 @@ async function act(kind: 'retry' | 'cancel') {
 	try {
 		const outcome = kind === 'retry' ? await retryRun(props.runId) : await cancelRun(props.runId);
 		message.value = outcome.message;
-		// 投影は数秒遅れ即時には変わらないが、反映され次第この再読込で追いつく
+		// 投影の数秒遅延で未反映の場合あり
 		await load(props.runId);
 		emit('changed');
 	} catch (e) {
-		// 捕捉しないと何も起きなかったように見える
 		message.value = e instanceof Error ? e.message : String(e);
 	} finally {
 		busy.value = false;
@@ -78,116 +77,73 @@ const pretty = (input: string | undefined) => {
 </script>
 
 <template>
-	<TransitionRoot :show="runId !== null" as="template">
-		<Dialog class="relative z-30" @close="emit('close')">
-			<TransitionChild
-				as="template"
-				enter="duration-200 ease-out"
-				enter-from="opacity-0"
-				enter-to="opacity-100"
-				leave="duration-150 ease-in"
-				leave-from="opacity-100"
-				leave-to="opacity-0"
-			>
-				<div class="fixed inset-0 bg-black/30" aria-hidden="true" />
-			</TransitionChild>
-
-			<div class="fixed inset-0 flex items-center justify-center p-4">
-				<TransitionChild
-					as="template"
-					enter="duration-200 ease-out"
-					enter-from="opacity-0 scale-95"
-					enter-to="opacity-100 scale-100"
-					leave="duration-150 ease-in"
-					leave-from="opacity-100 scale-100"
-					leave-to="opacity-0 scale-95"
-				>
-					<DialogPanel
-						class="relative max-h-[85vh] w-full max-w-5xl overflow-auto rounded-card border border-border bg-background p-4 shadow-lg sm:p-6"
-					>
+	<ModalShell :open="runId !== null" title="Run detail" width="5xl" @close="emit('close')">
+		<p v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</p>
+		<p v-else-if="!run" class="text-sm text-muted-foreground">Loading</p>
+		<div v-else class="space-y-4 text-sm">
+			<dl class="grid gap-y-2 sm:grid-cols-[10rem_1fr]">
+				<dt class="text-muted-foreground">Status</dt>
+				<dd><StatusCell :state="run.state" /></dd>
+				<dt class="text-muted-foreground">ID</dt>
+				<dd class="font-mono text-xs break-all">{{ run.id }}</dd>
+				<dt class="text-muted-foreground">Flow</dt>
+				<dd>{{ run.flow }}</dd>
+				<template v-if="run.parent_run_id">
+					<dt class="text-muted-foreground">Parent run</dt>
+					<dd>
 						<button
 							type="button"
-							aria-label="Close"
-							class="absolute top-4 right-4 flex size-8 items-center justify-center rounded-card border-none text-muted-foreground hover:bg-accent"
-							@click="emit('close')"
+							class="border-none font-mono text-xs break-all underline underline-offset-2 hover:text-foreground"
+							@click="emit('run', run.parent_run_id)"
 						>
-							<svg viewBox="0 0 16 16" class="size-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-								<path d="M4 4l8 8M12 4l-8 8" />
-							</svg>
+							{{ run.parent_run_id }}
 						</button>
+					</dd>
+				</template>
+				<dt class="text-muted-foreground">Nodes</dt>
+				<dd class="tabular-nums">
+					{{ run.node_done }} / {{ run.node_total }}
+					<span v-if="run.node_failed > 0" class="text-destructive">({{ run.node_failed }} failed)</span>
+				</dd>
+				<dt class="text-muted-foreground">Created at</dt>
+				<dd>{{ at(run.created_at) }}</dd>
+				<dt class="text-muted-foreground">Updated at</dt>
+				<dd>{{ at(run.updated_at) }}</dd>
+			</dl>
 
-						<DialogTitle class="mb-4 text-lg font-bold">Run detail</DialogTitle>
-
-						<p v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</p>
-						<p v-else-if="!run" class="text-sm text-muted-foreground">Loading</p>
-						<div v-else class="space-y-4 text-sm">
-							<dl class="grid gap-y-2 sm:grid-cols-[10rem_1fr]">
-								<dt class="text-muted-foreground">Status</dt>
-								<dd><StatusCell :state="run.state" /></dd>
-								<dt class="text-muted-foreground">ID</dt>
-								<dd class="font-mono text-xs break-all">{{ run.id }}</dd>
-								<dt class="text-muted-foreground">Flow</dt>
-								<dd>{{ run.flow }}</dd>
-								<template v-if="run.parent_run_id">
-									<dt class="text-muted-foreground">Parent run</dt>
-									<dd>
-										<button
-											type="button"
-											class="border-none font-mono text-xs break-all underline underline-offset-2 hover:text-foreground"
-											@click="emit('run', run.parent_run_id)"
-										>
-											{{ run.parent_run_id }}
-										</button>
-									</dd>
-								</template>
-								<dt class="text-muted-foreground">Nodes</dt>
-								<dd class="tabular-nums">
-									{{ run.node_done }} / {{ run.node_total }}
-									<span v-if="run.node_failed > 0" class="text-destructive">({{ run.node_failed }} failed)</span>
-								</dd>
-								<dt class="text-muted-foreground">Created at</dt>
-								<dd>{{ at(run.created_at) }}</dd>
-								<dt class="text-muted-foreground">Updated at</dt>
-								<dd>{{ at(run.updated_at) }}</dd>
-							</dl>
-
-							<div>
-								<p class="mb-1 text-muted-foreground">Graph</p>
-								<RunGraph :nodes="nodes" @select="emit('job', $event)" @run="emit('run', $event)" />
-							</div>
-
-							<div>
-								<p class="mb-1 text-muted-foreground">Input</p>
-								<pre class="overflow-auto rounded-card bg-muted p-3 text-xs">{{ pretty(run.input) }}</pre>
-							</div>
-
-							<div class="flex flex-wrap items-center gap-2 border-t border-border pt-4">
-								<button
-									type="button"
-									class="h-8 rounded-card border border-border px-3 text-sm"
-									:class="canRetry ? 'bg-background hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
-									:disabled="busy || !canRetry"
-									title="Only failed runs can be resumed"
-									@click="act('retry')"
-								>
-									Retry
-								</button>
-								<button
-									type="button"
-									class="h-8 rounded-card border border-border px-3 text-sm"
-									:class="canCancel ? 'bg-background text-destructive hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
-									:disabled="busy || !canCancel"
-									title="Running jobs are not stopped, only pending nodes"
-									@click="act('cancel')"
-								>
-									Cancel
-								</button>
-								<span v-if="message" class="text-xs text-muted-foreground">{{ message }}</span>
-							</div>
-						</div>
-					</DialogPanel>
-				</TransitionChild>
+			<div>
+				<p class="mb-1 text-muted-foreground">Graph</p>
+				<RunGraph :nodes="nodes" @select="emit('job', $event)" @run="emit('run', $event)" />
 			</div>
-		</Dialog>
-	</TransitionRoot>
+
+			<div>
+				<p class="mb-1 text-muted-foreground">Input</p>
+				<pre class="overflow-auto rounded-card bg-muted p-3 text-xs">{{ pretty(run.input) }}</pre>
+			</div>
+
+			<div class="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+				<button
+					type="button"
+					class="h-8 rounded-card border border-border px-3 text-sm"
+					:class="canRetry ? 'bg-background hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
+					:disabled="busy || !canRetry"
+					title="Only failed runs can be resumed"
+					@click="act('retry')"
+				>
+					Retry
+				</button>
+				<button
+					type="button"
+					class="h-8 rounded-card border border-border px-3 text-sm"
+					:class="canCancel ? 'bg-background text-destructive hover:bg-accent' : 'cursor-not-allowed text-muted-foreground'"
+					:disabled="busy || !canCancel"
+					title="Running jobs are not stopped, only pending nodes"
+					@click="act('cancel')"
+				>
+					Cancel
+				</button>
+				<span v-if="message" class="text-xs text-muted-foreground">{{ message }}</span>
+			</div>
+		</div>
+	</ModalShell>
 </template>

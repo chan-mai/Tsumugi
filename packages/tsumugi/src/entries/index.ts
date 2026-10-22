@@ -1,5 +1,4 @@
-// ジョブ管理Worker本体が使うエントリ
-export { defineTsumugi, enqueue, enqueueMany, shardFor } from '../worker.js';
+export { defineTsumugi, enqueue, enqueueMany, shardAt } from '../worker.js';
 export { bearerAuth, unsafeNoAuth } from '../api/auth.js';
 export type { AuthMiddleware, BearerOptions, TokenResolver } from '../api/auth.js';
 export { cloudflareAccess, clearJwksCache, verifyAccessJwt } from '../api/access.js';
@@ -10,13 +9,13 @@ export { project } from '../projection/projector.js';
 export { projectRun } from '../projection/run-projector.js';
 export type { RunOutboxRow } from '../projection/run-projector.js';
 export { sweepReadModel, DEFAULT_RETENTION_MS } from '../projection/sweep.js';
-export type { SweepOptions } from '../projection/sweep.js';
+export type { FailedRetention, SweepOptions } from '../projection/sweep.js';
 export { toPoint, writeMetrics } from '../analytics/writer.js';
 export type { MetricPoint } from '../analytics/writer.js';
 export type { OutboxRow } from '../projection/projector.js';
 export type {
 	BindingConfig,
-	RunControl,
+	RunControlStub,
 	RunNamespaceEnv,
 	SchedulerControl,
 	SchedulerNamespaceEnv,
@@ -25,11 +24,11 @@ export type {
 	TsumugiConfig,
 } from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
-export type { DispatchMessage, EnqueueInput, FailureNotifyStub, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
-// createRunClassは非公開, `defineTsumugi().runClass`の迂回は設定の二重管理につながる
+export type { DispatchMessage, EnqueueInput, NoticeEnqueueStub, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
+// createRunClass非公開, `defineTsumugi().runClass`迂回は設定二重管理の原因
 export { DEFAULT_MAX_NODES } from '../do/run.js';
-export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } from '../do/run.js';
-// createSchedulerClassはschedules定義を参照するので出さない, runClassと同じ理由(ADR-0040)
+export type { RunClass, RunEnv, RunSettings, RunNotifyStub, StartInput, StartResult } from '../do/run.js';
+// createSchedulerClassも同理由で非公開(ADR-0040)
 export { SCHEDULER_DO_NAME } from '../do/scheduler.js';
 export type { ScheduleMutationResult, SchedulerClass, SchedulerEnv, ScheduleTriggerResult, ScheduleView } from '../do/scheduler.js';
 export { InvalidScheduleError } from '../core/recurring.js';
@@ -56,7 +55,7 @@ export type {
 	Requirements,
 	TypedEnqueueInput,
 } from '../core/api.js';
-// assertNodeIdとadvanceは内部の判定, 検証に使うものは`tsumugi/testing`から出す
+// assertNodeId, advanceは内部用, 検証用途は`tsumugi/testing`から公開
 export { createFlow, InvalidFlowError, shapeOf } from '../core/flow.js';
 export {
 	InvalidJobIdError,

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHeartbeat, HEARTBEAT_MIN_INTERVAL_MS } from '../../src/queue/consumer.js';
 
-/** 呼び出しを記録する送信口, 時刻は明示的に進める */
 function harness() {
 	const sent: (number | undefined)[] = [];
 	let at = 1_000_000;
@@ -23,7 +22,7 @@ describe('生存報告の間引き', () => {
 	});
 
 	it('下限に満たない間隔の呼び出しは破棄する', async () => {
-		// performerが1秒ごとに呼んでもDOへの書き込みは増えない
+		// performerが毎秒呼び出してもDO書き込み回数は不変
 		const { sent, heartbeat, advance } = harness();
 		await heartbeat();
 		for (let i = 0; i < 4; i++) {
@@ -42,7 +41,7 @@ describe('生存報告の間引き', () => {
 	});
 
 	it('送信が失敗しても呼び出し側へ投げない', async () => {
-		// 報告が届かなくてもreaperが回収するだけで実行自体は続く
+		// 報告失敗時もreaperの処理対象になるのみ, 実行は継続
 		const heartbeat = createHeartbeat(
 			async () => {
 				throw new Error('unreachable');
@@ -53,7 +52,7 @@ describe('生存報告の間引き', () => {
 	});
 
 	it('送信が滞っても待機は上限で切り上げる', async () => {
-		// DOが応答しない場合にperformerの処理を止めない
+		// DO無応答時もperformerの処理は継続
 		const heartbeat = createHeartbeat(
 			() => new Promise(() => {}),
 			() => 0,
@@ -109,7 +108,6 @@ describe('取り消し要求の伝達(#95)', () => {
 		const { heartbeat, advance } = cancellable(true);
 		await heartbeat();
 		advance(1_000);
-		// 下限未満で送信は無く戻り値は直近の結果
 		await expect(heartbeat()).resolves.toEqual({ cancelRequested: true });
 	});
 

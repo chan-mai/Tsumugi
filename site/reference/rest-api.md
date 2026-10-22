@@ -48,7 +48,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 キーの一致は完全一致のみです。部分一致は索引が利用されず、件数が増えると全表走査になるため受け付けません。
 
 `sort`と`order`に不正な値が来ても400にはせず、既定値を採用します。ダッシュボードの表示が止まらないようにするためです。
-期間に数値以外が来た場合も同様に、その条件を無視します。
+期間に整数以外が来た場合も同様に、その条件を無視します。
 
 ### レスポンス
 
@@ -165,6 +165,8 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 
 指定できるのは上記の項目のみです。`timeoutMs`や`backoff`などは指定できず、既定値が使われます。
 
+`maxAttempts` `delayMs` `expiresInMs` `priority`は整数でのみ指定可能です。
+
 成功すると201で`{ "id": "..." }`が返ります。
 `uniqueKey`が既存のジョブと衝突した場合も201です。新規には作成されず、応答には既存のジョブIDが含まれます。
 
@@ -233,6 +235,9 @@ IDで指定する場合は`ids`のみを渡します。
 
 `ids`を指定した場合、他の条件は無視されます。
 
+
+`created_from` `created_to` `limit`は整数でのみ指定可能です。
+
 条件で指定し`state`を省略した場合、`bulk-retry`は`FAILED`と`STALLED`、`bulk-cancel`は`SCHEDULED` `QUEUED` `RUNNING`を対象とします。
 これ以外の状態を指定した場合は400を返します。対象が減らず、繰り返しても終わらないためです。
 
@@ -277,6 +282,7 @@ IDで指定する場合は`ids`のみを渡します。
 | `priority` | 任意 | 同時に変更する場合に指定            |
 
 `runAt`と`delayMs`はどちらか一方が必要です。両方を指定すると400を返します。
+`runAt` `delayMs` `priority`は整数でのみ指定可能です。
 
 ジョブIDは変わりません。取り消して再投入する場合と異なり、`uniqueKey`の予約も解放されません。
 
@@ -301,10 +307,10 @@ Analytics Engineに書いた時系列から、binding別の失敗率と所要時
 
 ### クエリパラメータ
 
-| 名前      | 既定 | 内容                   |
-| --------- | ---- | ---------------------- |
-| `hours`   | `24` | 遡る時間。1以上720以下 |
-| `binding` | なし | binding名での絞り込み  |
+| 名前      | 既定 | 内容                         |
+| --------- | ---- | ---------------------------- |
+| `hours`   | `24` | 遡る時間。1以上720以下の整数 |
+| `binding` | なし | binding名での絞り込み        |
 
 ### レスポンス
 
@@ -449,8 +455,8 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
       "time_zone": "Asia/Tokyo",
       "overlap": "skip",
       "paused": false,
-      "next_run_at": 1767722400000,
-      "last_run_at": 1767636000000,
+      "next_occurrence_at": 1767722400000,
+      "last_occurrence_at": 1767636000000,
       "last_fired_at": 1767636001200,
       "last_job_id": null,
       "last_run_id": "REPORT:nightly-1767636000000",
@@ -462,24 +468,24 @@ bindingごとに、実行待ちのジョブが待機している原因を取得�
 }
 ```
 
-| 項目              | 意味                                                     |
-| ----------------- | -------------------------------------------------------- |
-| `name`            | スケジュールの名前。`schedules`のキー                    |
-| `kind`            | `job`または`flow`                                        |
-| `target`          | binding名またはFlow名                                    |
-| `every_ms`        | 固定間隔。`cron`を指定した場合は`null`                   |
-| `cron`            | cron式。`everyMs`を指定した場合は`null`                  |
-| `time_zone`       | cronと表示に使うIANAタイムゾーン。固定間隔では`UTC`     |
-| `overlap`         | `skip`または`overlap`                                    |
-| `paused`          | 一時停止中か。停止中は定期の発火なし                     |
-| `next_run_at`     | 次回の実行予定                                           |
-| `last_run_at`     | 直近の発火の予定時刻。一度も発火していない場合は`null`   |
-| `last_fired_at`   | 直近の発火の実時刻。`last_run_at`との差が遅れ            |
-| `last_job_id`     | 直近の発火で投入したジョブ。`kind`が`flow`の場合は`null` |
-| `last_run_id`     | 直近の発火で開始したRun。`kind`が`job`の場合は`null`     |
-| `last_skipped_at` | 直近で発火しなかった時刻。一度も該当がない場合は`null`   |
-| `skipped_count`   | 前回が終わっていないために発火しなかった回数             |
-| `last_error`      | 直近の発火が失敗した理由。成功した場合は`null`           |
+| 項目                 | 意味                                                     |
+| -------------------- | -------------------------------------------------------- |
+| `name`               | スケジュールの名前。`schedules`のキー                    |
+| `kind`               | `job`または`flow`                                        |
+| `target`             | binding名またはFlow名                                    |
+| `every_ms`           | 固定間隔。`cron`を指定した場合は`null`                   |
+| `cron`               | cron式。`everyMs`を指定した場合は`null`                  |
+| `time_zone`          | cronと表示に使うIANAタイムゾーン。固定間隔では`UTC`      |
+| `overlap`            | `skip`または`overlap`                                    |
+| `paused`             | 一時停止中か。停止中は定期の発火なし                     |
+| `next_occurrence_at` | 次回の実行予定                                           |
+| `last_occurrence_at` | 直近の発火の予定時刻。一度も発火していない場合は`null`   |
+| `last_fired_at`      | 直近の発火の実時刻。`last_occurrence_at`との差が遅れ     |
+| `last_job_id`        | 直近の発火で投入したジョブ。`kind`が`flow`の場合は`null` |
+| `last_run_id`        | 直近の発火で開始したRun。`kind`が`job`の場合は`null`     |
+| `last_skipped_at`    | 直近で発火しなかった時刻。一度も該当がない場合は`null`   |
+| `skipped_count`      | 前回が終わっていないために発火しなかった回数             |
+| `last_error`         | 直近の発火が失敗した理由。成功した場合は`null`           |
 
 末尾が`_at`の項目はエポックミリ秒です。
 

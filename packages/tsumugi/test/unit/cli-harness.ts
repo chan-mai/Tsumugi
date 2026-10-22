@@ -1,11 +1,5 @@
 import type { CliDeps, CliFs, RunResult } from '../../src/cli/index.js';
 
-/**
- * CLIテスト用の依存の偽物
- * `vi.mock`を使わず, 記録するだけの実装をDIで渡す(`config-validate.test.ts`の`Noop`と同じ方針)
- */
-
-/** パス→内容のMapで代用する, ディレクトリはmkdirと書き込み済みパスから導く */
 export class MemoryFs implements CliFs {
 	readonly files = new Map<string, string>();
 	readonly dirs = new Set<string>();
@@ -34,7 +28,7 @@ export class MemoryFs implements CliFs {
 export const ok = (stdout = ''): RunResult => ({ ok: true, stdout, stderr: '' });
 export const fail = (stderr = ''): RunResult => ({ ok: false, stdout: '', stderr });
 
-/** 引数列から応答を決める台本, undefinedは成功扱い */
+/** undefinedは成功 */
 export type WranglerScript = (args: readonly string[]) => RunResult | undefined;
 
 export type Harness = {
@@ -42,7 +36,6 @@ export type Harness = {
 	fs: MemoryFs;
 	logs: string[];
 	errors: string[];
-	/** wranglerへ渡った引数列の記録 */
 	calls: string[][];
 };
 

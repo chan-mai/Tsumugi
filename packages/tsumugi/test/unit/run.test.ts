@@ -137,7 +137,7 @@ describe('runの進行判断', () => {
 	});
 
 	it('取り消し中もfan-outノードを集約する', () => {
-		// 集約しないと子孫が終わってもRUNNINGのまま残り、runがCANCELLEDに未決着
+		// 未集約では子孫終了後もRUNNINGのまま、runがCANCELLEDに未決着
 		const nodes = [
 			node({ id: 'each', state: 'RUNNING', container: true }),
 			node({ id: 'each:0', state: 'COMPLETED', parent: 'each', origin: 'fanOut' }),
@@ -148,7 +148,7 @@ describe('runの進行判断', () => {
 	});
 
 	it('依存が消えていれば待たずに中断する(ADR-0030)', () => {
-		// 定義から消えたノードは決着せず、待つと永久にRUNNINGのまま残る
+		// 定義から消えたノードは未決着、待機では永久にRUNNING
 		const nodes = [node({ id: 'b', state: 'PENDING', after: ['gone'] })];
 		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
 			{ type: 'skip', id: 'b', reason: 'a dependency is missing from the flow' },
@@ -208,13 +208,13 @@ describe('発火条件(ADR-0041)', () => {
 		const failed = [node({ id: 'a', state: 'FAILED' }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
 		expect(ids(failed, 'start')).toEqual(['b']);
 
-		// 全て成功したなら後始末は要らない
+		// 全成功時は後始末不要
 		const ok = [node({ id: 'a', state: 'COMPLETED' }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
 		expect(advance({ nodes: ok, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b', reason: 'no dependency failed' }]);
 	});
 
 	it('failureはSKIPPEDの依存では起動しない', () => {
-		// 経路を選ばなかっただけのノードは失敗ではない, 後始末を走らせる理由がない(ADR-0041)
+		// 経路非選択のノードは失敗でない, 後始末不要(ADR-0041)
 		const nodes = [node({ id: 'a', state: 'SKIPPED' }), node({ id: 'b', state: 'PENDING', after: ['a'], trigger: 'failure' })];
 		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'skip', id: 'b', reason: 'no dependency failed' }]);
 	});
@@ -259,7 +259,7 @@ describe('発火条件(ADR-0041)', () => {
 	});
 
 	it('消えた依存はalwaysでも中断する', () => {
-		// 成否が分からないので待っても解決しない(ADR-0030)
+		// 成否不明, 待機では未解決(ADR-0030)
 		const nodes = [node({ id: 'b', state: 'PENDING', after: ['gone'], trigger: 'always' })];
 		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
 			{ type: 'skip', id: 'b', reason: 'a dependency is missing from the flow' },
@@ -311,12 +311,12 @@ describe('期限超過(ADR-0039)', () => {
 	});
 
 	it('全て成功していてもFAILEDになる', () => {
-		// 期限の時点で決着していなかったrunは, 残りの結果に関わらず失敗として扱う
+		// 期限時点で未決着のrunは残りの結果に関わらず失敗
 		expect(advance({ nodes: [node({ id: 'a', state: 'COMPLETED' })], cancelling: false, expired: true }).state).toBe('FAILED');
 	});
 
 	it('期限で中断されたfan-outの子は親を成功扱いにしない', () => {
-		// fan-outの子の失敗は非致命(ADR-0035)で、ノードの状態だけではrunがCOMPLETEDに決着し得る
+		// fan-outの子の失敗は非致命(ADR-0035)、ノード状態のみではrunがCOMPLETEDに決着し得る
 		const nodes = [
 			node({ id: 'each', state: 'COMPLETED', container: true }),
 			node({ id: 'each:0', state: 'FAILED', parent: 'each', origin: 'fanOut' }),
@@ -336,7 +336,7 @@ describe('subflowノード', () => {
 	});
 
 	it('ジョブの投入は要求しない', () => {
-		// performerを持たず、startの決定ではJob DOへ空のbindingが渡る
+		// performerなし、startの決定ではJob DOへ空のbindingが渡る
 		const nodes = [node({ id: 'child', state: 'PENDING', subflow: true })];
 		expect(advance({ nodes, cancelling: false }).decisions).not.toContainEqual({ type: 'start', id: 'child' });
 	});
@@ -354,7 +354,7 @@ describe('subflowノード', () => {
 	});
 
 	it('取り消し中は実行中の子も止める', () => {
-		// ジョブと違い子のrunは実行中でも取り消せる
+		// ジョブと異なり子のrunは実行中も取り消し可能
 		const nodes = [node({ id: 'child', state: 'RUNNING', subflow: true })];
 		expect(advance({ nodes, cancelling: true }).decisions).toEqual([{ type: 'cancel', id: 'child' }]);
 	});

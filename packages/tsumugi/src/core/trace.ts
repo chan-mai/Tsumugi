@@ -1,4 +1,3 @@
-// W3C Trace Context version 00
 export function normalizeTraceparent(value: unknown): string | null {
 	if (value === undefined || value === null) return null;
 	if (

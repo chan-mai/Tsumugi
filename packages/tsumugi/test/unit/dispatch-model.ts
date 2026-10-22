@@ -1,17 +1,13 @@
-import type { ScheduleInput } from '../../src/core/types.js';
+import type { DispatchInput } from '../../src/core/types.js';
 
 /**
- * schedule()のdispatch決定を独立に再計算する参照モデル
- *
- * property testが実装のロジックをそのまま写すと、実装がずれても検査が同じだけずれて相殺
- * このモデルは仕様の用語(同時実行数 / トークン / キー上限 / 優先度)だけで書き、実装は非参照
- * reaperとnextAlarmAtは対象外, dispatchの正しさに限定
+ * planDispatch()のdispatch決定の参照モデル, 仕様の用語(同時実行数 / トークン / キー上限 / 優先度)のみで記述
+ * 実装の写しでは実装と検査の誤りが相殺, 実装は非参照
+ * reaperとnextAlarmAtは対象外
  */
-export function expectedDispatchIds(input: ScheduleInput): string[] {
+export function expectedDispatchIds(input: DispatchInput): string[] {
 	const { now, jobs, policy } = input;
 
-	// 回収されるジョブ(無応答のQUEUED/RUNNING)は同時実行数から外れる
-	// 取り消し要求への応答期限(要求+grace)の到来も同様に外れる(#95)
 	const reaped = new Set(
 		jobs
 			.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && j.dispatchedAt !== null)
@@ -30,18 +26,14 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 		if (j.concurrencyKey !== null) keyInFlight.set(j.concurrencyKey, (keyInFlight.get(j.concurrencyKey) ?? 0) + 1);
 	}
 
-	// 期限を過ぎたジョブ(ADR-0047)と取り消し要求済みのジョブ(#95)は投入の候補にならない
 	const ready = jobs
 		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now && (j.expiresAt === null || now < j.expiresAt))
 		.filter((j) => j.cancelRequestedAt === null)
 		.map((j) => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 
-	// 停止中は1件も投入しない(#27)
 	let slots = policy.paused ? 0 : Math.max(0, policy.concurrency - inFlight.length);
-	// rate無しはトークン無限, 有りは補充後の残量から始める
 	let tokens = policy.rate === null ? Number.POSITIVE_INFINITY : refilledTokens(input);
-	// キー別トークン, 格納が無いキーはtokens上限(ADR-0045)
 	const keyTokens = new Map<string, number>();
 	const keyTokensOf = (key: string): number => {
 		if (policy.perKeyRate === null) return Number.POSITIVE_INFINITY;
@@ -70,17 +62,13 @@ export function expectedDispatchIds(input: ScheduleInput): string[] {
 	return dispatched;
 }
 
-/**
- * 優先度の底上げを実装を参照せず再計算
- * 有効時はpriorityへfloor(max(0,now-createdAt)/agingIntervalMs)を加算,無効/0/負はpriorityのまま
- */
 function agedPriority(priority: number, createdAt: number, now: number, agingIntervalMs: number | null): number {
 	if (agingIntervalMs === null || agingIntervalMs <= 0) return priority;
 	return priority + Math.floor(Math.max(0, now - createdAt) / agingIntervalMs);
 }
 
-/** レート有効時の補充後トークン, スケジューラのrefillと同じ式 */
-function refilledTokens(input: ScheduleInput): number {
+// スケジューラのrefillと同式
+function refilledTokens(input: DispatchInput): number {
 	const rate = input.policy.rate!;
 	const elapsed = Math.max(0, input.now - input.bucket.refilledAt);
 	return Math.min(rate.tokens, input.bucket.tokens + elapsed * (rate.tokens / rate.intervalMs));

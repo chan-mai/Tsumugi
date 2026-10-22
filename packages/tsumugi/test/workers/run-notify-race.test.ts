@@ -3,14 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { EnqueueInput } from '../../src/do/job-shard.js';
 import type { NodeEvent } from '../../src/core/run.js';
 
-/**
- * 投入と完了通知の競合(#33)
- *
- * ジョブの投入はRPCで、awaitの間にJob DOからの完了通知が割り込む
- * 投入後の状態更新が終端のノードを起動中へ戻すと、通知は二度と届かずrunが永久にRUNNINGのまま
- */
+// ジョブ投入はRPC、await中にJob DOの完了通知が割り込み(#33)
+// 投入後の更新で終端ノードを起動中へ戻すと通知が再送されずrunがRUNNINGのまま
 
-/** 面をそのまま使うと型の展開が深くなりTS2589に抵触, 使う分だけを宣言 */
+// DO型直接参照でTS2589発生, 使用メソッドのみ宣言
 interface RunFace extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown }): Promise<{ id: string; created: boolean }>;
 }
@@ -26,11 +22,8 @@ const nodesOf = (runId: string) =>
 const stateOf = (runId: string) =>
 	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun()?.state as string | undefined);
 
-/**
- * 投入の最中に完了通知を届けるJob DOの替え玉を仕込む
- * 実際のJob DOでも、投入したジョブが即座に完了すれば同じ順序
- * DOのストレージはテストを跨いで残り、前回の行も削除してから開始
- */
+// 実Job DOでも投入ジョブ即完了時は同じ順序
+// DOストレージはテスト間で残存、前回の行も削除して開始
 async function installEagerShard(runId: string): Promise<void> {
 	await runInDurableObject(runStub(runId), (instance) => {
 		const self = instance as any;
@@ -42,7 +35,7 @@ async function installEagerShard(runId: string): Promise<void> {
 			get: (id: DurableObjectId) => ({
 				id,
 				enqueueMany: async (inputs: readonly EnqueueInput[]) => {
-					// 投入の応答を返す前に完了を伝える, Run DOはまだノードを起動中にしていない
+					// 投入応答前に完了通知, Run DOのノードは起動中へ未遷移
 					const events: NodeEvent[] = inputs.map((input) => ({
 						nodeId: input.nodeId as string,
 						jobId: input.id as string,
@@ -62,24 +55,23 @@ describe('投入と完了通知の競合(#33)', () => {
 	it('投入を待つ間に完了したノードを起動中へ戻さない', async () => {
 		const runId = 'GREETINGS:race1';
 		const stub = runStub(runId);
-		// 開始より先に設定, リセットによる開始済みの行の削除を防止
+		// リセットによる開始済み行の削除防止、開始前に設定
 		await installEagerShard(runId);
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'race' } });
 
 		await runDurableObjectAlarm(stub);
 
-		// 起動前へ戻すとJob DO側は終端のため通知が二度と届かず, ノードがSCHEDULEDのまま残る
 		expect((await nodesOf(runId))['list']).toBe('COMPLETED');
 	});
 
 	it('通知を追い越さずにrunが決着する', async () => {
 		const runId = 'GREETINGS:race2';
 		const stub = runStub(runId);
-		// 開始より先に設定, リセットによる開始済みの行の削除を防止
+		// リセットによる開始済み行の削除防止、開始前に設定
 		await installEagerShard(runId);
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'race' } });
 
-		// 進みが止まるまで回す, 各tickの投入がその場で完了に変わる
+		// 進行停止まで反復, 各tickの投入は即完了
 		for (let i = 0; i < 8; i++) await runDurableObjectAlarm(stub);
 
 		expect(await stateOf(runId)).toBe('COMPLETED');

@@ -15,7 +15,7 @@ describe('更新間隔の読み出し', () => {
 	});
 
 	it('選択肢に無い値は既定へ落とす', () => {
-		// 手で書き換えられた場合や, 選択肢を減らした後の値が残っている場合
+		// 手動編集値, 削除済み選択肢の残存値
 		for (const raw of ['500', 'live', '', '-1']) {
 			expect(loadRefresh(storage(raw))).toBe(DEFAULT_REFRESH_MS);
 		}

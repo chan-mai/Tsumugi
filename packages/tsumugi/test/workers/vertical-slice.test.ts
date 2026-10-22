@@ -10,7 +10,6 @@ const T0 = 1_800_000_000_000;
 
 const performed: { payload: unknown; attempt: number; jobId: string; deadlineAt: number }[] = [];
 
-// consumerへ渡すのは`perform`を持つ実体, `ctx.exports`から引かれる形と同じ(ADR-0037)
 const performers = {
 	HELLO: {
 		perform: async (payload: { name: string }, ctx: JobContext): Promise<void> => {
@@ -22,7 +21,6 @@ const performers = {
 			throw new Error('intentional failure');
 		},
 	},
-	// 戻り値を返すperformer, resultの保存経路を見る(#9)
 	ECHO: {
 		perform: async (payload: { msg: string }): Promise<{ echoed: string }> => ({ echoed: payload.msg }),
 	},
@@ -30,7 +28,6 @@ const performers = {
 
 const consumerEnv: ConsumerEnv = env;
 
-/** DOに送られたメッセージを横取りしてconsumerへ手で渡す, Queuesの配送自体はここでの関心ではない */
 function captureQueue() {
 	const sent: DispatchMessage[] = [];
 	const queue = {
@@ -86,28 +83,24 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 
 		const jobId = await stub.enqueue({ binding: 'HELLO', payload: { name: 'world' } });
 
-		// IDの形式(ADR-0005)
 		expect(parseJobId(jobId)).toMatchObject({ binding: 'HELLO', shard: 0 });
 		expect(await stateOf('HELLO', jobId)).toBe('SCHEDULED');
 
-		// alarmを明示的に発火させる, Workersには時間を進めるAPIが無い
+		// 時刻を進めるAPI無し、alarm明示発火
 		expect(await runDurableObjectAlarm(stub)).toBe(true);
 		expect(await stateOf('HELLO', jobId)).toBe('QUEUED');
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toMatchObject({ jobId, binding: 'HELLO', attempt: 1 });
 
-		// consumerがperformerを呼び、必ずack
 		const { acked, batch } = makeBatch(sent);
 		await handleBatch(batch, consumerEnv, performers);
 		expect(acked).toHaveLength(1);
 
 		expect(performed).toHaveLength(1);
 		expect(performed[0]).toMatchObject({ payload: { name: 'world' }, attempt: 1, jobId });
-		// timeoutの残りは`deadlineAt`から引く(ADR-0037)
 		expect(performed[0]!.deadlineAt).toBeGreaterThan(Date.now());
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
-		// 1回実行して成功したためattemptsは1, 失敗時だけの集計では完了ジョブが0回に見える
 		const row = await runInDurableObject(shard('HELLO'), (instance) => (instance as any).repo.find(jobId) as { attempts: number });
 		expect(row.attempts).toBe(1);
 	});
@@ -127,9 +120,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		const { acked, batch } = makeBatch(sent);
 		await handleBatch(batch, consumerEnv, performers);
 
-		// 失敗してもQueuesのretryを使わず必ずack(ADR-0004)
 		expect(acked).toHaveLength(1);
-		// リトライ方針はDOが持ち、状態はFAILEDではなくSCHEDULEDに戻る
 		expect(await stateOf('BOOM', jobId)).toBe('SCHEDULED');
 	});
 
@@ -147,11 +138,9 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		await handleBatch(makeBatch(sent).batch, consumerEnv, performers);
 		expect(await stateOf('ECHO', jobId)).toBe('COMPLETED');
 
-		// DOのjob行に戻り値がJSON文字列で保存
 		const row = await runInDurableObject(shard('ECHO'), (instance) => (instance as any).repo.find(jobId) as { result: string | null });
 		expect(row.result).toBe(JSON.stringify({ echoed: 'hi' }));
 
-		// 次のtickでCOMPLETEDのスナップショットがD1へ投影され戻り値も届く
 		await runDurableObjectAlarm(stub);
 		const projected = await env.TSUMUGI_DB.prepare('SELECT result FROM job WHERE id = ?').bind(jobId).first<{ result: string | null }>();
 		expect(projected?.result).toBe(JSON.stringify({ echoed: 'hi' }));
@@ -175,9 +164,9 @@ describe('DOの書き込み回数', () => {
 		const after = await runInDurableObject(stub, (instance) => (instance as any).repo.writes as number);
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
-		// 内訳: insert / QUEUEDへの遷移/ COMPLETEDへの遷移 の3回+それぞれのアウトボックス追記3回= 6
-		// 残り1回は投影後のアウトボックス削除, バッチ単位のため件数が増えれば償却
-		// ジョブあたり6回はスパイクの実測と一致する,増やす時は課金への影響を意識して更新すること
+		// insert, QUEUED遷移, COMPLETED遷移と各アウトボックス追記で6回
+		// 残り1回は投影後アウトボックス削除, バッチ単位で償却
+		// 6回はスパイク実測値と一致, 増加時は課金影響を確認
 		expect(after - before).toBe(7);
 	});
 });

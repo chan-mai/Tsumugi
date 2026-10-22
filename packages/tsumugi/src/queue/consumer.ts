@@ -7,45 +7,24 @@ import type { DispatchMessage, TsumugiJobShard } from '../do/job-shard.js';
 
 export type PerformerCtor<Env> = new (ctx: ExecutionContext, env: Env) => PerformerLike<any, any, any>;
 
-/** 解決したperformerの形, 同一Workerでも別Workerでも同じ(ADR-0037) */
 export type PerformerService = {
 	perform(payload: unknown, ctx: JobContext): Promise<unknown>;
 };
 
-/**
- * performerの解決先(ADR-0037)
- * 同一Workerは`ctx.exports`, 別Workerはservice bindingの`env`
- */
 export type PerformerSource = Record<string, PerformerService | undefined>;
 
-/**
- * binding名からperformerを解決する対応
- * 実行時の解決には不使用, binding名の一覧とpayloadの型の導出だけに使用(ADR-0037)
- */
+/** binding名とperformerの対応, binding名一覧とpayload型の導出専用で実行時解決には不使用(ADR-0037) */
 export type PerformerRegistry<Env> = Record<string, PerformerCtor<Env> | RemoteRef>;
 
 export type ConsumerEnv = {
 	JOB_SHARD: DurableObjectNamespace<TsumugiJobShard>;
 };
 
-/**
- * 生存報告をDOへ送る最短の間隔
- * performerが短い周期で実行してもDOへの書き込みはこの間隔に収まる
- */
 export const HEARTBEAT_MIN_INTERVAL_MS = 5_000;
 
-/** 生存報告の送信を待つ上限, DOが応答しなくてもperformerの処理は継続 */
-export const HEARTBEAT_SEND_TIMEOUT_MS = 1_000;
+const HEARTBEAT_SEND_TIMEOUT_MS = 1_000;
 
-/**
- * 間隔制限付きの生存報告の作成
- * 直前の送信からの経過が下限に満たない要求は送信せず戻り値は直近の結果のまま
- * 送信の失敗は破棄, 報告が無くてもreaperが回収するだけで実行自体は継続
- * 送信の待機には上限があり、超えた分は結果を待たず戻り値を確定し応答は次回へ反映
- *
- * 取り消し要求(#95)は一度trueになれば以後もtrue
- * 不受理(accepted=false)もtrueとして扱う, この試行の報告はもう記録されず継続する意味が無い
- */
+/** 送信失敗は破棄, 報告欠落時もreaperの検出のみで実行は継続 */
 export function createHeartbeat(
 	send: (progress?: number) => Promise<{ accepted: boolean; cancelRequested: boolean }>,
 	now: () => number,
@@ -125,17 +104,13 @@ export class TsumugiTimeoutError extends Error {
 	}
 }
 
-export function shardStub<Env extends ConsumerEnv>(env: Env, jobId: string): DurableObjectStub<TsumugiJobShard> {
+function shardStub<Env extends ConsumerEnv>(env: Env, jobId: string): DurableObjectStub<TsumugiJobShard> {
 	return env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardNameOf(jobId)));
 }
 
-/**
- * timeoutでの待機の終了
- *
- * performerの実行自体は止められず、ランタイムの制約で回避不能
- * 中断が必要なperformerは`ctx.deadlineAt`から自分でAbortSignalを作成(ADR-0037)
- * `touch`は期限の再計測, 生存報告が受理されるたびに呼びDO側のreaper期限と起点を同期
- */
+// timeoutでの待機終了, performer実行自体は停止不可(ADR-0037)
+// 中断が必要なperformerは`ctx.deadlineAt`から自前でAbortSignal作成
+// `touch`は期限再計測, 生存報告受理ごとに呼びDO側reaper期限と起点を同期
 function withTimeout<T>(jobId: string, timeoutMs: number, run: (touch: () => void) => Promise<T>): Promise<T> {
 	if (timeoutMs <= 0) return run(() => {});
 
@@ -147,7 +122,7 @@ function withTimeout<T>(jobId: string, timeoutMs: number, run: (touch: () => voi
 		};
 		let timer = setTimeout(fire, timeoutMs);
 		const touch = () => {
-			// 中断後の再計測は受け付けない, 遅れて届いた受理での期限の復活を防止
+			// 中断後の再計測は無視, 遅延した受理による期限復活防止
 			if (fired) return;
 			clearTimeout(timer);
 			timer = setTimeout(fire, timeoutMs);
@@ -165,21 +140,15 @@ function withTimeout<T>(jobId: string, timeoutMs: number, run: (touch: () => voi
 	});
 }
 
-/**
- * 例外を文字列へ変換, 中断はDO側が持ちここでは形式の調整のみ
- * `stack`は1行目に`Name: message`を含み連結では重複
- */
+/** 切り詰めはDO側, `stack`は1行目に`Name: message`を含む */
 export function describeError(error: unknown): string {
 	if (!(error instanceof Error)) return String(error);
 	return error.stack ?? `${error.name}: ${error.message}`;
 }
 
 /**
- * Queuesのconsumer
- *
- * 成否によらず必ずackする(ADR-0004)
- * Queuesのretryを使わず`max_retries`と`delaySeconds`の上限を製品仕様から排除
- * リトライ回数もバックオフも全てDOのalarmが保持
+ * 成否によらず必ずack(ADR-0004)
+ * Queuesのretry不使用で`max_retries`/`delaySeconds`の上限回避, リトライとバックオフはDOのalarmで管理
  */
 export async function handleBatch<Env extends ConsumerEnv>(
 	batch: MessageBatch<DispatchMessage>,
@@ -187,33 +156,30 @@ export async function handleBatch<Env extends ConsumerEnv>(
 	exports: PerformerSource = {},
 ): Promise<void> {
 	const results = await Promise.allSettled(batch.messages.map((message) => handleOne(message, env, exports)));
-	// handleOneは内部で捕捉しきる想定だが、漏れた例外を再送出するとackされずQueuesのリトライが発生(ADR-0004)
+	// 漏れた例外は再送出せずログのみ, 再送出は未ackでQueuesリトライ発生(ADR-0004)
 	for (const result of results) {
 		if (result.status === 'rejected') console.error('tsumugi: handleOne rejected', result.reason);
 	}
 }
 
 async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessage>, env: Env, exports: PerformerSource): Promise<void> {
-	// 報告先の特定に必要なjobIdをtryの外で保持, 本文が壊れていれば未取得のまま
+	// 報告先特定用jobIdをtry外で保持, 本文不正時は未取得
 	let jobId: string | undefined;
 	let ok = false;
 	let failure: string | undefined;
 	let result: unknown;
-	// performの中で要求された子, 完了報告に同梱して送信(ADR-0031)
 	const spawns: SpawnRequest[] = [];
-	// ctx.failの指定, 失敗の報告にのみ同梱(#91)
 	let fail: FailOptions | undefined;
 
 	try {
-		// 分割代入もtryの中, 本文がnull等で壊れていても例外によるackの欠落を防止(ADR-0004)
+		// 分割代入もtry内, 本文null等の例外でのack欠落防止(ADR-0004)
 		const body = message.body;
-		// jobIdが無い/文字列でない本文はここで拒否, performer実行とreportの対象外
 		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
 		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt, traceparent } = body;
 
-		// 期限切れは実行せず終了(ADR-0047), 滞留から復帰した時のまとめ実行を防止
-		// 報告の失敗時はreaperの判定で期限切れとしてCANCELLEDへ遷移
+		// 期限切れは非実行, 滞留解消時の一括実行防止(ADR-0047)
+		// 報告失敗時はreaperが期限切れとしてCANCELLEDへ遷移
 		if (typeof expiresAt === 'number' && Date.now() >= expiresAt) {
 			await shardStub(env, jobId)
 				.expire(jobId)
@@ -225,31 +191,30 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		}
 
 		if (claimRequired && !(await shardStub(env, jobId).claim(jobId))) {
-			// 重複配送で他方が既に実行権を取得済み, 二重実行の回避で何もせず終了(ADR-0007)
+			// 重複配送で他方が実行権取得済み, 二重実行回避で終了(ADR-0007)
 			message.ack();
 			return;
 		}
 
-		// 同一Workerのperformerは`ctx.exports`から, 別Workerはservice bindingの`env`から解決(ADR-0037)
+		// 同一Workerは`ctx.exports`, 別Workerはservice bindingの`env`から解決(ADR-0037)
 		const service = (exports[binding] ?? (env as Record<string, unknown>)[binding]) as PerformerService | undefined;
-		// 設定漏れは即時失敗, 捕捉して無視すると検知できないまま失敗が継続
+		// 設定漏れは即時失敗, 無視すると未検知のまま失敗継続
 		if (typeof service?.perform !== 'function') {
 			throw new Error(`performer not found: ${binding} (export it, or add a service binding)`);
 		}
 
 		// 要求は保持のみ, 送信は完了報告と同時(ADR-0031)
-		// 関数はRPCのstubとして越え、別Workerのperformerからも呼び出し可能(ADR-0037)
+		// 関数はRPC stubとして別Workerのperformerからも呼び出し可能(ADR-0037)
 		const spawn = (id: string, target: string, childPayload: unknown, options?: SpawnRequest['options']) => {
-			// IDの形式検証, 不正な値はRun DOで受理できず通知が滞留
+			// ID形式検証, 不正値はRun DOで受理不可で通知滞留
 			assertNodeId(id);
 			spawns.push({ id, binding: target, payload: childPayload, ...(options ? { options } : {}) });
 		};
 		const stableId = jobId;
 		const stub = shardStub(env, stableId);
 
-		// performの戻り値をDOへ渡す, 保存はDO側が担当(#9)
 		result = await withTimeout(stableId, timeoutMs, (touch) => {
-			// DOが受理した報告だけ期限を再計測, timeoutMsが報告間隔として機能
+			// DO受理の報告のみ期限再計測, timeoutMsを報告間隔として利用
 			const heartbeat = createHeartbeat(
 				(progress) =>
 					stub.heartbeat(stableId, progress).then((ack) => {
@@ -279,26 +244,26 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		});
 		ok = true;
 	} catch (error) {
-		// 本文をDOへ渡す, 破棄するとダッシュボードから失敗の理由が永久に不明(ADR-0028)
+		// エラー本文をDOへ送信, 失敗理由のダッシュボード表示用(ADR-0028)
 		failure = describeError(error);
 		console.error(`tsumugi: perform failed (${jobId ?? 'unknown'})`, error);
 	}
 
 	message.ack();
 
-	// jobIdが取れないのは本文が壊れている場合, 報告先が無いのでackだけで終える
-	// DO側のジョブはQUEUEDのまま残り、timeout経過後にreaperが無応答として回収
+	// jobId無しは本文不正, 報告先が無くackのみ
+	// DO側ジョブはQUEUEDのまま, timeout経過後にreaperが無応答として処理
 	if (jobId === undefined) return;
 
 	try {
-		// exactOptionalPropertyTypesのためerror未定義は省いて渡す
-		// 失敗した試行のspawnは非送信, 再実行で再度要求が届く(ADR-0032)
+		// exactOptionalPropertyTypes対応でerror未定義は省略
+		// 失敗試行のspawnは非送信, 再実行時に再要求(ADR-0032)
 		const outcome = ok
 			? { ok: true, result, ...(spawns.length > 0 ? { spawns } : {}) }
 			: { ok: false, ...(failure === undefined ? {} : { error: failure }), ...(fail ? { fail } : {}) };
 		await shardStub(env, jobId).report(jobId, outcome);
 	} catch (error) {
-		// 報告が失われるとジョブはQUEUEDのまま残る, reaperが無応答として回収
+		// 報告喪失時はQUEUEDのまま, reaperが無応答として処理
 		console.error(`tsumugi: report failed (${jobId})`, error);
 	}
 }

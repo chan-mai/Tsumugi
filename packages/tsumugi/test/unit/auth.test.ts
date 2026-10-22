@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
 
-/** base64のsecretに現れる文字, ダッシュボードはこれをencodeURIComponentしてcookieへ書く */
+// base64のsecretに含まれる文字, ダッシュボードはencodeURIComponent後にcookieへ保存
 const TOKEN = 'sk+ab/cd=';
 
 const appWith = (token: string) => {

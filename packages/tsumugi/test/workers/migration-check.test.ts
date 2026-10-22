@@ -24,12 +24,7 @@ const call = (path: string, database: D1Database) =>
 		{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 	);
 
-/**
- * 台帳の応答だけ差し替えたD1を返す, 実際のテスト用D1は無変更
- *
- * D1のメソッドはプロトタイプにあり展開では失われる
- * `prepare`しか使わない経路では発覚せず、`batch`の実行時に初めて壊れる
- */
+// D1メソッドはプロトタイプ上で展開時に欠落, `batch`実行時のみ失敗
 function proxyD1(onMigrationsQuery: () => D1PreparedStatement): D1Database {
 	const base = env.TSUMUGI_DB;
 	return new Proxy(base, {
@@ -52,7 +47,6 @@ function withLedger(rows: { name: string }[] | 'missing'): D1Database {
 	});
 }
 
-/** 台帳の欠如ではない一時障害を起こすD1 */
 function withError(message: string): D1Database {
 	return proxyD1(() => {
 		throw new Error(message);
@@ -66,26 +60,26 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('欠けていれば名前を返す', async () => {
-		// 期待値は定義から導く, マイグレーションを追加するたびの書き換えの回避
+		// 期待値は定義から導出, マイグレーション追加ごとの書き換え回避
 		const [first, ...rest] = EXPECTED_MIGRATIONS;
 		const status = await checkMigrations(withLedger([{ name: first }]));
 		expect(status).toEqual({ ok: false, missing: rest });
 	});
 
 	it('台帳自体が無ければ全件未適用として扱う', async () => {
-		// 一度も適用していない状態, 例外をそのまま出すと原因が分からない
+		// 未適用状態, 例外をそのまま返すと原因不明
 		const status = await checkMigrations(withLedger('missing'));
 		expect(status).toEqual({ ok: false, missing: [...EXPECTED_MIGRATIONS] });
 	});
 
 	it('一時障害はunavailableとして扱い未適用と区別する(#8)', async () => {
-		// D1の一時障害を未適用と混同すると、適用済みの環境への誤った復旧手順の案内につながる
+		// 一時障害を未適用と混同すると適用済み環境へ誤った復旧手順を案内
 		const status = await checkMigrations(withError('D1_ERROR: Network connection lost'));
 		expect(status).toEqual({ ok: false, unavailable: true });
 	});
 
 	it('一時障害では適用漏れの復旧手順を案内しない(#8)', async () => {
-		// unavailableはTTLで再利用され、共有appのキャッシュに影響しないよう専用のappを用意
+		// unavailableはTTL内再利用、共有appのキャッシュへの影響回避で専用app
 		const isolated = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
 		const res = await isolated.fetch!(
 			new Request('https://example.com/api/jobs', { headers: { authorization: `Bearer ${TOKEN}` } }),
@@ -113,7 +107,6 @@ describe('マイグレーション適用漏れの検出', () => {
 		expect((await check(failing)).ok).toBe(false);
 		expect(calls).toBe(1);
 
-		// TTLを過ぎたら再検査
 		clock += 5_001;
 		await check(failing);
 		expect(calls).toBe(2);
@@ -149,7 +142,7 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('batchを使う経路も通る', async () => {
-		// 展開でモックを作るとプロトタイプのメソッドが欠落し、ここで初めて壊れる
+		// 展開でのモック作成ではプロトタイプのメソッドが欠落、ここで初めて失敗
 		const res = await call('/api/jobs', withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
 		expect(res.status).toBe(200);
 	});
@@ -177,7 +170,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		const check = cachedCheck();
 		expect((await check(flipping)).ok).toBe(false);
 		applied = true;
-		// 失敗を保持し続けると、適用してもWorkerの再デプロイまで未復帰
+		// 失敗保持時は適用後もWorker再デプロイまで未復帰
 		expect((await check(flipping)).ok).toBe(true);
 	});
 });

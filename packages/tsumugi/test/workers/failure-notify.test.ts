@@ -5,42 +5,36 @@ import type { FailureNotice } from '../../src/core/types.js';
 import { failureNotify } from '../../src/do/tables.js';
 import { embedJobId } from '../../src/core/ids.js';
 
-/**
- * 失敗したジョブの通知(#30)
- *
- * 終端の失敗だけを通知先のbindingへジョブとして投入
- * 通知そのものの失敗は対象外, 自分を呼び続ける循環の防止
- */
-
 const T0 = 2_500_000_000_000;
 const NOTIFY = 'NotifyFailure';
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
-/** 投入先を差し替える, 実キューへ出すとconsumerが走って状態が変わる */
+// 実キューはconsumer実行で状態変化
 async function install(name: string, sent: DispatchMessage[] = []): Promise<void> {
+	const record = (body: DispatchMessage) => {
+		if (body.jobId.startsWith(`${name}:`)) sent.push(body);
+	};
 	await runInDurableObject(shard(name), (instance) => {
 		(instance as any).clock = { now: () => T0 };
 		(instance as any).env.TSUMUGI_QUEUE = {
-			send: async (body: DispatchMessage) => void sent.push(body),
+			send: async (body: DispatchMessage) => record(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
-				for (const m of batch) sent.push(m.body);
+				for (const m of batch) record(m.body);
 			},
 		};
 	});
 }
 
-/** 通知先へ届いたジョブのpayload, 宛先はshard 0に固定 */
 const payloadOf = (jobId: string) =>
 	runInDurableObject(shard(`${NOTIFY}#0`), (instance) => {
 		const row = (instance as any).repo.find(jobId) as { payload: string } | undefined;
 		return row ? (JSON.parse(row.payload) as FailureNotice) : undefined;
 	});
 
-/** 通知として投入されるジョブのID, 元のID全体と試行回数から決まる */
 const noticeIdOf = (jobId: string, attempts: number) => `${NOTIFY}#0:failure-${embedJobId(jobId)}-${attempts}`;
 
-/** flowと定期実行の起動口, RPCの型はブランドを継承する必要がある */
+// RPC型はブランド継承が必要
 interface RunFace extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown }): Promise<unknown>;
 }
@@ -48,13 +42,12 @@ interface SchedulerFace extends Rpc.DurableObjectBranded {
 	sync(): Promise<void>;
 }
 
-/** DOが保存した宛先, 投入の経路ごとに届いているかを見る */
 const bindingOf = (name: string) =>
 	runInDurableObject(shard(name), (instance) => (instance as any).repo.readSetting('failure_binding') as string | undefined);
 
 const countOf = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countJobs() as number);
 
-/** 失敗の通知先を設定へ書き込む, 実際はenqueueに同梱されて届く */
+// 実運用ではenqueueに同梱
 const configure = (name: string) => shard(name).configure({ failureBinding: NOTIFY });
 
 describe('失敗したジョブの通知(#30)', () => {
@@ -65,7 +58,6 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		const jobId = await shard('FAIL1#0').enqueue({ binding: 'FAIL1', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('FAIL1#0'));
-		// 試行を使い切って失敗させる状況
 		await shard('FAIL1#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('FAIL1#0'));
 
@@ -86,12 +78,11 @@ describe('失敗したジョブの通知(#30)', () => {
 		const sent: DispatchMessage[] = [];
 		await install('FAIL2#0', sent);
 		await configure('FAIL2#0');
-		// DOのストレージはテストを跨いで残り、増えた分で判定
+		// DOストレージはテスト間で残存、増分で判定
 		const before = await countOf(`${NOTIFY}#0`);
 
 		await shard('FAIL2#0').enqueue({ binding: 'FAIL2', payload: {}, maxAttempts: 3 });
 		await runDurableObjectAlarm(shard('FAIL2#0'));
-		// 1回目の失敗, まだ試行が残るためSCHEDULEDへ戻る
 		await shard('FAIL2#0').report(sent[0]!.jobId, { ok: false, error: 'retry me' });
 		await runDurableObjectAlarm(shard('FAIL2#0'));
 
@@ -112,7 +103,7 @@ describe('失敗したジョブの通知(#30)', () => {
 	});
 
 	it('通知そのものの失敗は通知しない', async () => {
-		// 循環すると失敗のたびに新しい通知が生まれ, 止まらなくなる
+		// 循環時は失敗ごとに新規通知が無限に発生
 		const sent: DispatchMessage[] = [];
 		await install(`${NOTIFY}#0`, sent);
 		await configure(`${NOTIFY}#0`);
@@ -123,7 +114,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		await shard(`${NOTIFY}#0`).report(sent[0]!.jobId, { ok: false, error: 'notification failed' });
 		await runDurableObjectAlarm(shard(`${NOTIFY}#0`));
 
-		// 投入した1件だけが増える, その失敗から新しい通知は生まれない
+		// 投入1件のみ増加, その失敗から新規通知なし
 		expect(await countOf(`${NOTIFY}#0`)).toBe(before + 1);
 	});
 
@@ -138,7 +129,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		await runDurableObjectAlarm(shard('FAIL4#0'));
 		const after = await countOf(`${NOTIFY}#0`);
 
-		// 送信の後で中断した場合と同じ状況, カーソルが進まず同じ通知が再送
+		// 送信後中断を再現, カーソル未更新で同じ通知を再送
 		await runInDurableObject(shard('FAIL4#0'), (instance) => {
 			(instance as any).repo.db
 				.insert(failureNotify)
@@ -147,18 +138,16 @@ describe('失敗したジョブの通知(#30)', () => {
 		});
 		await runDurableObjectAlarm(shard('FAIL4#0'));
 
-		// 決定的なIDのため既存が返り, 通知先のジョブは増えない(ADR-0029)
 		expect(await countOf(`${NOTIFY}#0`)).toBe(after);
 		expect(await payloadOf(noticeIdOf(jobId, 1))).toBeDefined();
 	});
 
 	it('回収された失敗も通知する', async () => {
-		// 終端はreportによる失敗だけではない, reaperの中断も通知の対象
 		const sent: DispatchMessage[] = [];
 		await install('FAIL6#0', sent);
 		await configure('FAIL6#0');
 
-		// at-most-onceは再投入が二重実行になり得るためSTALLEDで止まる(ADR-0007)
+		// at-most-onceは二重実行回避でSTALLED停止(ADR-0007)
 		const jobId = await shard('FAIL6#0').enqueue({
 			binding: 'FAIL6',
 			payload: {},
@@ -167,16 +156,16 @@ describe('失敗したジョブの通知(#30)', () => {
 			guarantee: 'at-most-once',
 		});
 		await runDurableObjectAlarm(shard('FAIL6#0'));
-		// 応答が無いまま期限と猶予を過ぎると回収
+		// 無応答で期限と猶予経過後にreaper処理
 		await runInDurableObject(shard('FAIL6#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 120_000 }));
 		await runDurableObjectAlarm(shard('FAIL6#0'));
 
-		// 報告が無く試行は計上されていない
+		// 報告なしで試行未計上
 		expect(await payloadOf(noticeIdOf(jobId, 0))).toMatchObject({ jobId, binding: 'FAIL6', state: 'STALLED', attempts: 0 });
 	});
 
 	it('流量を固定したshardにも後から追加した宛先が届く', async () => {
-		// 宛先をpolicyのpinと同じ扱いにすると、一度流量を制限したshardへ後から追加した宛先が永久に届かない
+		// policyのpinと同じ扱いでは流量制限済みshardへ後続宛先が未反映
 		const sent: DispatchMessage[] = [];
 		await install('FAIL7#0', sent);
 		await shard('FAIL7#0').configure({ policy: { concurrency: 10 } });
@@ -190,7 +179,7 @@ describe('失敗したジョブの通知(#30)', () => {
 	});
 
 	it('bindingが違えばローカル部が同じでも別の通知になる', async () => {
-		// ローカル部だけで構築すると、利用者がIDを指定した2件の失敗が1件に統合されてしまう
+		// ローカル部のみの構築では利用者指定IDの2件の失敗が1件に統合
 		const sent: DispatchMessage[] = [];
 		await install('FAIL8#0', sent);
 		await install('FAIL9#0', sent);
@@ -211,7 +200,7 @@ describe('失敗したジョブの通知(#30)', () => {
 	});
 
 	it('宛先の解除が届くと通知しなくなる', async () => {
-		// onFailureを設定から外した場合, 既存のshardが古い宛先へ送り続けてはいけない
+		// onFailure削除後, 既存shardの旧宛先への送信防止
 		const sent: DispatchMessage[] = [];
 		await install('FAIL10#0', sent);
 		await shard('FAIL10#0').enqueueMany([{ binding: 'FAIL10', payload: {}, maxAttempts: 1 }], { failureBinding: NOTIFY });
@@ -226,14 +215,14 @@ describe('失敗したジョブの通知(#30)', () => {
 	});
 
 	it('flowと定期実行が投入するshardにも宛先が届く', async () => {
-		// 投入の経路ごとにクライアントが別で、設定が抜けるとその経路の失敗だけ破棄
+		// 投入経路ごとに別クライアント, 設定漏れ時はその経路の失敗のみ破棄
 		const runNamespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
 		await runNamespace.get(runNamespace.idFromName('GREETINGS:notify-wiring')).start({ flow: 'GREETINGS', input: { prefix: 'wiring' } });
 
 		const schedulerNamespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 		const scheduler = schedulerNamespace.get(schedulerNamespace.idFromName('scheduler'));
 		await scheduler.sync();
-		// 最短の定義が1分間隔, 発火のために時計を前進
+		// 最短定義は1分間隔, 発火用に時計を前進
 		const ahead = Date.now() + 2 * 60_000;
 		await runInDurableObject(scheduler, (instance) => void ((instance as any).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
@@ -244,11 +233,10 @@ describe('失敗したジョブの通知(#30)', () => {
 	});
 
 	it('宛先を持たない設定が届いても宛先は消えない', async () => {
-		// 共通設定を持たないクライアントからの投入で宛先が消えると、以降の失敗が破棄
+		// 共通設定なしクライアントの投入で宛先削除時、以降の失敗を破棄
 		const sent: DispatchMessage[] = [];
 		await install('FAIL5#0', sent);
 		await shard('FAIL5#0').enqueueMany([{ binding: 'FAIL5', payload: {}, maxAttempts: 1 }], { failureBinding: NOTIFY });
-		// 宛先を含まずpolicyだけを持つ設定
 		await shard('FAIL5#0').enqueueMany([{ binding: 'FAIL5', payload: {}, maxAttempts: 1 }], { policy: { concurrency: 5 } });
 
 		await runDurableObjectAlarm(shard('FAIL5#0'));
@@ -267,7 +255,6 @@ describe('失敗したジョブの通知(#30)', () => {
 		await shard('FAIL7#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
 
 		const alarm = await runInDurableObject(shard('FAIL7#0'), async (instance) => {
-			// D1障害
 			const env = (instance as any).env;
 			const original = env.TSUMUGI_DB;
 			env.TSUMUGI_DB = {
@@ -288,10 +275,9 @@ describe('失敗したジョブの通知(#30)', () => {
 		});
 
 		expect(await payloadOf(noticeIdOf(jobId, 1))).toBeDefined();
-		// 即時の再起動では障害の間tickを反復
+		// 即時再起動では障害中にtick反復
 		expect(alarm).toBe(T0 + 5_000);
 
-		// D1の回復後のtickで未投影の行を投影
 		await runDurableObjectAlarm(shard('FAIL7#0'));
 		const remaining = await runInDurableObject(shard('FAIL7#0'), (instance) => (instance as any).repo.countOutbox() as number);
 		expect(remaining).toBe(0);
@@ -304,7 +290,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		await install('FAIL6#0', sent);
 		await configure('FAIL6#0');
 
-		// 同じストレージで新しいインスタンスを生成し退避後の状態を再現
+		// 同一ストレージで新インスタンス生成し退避後を再現
 		const jobId = await runInDurableObject(shard('FAIL6#0'), async (instance, state) => {
 			const fresh = new (instance.constructor as any)(state, (instance as any).env);
 			fresh.clock = (instance as any).clock;

@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { main } from '../../src/cli/index.js';
 import { makeDeps } from './cli-harness.js';
 
-// 引数の解釈はCLIの入口, 誤った起動で書き込みが発生しないことをここで保証
-
 describe('引数の解釈', () => {
 	it('引数なしはusageを出して失敗する', () => {
 		const { deps, errors, fs } = makeDeps();
@@ -50,7 +48,6 @@ describe('引数の解釈', () => {
 	});
 
 	it('initは余分な位置引数を拒否する', () => {
-		// 誤った起動でリソース作成まで進めない
 		const { deps, errors, calls, fs } = makeDeps();
 		expect(main(['init', 'extra'], deps)).toBe(1);
 		expect(errors.join('\n')).toContain('does not accept positional arguments');

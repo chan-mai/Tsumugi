@@ -4,8 +4,8 @@ using Http;
 
 namespace Tsumugi;
 
-// components.schemasに載るモデル
-// JobDetail等の合成はallOfではなくスプレッドで平坦にする, 従来の形を保つ
+// 以下はcomponents.schemasへ出力
+// JobDetail等の合成はallOfでなくスプレッドで平坦化
 
 model Error {
 	error: string;
@@ -201,7 +201,7 @@ model RunNode {
 	updated_at: integer;
 }
 
-@doc("Either ids, or the filter fields. When ids is present the filter fields are ignored.")
+@doc("Either ids, or the filter fields. When ids is present the filter fields are ignored. Unknown fields are rejected with 400.")
 model BulkRequest {
 	@doc("Job ids to process")
 	@minItems(1)
@@ -416,10 +416,10 @@ model Schedule {
 	@doc("Whether the schedule is paused. A paused schedule does not fire on its own; occurrences elapsed while paused are discarded on resume.")
 	paused: boolean;
 
-	next_run_at: integer;
+	next_occurrence_at: integer;
 
 	@doc("Scheduled time of the latest firing. The gap to last_fired_at is the delay.")
-	last_run_at: integer | null;
+	last_occurrence_at: integer | null;
 
 	@doc("When the latest firing actually happened")
 	last_fired_at: integer | null;
@@ -439,8 +439,8 @@ model Schedule {
 	last_error: string | null;
 }
 
-// 以降は応答の包み, componentsには載らない
-// 説明は@docがそのままresponsesのdescriptionになる
+// 以下は応答モデル, componentsへの出力なし
+// @docはresponsesのdescription
 
 @doc("Authentication failed")
 model Unauthorized {
@@ -524,7 +524,7 @@ model BadBody {
 	@body body: Error;
 }
 
-// 400は1つしか書けないので, 本文とジョブIDの両方で断る経路は説明をまとめる
+// 400は1つのみ記載可, 本文とジョブIDの拒否理由を1つの説明へ統合
 @doc("Malformed job id, or invalid request body")
 model BadJobIdOrBody {
 	@statusCode statusCode: 400;

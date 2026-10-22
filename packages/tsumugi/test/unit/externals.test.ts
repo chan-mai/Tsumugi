@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error 検査スクリプトと同じ実装を見るため型定義のないmjsを直接読む
 import { externalsIn } from '../../scripts/externals.mjs';
 
-/**
- * バンドルに残る外部依存の検出
- *
- * 誤検出はリリース前の検査の失敗につながり、import文の形に限ることを固定
- */
+// 誤検出はリリース前検査の失敗要因
 
 const scan = (source: string) => [...(externalsIn(source) as Set<string>)].sort();
 
@@ -28,7 +24,7 @@ describe('外部依存の検出', () => {
 	});
 
 	it('文字列やコメントの中の文言を拾わない', () => {
-		// ダッシュボードのHTMLに焼き込まれる案内文がこの形をしている
+		// ダッシュボードのHTMLに埋め込まれた案内文がこの形
 		expect(scan(`const msg = "Please import '@vue-flow/core/dist/style.css' to render";`)).toEqual([]);
 		expect(scan(`// import 'docs-only-example';`)).toEqual([]);
 		expect(scan(`const text = \`import "in-template"\`;`)).toEqual([]);

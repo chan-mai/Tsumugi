@@ -31,7 +31,7 @@ describe('一括操作の対象の検証', () => {
 	});
 
 	it('操作が受け付けない状態を拒否する', () => {
-		// 対象が減らないと残り件数を追う繰り返しが終わらない
+		// 対象不減時の残件数追跡ループの無限化防止
 		expect(validateBulk({ state: 'RUNNING' }, 'retry')).toEqual({ error: 'state must be one of FAILED, STALLED for retry' });
 		expect(validateBulk({ state: 'FAILED' }, 'cancel')).toEqual({
 			error: 'state must be one of SCHEDULED, QUEUED, RUNNING for cancel',
@@ -58,12 +58,16 @@ describe('一括操作の対象の検証', () => {
 		expect(validateBulk({ limit: 5 }, 'retry')).toMatchObject({ input: { limit: 5 } });
 	});
 
+	it('未知のキーを拒否する', () => {
+		expect(validateBulk({ uniqueKey: 'u1' }, 'retry')).toEqual({ error: 'unknown field: uniqueKey' });
+	});
+
 	it('不正な型と値を拒否する', () => {
 		expect(validateBulk(null, 'retry')).toEqual({ error: 'body must be an object' });
 		expect(validateBulk({ binding: 1 }, 'retry')).toEqual({ error: 'binding must be a string' });
 		expect(validateBulk({ limit: 0 }, 'retry')).toEqual({ error: 'limit must be at least 1' });
 		expect(validateBulk({ limit: 1.5 }, 'retry')).toEqual({ error: 'limit must be an integer' });
-		expect(validateBulk({ created_from: 'today' }, 'retry')).toEqual({ error: 'created_from must be a number' });
+		expect(validateBulk({ created_from: 'today' }, 'retry')).toEqual({ error: 'created_from must be an integer' });
 	});
 });
 
@@ -80,7 +84,7 @@ describe('shardごとのまとめ', () => {
 	});
 
 	it('形式が壊れたIDは分けて返す', () => {
-		// 読み取りモデルの行が壊れていても他の対象の処理は継続
+		// 読み取りモデルに不正行があっても他対象の処理は継続
 		const { groups, invalid } = groupByShard(['MAIL#0:a', 'broken']);
 
 		expect([...groups.keys()]).toEqual(['MAIL#0']);

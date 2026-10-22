@@ -3,12 +3,8 @@ import { readWorkerName } from '../../src/cli/config-file.js';
 import { extractDatabaseId, init } from '../../src/cli/init.js';
 import { makeDeps, fail, ok } from './cli-harness.js';
 
-// initは唯一ユーザーのファイルとCloudflareのリソースへ触れる
-// 破壊方向の誤り(上書き, 転記漏れ)をここで検出
-
 const DATABASE_ID = '9945ba53-b1cb-45a2-8f01-c650518c2f2a';
 
-/** wrangler d1 createが出すJSONC断片の形 */
 const D1_CREATE_STDOUT = `✅ Successfully created DB 'my-jobs'
 
 {
@@ -24,7 +20,6 @@ const D1_CREATE_STDOUT = `✅ Successfully created DB 'my-jobs'
 
 const d1Script = (args: readonly string[]) => (args[0] === 'd1' && args[1] === 'create' ? ok(D1_CREATE_STDOUT) : ok());
 
-/** コメントと末尾カンマを除去してJSONとして読む, 生成物の構文の妥当性を確認 */
 const parseJsonc = (source: string): unknown => JSON.parse(source.replace(/^\s*\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1'));
 
 describe('initの新規生成', () => {
@@ -46,7 +41,7 @@ describe('initの新規生成', () => {
 	});
 
 	it('生成したwrangler.jsoncは構文として妥当', () => {
-		// 部分一致の検査では構文の破れを検出できず、パースまで実施
+		// 部分一致では構文エラー検出不能、パースまで実施
 		const { deps, fs } = makeDeps(d1Script);
 		expect(init({ name: 'my-jobs' }, deps)).toBe(0);
 		const parsed = parseJsonc(fs.read('/proj/wrangler.jsonc')) as { name?: string; d1_databases?: unknown[] };
@@ -65,7 +60,6 @@ describe('initの新規生成', () => {
 	});
 
 	it('リソース作成から適用まで順に実行する', () => {
-		// 設定より先にd1 createを実行する, 出力のdatabase_idを設定へ書くため
 		const { deps, calls } = makeDeps(d1Script);
 		expect(init({ name: 'my-jobs' }, deps)).toBe(0);
 		expect(calls).toEqual([
@@ -113,7 +107,7 @@ describe('initと既存ファイル', () => {
 		expect(fs.read('/proj/wrangler.jsonc')).toBe(original);
 		expect(logs.join('\n')).toContain(`"database_id": "${DATABASE_ID}"`);
 		expect(calls[1]).toEqual(['queues', 'create', 'existing-app']);
-		// TSUMUGI_DBが設定へ書かれた保証が無く、適用とtypesは非実行
+		// TSUMUGI_DBの設定記載が未保証、適用とtypesは非実行
 		expect(calls.some((args) => args.includes('migrations'))).toBe(false);
 		expect(calls.some((args) => args[0] === 'types')).toBe(false);
 	});
@@ -150,7 +144,7 @@ describe('initの失敗', () => {
 	});
 
 	it('d1 createが失敗したらプレースホルダで生成して非0を返す', () => {
-		// 生成自体は続ける, 残作業があることをexit codeで示す
+		// 生成は継続, 残作業の存在をexit codeで通知
 		const { deps, fs, errors } = makeDeps((args) => (args[0] === 'd1' && args[1] === 'create' ? fail('already exists') : ok()));
 		expect(init({ name: 'my-jobs' }, deps)).toBe(1);
 
@@ -170,7 +164,7 @@ describe('Worker名の読み取り', () => {
 	});
 
 	it('入れ子のbindingのnameは拾わずトップレベルを返す', () => {
-		// bindingがトップレベルのnameより前に並ぶ設定で誤った名前を埋めない
+		// bindingがトップレベルのnameより前にある設定での誤った名前の埋め込み防止
 		const config = '{\n  "durable_objects": { "bindings": [{ "name": "JOB_SHARD" }] },\n  "name": "my-jobs"\n}';
 		expect(readWorkerName(config, 'jsonc')).toBe('my-jobs');
 	});

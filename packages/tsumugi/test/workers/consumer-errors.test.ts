@@ -6,9 +6,7 @@ import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
 const consumerEnv: ConsumerEnv = env;
 
-/** 実行されたjobIdを控える, ackだけでなく実行の有無を検証するため */
 const performed: string[] = [];
-// consumerへ渡すのは`perform`を持つ実体, `ctx.exports`から引かれる形と同じ(ADR-0037)
 const performers = {
 	OK: {
 		perform: async (_payload: unknown, ctx: JobContext): Promise<void> => {
@@ -37,7 +35,7 @@ function message(body: unknown): FakeMessage {
 		body: body as DispatchMessage,
 		attempts: 1,
 		ack: vi.fn(),
-		// consumerはretryを呼ばない, 呼べばQueuesのリトライが発生(ADR-0004)
+		// consumerはretry不使用, 呼び出し時はQueuesリトライ発生(ADR-0004)
 		retry: vi.fn(() => {
 			throw new Error('retry must not be called');
 		}),
@@ -68,14 +66,11 @@ describe('壊れたメッセージ(ADR-0004)', () => {
 		// 分割代入がtryの外にあると本文nullの例外でackに未到達
 		expect(broken.ack).toHaveBeenCalledTimes(1);
 		expect(broken.retry).not.toHaveBeenCalled();
-		// 壊れた本文ではperformerは非実行, 正常なメッセージだけが1回実行
 		expect(performed).toEqual(['OK#0:valid']);
-		// 同じバッチの正常なメッセージの処理は継続
 		expect(valid.ack).toHaveBeenCalledTimes(1);
 	});
 
 	it('jobIdが無い本文はperformerを実行せずackする', async () => {
-		// bodyはオブジェクトだがjobIdが欠けている, claimRequired無しでも実行経路に入れない
 		const noId = message({ binding: 'OK', attempt: 1, payload: {}, timeoutMs: 60_000, claimRequired: false });
 
 		await expect(handleBatch(batchOf([noId]), consumerEnv, performers)).resolves.toBeUndefined();
@@ -101,11 +96,10 @@ describe('reportの失敗(ADR-0004)', () => {
 		const msg = message(validBody);
 		await expect(handleBatch(batchOf([msg]), failingEnv, performers)).resolves.toBeUndefined();
 
-		// performerは実行され、成功のreportの時点で失敗
 		expect(performed).toEqual(['OK#0:valid']);
 		expect(report).toHaveBeenCalledTimes(1);
 		expect(report).toHaveBeenCalledWith('OK#0:valid', { ok: true });
-		// 報告が失われてもackはする, ジョブはQUEUEDのまま残りreaperが拾う
+		// 報告喪失時もack, QUEUEDのジョブはreaperが再処理
 		expect(msg.ack).toHaveBeenCalledTimes(1);
 		expect(msg.retry).not.toHaveBeenCalled();
 	});

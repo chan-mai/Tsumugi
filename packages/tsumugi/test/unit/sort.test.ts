@@ -14,14 +14,14 @@ describe('一覧の並べ替え', () => {
 	});
 
 	it('許可していない列は既定を使う', () => {
-		// 列名はSQLへ直接埋め込み, 検査漏れはそのまま注入
+		// 列名はSQLへ直接埋め込み, 検査漏れでSQLインジェクション
 		for (const injection of ['payload', 'id; DROP TABLE job', '(SELECT 1)', '', 'UPDATED_AT']) {
 			expect(resolveSort(injection, null).column).toBe('updated_at');
 		}
 	});
 
 	it('プロトタイプ由来の名前は許可しない', () => {
-		// `in`での判定はconstructor等を拒否できず、列の代わりに関数が渡り500が発生
+		// `in`判定ではconstructor等を除外不能、列の代わりに関数が渡り500
 		for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
 			expect(resolveSort(name, null).column, name).toBe('updated_at');
 		}
@@ -42,7 +42,7 @@ describe('1回目で成功した試行の構築(ADR-0028)', () => {
 	});
 
 	it('保存された履歴があればそちらを使う', () => {
-		// 構築した1件で上書きすると失敗の理由が消える
+		// 構築した1件での上書きは失敗理由が消失
 		const stored = [{ attempt: 2, state: 'COMPLETED', started_at: 5, finished_at: 6, error: null }];
 		expect(attemptsOf(done, stored)).toBe(stored);
 	});
@@ -61,7 +61,7 @@ describe('1回目で成功した試行の構築(ADR-0028)', () => {
 
 describe('例外の文字列化(ADR-0028)', () => {
 	it('stackをそのまま使う', () => {
-		// stackは1行目にName: messageを含む, 繋げると同じ行が2回出る
+		// stack1行目にName: message含む, 連結すると同じ行が重複
 		const error = new Error('boom');
 		const text = describeError(error);
 		expect(text.split('\n').filter((l) => l.includes('Error: boom'))).toHaveLength(1);

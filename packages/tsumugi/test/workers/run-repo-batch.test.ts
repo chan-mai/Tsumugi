@@ -2,12 +2,8 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import type { TsumugiRunInstance } from '../../src/do/run.js';
 
-/**
- * 一括の書き込みがバインド変数の上限に収まること
- *
- * 1文の変数は100個までで、101個目はSQLITE_ERROR
- * fan-outの展開もtickで変更したノードの追記も件数が実行時に確定し、分割なしでは失敗
- */
+// 1文のバインド変数上限100, 超過でSQLITE_ERROR
+// fan-out展開, tick変更ノード追記は件数が実行時確定
 
 const ns = env.RUN as unknown as DurableObjectNamespace<TsumugiRunInstance>;
 

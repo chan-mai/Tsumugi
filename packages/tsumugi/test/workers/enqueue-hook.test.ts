@@ -3,16 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { createClient } from '../../src/client/enqueue.js';
 import { formatJobId } from '../../src/core/ids.js';
 
-/**
- * 投入時の既定値フック(#96)
- *
- * worker clientの適用はここでDOの行まで確認
- * Run DO / Scheduler DOの経路はexamples/basicのonEnqueue(ListNamesへtimeoutMs 45_000)で確認
- */
+// Run DO / Scheduler DOの経路はexamples/basicのonEnqueue(ListNamesへtimeoutMs 45_000)で確認
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
-/** 投入先を差し替える, 実キューへ出すとconsumerが走って状態が変わる */
+// 実キューはconsumer実行で状態変化
 const install = (name: string) =>
 	runInDurableObject(shard(name), (instance) => {
 		(instance as any).env.TSUMUGI_QUEUE = {
@@ -45,7 +40,7 @@ describe('投入時の既定値フック(#96)', () => {
 		const stub = runNamespace.get(runNamespace.idFromName('GREETINGS:enqueue-hook'));
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'enqhook' } });
 
-		// ノードの投入はRun DOのtickが行う, 確定するまでalarmを回す
+		// ノード投入はRun DOのtickで実施, 確定までalarm反復
 		let jobId: string | null = null;
 		for (let i = 0; i < 10 && jobId === null; i++) {
 			await runDurableObjectAlarm(stub as never);
@@ -55,7 +50,6 @@ describe('投入時の既定値フック(#96)', () => {
 			);
 		}
 
-		// examples/basicのonEnqueueはListNamesへtimeoutMs 45_000を付与
 		const row = await runInDurableObject(shard('ListNames#0'), (instance) => (instance as any).repo.find(jobId) as { timeout_ms: number });
 		expect(row.timeout_ms).toBe(45_000);
 	});
@@ -66,17 +60,16 @@ describe('投入時の既定値フック(#96)', () => {
 		const schedulerNamespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 		const scheduler = schedulerNamespace.get(schedulerNamespace.idFromName('scheduler'));
 		await scheduler.sync();
-		const nextRunAt = await runInDurableObject(
+		const nextOccurrenceAt = await runInDurableObject(
 			scheduler,
-			(instance) => ((instance as any).repo.find('poll-names') as { next_run_at: number }).next_run_at,
+			(instance) => ((instance as any).repo.find('poll-names') as { next_occurrence_at: number }).next_occurrence_at,
 		);
-		// poll-namesの間隔が5分, 初回時刻を超えるため時計を前進
+		// poll-names間隔5分, 初回時刻超過まで時計を前進
 		const ahead = Date.now() + 6 * 60_000;
 		await runInDurableObject(scheduler, (instance) => void ((instance as any).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 
-		// poll-namesがListNamesへ投入, 定期実行の経路にも既定値が届く
-		const jobId = formatJobId({ binding: 'ListNames', shard: 0, localId: `poll-names-${nextRunAt}` });
+		const jobId = formatJobId({ binding: 'ListNames', shard: 0, localId: `poll-names-${nextOccurrenceAt}` });
 		const row = await runInDurableObject(shard('ListNames#0'), (instance) => (instance as any).repo.find(jobId) as { timeout_ms: number });
 		expect(row.timeout_ms).toBe(45_000);
 	});

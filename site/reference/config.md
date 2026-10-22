@@ -191,20 +191,22 @@ const tsumugi = defineTsumugi({
 { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 3_600_000, jitter: true }
 ```
 
-この形を受け取るのはトップレベルの`enqueue`と`createClient`です。
+この形を受け取るのは`createClient`です。
 `defineTsumugi`の`enqueue`は`binding`ごとにpayloadと必須キーが決まる型を受け取ります。
 
 ## SweepOptions
 
 `retention`に指定する値です。
-cronトリガーを設定すると、終了したジョブを一覧から削除します。
+cronトリガーを設定すると、終了したジョブとRunを一覧から削除します。
 
-| 名前          | 既定   | 内容                           |
-| ------------- | ------ | ------------------------------ |
-| `olderThanMs` | 7日    | 終了したジョブを一覧に残す時間 |
-| `limit`       | `1000` | 1回で削除する件数の上限        |
+| 名前          | 既定   | 内容                                         |
+| ------------- | ------ | -------------------------------------------- |
+| `olderThanMs` | 7日    | 終了したジョブとRunを一覧に残す時間          |
+| `limit`       | `1000` | 1回で削除する件数の上限(ジョブ・Runそれぞれ) |
 
-Runは対象に含みません。Runの保持期間は`runs`で指定可能です。
+Runを再開できる期間は`runs`で指定します。
+`FAILED`のRunは、`olderThanMs`か`runs.failedRetentionMs`のいずれか長い方が経過すると一覧から削除されます。
+`FAILED`と`STALLED`のジョブは、`olderThanMs`かbindingの`failedRetentionMs`のいずれか長い方が経過すると一覧から削除されます。
 
 ## wranglerのbinding
 

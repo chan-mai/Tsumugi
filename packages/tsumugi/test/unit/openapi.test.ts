@@ -6,24 +6,17 @@ import { API_VERSION, openapiDocument } from '../../src/api/openapi.js';
 import { createRest } from '../../src/api/rest.js';
 import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
 
-/**
- * OpenAPI定義の網羅
- *
- * 他言語の利用者はこの定義からクライアントを生成し、経路が欠けると存在しないことと同義
- * 実装との突き合わせを自動にしないと、経路を追加した時に定義だけ古いまま残る
- */
+// 他言語の利用者はこの定義からクライアント生成, 経路の欠落は存在しないことと同義
 
 const packageJson = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
 
-/** Honoの`:id`をOpenAPIの`{id}`へ, 比較のために表記を揃える */
 const toTemplate = (path: string) => path.replace(/:([A-Za-z0-9_]+)/g, '{$1}');
 
-/** 実装が登録した経路, ミドルウェアとSPAへの受け皿は除く */
 function registeredRoutes(): string[] {
 	const noop = async (_c: unknown, next: () => Promise<void>) => {
 		await next();
 	};
-	// 任意の経路を全て有効化, 渡さないと501を返す経路が未登録
+	// 未指定時は501を返す経路が未登録
 	const app = createRest(noop as never, {
 		bindings: ['MAIL'],
 		enqueue: async () => 'MAIL#0:x',
@@ -38,6 +31,7 @@ function registeredRoutes(): string[] {
 		shardsOf: () => 1,
 	});
 
+	// ALLはミドルウェアとSPAのフォールバック
 	return app.routes
 		.filter((route) => route.method !== 'ALL')
 		.map((route) => `${route.method} ${toTemplate(route.path)}`)
@@ -70,7 +64,7 @@ describe('OpenAPI定義', () => {
 	});
 
 	it('参照した名前が全てcomponentsに在る', () => {
-		// $refの綴り違いは生成時に初めて失敗する, ここで検出
+		// $refの綴り違いは生成時まで未発覚, ここで検出
 		const document = openapiDocument();
 		const names = new Set(Object.keys(document.components.schemas));
 		const referenced = [...JSON.stringify(document).matchAll(/#\/components\/schemas\/([A-Za-z]+)/g)].map((m) => m[1] as string);
@@ -97,14 +91,14 @@ describe('OpenAPI定義', () => {
 	});
 
 	it('版がpackage.jsonと一致する', () => {
-		// 実行時にpackage.jsonを読めないので写しを持っている, 上げ忘れると古い版の仕様が配られる
+		// 実行時はpackage.json読込不可、写しの更新漏れは旧バージョンの仕様配布
 		const { version } = JSON.parse(readFileSync(packageJson, 'utf8')) as { version: string };
 		expect(API_VERSION).toBe(version);
 	});
 
 	it('生成器の表現差が正規化されている', () => {
-		// 畳み損ねは利用者のクライアント生成物を変える(ADR-0038)
-		// 意図してこれらの表現を使う時は、emit-module.mjsの正規化とこのテストをあわせて更新
+		// 正規化漏れは利用者のクライアント生成物を変更(ADR-0038)
+		// これらの表現の意図的な使用時はemit-module.mjsの正規化と本テストを併せて更新
 		const text = JSON.stringify(openapiDocument());
 		expect(text).not.toContain('"unevaluatedProperties"');
 		expect(text).not.toContain('"anyOf"');
