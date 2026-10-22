@@ -1,9 +1,22 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
 import { describe, expect, it } from 'vitest';
-import { attempt, failureNotify, job, outbox, setting, settledNotify, uniqueKey } from '../../src/do/tables.js';
+import {
+	attempt,
+	failureNotify,
+	job,
+	jobLog,
+	keyBucket,
+	outbox,
+	runNotify,
+	setting,
+	settledNotify,
+	uniqueKey,
+} from '../../src/do/tables.js';
+import { node, run, runOutbox } from '../../src/do/run-tables.js';
 import { schedule, schedulerSetting } from '../../src/do/scheduler-tables.js';
 import { job as readModel } from '../../src/projection/tables.js';
+import { run as runModel, runNode } from '../../src/projection/run-tables.js';
 
 // DOのテーブルは`schema.ts`のDDLで作成, クエリは`tables.ts`で構築
 // 片方のみの修正では型検査成功でも実行時に列欠落
@@ -20,7 +33,7 @@ describe('DDLとDrizzle定義の一致', () => {
 				.sort();
 		});
 
-	for (const table of [job, attempt, uniqueKey, setting, outbox, failureNotify, settledNotify]) {
+	for (const table of [job, attempt, uniqueKey, setting, keyBucket, jobLog, outbox, runNotify, failureNotify, settledNotify]) {
 		const config = getTableConfig(table);
 
 		it(`${config.name}の列が一致する`, async () => {
@@ -60,14 +73,43 @@ describe('Scheduler DOのDDLとDrizzle定義の一致', () => {
 	}
 });
 
-// D1読み取りモデルも`migrations/`のDDLと`projection/tables.ts`の二重管理
-describe('D1のDDLとDrizzle定義の一致', () => {
-	it('jobの列が一致する', async () => {
-		const config = getTableConfig(readModel);
-		const { results } = await env.TSUMUGI_DB.prepare(`SELECT name FROM pragma_table_info('job')`).all<{ name: string }>();
+// Run DOも`run-schema.ts`と`run-tables.ts`の二重管理
+describe('Run DOのDDLとDrizzle定義の一致', () => {
+	// DO型直接参照でTS2589発生, 呼び出しなしで空宣言
+	interface RunFace extends Rpc.DurableObjectBranded {}
+	const namespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
+	const stub = namespace.get(namespace.idFromName('GREETINGS:drift'));
 
-		const actual = results.map((r) => r.name).sort();
-		expect(actual.length).toBeGreaterThan(0);
-		expect(actual).toEqual(config.columns.map((c) => c.name).sort());
-	});
+	const columnsOf = (table: string) =>
+		runInDurableObject(stub, (instance) =>
+			((instance as any).repo.sql as SqlStorage)
+				.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
+				.toArray()
+				.map((r) => r.name)
+				.sort(),
+		);
+
+	for (const table of [run, node, runOutbox]) {
+		const config = getTableConfig(table);
+
+		it(`${config.name}の列が一致する`, async () => {
+			const actual = await columnsOf(config.name);
+			expect(actual.length).toBeGreaterThan(0);
+			expect(actual).toEqual(config.columns.map((c) => c.name).sort());
+		});
+	}
+});
+
+// D1読み取りモデルも`migrations/`のDDLと`projection/`のDrizzle定義の二重管理
+describe('D1のDDLとDrizzle定義の一致', () => {
+	for (const table of [readModel, runModel, runNode]) {
+		const config = getTableConfig(table);
+
+		it(`${config.name}の列が一致する`, async () => {
+			const { results } = await env.TSUMUGI_DB.prepare(`SELECT name FROM pragma_table_info(?)`).bind(config.name).all<{ name: string }>();
+			const actual = results.map((r) => r.name).sort();
+			expect(actual.length).toBeGreaterThan(0);
+			expect(actual).toEqual(config.columns.map((c) => c.name).sort());
+		});
+	}
 });
