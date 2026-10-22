@@ -32,5 +32,5 @@ export function useJobActions(source: Ref<{ state: string; retryable?: boolean }
 		}
 	}
 
-	return { busy, gone, canRetry, canCancel, goneReason, act, reset: () => (gone.value = false) };
+	return { busy, canRetry, canCancel, goneReason, act, reset: () => (gone.value = false) };
 }

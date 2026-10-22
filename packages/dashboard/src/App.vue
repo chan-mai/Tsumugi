@@ -354,8 +354,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 	<div v-else class="p-4 sm:p-8">
 		<header class="mb-6 flex flex-wrap items-center gap-4">
 			<h1 class="text-xl font-bold">Tsumugi</h1>
-			<!-- flowsが1つも無い構成ではrunの画面を非表示 -->
-			<nav v-if="tabs.length > 1" class="flex items-center gap-1 text-sm">
+			<nav class="flex items-center gap-1 text-sm">
 				<button
 					v-for="option in tabs"
 					:key="option"

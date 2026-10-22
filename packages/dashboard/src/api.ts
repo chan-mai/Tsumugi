@@ -212,8 +212,6 @@ export type BulkInput = { ids: string[] };
 export type BulkOutcome = {
 	ok: string[];
 	failed: { id: string; reason: string }[];
-	/** 上限で除外した残りの見積り, 0になるまで反復 */
-	remaining: number;
 };
 
 /** 選択したジョブの一括処理, 状態の判定はサーバ側が担当 */
@@ -227,7 +225,7 @@ export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): 
 	if (res.status === 401) throw new UnauthorizedError();
 	const body = (await res.json().catch(() => ({}))) as Partial<BulkOutcome> & { error?: string };
 	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-	return { ok: body.ok ?? [], failed: body.failed ?? [], remaining: body.remaining ?? 0 };
+	return { ok: body.ok ?? [], failed: body.failed ?? [] };
 };
 
 export type Policy = PolicyView;
