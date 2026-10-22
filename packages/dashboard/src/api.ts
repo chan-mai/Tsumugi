@@ -53,9 +53,10 @@ export function saveToken(value: string): void {
 	document.cookie = `${name}=${encodeURIComponent(value)}; ${cookieAttributes(location.protocol)}`;
 }
 
-async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function call<T>(path: string, init: RequestInit = {}, Unavailable?: new () => Error): Promise<T> {
 	const res = await fetch(path, { ...init, credentials: 'same-origin' });
 	if (res.status === 401) throw new UnauthorizedError();
+	if (res.status === 501 && Unavailable) throw new Unavailable();
 	if (!res.ok) {
 		const body = (await res.json().catch(() => ({}))) as { error?: string };
 		throw new Error(body.error ?? `${res.status}`);
@@ -164,11 +165,7 @@ export class MetricsUnavailableError extends Error {
 export const getMetrics = async (params: { hours: number; binding?: string }): Promise<Metrics> => {
 	const query = new URLSearchParams({ hours: String(params.hours) });
 	if (params.binding) query.set('binding', params.binding);
-	const res = await fetch(`/api/metrics?${query}`, { credentials: 'same-origin' });
-	if (res.status === 401) throw new UnauthorizedError();
-	if (res.status === 501) throw new MetricsUnavailableError();
-	const body = (await res.json().catch(() => ({}))) as Partial<Metrics> & { error?: string };
-	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	const body = await call<Partial<Metrics>>(`/api/metrics?${query}`, {}, MetricsUnavailableError);
 	return { hours: body.hours ?? params.hours, bindings: body.bindings ?? [], series: body.series ?? [] };
 };
 
@@ -180,11 +177,7 @@ export class SchedulesUnavailableError extends Error {
 }
 
 export const listSchedules = async (): Promise<Schedule[]> => {
-	const res = await fetch('/api/schedules', { credentials: 'same-origin' });
-	if (res.status === 401) throw new UnauthorizedError();
-	if (res.status === 501) throw new SchedulesUnavailableError();
-	const body = (await res.json().catch(() => ({}))) as { schedules?: Schedule[]; error?: string };
-	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
+	const body = await call<{ schedules?: Schedule[] }>('/api/schedules', {}, SchedulesUnavailableError);
 	return body.schedules ?? [];
 };
 
@@ -205,15 +198,11 @@ export type BulkOutcome = {
 
 /** 状態判定はサーバ側 */
 export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): Promise<BulkOutcome> => {
-	const res = await fetch(`/api/jobs/bulk-${action}`, {
+	const body = await call<Partial<BulkOutcome>>(`/api/jobs/bulk-${action}`, {
 		method: 'POST',
-		credentials: 'same-origin',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-	if (res.status === 401) throw new UnauthorizedError();
-	const body = (await res.json().catch(() => ({}))) as Partial<BulkOutcome> & { error?: string };
-	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
 	return { ok: body.ok ?? [], failed: body.failed ?? [] };
 };
 
