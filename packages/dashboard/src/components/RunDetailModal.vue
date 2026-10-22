@@ -17,7 +17,7 @@ const busy = ref(false);
 /** 親子のrunを素早く移動した時、前のrunの応答で上書きしないための連番 */
 let loadSequence = 0;
 
-const canRetry = computed(() => run.value?.state === 'FAILED');
+const canRetry = computed(() => run.value?.retryable === true);
 const canCancel = computed(() => run.value?.state === 'RUNNING');
 
 async function load(id: string) {

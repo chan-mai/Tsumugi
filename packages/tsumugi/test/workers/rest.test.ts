@@ -1212,6 +1212,36 @@ describe('runの開始', () => {
 		expect(res.status).toBe(400);
 	});
 
+	it('保持期間を過ぎた失敗runはretryable=false(ADR-0027)', async () => {
+		// Run DOは失敗後failedRetentionMsで削除, D1の行は残り再開は410
+		const shortLived = defineTsumugi({
+			performers: { REST: Noop },
+			flows: { GREETINGS: flow<{ prefix: string }>((f) => void f.node('only', 'REST', { input: (i) => i })) },
+			auth: bearerAuth(TOKEN),
+			runs: { failedRetentionMs: 60_000 },
+		});
+		const seed = (id: string, updatedAt: number) =>
+			env.TSUMUGI_DB.prepare(
+				`INSERT OR REPLACE INTO run (id, seq, flow, state, input, node_total, node_done, node_failed, created_at, updated_at)
+				 VALUES (?, 1, 'GREETINGS', 'FAILED', '{}', 1, 0, 1, ?, ?)`,
+			)
+				.bind(id, updatedAt, updatedAt)
+				.run();
+		const detail = async (id: string) => {
+			const res = await shortLived.fetch!(
+				new Request(`https://example.com/api/runs/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${TOKEN}` } }),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+			return (await res.json<{ run: { retryable: boolean } }>()).run.retryable;
+		};
+
+		await seed('GREETINGS:retention-old', Date.now() - 10 * 60_000);
+		await seed('GREETINGS:retention-fresh', Date.now());
+		expect(await detail('GREETINGS:retention-old')).toBe(false);
+		expect(await detail('GREETINGS:retention-fresh')).toBe(true);
+	});
+
 	it('Object.prototypeの名前を登録済みとして扱わない', async () => {
 		await expect(withFlows.start(env as never, 'constructor' as never, {} as never)).rejects.toThrow(/flow is not registered/);
 		await expect(withFlows.start(env as never, 'toString' as never, {} as never)).rejects.toThrow(/flow is not registered/);

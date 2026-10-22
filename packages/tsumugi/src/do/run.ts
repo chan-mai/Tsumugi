@@ -62,7 +62,7 @@ export const DEFAULT_MAX_DEPTH = 3;
 const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
 
 /** 失敗したrunをDOに残す時間, 再開を受け付ける期間(ADR-0034) */
-const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEFAULT_RUN_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type RunSettings = {
 	/** 1つのrunに入るノード数の上限(ADR-0035) */
@@ -157,7 +157,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 	const nameOf = (child: AnyFlow) => Object.keys(flows).find((name) => flows[name] === child);
 	const retention: Retention = {
 		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
-		failedMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
+		failedMs: settings.failedRetentionMs ?? DEFAULT_RUN_FAILED_RETENTION_MS,
 	};
 	const client = createClient<RunEnv>(
 		bindings,

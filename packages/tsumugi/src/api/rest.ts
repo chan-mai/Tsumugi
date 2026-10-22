@@ -60,6 +60,8 @@ export type RestOptions<Env extends RestEnv> = {
 	 * 一覧の`retryable`に必要, 実行可否の事前判定用(ADR-0027)
 	 */
 	failedRetentionMs?: (binding: string) => number;
+	/** 失敗したrunの保持期間, 詳細の`retryable`の判定用(ADR-0034) */
+	runFailedRetentionMs?: number;
 	/** 登録済みflowの名前, 開始先の検証と選択肢に使用 */
 	flows?: readonly string[];
 	start?: (env: Env, flow: string, input: unknown, options?: { id?: string; deadlineMs?: number }) => Promise<string>;
@@ -472,7 +474,19 @@ export type { SortColumn };
  * 稼働中も投影済みでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings, shardsOf, enqueue, failedRetentionMs, flows = [], start, runFor, schedulerFor, metrics } = options;
+	const {
+		dashboard,
+		bindings,
+		shardsOf,
+		enqueue,
+		failedRetentionMs,
+		runFailedRetentionMs,
+		flows = [],
+		start,
+		runFor,
+		schedulerFor,
+		metrics,
+	} = options;
 
 	/**
 	 * 一覧の1行にretryの可否を付与
@@ -1050,8 +1064,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				// subflowとして起動された場合の親, 画面から親のrunへの参照用
 				parent_run_id: found.parentRunId,
 				parent_node_id: found.parentNodeId,
-				// 終端でなければ再開不可, 操作前に可否を表示(ADR-0034)
-				retryable: found.state === 'FAILED',
+				// 失敗のみ再開可, 保持期間後はDOが削除済みでジョブのretryableと同じ近似(ADR-0034)
+				retryable: found.state === 'FAILED' && (runFailedRetentionMs === undefined || found.updatedAt > Date.now() - runFailedRetentionMs),
 			},
 			nodes: nodes.map((node) => ({
 				id: node.nodeId,
