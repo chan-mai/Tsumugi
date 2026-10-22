@@ -227,7 +227,7 @@ await tsumugi.jobs(env).enqueue('CHARGE', payload, { concurrencyKey: 'customer:c
 ```
 
 ::: warning
-トップレベルの`enqueue(env, input)`と`createClient()`では必須化が適用されません。
+`createClient()`では必須化が適用されません。
 [投入経路](/guide/enqueue#paths)を参照してください。
 :::
 

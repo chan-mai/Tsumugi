@@ -2,16 +2,15 @@
 
 ## 投入経路 {#paths}
 
-投入には3つの経路があります。
+投入には2つの経路があります。
 
 | 経路                                    | 型                                        | `bindings`の設定       |
 | --------------------------------------- | ----------------------------------------- | ---------------------- |
 | `tsumugi.enqueue` / `tsumugi.jobs(env)` | bindingごとにpayloadと必須キーが決まる    | 反映される             |
-| `enqueue(env, input)`                   | `binding`は`string`、`payload`は`unknown` | 反映されない           |
-| `createClient(bindings)`                | 同上                                      | 引数の内容が反映される |
+| `createClient(bindings)`                | `binding`は`string`、`payload`は`unknown` | 引数の内容が反映される |
 
-推奨は`defineTsumugi`の戻り値を使う経路です。
-トップレベルの`enqueue`は`defineTsumugi`の設定を参照しないため、`bindings`で指定した分割数、流量制御、保持期間が反映されず、`partitionKey`も無効です。
+通常、performerと同じWorkerからは、`defineTsumugi`の戻り値を利用します。
+`createClient`は投入のみを限定的に行うWorker向けに提供されています。
 また、wranglerのbindingが不足している場合、`tsumugi.enqueue`と`tsumugi.jobs`では不足の一覧を含む例外が発生することがあります。
 
 ## enqueue

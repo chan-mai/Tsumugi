@@ -191,7 +191,7 @@ const tsumugi = defineTsumugi({
 { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 3_600_000, jitter: true }
 ```
 
-この形を受け取るのはトップレベルの`enqueue`と`createClient`です。
+この形を受け取るのは`createClient`です。
 `defineTsumugi`の`enqueue`は`binding`ごとにpayloadと必須キーが決まる型を受け取ります。
 
 ## SweepOptions

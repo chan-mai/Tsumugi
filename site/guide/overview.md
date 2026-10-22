@@ -47,7 +47,7 @@ Tsumugiはこれらを内部でいい感じに処理します。
 あなたが書くのは2箇所だけです。
 
 ```ts
-import { enqueue } from 'tsumugi';
+import { defineTsumugi } from 'tsumugi';
 import { Performer } from 'tsumugi/performer';
 
 // 1. ジョブの中身をperformerとして定義してexportする
@@ -57,8 +57,10 @@ export class SendMail extends Performer<{ to: string }, void, {}, Env> {
   }
 }
 
+const tsumugi = defineTsumugi({ performers: { SendMail } });
+
 // 2. 投入する。binding名はexportした名前
-const id = await enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
+const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
 ```
 
 キューの構成もconsumerの分岐も一覧への反映も、意識する必要はありません。
