@@ -2,21 +2,19 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import BindingsView from './components/BindingsView.vue';
 import BulkActions from './components/BulkActions.vue';
-import CheckBox from './components/CheckBox.vue';
 import DateRangeMenu from './components/DateRangeMenu.vue';
 import FilterMenu from './components/FilterMenu.vue';
 import JobDetailModal from './components/JobDetailModal.vue';
+import JobsTable from './components/JobsTable.vue';
 import MetricsView from './components/MetricsView.vue';
 import NewJobModal from './components/NewJobModal.vue';
 import NewRunModal from './components/NewRunModal.vue';
 import Pagination from './components/Pagination.vue';
 import RefreshMenu from './components/RefreshMenu.vue';
-import RowActions from './components/RowActions.vue';
 import RunDetailModal from './components/RunDetailModal.vue';
+import RunsTable from './components/RunsTable.vue';
 import SchedulesView from './components/SchedulesView.vue';
 import SearchBox from './components/SearchBox.vue';
-import SortHeader from './components/SortHeader.vue';
-import StatusCell from './components/StatusCell.vue';
 import TokenPrompt from './components/TokenPrompt.vue';
 import ViewMenu from './components/ViewMenu.vue';
 import {
@@ -33,9 +31,9 @@ import {
 	type Job,
 	type Run,
 } from './api';
+import { TOGGLEABLE, toggleColumn, visible } from './columns';
 import { loadRefresh, REFRESH_KEY } from './refresh';
 import { isJobId, type SearchField } from './search';
-import { formatTimestamp } from './time';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 const RUN_STATES = ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
@@ -206,21 +204,10 @@ function resetFilters() {
 	createdTo.value = null;
 }
 
-const progressOf = (run: Run) => `${run.node_done} / ${run.node_total}`;
-
 const selectedIds = computed(() => picked.value.filter((id) => jobs.value.some((job) => job.id === id)));
-const allPicked = computed(() => jobs.value.length > 0 && jobs.value.every((job) => picked.value.includes(job.id)));
 
 function clearSelection() {
 	picked.value = [];
-}
-
-function togglePick(id: string) {
-	picked.value = picked.value.includes(id) ? picked.value.filter((value) => value !== id) : [...picked.value, id];
-}
-
-function toggleAll() {
-	picked.value = allPicked.value ? [] : jobs.value.map((job) => job.id);
 }
 
 function restartTimer() {
@@ -276,52 +263,6 @@ onMounted(() => {
 	detectFeatures();
 });
 onUnmounted(() => timer && clearInterval(timer));
-
-const at = (value: number | null) => (value === null ? '' : formatTimestamp(value));
-const durationOf = (job: Job) =>
-	job.dispatched_at && job.updated_at > job.dispatched_at ? `${job.updated_at - job.dispatched_at} ms` : '';
-
-// 狭い画面での操作性確保、重要度の低い列から非表示
-const COLUMN = {
-	id: 'hidden lg:table-cell',
-	startedAt: 'hidden xl:table-cell',
-	updatedAt: 'hidden md:table-cell',
-	attempts: 'hidden sm:table-cell',
-	processingTime: 'hidden xl:table-cell',
-};
-const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
-
-// Binding, Statusは行識別用に固定
-const TOGGLEABLE = [
-	{ key: 'id', label: 'ID' },
-	{ key: 'startedAt', label: 'Started at' },
-	{ key: 'updatedAt', label: 'Updated at' },
-	{ key: 'attempts', label: 'Attempts' },
-	{ key: 'processingTime', label: 'Processing time' },
-];
-const VIEW_KEY = 'tsumugi:columns';
-
-function loadVisible(): Record<string, boolean> {
-	const all = Object.fromEntries(TOGGLEABLE.map((c) => [c.key, true]));
-	try {
-		return { ...all, ...(JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as Record<string, boolean>) };
-	} catch {
-		return all;
-	}
-}
-
-const visible = ref(loadVisible());
-
-function toggleColumn(key: string) {
-	visible.value = { ...visible.value, [key]: !visible.value[key] };
-	try {
-		localStorage.setItem(VIEW_KEY, JSON.stringify(visible.value));
-	} catch {
-		// プライベートモード等の書き込み不可, 表示自体は継続
-	}
-}
-
-const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[key] : 'hidden');
 </script>
 
 <template>
@@ -415,114 +356,19 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 
 			<BindingsView v-else-if="tab === 'bindings'" ref="bindingsView" />
 
-			<div v-else-if="tab === 'runs'" class="relative w-full overflow-x-auto rounded-card border border-border">
-				<table class="w-full caption-bottom text-sm">
-					<thead class="[&_tr]:border-b [&_tr]:border-border">
-						<tr>
-							<th :class="HEAD">Flow</th>
-							<th :class="[HEAD, columnClass('id')]">ID</th>
-							<th :class="HEAD">Status</th>
-							<th :class="HEAD">Nodes</th>
-							<th :class="[HEAD, columnClass('updatedAt')]">Updated at</th>
-						</tr>
-					</thead>
-					<tbody class="[&_tr:last-child]:border-0">
-						<tr
-							v-for="run in runs"
-							:key="run.id"
-							class="cursor-pointer border-b border-border transition-colors hover:bg-muted"
-							@click="selectedRun = run.id"
-						>
-							<td class="p-4 align-middle">
-								{{ run.flow }}
-								<!-- ID列非表示の幅での行識別用 -->
-								<span class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ run.id }}</span>
-							</td>
-							<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ run.id }}</td>
-							<td class="p-4 align-middle"><StatusCell :state="run.state" /></td>
-							<td class="p-4 align-middle tabular-nums">
-								{{ progressOf(run) }}
-								<span v-if="run.node_failed > 0" class="text-destructive">({{ run.node_failed }})</span>
-							</td>
-							<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('updatedAt')">{{ at(run.updated_at) }}</td>
-						</tr>
-						<tr v-if="runs.length === 0">
-							<td colspan="5" class="h-24 text-center text-muted-foreground">No results.</td>
-						</tr>
-					</tbody>
-				</table>
-			</div>
+			<RunsTable v-else-if="tab === 'runs'" :runs="runs" @select="selectedRun = $event" />
 
-			<div v-else class="relative w-full overflow-x-auto rounded-card border border-border">
-				<table class="w-full caption-bottom text-sm">
-					<thead class="[&_tr]:border-b [&_tr]:border-border">
-						<tr>
-							<th class="h-12 w-10 pl-4">
-								<button
-									type="button"
-									class="flex size-6 items-center justify-center rounded-sm border-none hover:bg-accent"
-									aria-label="Select all rows"
-									@click="toggleAll"
-								>
-									<CheckBox :checked="allPicked" />
-								</button>
-							</th>
-							<th :class="HEAD">
-								<SortHeader label="Binding" column="binding" :sort="sort" :desc="desc" @sort="sortBy" />
-							</th>
-							<th :class="[HEAD, columnClass('id')]">ID</th>
-							<th :class="HEAD">
-								<SortHeader label="Status" column="state" :sort="sort" :desc="desc" @sort="sortBy" />
-							</th>
-							<th :class="[HEAD, columnClass('startedAt')]">Started at</th>
-							<th :class="[HEAD, columnClass('updatedAt')]">
-								<SortHeader label="Updated at" column="updated_at" :sort="sort" :desc="desc" @sort="sortBy" />
-							</th>
-							<th :class="[HEAD, columnClass('attempts')]">
-								<SortHeader label="Attempts" column="attempts" :sort="sort" :desc="desc" @sort="sortBy" />
-							</th>
-							<th :class="[HEAD, columnClass('processingTime')]">Processing time</th>
-							<th class="h-12 w-12 px-4" />
-						</tr>
-					</thead>
-					<tbody class="[&_tr:last-child]:border-0">
-						<tr
-							v-for="job in jobs"
-							:key="job.id"
-							class="cursor-pointer border-b border-border transition-colors hover:bg-muted"
-							@click="selected = job.id"
-						>
-							<td class="pl-4 align-middle" @click.stop>
-								<button
-									type="button"
-									class="flex size-6 items-center justify-center rounded-sm border-none hover:bg-accent"
-									:aria-label="`Select ${job.id}`"
-									@click="togglePick(job.id)"
-								>
-									<CheckBox :checked="picked.includes(job.id)" />
-								</button>
-							</td>
-							<td class="p-4 align-middle">
-								{{ job.binding }}
-								<!-- ID列非表示の幅での行識別用 -->
-								<span v-if="visible.id" class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ job.id }}</span>
-							</td>
-							<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ job.id }}</td>
-							<td class="p-4 align-middle"><StatusCell :state="job.state" /></td>
-							<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('startedAt')">{{ at(job.dispatched_at) }}</td>
-							<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('updatedAt')">{{ at(job.updated_at) }}</td>
-							<td class="p-4 align-middle tabular-nums" :class="columnClass('attempts')">{{ job.attempts }} / {{ job.max_attempts }}</td>
-							<td class="p-4 align-middle tabular-nums" :class="columnClass('processingTime')">{{ durationOf(job) }}</td>
-							<td class="p-4 align-middle" @click.stop>
-								<RowActions :job-id="job.id" :state="job.state" :retryable="job.retryable" @changed="load" @message="message = $event" />
-							</td>
-						</tr>
-						<tr v-if="jobs.length === 0">
-							<td colspan="9" class="h-24 text-center text-muted-foreground">No results.</td>
-						</tr>
-					</tbody>
-				</table>
-			</div>
+			<JobsTable
+				v-else
+				v-model:picked="picked"
+				:jobs="jobs"
+				:sort="sort"
+				:desc="desc"
+				@select="selected = $event"
+				@sort="sortBy"
+				@changed="load"
+				@message="message = $event"
+			/>
 
 			<Pagination v-if="isList" v-model:page="page" v-model:page-size="pageSize" :total="total" :unit="tab" />
 		</div>
