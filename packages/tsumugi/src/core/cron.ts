@@ -104,8 +104,8 @@ export function parseCron(expression: string): CronSpec {
 		daysOfMonth: parsed[2]!,
 		months: parsed[3]!,
 		daysOfWeek,
-		restrictedDayOfMonth: fields[2] !== '*',
-		restrictedDayOfWeek: fields[4] !== '*',
+		restrictedDayOfMonth: !fields[2]!.startsWith('*'),
+		restrictedDayOfWeek: !fields[4]!.startsWith('*'),
 	};
 }
 

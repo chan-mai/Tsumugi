@@ -72,6 +72,8 @@ export type CreateJobRequest = {
 	priority?: number;
 	concurrencyKey?: string;
 	uniqueKey?: string;
+	/** 分割したbindingの投入先shardの決定, shards>=2では必須(ADR-0011) */
+	partitionKey?: string;
 	traceparent?: string;
 };
 

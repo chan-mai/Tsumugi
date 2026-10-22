@@ -54,6 +54,7 @@ describe('投入内容の検証', () => {
 	it('キーは文字列でなければ拒否する', () => {
 		expect(ok({ binding: 'MAIL', payload: {}, uniqueKey: 1 })).toEqual({ error: 'uniqueKey must be a string' });
 		expect(ok({ binding: 'MAIL', payload: {}, concurrencyKey: {} })).toEqual({ error: 'concurrencyKey must be a string' });
+		expect(ok({ binding: 'MAIL', payload: {}, partitionKey: 1 })).toEqual({ error: 'partitionKey must be a string' });
 	});
 
 	it('任意項目を取り込む', () => {
@@ -66,6 +67,7 @@ describe('投入内容の検証', () => {
 			priority: 2,
 			uniqueKey: 'u',
 			concurrencyKey: 'c',
+			partitionKey: 'p',
 		});
 		expect(result).toEqual({
 			input: {
@@ -77,12 +79,13 @@ describe('投入内容の検証', () => {
 				priority: 2,
 				uniqueKey: 'u',
 				concurrencyKey: 'c',
+				partitionKey: 'p',
 			},
 		});
 	});
 
 	it('空文字のキーは付けない', () => {
-		expect(ok({ binding: 'MAIL', payload: {}, uniqueKey: '', concurrencyKey: '' })).toEqual({
+		expect(ok({ binding: 'MAIL', payload: {}, uniqueKey: '', concurrencyKey: '', partitionKey: '' })).toEqual({
 			input: { binding: 'MAIL', payload: {} },
 		});
 	});

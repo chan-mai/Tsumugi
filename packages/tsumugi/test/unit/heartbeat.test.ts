@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHeartbeat, HEARTBEAT_MIN_INTERVAL_MS } from '../../src/queue/consumer.js';
 
 /** 呼び出しを記録する送信口, 時刻は明示的に進める */
@@ -61,6 +61,28 @@ describe('生存報告の間引き', () => {
 			10,
 		);
 		await expect(heartbeat()).resolves.toEqual({ cancelRequested: false });
+	});
+
+	it('送信が同期的に例外を送出しても呼び出し側へ投げない', async () => {
+		const heartbeat = createHeartbeat(
+			() => {
+				throw new Error('unreachable');
+			},
+			() => 0,
+		);
+		await expect(heartbeat()).resolves.toEqual({ cancelRequested: false });
+	});
+
+	describe('待機の上限のタイマー', () => {
+		afterEach(() => void vi.useRealTimers());
+
+		it('送信が先に終われば解除する', async () => {
+			// 未解除では呼び出しごとにタイマーが増加, 上限の経過まで保持
+			vi.useFakeTimers();
+			const { heartbeat } = harness();
+			await heartbeat();
+			expect(vi.getTimerCount()).toBe(0);
+		});
 	});
 });
 

@@ -258,6 +258,38 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
+	it('再開はfan-outで許容済みの子の失敗を再実行しない(ADR-0034)', async () => {
+		const runId = 'GREETINGS:fanretry';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'fr' } });
+
+		// 各ノードを投入まで進め、終端の通知を手で届ける
+		const finish = async (nodeId: string, state: 'COMPLETED' | 'FAILED', result: unknown = null, error = 'intentional failure') => {
+			await settleRun(runId);
+			sent.length = 0;
+			const jobId = await jobIdOf(runId, nodeId);
+			if (jobId === null) throw new Error(`${nodeId} has no job id`);
+			await stub.notify([{ nodeId, jobId, state, result: JSON.stringify(result), error: state === 'FAILED' ? error : null }]);
+		};
+		await finish('list', 'COMPLETED', { names: ['a', 'b'] });
+		// 期限超過と同様の理由であっても期限の無いrunでは許容済みの失敗
+		await finish('greet:0', 'FAILED', null, 'run deadline exceeded: 10000ms');
+		await finish('greet:1', 'COMPLETED');
+		await finish('report', 'FAILED');
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('FAILED');
+		const tolerated = await jobIdOf(runId, 'greet:0');
+
+		expect(await stub.retry()).toEqual({ ok: true });
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ greet: 'COMPLETED', 'greet:0': 'FAILED', report: 'PENDING' });
+
+		await finish('report', 'COMPLETED');
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('COMPLETED');
+		expect(await jobIdOf(runId, 'greet:0')).toBe(tolerated);
+	});
+
 	it('取り消しは未起動を止めて終端を待つ', async () => {
 		const runId = 'GREETINGS:cancel1';
 		const stub = runStub(runId);
@@ -271,6 +303,30 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('CANCELLED');
 		// 終端に達したrunは取り消せない
 		expect(await stub.cancel()).toEqual({ ok: false, reason: 'invalid-state' });
+	});
+
+	it('決定の無い完了通知でもrunの進捗がD1へ投影される(ADR-0008)', async () => {
+		const runId = 'GREETINGS:progress1';
+		await installQueues();
+		await runStub(runId).start({ flow: 'GREETINGS', input: { prefix: 'pg' } });
+		await settleRun(runId);
+		sent.length = 0;
+
+		// listの完了でfan-outの子3つを展開, 実行の配送なし
+		const listJob = await jobIdOf(runId, 'list');
+		await runStub(runId).notify([
+			{ nodeId: 'list', jobId: listJob!, state: 'COMPLETED', result: JSON.stringify({ names: ['a', 'b', 'c'] }), error: null },
+		]);
+		await settleRun(runId);
+		sent.length = 0;
+
+		// 兄弟が実行中で新しい決定は出ない完了
+		const childJob = await jobIdOf(runId, 'greet:0');
+		await runStub(runId).notify([{ nodeId: 'greet:0', jobId: childJob!, state: 'COMPLETED', result: null, error: null }]);
+		await settleRun(runId);
+
+		const row = await env.TSUMUGI_DB.prepare('SELECT node_done FROM run WHERE id = ?').bind(runId).first<{ node_done: number }>();
+		expect(row?.node_done).toBe(2);
 	});
 
 	it('runとノードがD1へ投影される(ADR-0008)', async () => {

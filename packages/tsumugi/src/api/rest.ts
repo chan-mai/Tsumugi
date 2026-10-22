@@ -1,4 +1,4 @@
-import { and, asc, desc as sqlDesc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc as sqlDesc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
@@ -60,6 +60,8 @@ export type RestOptions<Env extends RestEnv> = {
 	 * 一覧の`retryable`に必要, 実行可否の事前判定用(ADR-0027)
 	 */
 	failedRetentionMs?: (binding: string) => number;
+	/** 失敗したrunの保持期間, 詳細の`retryable`の判定用(ADR-0034) */
+	runFailedRetentionMs?: number;
 	/** 登録済みflowの名前, 開始先の検証と選択肢に使用 */
 	flows?: readonly string[];
 	start?: (env: Env, flow: string, input: unknown, options?: { id?: string; deadlineMs?: number }) => Promise<string>;
@@ -108,7 +110,7 @@ export function validateCreateJob(
 		return { error: 'expiresInMs must be a positive integer' };
 	}
 
-	for (const name of ['concurrencyKey', 'uniqueKey'] as const) {
+	for (const name of ['concurrencyKey', 'uniqueKey', 'partitionKey'] as const) {
 		if (raw[name] !== undefined && typeof raw[name] !== 'string') return { error: `${name} must be a string` };
 	}
 
@@ -129,6 +131,7 @@ export function validateCreateJob(
 	if (typeof raw.priority === 'number') input.priority = raw.priority;
 	if (typeof raw.concurrencyKey === 'string' && raw.concurrencyKey) input.concurrencyKey = raw.concurrencyKey;
 	if (typeof raw.uniqueKey === 'string' && raw.uniqueKey) input.uniqueKey = raw.uniqueKey;
+	if (typeof raw.partitionKey === 'string' && raw.partitionKey) input.partitionKey = raw.partitionKey;
 	return { input };
 }
 
@@ -303,6 +306,7 @@ export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input
 			return { error: `${name} must be a number` };
 		}
 	}
+	if (typeof raw.limit === 'number' && !Number.isInteger(raw.limit)) return { error: 'limit must be an integer' };
 	if (typeof raw.limit === 'number' && raw.limit < 1) return { error: 'limit must be at least 1' };
 
 	return {
@@ -470,7 +474,19 @@ export type { SortColumn };
  * 稼働中も投影済みでページングもソートも通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings, shardsOf, enqueue, failedRetentionMs, flows = [], start, runFor, schedulerFor, metrics } = options;
+	const {
+		dashboard,
+		bindings,
+		shardsOf,
+		enqueue,
+		failedRetentionMs,
+		runFailedRetentionMs,
+		flows = [],
+		start,
+		runFor,
+		schedulerFor,
+		metrics,
+	} = options;
 
 	/**
 	 * 一覧の1行にretryの可否を付与
@@ -590,7 +606,14 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const parsed = validateCreateJob(body, bindings, c.req.header('traceparent'));
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
-		const id = await enqueue(c.env, parsed.input);
+		let id: string;
+		try {
+			id = await enqueue(c.env, parsed.input);
+		} catch (error) {
+			// 分割構成のpartitionKey欠落, binding名の不正は入力の誤り
+			if (error instanceof InvalidJobIdError) return c.json({ error: error.message } satisfies ErrorResponse, 400);
+			throw error;
+		}
 		return c.json({ id } satisfies CreateJobResponse, 201);
 	});
 
@@ -615,6 +638,19 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	});
 
 	/**
+	 * DOに残る失敗ジョブの条件, retryableと同じ保持期間からの近似
+	 * 除外しないと消えた行がcreatedAt順の先頭に残り、繰り返しても後続へ未到達
+	 * binding未指定時は登録一覧ごとの条件, 一覧が無ければ近似不能で条件なし
+	 */
+	const retainedClause = (binding: string | undefined, now: number) => {
+		if (!failedRetentionMs) return undefined;
+		const retained = (name: string) => gt(readModel.updatedAt, now - failedRetentionMs(name));
+		if (binding) return retained(binding);
+		if (!bindings || bindings.length === 0) return undefined;
+		return or(...bindings.map((name) => and(eq(readModel.binding, name), retained(name))));
+	};
+
+	/**
 	 * 条件に一致するジョブの一括処理
 	 *
 	 * 対象は読み取りモデルから取得, 横断的な抽出はDOには問い合わせ不能(ADR-0008)
@@ -637,6 +673,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				...[
 					inArray(readModel.state, [...states]),
 					action === 'cancel' ? isNull(readModel.cancelRequestedAt) : undefined,
+					action === 'retry' ? retainedClause(binding, Date.now()) : undefined,
 					binding ? eq(readModel.binding, binding) : undefined,
 					uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
 					concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
@@ -865,12 +902,12 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	/**
 	 * 拒否の理由をHTTPの意味へ変換
-	 * goneは410, 資源が在ったが失われた状態を指す, 状態違いの409とは利用者の対応が違う
+	 * goneは410, 未作成と保持期間後の削除は区別不能, 状態違いの409とは利用者の対応が違う
 	 */
 	function refusal(result: { ok: false; reason: 'invalid-state' | 'gone' }, subject: 'job' | 'run' = 'job') {
 		return result.reason === 'gone'
 			? ({
-					body: { ok: false, error: `${subject} is no longer available: removed from the coordinator after the retention period` },
+					body: { ok: false, error: `${subject} not found: it does not exist or was removed after the retention period` },
 					status: 410,
 				} as const)
 			: ({ body: { ok: false, error: 'not allowed in the current state' }, status: 409 } as const);
@@ -1027,8 +1064,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				// subflowとして起動された場合の親, 画面から親のrunへの参照用
 				parent_run_id: found.parentRunId,
 				parent_node_id: found.parentNodeId,
-				// 終端でなければ再開不可, 操作前に可否を表示(ADR-0034)
-				retryable: found.state === 'FAILED',
+				// 失敗のみ再開可, 保持期間後はDOが削除済みでジョブのretryableと同じ近似(ADR-0034)
+				retryable: found.state === 'FAILED' && (runFailedRetentionMs === undefined || found.updatedAt > Date.now() - runFailedRetentionMs),
 			},
 			nodes: nodes.map((node) => ({
 				id: node.nodeId,

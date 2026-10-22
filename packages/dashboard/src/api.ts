@@ -120,19 +120,12 @@ export const listJobs = (params: ListParams) => {
 
 export type CreateJobInput = CreateJobRequest;
 
-export const createJob = async (input: CreateJobInput) => {
-	const res = await fetch('/api/jobs', {
+export const createJob = (input: CreateJobInput) =>
+	call<{ id: string }>('/api/jobs', {
 		method: 'POST',
-		credentials: 'same-origin',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-	if (res.status === 401) throw new UnauthorizedError();
-	const body = (await res.json()) as { id?: string; error?: string };
-	// 検証に失敗した理由はサーバが返し、そのまま表示
-	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-	return { id: body.id as string };
-};
 
 export type ListRunParams = { state?: string; flow?: string; limit: number; offset: number };
 
@@ -152,18 +145,12 @@ export const cancelRun = (id: string) => mutate(`/api/runs/${encodeURIComponent(
 
 export type StartRunInput = StartRunRequest;
 
-export const startRun = async (input: StartRunInput) => {
-	const res = await fetch('/api/runs', {
+export const startRun = (input: StartRunInput) =>
+	call<{ id: string }>('/api/runs', {
 		method: 'POST',
-		credentials: 'same-origin',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-	if (res.status === 401) throw new UnauthorizedError();
-	const body = (await res.json()) as { id?: string; error?: string };
-	if (!res.ok) throw new Error(body.error ?? `${res.status}`);
-	return { id: body.id as string };
-};
 
 export type BindingMetrics = {
 	binding: string;

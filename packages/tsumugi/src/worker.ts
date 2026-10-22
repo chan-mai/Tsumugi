@@ -5,7 +5,7 @@ import { TERMINAL_STATES } from './core/transitions.js';
 import type { SettledState } from './core/types.js';
 import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
-import { createRunClass, type RunClass, type RunSettings, type StartResult } from './do/run.js';
+import { createRunClass, DEFAULT_RUN_FAILED_RETENTION_MS, type RunClass, type RunSettings, type StartResult } from './do/run.js';
 import {
 	createSchedulerClass,
 	SCHEDULER_DO_NAME,
@@ -289,6 +289,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 				enqueue: (env, input) => client.enqueue(env, input),
 				// 一覧のretryable判定に使う, UI側が押す前に可否を出せるようにする(ADR-0027)
 				failedRetentionMs: (binding) => configOf(config.bindings ?? {}, binding)?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
+				runFailedRetentionMs: config.runs?.failedRetentionMs ?? DEFAULT_RUN_FAILED_RETENTION_MS,
 				flows: Object.keys(flows),
 				// 未設定なら渡さない, `/api/metrics`は501を返す
 				...(config.metrics ? { metrics: config.metrics as MetricsResolver<Env> } : {}),

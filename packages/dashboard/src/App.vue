@@ -108,9 +108,25 @@ function commitSearch(value: string) {
 	if (searchField.value === 'id' && isJobId(value)) selected.value = value;
 }
 
+/**
+ * 条件の世代, タブ / 抽出条件 / 頁の変更で更新
+ * 遅れて届いた旧条件の応答の破棄用, 定期更新では据え置き(応答が間隔より遅いと全件破棄)
+ */
+let conditionGeneration = 0;
+let requestSequence = 0;
+let appliedSequence = 0;
+
+/** 条件を変えた後の再読込, 変更前に発行した要求の応答は反映なし */
+function reloadForConditions() {
+	conditionGeneration++;
+	load();
+}
+
 async function load() {
-	// 切替前に発行した応答で共有の状態を上書きしないよう、開始時のタブを保持
+	const generation = conditionGeneration;
+	const sequence = ++requestSequence;
 	const requested = tab.value;
+	const stale = () => generation !== conditionGeneration || sequence < appliedSequence;
 	try {
 		if (requested === 'metrics') {
 			await metricsView.value?.load();
@@ -134,7 +150,8 @@ async function load() {
 				}),
 				getFlows(),
 			]);
-			if (tab.value !== requested) return;
+			if (stale()) return;
+			appliedSequence = sequence;
 			runs.value = list.runs;
 			total.value = list.total;
 			flows.value = available.flows;
@@ -159,7 +176,8 @@ async function load() {
 			getBindings(),
 			getFlows(),
 		]);
-		if (tab.value !== requested) return;
+		if (stale()) return;
+		appliedSequence = sequence;
 		jobs.value = list.jobs;
 		total.value = list.total;
 		byState.value = stats.byState;
@@ -168,7 +186,8 @@ async function load() {
 		error.value = null;
 		unauthorized.value = false;
 	} catch (e) {
-		if (tab.value !== requested) return;
+		if (stale()) return;
+		appliedSequence = sequence;
 		if (isUnauthorized(e)) {
 			// HTML自体は未認証でも返り、ここで初めて認証の要否が判明
 			unauthorized.value = true;
@@ -184,7 +203,7 @@ function switchTab(next: 'jobs' | 'runs' | 'schedules' | 'bindings' | 'metrics')
 	tab.value = next;
 	resetFilters();
 	page.value = 0;
-	load();
+	reloadForConditions();
 }
 
 function resetFilters() {
@@ -232,9 +251,9 @@ function setRefresh(ms: number) {
 
 watch([state, binding, runFlow, searchField, search, createdFrom, createdTo, pageSize, sort, desc], () => {
 	page.value = 0;
-	load();
+	reloadForConditions();
 });
-watch(page, load);
+watch(page, reloadForConditions);
 
 /** 同一列で向きの反転, 別列なら降順から */
 function sortBy(column: string) {
@@ -258,9 +277,14 @@ async function detectFeatures() {
 	hasSchedules.value = available(schedules);
 }
 
-/** トークンを入れ直した後の再読込, 認証で隠れていたタブもここで戻る */
+/**
+ * トークンを入れ直した後の再読込, 認証で隠れていたタブもここで戻る
+ * jobs / runs以外のタブは再マウント時に自前で読み込み, 401なら再びトークン入力へ
+ */
 function reload() {
-	load();
+	unauthorized.value = false;
+	// トークン入力前の要求の401で入力画面へ戻さない
+	reloadForConditions();
 	detectFeatures();
 }
 
@@ -383,9 +407,9 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
 					<div v-if="!isList" class="grow" />
-					<!-- 一覧向けの操作は他のタブでは非表示, 選択が残っていても対象が見えない -->
+					<!-- ジョブの一括操作は他のタブでは非表示, 選択が残っていても対象が見えない -->
 					<BulkActions
-						v-if="isList && selectedIds.length > 0"
+						v-if="tab === 'jobs' && selectedIds.length > 0"
 						:ids="selectedIds"
 						@changed="
 							clearSelection();

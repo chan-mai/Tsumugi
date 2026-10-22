@@ -85,3 +85,49 @@ describe('tick中に設定されたalarm', () => {
 		});
 	});
 });
+
+describe('tickが失敗した場合の再設定', () => {
+	// 失敗後の再試行の予定による、割り込んだ処理が要求した早い予定の上書きなし
+	it('Job DOは早い予定を残す', async () => {
+		await runInDurableObject(shard('CLOBBERFAIL#0'), async (instance) => {
+			const inner = internals(instance) as Internals & { repo: { scheduleWindow(): never } };
+			inner.clock = { now: () => T0 };
+			inner.repo.scheduleWindow = () => {
+				throw new Error('intentional failure');
+			};
+			await inner.ctx.storage.setAlarm(T0 + 1_000);
+			await inner.alarm();
+			expect(await inner.ctx.storage.getAlarm()).toBe(T0 + 1_000);
+		});
+	});
+
+	it('Run DOは早い予定を残す', async () => {
+		const stub = runStub('GREETINGS:clobberfail1');
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'cf' } });
+		await runInDurableObject(stub, async (instance) => {
+			const inner = internals(instance) as Internals & { repo: { findRun(): never } };
+			inner.clock = { now: () => T0 };
+			inner.repo.findRun = () => {
+				throw new Error('intentional failure');
+			};
+			await inner.ctx.storage.setAlarm(T0 + 1_000);
+			await inner.alarm();
+			expect(await inner.ctx.storage.getAlarm()).toBe(T0 + 1_000);
+		});
+	});
+
+	it('Scheduler DOは早い予定を残す', async () => {
+		const namespace = env.SCHEDULER as unknown as DurableObjectNamespace;
+		const stub = namespace.get(namespace.idFromName('scheduler-clobberfail'));
+		await runInDurableObject(stub, async (instance) => {
+			const inner = internals(instance) as Internals & { repo: { rows(): never } };
+			inner.clock = { now: () => T0 };
+			inner.repo.rows = () => {
+				throw new Error('intentional failure');
+			};
+			await inner.ctx.storage.setAlarm(T0 + 1_000);
+			await inner.alarm();
+			expect(await inner.ctx.storage.getAlarm()).toBe(T0 + 1_000);
+		});
+	});
+});

@@ -135,6 +135,108 @@ describe('subflowの縦串', () => {
 		expect(await stateOf(parent)).toBe('FAILED');
 	});
 
+	it('親の再開で失敗した子も失敗したノードから再開する(ADR-0034)', async () => {
+		const parent = 'PIPELINE:sub-retry';
+		const child = 'GREETINGS:sub-retry-greetings';
+		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
+		await settleRuns([parent, child]);
+		sent.length = 0;
+		const jobId = (await nodeOf(child, 'list'))?.job_id;
+		if (!jobId) throw new Error('the first node of the child run has no job id');
+		await runStub(child).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'intentional failure' }]);
+		await settleRuns([parent, child]);
+		expect(await stateOf(parent)).toBe('FAILED');
+
+		// 子は保持期間内で残存, 同じ子runIdの起動は既存を返す
+		await runStub(parent).retry();
+		await settle([parent, child], registry);
+
+		expect(await stateOf(child)).toBe('COMPLETED');
+		expect((await nodeOf(parent, 'greetings'))?.state).toBe('COMPLETED');
+		expect(await stateOf(parent)).toBe('COMPLETED');
+	});
+
+	it('子のflow定義が消えた場合も親へ失敗を通知し削除を予約する(ADR-0030)', async () => {
+		const parent = 'PIPELINE:sub-gone';
+		const child = 'GREETINGS:sub-gone-greetings';
+		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
+		await settleRuns([parent, child]);
+		sent.length = 0;
+
+		// デプロイで子のflowが定義から外れた状況, ジョブの完了待ちでalarmは無く直接起動
+		await runInDurableObject(runStub(child), async (instance) => {
+			(instance as any).repo.sql.exec(`UPDATE run SET flow = 'REMOVED'`);
+			await (instance as any).alarm();
+		});
+		await settleRuns([parent]);
+
+		expect(await stateOf(child)).toBe('FAILED');
+		expect((await nodeOf(parent, 'greetings'))?.state).toBe('FAILED');
+		expect(await stateOf(parent)).toBe('FAILED');
+		// 保持期間の経過後に削除する予定, 無いとDOが残存
+		const alarm = await runInDurableObject(
+			runStub(child),
+			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,
+		);
+		expect(alarm).not.toBeNull();
+	});
+
+	it('起動失敗と判定済みのノードへ子の完了を適用しない', async () => {
+		const parent = 'PIPELINE:sub-lost';
+		const child = 'GREETINGS:sub-lost-greetings';
+		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
+		await settleRuns([parent, child]);
+		sent.length = 0;
+
+		// 子の起動RPCが応答を失い、親だけが失敗と判定した状況
+		await runInDurableObject(runStub(parent), (instance) => {
+			(instance as any).repo.sql.exec(`UPDATE node SET state = 'FAILED' WHERE id = 'greetings'`);
+		});
+		await runStub(parent).notifyChild('greetings', child, 'COMPLETED');
+
+		expect((await nodeOf(parent, 'greetings'))?.state).toBe('FAILED');
+	});
+
+	it('親への通知に失敗したら間隔を空けて再送する', async () => {
+		const child = 'GREETINGS:notify-retry';
+		const T = 2_600_000_000_000;
+		await runStub(child).start({
+			flow: 'GREETINGS',
+			input: { prefix: 'x' },
+			parent: { runId: 'PIPELINE:notify-retry', nodeId: 'greetings' },
+			depth: 1,
+		});
+		await settleRuns([child]);
+		sent.length = 0;
+		const jobId = (await nodeOf(child, 'list'))?.job_id;
+		if (!jobId) throw new Error('the first node of the child run has no job id');
+
+		const alarm = await runInDurableObject(runStub(child), async (instance) => {
+			(instance as any).clock = { now: () => T };
+			// 親のRun DOへ届かない状況, envは他のテストと共有で終了時に復元
+			const original = (instance as any).env.RUN;
+			(instance as any).env.RUN = {
+				idFromName: (name: string) => ({ name }),
+				get: () => ({
+					notifyChild: async () => {
+						throw new Error('unreachable');
+					},
+				}),
+			};
+			try {
+				await (instance as any).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'boom' }]);
+				await (instance as any).ctx.storage.deleteAlarm();
+				await (instance as any).alarm();
+				return (await (instance as any).ctx.storage.getAlarm()) as number | null;
+			} finally {
+				(instance as any).env.RUN = original;
+			}
+		});
+
+		// 即時の再起動では失敗の間ずっとtickを反復
+		expect(alarm).toBeGreaterThan(T);
+	});
+
 	it('親を取り消すと子も取り消される', async () => {
 		const parent = 'PIPELINE:sub-cancel';
 		const child = 'GREETINGS:sub-cancel-greetings';

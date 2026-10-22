@@ -85,6 +85,14 @@ describe('重複と前提の検査', () => {
 		expect(addPerformer('send-mail', deps)).toBe(1);
 		expect(fs.files.has('/proj/src/performers/send-mail.ts')).toBe(false);
 	});
+
+	it('バレルと同じファイル名になる名前は拒否する', () => {
+		const { deps, fs, errors } = makeDeps();
+		fs.mkdir('/proj/src/performers');
+		expect(addPerformer('index', deps)).toBe(1);
+		expect(fs.files.has('/proj/src/performers/index.ts')).toBe(false);
+		expect(errors.join('\n')).toContain('index');
+	});
 });
 
 describe('service bindingの断片', () => {

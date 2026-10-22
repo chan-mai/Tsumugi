@@ -162,6 +162,9 @@ const DEFAULTS: {
  */
 const TICK_LIMIT = 200;
 
+/** tickの後段(投影, 通知, 削除)が失敗した場合の再試行間隔 */
+const STAGE_RETRY_MS = 5_000;
+
 /** 1回の投影で処理するアウトボックスの上限, D1のバッチ上限とtickの時間に配慮 */
 const PROJECTION_LIMIT = 200;
 
@@ -281,7 +284,6 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.repo.deleteSetting('settings');
 		this.policy = DEFAULT_POLICY;
 		this.retention = { doneMs: DEFAULT_SWEEP_AFTER_MS, failedMs: DEFAULT_FAILED_RETENTION_MS };
-		this.#policyLoaded = true;
 		await this.#armAlarm(this.clock.now());
 	}
 
@@ -713,7 +715,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			// alarm()がthrowするとworkerdは2秒起点の指数バックオフで最大6回のみリトライ
 			// 捕捉して必ず次のalarmを再設定し、一時的な失敗での調停停止を防止
 			console.error('tsumugi: tick failed', error);
-			await this.ctx.storage.setAlarm(this.clock.now() + 5_000);
+			// 割り込んだ処理が設定した早い予定は維持
+			await this.#armAlarm(this.clock.now() + 5_000);
 		}
 	}
 
@@ -721,7 +724,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const now = this.clock.now();
 		this.#loadPolicy();
 		this.#loadBucket();
-		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT);
+		// 実行中がconcurrency未満なら全件が範囲内, 以上なら空きは0で集計漏れの影響なし
+		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT, Math.max(TICK_LIMIT, this.policy.concurrency));
 
 		const readyKeys =
 			this.policy.perKeyRate === null
@@ -790,11 +794,22 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			await this.env.TSUMUGI_QUEUE.sendBatch(messages.slice(i, i + SEND_BATCH_LIMIT));
 		}
 
-		const projected = await this.#project();
-		const notified = await this.#notifyRuns();
-		const notifiedFailures = await this.#notifyFailures();
-		const notifiedSettled = await this.#notifySettled();
-		const { deleted, retryAt } = this.#sweep(now);
+		// 後段は互いに独立
+		let failed = false;
+		const stage = async <T>(name: string, run: () => T | Promise<T>, fallback: T): Promise<T> => {
+			try {
+				return await run();
+			} catch (error) {
+				console.error(`tsumugi: ${name} failed`, error);
+				failed = true;
+				return fallback;
+			}
+		};
+		const projected = await stage('project', () => this.#project(), 0);
+		const notified = await stage('notifyRuns', () => this.#notifyRuns(), 0);
+		const notifiedFailures = await stage('notifyFailures', () => this.#notifyFailures(), 0);
+		const notifiedSettled = await stage('notifySettled', () => this.#notifySettled(), 0);
+		const { deleted, retryAt } = await stage('sweep', () => this.#sweep(now), { deleted: 0, retryAt: null });
 
 		// 上限まで読んだなら残りがある可能性が高く、即座に自分を再起動
 		// 投入候補はreadyCountで判定, 実行中のジョブで範囲が埋まっても投入すべき候補が無ければ再実行なし
@@ -810,8 +825,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			notified >= NOTIFY_LIMIT ||
 			notifiedFailures >= FAILURE_NOTIFY_LIMIT ||
 			notifiedSettled >= SETTLED_NOTIFY_LIMIT ||
-			this.repo.countOutbox() > 0;
-		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt].filter((v): v is number => v !== null);
+			// 失敗時のoutboxの残りは即時再起動の対象外, 含めると障害の間tickを反復
+			(!failed && this.repo.countOutbox() > 0);
+		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt, failed ? now + STAGE_RETRY_MS : null].filter(
+			(v): v is number => v !== null,
+		);
 		const next = candidates.length > 0 ? Math.min(...candidates) : null;
 		// tickの実行中に設定されたalarmを後ろへずらさない
 		// alarmはハンドラの開始時に消え、ここに在るものは割り込んだ処理が要求した予定

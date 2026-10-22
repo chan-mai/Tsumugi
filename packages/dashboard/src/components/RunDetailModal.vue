@@ -14,16 +14,22 @@ const nodes = ref<RunNode[]>([]);
 const error = ref<string | null>(null);
 const message = ref<string | null>(null);
 const busy = ref(false);
+/** 親子のrunを素早く移動した時、前のrunの応答で上書きしないための連番 */
+let loadSequence = 0;
 
-const canRetry = computed(() => run.value?.state === 'FAILED');
+const canRetry = computed(() => run.value?.retryable === true);
 const canCancel = computed(() => run.value?.state === 'RUNNING');
 
 async function load(id: string) {
+	const sequence = ++loadSequence;
 	try {
 		const loaded = await getRun(id);
+		if (sequence !== loadSequence || props.runId !== id) return;
 		run.value = loaded.run;
 		nodes.value = loaded.nodes;
+		error.value = null;
 	} catch (e) {
+		if (sequence !== loadSequence || props.runId !== id) return;
 		error.value = e instanceof Error ? e.message : String(e);
 	}
 }
@@ -31,6 +37,7 @@ async function load(id: string) {
 watch(
 	() => props.runId,
 	async (id) => {
+		loadSequence++;
 		if (!id) return;
 		// 閉じるアニメーションの間に中身が消えないよう、開く時だけ差し替え
 		run.value = null;

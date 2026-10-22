@@ -14,6 +14,7 @@ const expiresInMs = ref<number | null>(null);
 const priority = ref<number | null>(null);
 const uniqueKey = ref('');
 const concurrencyKey = ref('');
+const partitionKey = ref('');
 const error = ref<string | null>(null);
 const busy = ref(false);
 
@@ -29,6 +30,7 @@ watch(
 		priority.value = null;
 		uniqueKey.value = '';
 		concurrencyKey.value = '';
+		partitionKey.value = '';
 		error.value = null;
 	},
 );
@@ -56,6 +58,7 @@ async function submit() {
 			...(priority.value !== null ? { priority: priority.value } : {}),
 			...(uniqueKey.value ? { uniqueKey: uniqueKey.value } : {}),
 			...(concurrencyKey.value ? { concurrencyKey: concurrencyKey.value } : {}),
+			...(partitionKey.value ? { partitionKey: partitionKey.value } : {}),
 		});
 		emit('created', id);
 		emit('close');
@@ -157,6 +160,10 @@ const LABEL = 'mb-1 block text-sm text-muted-foreground';
 								<div>
 									<label :class="LABEL" for="new-job-concurrency">Concurrency key</label>
 									<input id="new-job-concurrency" v-model="concurrencyKey" type="text" placeholder="optional" :class="FIELD" />
+								</div>
+								<div>
+									<label :class="LABEL" for="new-job-partition">Partition key</label>
+									<input id="new-job-partition" v-model="partitionKey" type="text" placeholder="required when sharded" :class="FIELD" />
 								</div>
 							</div>
 

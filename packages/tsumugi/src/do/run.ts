@@ -29,7 +29,7 @@ import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
 import type { NodeRow } from './run-schema.js';
-import { RunRepo } from './run-repo.js';
+import { deadlineErrorOf, RunRepo } from './run-repo.js';
 
 export type RunEnv = ClientEnv & {
 	TSUMUGI_DB: D1Database;
@@ -46,6 +46,9 @@ const ADVANCE_ROUNDS = 32;
 /** 1回の投影で処理するアウトボックスの上限 */
 const PROJECTION_LIMIT = 200;
 
+/** 親への通知に失敗した後の再送間隔 */
+const NOTIFY_RETRY_MS = 5_000;
+
 /** 1つのrunに入るノード数の既定上限(ADR-0035) */
 export const DEFAULT_MAX_NODES = 10_000;
 
@@ -59,7 +62,7 @@ export const DEFAULT_MAX_DEPTH = 3;
 const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
 
 /** 失敗したrunをDOに残す時間, 再開を受け付ける期間(ADR-0034) */
-const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEFAULT_RUN_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type RunSettings = {
 	/** 1つのrunに入るノード数の上限(ADR-0035) */
@@ -104,7 +107,9 @@ export interface RunStub extends Rpc.DurableObjectBranded {
  */
 export interface RunPeerStub extends Rpc.DurableObjectBranded {
 	start(input: StartInput): Promise<StartResult>;
+	state(): Promise<RunState | null>;
 	cancel(): Promise<MutationResult>;
+	retry(): Promise<MutationResult>;
 	notifyChild(nodeId: string, childRunId: string, state: RunState): Promise<void>;
 }
 
@@ -152,7 +157,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 	const nameOf = (child: AnyFlow) => Object.keys(flows).find((name) => flows[name] === child);
 	const retention: Retention = {
 		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
-		failedMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
+		failedMs: settings.failedRetentionMs ?? DEFAULT_RUN_FAILED_RETENTION_MS,
 	};
 	const client = createClient<RunEnv>(
 		bindings,
@@ -270,6 +275,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			}
 
 			if (touched.length > 0) {
+				this.repo.appendRunOutbox();
 				this.repo.appendNodeOutbox(runId, touched);
 				await this.#armAlarm(now);
 			}
@@ -287,8 +293,11 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const row = this.repo.findNode(nodeId);
 			// 再開で子が差し替わっているなら古い通知, 適用すると再実行の結果を上書き(ADR-0034)
 			if (!row || row.child_run_id !== childRunId || state === 'RUNNING') return;
+			// 起動失敗と判定済みのノード, 応答喪失で子だけ進んだ通知の適用なし
+			if (isNodeTerminal(row.state as NodeState)) return;
 
 			this.repo.updateNode(nodeId, { state, ...(state === 'FAILED' ? { error: `child run failed: ${childRunId}` } : {}) }, now);
+			this.repo.appendRunOutbox();
 			this.repo.appendNodeOutbox(run.id, [nodeId]);
 			await this.#armAlarm(now);
 		}
@@ -320,7 +329,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			if (!row) return { ok: false, reason: 'gone' };
 			if (row.state !== 'FAILED') return { ok: false, reason: 'invalid-state' };
 
-			const reset = this.repo.resetForRetry(now);
+			const aborted = row.expired === 1 && row.cancelling === 0 ? deadlineErrorOf(row.deadline_ms) : null;
+			const reset = this.repo.resetForRetry(now, aborted);
 			// 期限を再計算し超過の印を解除, 元のままでは再開直後に再び超過(ADR-0039)
 			this.repo.resetDeadline(now);
 			this.repo.setRunState(row.id, 'RUNNING', now);
@@ -336,7 +346,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			} catch (error) {
 				// alarm()がthrowするとworkerdのリトライは6回で枯渇, 捕捉して必ず再設定
 				console.error('tsumugi: run tick failed', error);
-				await this.ctx.storage.setAlarm(this.clock.now() + 5_000);
+				// 割り込んだ処理が設定した早い予定は維持
+				await this.#armAlarm(this.clock.now() + 5_000);
 			}
 		}
 
@@ -363,8 +374,15 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const flow = Object.hasOwn(flows, runRow.flow) ? flows[runRow.flow] : undefined;
 			if (!flow) {
 				// 定義ごと消えた場合は待機で解決せず, 理由を残してFAILEDへ(ADR-0030)
-				this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
-				await this.#project();
+				// 決着済みは再設定なし(通知ごとの状態と投影の再追記を回避するため)
+				if (runRow.state === 'RUNNING') this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
+				const projected = await this.#project();
+				// 親への通知と削除は通常の決着と同じ手順, 省くと親ノードとDOが残存
+				const notified = await this.#notifyParent(this.repo.findRun()?.state as RunState, now);
+				if (notified && (await this.#sweep(now))) return;
+				if (projected >= PROJECTION_LIMIT || this.repo.countOutbox() > 0) await this.#armAlarm(now);
+				else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
+				else await this.#armSweep(now);
 				return;
 			}
 
@@ -379,7 +397,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				expired = true;
 			}
 			// 中断されたノードへ残す理由, runには理由の置き場が無い, 取り消しはCANCELLEDのまま
-			const deadlineError = expired && !cancelling ? `run deadline exceeded: ${runRow.deadline_ms}ms` : null;
+			const deadlineError = expired && !cancelling ? deadlineErrorOf(runRow.deadline_ms) : null;
 
 			const touched = new Set<string>();
 			const inputs: EnqueueInput[] = [];
@@ -428,12 +446,14 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const unstarted = new Set<string>();
 			for (const child of subflows) {
 				try {
-					await this.#runStub(child.childRunId).start({
+					const stub = this.#runStub(child.childRunId);
+					const started = await stub.start({
 						flow: child.flow,
 						input: child.input,
 						parent: { runId: runRow.id, nodeId: child.nodeId },
 						depth: runRow.depth + 1,
 					});
+					if (!started.created && (await this.#resumeChild(stub, child.nodeId, now))) touched.add(child.nodeId);
 				} catch (error) {
 					// 入れ子の上限超過等は待機では解決しない, FAILEDへ進めないとtickが同じ失敗を反復
 					this.repo.updateNode(child.nodeId, { state: 'FAILED', error: `failed to start child run: ${messageOf(error)}` }, now);
@@ -473,9 +493,9 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				deferred > 0 ||
 				projected >= PROJECTION_LIMIT ||
 				settled.decisions.some((decision) => !waiting.has(decision.id)) ||
-				this.repo.countOutbox() > 0 ||
-				!notified;
+				this.repo.countOutbox() > 0;
 			if (hasMore) await this.#armAlarm(now);
+			else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
 			else if (settled.state === 'RUNNING') await this.#armDeadline(now);
 			else await this.#armSweep(now);
 		}
@@ -723,6 +743,22 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		#shardOf(binding: string, runId: string): number {
 			// runIdをpartitionKeyに使用, run内のノードが同じshardに集約されRun DO側でIDを決定可能(ADR-0011)
 			return resolveShard(binding, configOf(bindings, binding)?.shards ?? 1, runId);
+		}
+
+		/**
+		 * 再開時に残存する終端の子runの再開(ADR-0034)
+		 * 子は通知済みで再通知なし, 放置では親ノードが待機のまま停止
+		 * 失敗は子も再開, それ以外の終端は状態をノードへ反映しtrueを返す
+		 */
+		async #resumeChild(stub: DurableObjectStub<RunPeerStub>, nodeId: string, now: number): Promise<boolean> {
+			const state = await stub.state();
+			if (state === 'FAILED') {
+				await stub.retry();
+				return false;
+			}
+			if (state !== 'COMPLETED' && state !== 'CANCELLED') return false;
+			this.repo.updateNode(nodeId, { state }, now);
+			return true;
 		}
 
 		/**

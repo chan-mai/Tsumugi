@@ -6,6 +6,7 @@ import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
 import { createRest, SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
+import { hashToShard } from '../../src/core/shard.js';
 import type { ScheduleView } from '../../src/do/scheduler.js';
 
 const T0 = 2_200_000_000_000;
@@ -561,6 +562,26 @@ describe('ジョブの投入', () => {
 		expect(res.status).toBe(401);
 	});
 
+	it('分割したbindingへはpartitionKeyで投入先を決定する(ADR-0011)', async () => {
+		const sharded = defineTsumugi({ performers: { REST: Noop }, auth: bearerAuth(TOKEN), bindings: { REST: { shards: 2 } } });
+		const postTo = (body: unknown) =>
+			sharded.fetch!(
+				new Request('https://example.com/api/jobs', { method: 'POST', headers: authorized, body: JSON.stringify(body) }),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+
+		// 省略は入力の誤り, 0番への暗黙の割り当てなし
+		const missing = await postTo({ binding: 'REST', payload: {} });
+		expect(missing.status).toBe(400);
+		expect((await missing.json<{ error: string }>()).error).toContain('partitionKey');
+
+		const res = await postTo({ binding: 'REST', payload: {}, partitionKey: 'tenant-42' });
+		expect(res.status).toBe(201);
+		const { id } = await res.json<{ id: string }>();
+		expect(id).toMatch(new RegExp(`^REST#${hashToShard('tenant-42', 2)}:`));
+	});
+
 	it('登録済みbindingが選択肢として返る', async () => {
 		const res = await call(withAuth, 'GET', '/api/bindings', { authorization: `Bearer ${TOKEN}` });
 		const { bindings } = await res.json<{ bindings: string[] }>();
@@ -604,6 +625,23 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 		// 状態違いの409と混ぜると,保持期間を延ばせば直るのかどうかが利用者に伝わらない
 		expect(res.status).toBe(410);
 		expect((await res.json<{ error: string }>()).error).toContain('retention');
+	});
+
+	it('条件指定のbulk-retryは保持期間を過ぎた行を対象にしない', async () => {
+		await orphan('GONE#0:bulk-old', 'FAILED', Date.now() - 10 * 60 * 1000);
+		for (const body of [{ binding: 'GONE' }, {}]) {
+			const res = await shortLived.fetch!(
+				new Request('https://example.com/api/jobs/bulk-retry', {
+					method: 'POST',
+					headers: { ...authorized, 'content-type': 'application/json' },
+					body: JSON.stringify(body),
+				}),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+			const result = await res.json<{ failed: { id: string }[]; remaining: number }>();
+			expect(result.failed.map((f) => f.id)).not.toContain('GONE#0:bulk-old');
+		}
 	});
 
 	it('状態が違うだけなら409', async () => {
@@ -1032,10 +1070,13 @@ describe('一括リトライと一括取り消し', () => {
 
 	it('DOに無いジョブは理由付きで拒否する', async () => {
 		// 読み取りモデルにだけ残っている行, 全体は成功の扱い
+		// 保持期間内の更新時刻, 過ぎた行は抽出対象外
 		await env.TSUMUGI_DB.prepare(
 			`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, created_at, updated_at, payload)
-			 VALUES ('BULKGONE#0:x', 1, 'BULKGONE', 'FAILED', 0, 3, 3, 'at-least-once', 1, 1, '{}')`,
-		).run();
+			 VALUES ('BULKGONE#0:x', 1, 'BULKGONE', 'FAILED', 0, 3, 3, 'at-least-once', 1, ?, '{}')`,
+		)
+			.bind(Date.now())
+			.run();
 
 		const res = await post('retry', { binding: 'BULKGONE' });
 		expect(res.status).toBe(200);
@@ -1119,6 +1160,7 @@ describe('予約済みジョブの実行時刻の変更', () => {
 	it('DOに無いジョブは410', async () => {
 		const res = await post('/api/jobs/REST%230:missingjob/reschedule', { runAt: T0 + 60_000 });
 		expect(res.status).toBe(410);
+		expect((await res.json<{ error: string }>()).error).toContain('does not exist');
 	});
 
 	it('検証に落ちた本文は400', async () => {
@@ -1169,6 +1211,36 @@ describe('runの開始', () => {
 	it('未登録のflowは400', async () => {
 		const res = await post({ flow: 'UNKNOWN', input: {} });
 		expect(res.status).toBe(400);
+	});
+
+	it('保持期間を過ぎた失敗runはretryable=false(ADR-0027)', async () => {
+		// Run DOは失敗後failedRetentionMsで削除, D1の行は残り再開は410
+		const shortLived = defineTsumugi({
+			performers: { REST: Noop },
+			flows: { GREETINGS: flow<{ prefix: string }>((f) => void f.node('only', 'REST', { input: (i) => i })) },
+			auth: bearerAuth(TOKEN),
+			runs: { failedRetentionMs: 60_000 },
+		});
+		const seed = (id: string, updatedAt: number) =>
+			env.TSUMUGI_DB.prepare(
+				`INSERT OR REPLACE INTO run (id, seq, flow, state, input, node_total, node_done, node_failed, created_at, updated_at)
+				 VALUES (?, 1, 'GREETINGS', 'FAILED', '{}', 1, 0, 1, ?, ?)`,
+			)
+				.bind(id, updatedAt, updatedAt)
+				.run();
+		const detail = async (id: string) => {
+			const res = await shortLived.fetch!(
+				new Request(`https://example.com/api/runs/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${TOKEN}` } }),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+			return (await res.json<{ run: { retryable: boolean } }>()).run.retryable;
+		};
+
+		await seed('GREETINGS:retention-old', Date.now() - 10 * 60_000);
+		await seed('GREETINGS:retention-fresh', Date.now());
+		expect(await detail('GREETINGS:retention-old')).toBe(false);
+		expect(await detail('GREETINGS:retention-fresh')).toBe(true);
 	});
 
 	it('Object.prototypeの名前を登録済みとして扱わない', async () => {

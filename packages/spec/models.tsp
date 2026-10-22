@@ -133,6 +133,9 @@ model CreateJobRequest {
 	concurrencyKey?: string;
 	uniqueKey?: string;
 
+	@doc("Selects the shard of a binding split into shards. Required when shards is 2 or more.")
+	partitionKey?: string;
+
 	@doc("Trace context propagated to the performer. Takes precedence over the traceparent request header.")
 	traceparent?: Traceparent;
 }

@@ -2,25 +2,15 @@ import { asc, eq, getTableColumns, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
 import type { NodeTrigger } from '../core/flow.js';
+import { chunk } from './bind.js';
 import { applyRunSchema, type NodeRow, type RunRow } from './run-schema.js';
 import { node, run, runOutbox } from './run-tables.js';
-
-/** 1文に渡せるバインド変数の上限, 101個目でSQLITE_ERROR */
-const BIND_LIMIT = 100;
 
 const NODE_COLUMNS = Object.keys(getTableColumns(node)).length;
 const OUTBOX_COLUMNS = Object.keys(getTableColumns(runOutbox)).length;
 
-/**
- * バインド変数の上限に収まる件数へ分ける
- * fan-outの展開は件数が実行時に確定し、1文にまとめると上限を超過
- */
-function chunk<T>(items: readonly T[], perItem: number): T[][] {
-	const size = Math.max(1, Math.floor(BIND_LIMIT / perItem));
-	const parts: T[][] = [];
-	for (let i = 0; i < items.length; i += size) parts.push(items.slice(i, i + size));
-	return parts;
-}
+/** 期限超過で中断したノードの理由 */
+export const deadlineErrorOf = (deadlineMs: number | null) => `run deadline exceeded: ${deadlineMs}ms`;
 
 export type NewNode = {
 	id: string;
@@ -272,10 +262,23 @@ export class RunRepo {
 	 * 再開のために中断されたノードを起動前の状態へ復帰(ADR-0034)
 	 * fan-outノードは子を作り直さず集約待ちへ戻す, 作り直しでは成功済みの子も削除
 	 * 子のrunIDも解除, 残すと旧い子の遅れた通知が再開後の状態を上書き
+	 * fan-outの子は期限超過で中断したもののみ対象, 実行済みの失敗は集計値で後段へ渡り済み
 	 */
-	resetForRetry(now: number): string[] {
+	resetForRetry(now: number, aborted: string | null): string[] {
 		// 親への通知済みの印を解除, 設定のままでは再開後の終端が親へ届かない
 		this.db.update(run).set({ parentNotified: 0, updatedAt: now }).run();
+		// 子を戻すコンテナは集約待ちへ, COMPLETEDのままでは集計値が再開前のまま
+		const containers = this.sql.exec<{ id: string }>(
+			`UPDATE node SET state = 'RUNNING', updated_at = ?
+			WHERE container = 1 AND state = 'COMPLETED' AND EXISTS(
+				SELECT 1 FROM node child
+				WHERE child.parent = node.id AND child.origin = 'fanOut' AND child.state = 'FAILED' AND child.error = ?
+			)
+			RETURNING id`,
+			now,
+			aborted,
+		);
+		const reopened = containers.toArray().map((row) => row.id);
 		const cursor = this.sql.exec<{ id: string }>(
 			`UPDATE node SET
 				state = CASE WHEN container = 1 AND EXISTS(SELECT 1 FROM node child WHERE child.parent = node.id) THEN 'RUNNING' ELSE 'PENDING' END,
@@ -284,10 +287,12 @@ export class RunRepo {
 				error = NULL,
 				updated_at = ?
 			WHERE state IN ('FAILED', 'STALLED', 'SKIPPED', 'CANCELLED')
+				AND (origin <> 'fanOut' OR (state = 'FAILED' AND error = ?))
 			RETURNING id`,
 			now,
+			aborted,
 		);
-		return cursor.toArray().map((row) => row.id);
+		return [...reopened, ...cursor.toArray().map((row) => row.id)];
 	}
 
 	countNodes(): number {

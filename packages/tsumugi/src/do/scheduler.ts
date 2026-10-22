@@ -234,7 +234,10 @@ export function createSchedulerClass({
 			} catch (error) {
 				// alarm()がthrowするとworkerdのリトライは6回で枯渇, 捕捉して必ず再設定
 				console.error('tsumugi: scheduler tick failed', error);
-				await this.ctx.storage.setAlarm(this.clock.now() + 5_000);
+				// 割り込んだsyncやtriggerが設定した早い予定は維持
+				const retryAt = this.clock.now() + 5_000;
+				const current = await this.ctx.storage.getAlarm();
+				if (current === null || current > retryAt) await this.ctx.storage.setAlarm(retryAt);
 			}
 		}
 
