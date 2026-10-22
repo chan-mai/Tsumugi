@@ -58,15 +58,28 @@ export function createHeartbeat(
 		const at = now();
 		if (at - lastAt < minIntervalMs) return { cancelRequested };
 		lastAt = at;
-		const sending = Promise.resolve(send(progress)).then(
-			(ack) => {
-				if (ack.cancelRequested || !ack.accepted) cancelRequested = true;
-			},
-			(error: unknown) => {
-				console.error('tsumugi: heartbeat failed', error);
-			},
-		);
-		await Promise.race([sending, new Promise<void>((resolve) => setTimeout(resolve, sendTimeoutMs))]);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			// sendの同期例外も捕捉, performへの伝播なし
+			const sending = Promise.resolve()
+				.then(() => send(progress))
+				.then(
+					(ack) => {
+						if (ack.cancelRequested || !ack.accepted) cancelRequested = true;
+					},
+					(error: unknown) => {
+						console.error('tsumugi: heartbeat failed', error);
+					},
+				);
+			await Promise.race([
+				sending,
+				new Promise<void>((resolve) => {
+					timer = setTimeout(resolve, sendTimeoutMs);
+				}),
+			]);
+		} finally {
+			if (timer !== undefined) clearTimeout(timer);
+		}
 		return { cancelRequested };
 	};
 }
