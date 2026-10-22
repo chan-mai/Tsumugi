@@ -365,8 +365,14 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const flow = Object.hasOwn(flows, runRow.flow) ? flows[runRow.flow] : undefined;
 			if (!flow) {
 				// 定義ごと消えた場合は待機で解決せず, 理由を残してFAILEDへ(ADR-0030)
-				this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
-				await this.#project();
+				// 決着済みは再設定なし(通知ごとの状態と投影の再追記を回避するため)
+				if (runRow.state === 'RUNNING') this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
+				const projected = await this.#project();
+				// 親への通知と削除は通常の決着と同じ手順, 省くと親ノードとDOが残存
+				const notified = await this.#notifyParent(this.repo.findRun()?.state as RunState, now);
+				if (notified && (await this.#sweep(now))) return;
+				if (!notified || projected >= PROJECTION_LIMIT || this.repo.countOutbox() > 0) await this.#armAlarm(now);
+				else await this.#armSweep(now);
 				return;
 			}
 

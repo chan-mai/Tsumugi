@@ -156,6 +156,31 @@ describe('subflowの縦串', () => {
 		expect(await stateOf(parent)).toBe('COMPLETED');
 	});
 
+	it('子のflow定義が消えた場合も親へ失敗を通知し削除を予約する(ADR-0030)', async () => {
+		const parent = 'PIPELINE:sub-gone';
+		const child = 'GREETINGS:sub-gone-greetings';
+		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
+		await settleRuns([parent, child]);
+		sent.length = 0;
+
+		// デプロイで子のflowが定義から外れた状況, ジョブの完了待ちでalarmは無く直接起動
+		await runInDurableObject(runStub(child), async (instance) => {
+			(instance as any).repo.sql.exec(`UPDATE run SET flow = 'REMOVED'`);
+			await (instance as any).alarm();
+		});
+		await settleRuns([parent]);
+
+		expect(await stateOf(child)).toBe('FAILED');
+		expect((await nodeOf(parent, 'greetings'))?.state).toBe('FAILED');
+		expect(await stateOf(parent)).toBe('FAILED');
+		// 保持期間の経過後に削除する予定, 無いとDOが残存
+		const alarm = await runInDurableObject(
+			runStub(child),
+			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,
+		);
+		expect(alarm).not.toBeNull();
+	});
+
 	it('親を取り消すと子も取り消される', async () => {
 		const parent = 'PIPELINE:sub-cancel';
 		const child = 'GREETINGS:sub-cancel-greetings';
