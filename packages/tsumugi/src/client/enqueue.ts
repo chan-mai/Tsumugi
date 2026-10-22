@@ -63,26 +63,6 @@ export type CommonSettings = {
 	settled?: SettledTarget | null;
 };
 
-export type EnqueueDefaults = Partial<
-	Pick<
-		EnqueueInput,
-		| 'traceparent'
-		| 'priority'
-		| 'maxAttempts'
-		| 'backoff'
-		| 'timeoutMs'
-		| 'guarantee'
-		| 'delayMs'
-		| 'runAt'
-		| 'expiresAt'
-		| 'expiresInMs'
-		| 'concurrencyKey'
-	>
->;
-
-/** 投入時の既定値付与フック, 呼び出し側未指定のキーのみ適用(#96) */
-export type EnqueueHook = (input: Readonly<EnqueueInput>) => EnqueueDefaults | undefined;
-
 const DEFAULTABLE_KEYS = [
 	'traceparent',
 	'priority',
@@ -96,6 +76,11 @@ const DEFAULTABLE_KEYS = [
 	'expiresInMs',
 	'concurrencyKey',
 ] as const;
+
+export type EnqueueDefaults = Partial<Pick<EnqueueInput, (typeof DEFAULTABLE_KEYS)[number]>>;
+
+/** 投入時の既定値付与フック, 呼び出し側未指定のキーのみ適用(#96) */
+export type EnqueueHook = (input: Readonly<EnqueueInput>) => EnqueueDefaults | undefined;
 
 // 片方確定時はもう片方の既定値破棄
 const EXCLUSIVE_PAIRS: readonly (readonly [keyof EnqueueDefaults, keyof EnqueueDefaults])[] = [
