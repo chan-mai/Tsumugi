@@ -10,6 +10,7 @@ const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 	origin: 'static',
 	after: [],
 	job_id: null,
+	child_run_id: null,
 	result: null,
 	error: null,
 	position: 0,
