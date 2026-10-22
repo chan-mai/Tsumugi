@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { NodeSnapshot, RunSnapshot } from '../do/run-repo.js';
+import { latestPerKey } from './projector.js';
 import { run, runNode } from './run-tables.js';
 
 export type RunOutboxRow = { seq: number; kind: string; target: string; snapshot: string };
@@ -48,7 +49,7 @@ type Upsert = ReturnType<typeof toStatements>[number];
 
 export function toStatements(db: D1Database, rows: readonly RunOutboxRow[]) {
 	const d = drizzle(db);
-	return rows.map((row) => {
+	return latestPerKey(rows, (row) => `${row.kind}:${row.target}`).map((row) => {
 		if (row.kind === 'run') {
 			const values = toRunValues(JSON.parse(row.snapshot) as RunSnapshot, row.seq);
 			const { id: _id, createdAt: _createdAt, flow: _flow, ...mutable } = values;

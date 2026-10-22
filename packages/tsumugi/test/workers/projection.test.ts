@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { project, type OutboxRow } from '../../src/projection/projector.js';
+import { project, toStatements, type OutboxRow } from '../../src/projection/projector.js';
 
 const T0 = 2_100_000_000_000;
 
@@ -66,6 +66,23 @@ describe('D1への投影(ADR-0008)', () => {
 		const after = await readD1(jobId);
 		expect(after!.state).toBe(current!.state);
 		expect(after!.seq).toBe(current!.seq);
+	});
+
+	it('同じジョブの複数スナップショットは最大seqの1件のみ書き込む', async () => {
+		await install('PROJ5#0', T0);
+		const jobId = await shard('PROJ5#0').enqueue({ binding: 'PROJ5', payload: {} });
+		await runDurableObjectAlarm(shard('PROJ5#0'));
+		const snapshot = await snapshotOf('PROJ5#0', jobId);
+		const base = (await readD1(jobId))!.seq;
+
+		const rows: OutboxRow[] = [
+			{ seq: base + 2, job_id: jobId, snapshot: JSON.stringify({ ...snapshot, state: 'COMPLETED' }) },
+			{ seq: base + 1, job_id: jobId, snapshot: JSON.stringify({ ...snapshot, state: 'RUNNING' }) },
+		];
+		expect(toStatements(env.TSUMUGI_DB, rows)).toHaveLength(1);
+		await project(env.TSUMUGI_DB, rows);
+
+		expect(await readD1(jobId)).toMatchObject({ state: 'COMPLETED', seq: base + 2 });
 	});
 
 	it('D1への書き込みが失敗したらカーソルを進めない', async () => {

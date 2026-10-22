@@ -44,13 +44,23 @@ function toValues(snapshot: JobSnapshot, seq: number): typeof job.$inferInsert {
 	};
 }
 
+// 最大seqの1件で結果同一
+export function latestPerKey<T extends { seq: number }>(rows: readonly T[], keyOf: (row: T) => string): T[] {
+	const latest = new Map<string, T>();
+	for (const row of rows) {
+		const current = latest.get(keyOf(row));
+		if (!current || row.seq > current.seq) latest.set(keyOf(row), row);
+	}
+	return [...latest.values()];
+}
+
 // batch引数の型, drizzle内部型への依存回避で推論から取得
 type Upsert = ReturnType<typeof toStatements>[number];
 
 /** `excluded.seq > job.seq`で古い状態の上書き防止, 再送や順序入れ替わりでも結果不変(ADR-0008) */
 export function toStatements(db: D1Database, rows: readonly OutboxRow[]) {
 	const d = drizzle(db);
-	return rows.map((outbox) => {
+	return latestPerKey(rows, (row) => row.job_id).map((outbox) => {
 		const values = toValues(JSON.parse(outbox.snapshot) as JobSnapshot, outbox.seq);
 		const set = Object.fromEntries(
 			Object.entries(values).filter(([column]) => !(IMMUTABLE as readonly string[]).includes(column)),

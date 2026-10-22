@@ -98,7 +98,7 @@ let conditionGeneration = 0;
 let requestSequence = 0;
 let appliedSequence = 0;
 let inFlight = 0;
-// 登録済みbindingとflowはデプロイまで不変, 取得成功後は再取得なし
+// 登録済みbindingとflowはデプロイまで不変
 let definitionsLoaded = false;
 
 async function loadDefinitions() {
@@ -186,7 +186,7 @@ async function load() {
 	}
 }
 
-// 前回未完了と非表示中は省略, 応答遅延時の要求の累積防止
+// 応答遅延時の要求累積防止
 function tick() {
 	if (inFlight > 0 || document.hidden) return;
 	load();

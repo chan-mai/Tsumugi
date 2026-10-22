@@ -97,7 +97,7 @@ describe('tickが失敗した場合の再設定', () => {
 
 	it('Run DOは早い予定を残す', async () => {
 		const stub = runStub('GREETINGS:clobberfail1');
-		// 開始前に時計固定, 実時刻のalarmでは検査中に自動発火
+		// 実時刻のalarmは検査中に自動発火
 		await runInDurableObject(stub, (instance) => {
 			internals(instance).clock = { now: () => T0 };
 		});

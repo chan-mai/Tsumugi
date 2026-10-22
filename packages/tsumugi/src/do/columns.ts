@@ -1,4 +1,4 @@
-// CREATE TABLE IF NOT EXISTSは既存テーブル不変, 既存DOへの追加列反映用
+// CREATE TABLE IF NOT EXISTSは既存テーブル不変
 export function ensureColumns(sql: SqlStorage, table: string, columns: readonly (readonly [name: string, type: string])[]): Set<string> {
 	const existing = new Set(
 		sql

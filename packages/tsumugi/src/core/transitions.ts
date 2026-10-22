@@ -24,7 +24,6 @@ export const ACTIVE_STATES: readonly ActiveState[] = ['SCHEDULED', 'QUEUED', 'RU
 
 export const TERMINAL_STATES: readonly JobState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 
-// 失敗通知とメトリクスの失敗件数の対象(#30)
 export const FAILURE_STATES: readonly JobState[] = ['FAILED', 'STALLED'];
 
 export function isActive(state: JobState): state is ActiveState {
