@@ -58,6 +58,10 @@ describe('一括操作の対象の検証', () => {
 		expect(validateBulk({ limit: 5 }, 'retry')).toMatchObject({ input: { limit: 5 } });
 	});
 
+	it('未知のキーを拒否する', () => {
+		expect(validateBulk({ uniqueKey: 'u1' }, 'retry')).toEqual({ error: 'unknown field: uniqueKey' });
+	});
+
 	it('不正な型と値を拒否する', () => {
 		expect(validateBulk(null, 'retry')).toEqual({ error: 'body must be an object' });
 		expect(validateBulk({ binding: 1 }, 'retry')).toEqual({ error: 'binding must be a string' });

@@ -264,10 +264,16 @@ type BulkTarget =
  * `ids`指定時はidsのみ対象, 条件併用は対象の解釈が二通り
  * 条件指定時の状態は操作の受理状態に限定, 非限定では対象が減らず繰り返しが終了不能
  */
+const BULK_KEYS = ['ids', 'binding', 'state', 'unique_key', 'concurrency_key', 'created_from', 'created_to', 'limit'];
+
 export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input: BulkTarget } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
 	const raw = body as Record<string, unknown>;
 	const allowed: readonly string[] = BULK_STATES[action];
+
+	// 綴り違いの無視で全件対象化
+	const unknown = Object.keys(raw).find((key) => !BULK_KEYS.includes(key));
+	if (unknown !== undefined) return { error: `unknown field: ${unknown}` };
 
 	if (raw.ids !== undefined) {
 		if (!Array.isArray(raw.ids)) return { error: 'ids must be an array' };

@@ -201,7 +201,7 @@ model RunNode {
 	updated_at: integer;
 }
 
-@doc("Either ids, or the filter fields. When ids is present the filter fields are ignored.")
+@doc("Either ids, or the filter fields. When ids is present the filter fields are ignored. Unknown fields are rejected with 400.")
 model BulkRequest {
 	@doc("Job ids to process")
 	@minItems(1)
