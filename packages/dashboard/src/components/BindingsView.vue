@@ -2,8 +2,6 @@
 import { ref } from 'vue';
 import { getDiagnostics, isUnauthorized, resetPolicy, updatePolicy, type BindingDiagnostics } from '../api';
 
-const emit = defineEmits<{ unauthorized: [] }>();
-
 const entries = ref<[string, BindingDiagnostics][]>([]);
 const error = ref<string | null>(null);
 const message = ref<string | null>(null);
@@ -33,10 +31,7 @@ async function load() {
 		error.value = null;
 	} catch (e) {
 		if (requested !== generation) return;
-		if (isUnauthorized(e)) {
-			emit('unauthorized');
-			return;
-		}
+		if (isUnauthorized(e)) return;
 		error.value = e instanceof Error ? e.message : String(e);
 	}
 }

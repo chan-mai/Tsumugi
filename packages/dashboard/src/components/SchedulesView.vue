@@ -4,7 +4,7 @@ import { ref } from 'vue';
 import { isUnauthorized, listSchedules, setSchedulePaused, triggerSchedule, type Schedule } from '../api';
 import { formatTimestamp } from '../time';
 
-const emit = defineEmits<{ unauthorized: []; job: [string]; run: [string] }>();
+const emit = defineEmits<{ job: [string]; run: [string] }>();
 
 const schedules = ref<Schedule[]>([]);
 const error = ref<string | null>(null);
@@ -23,10 +23,7 @@ async function load() {
 		error.value = null;
 	} catch (e) {
 		if (requested !== generation) return;
-		if (isUnauthorized(e)) {
-			emit('unauthorized');
-			return;
-		}
+		if (isUnauthorized(e)) return;
 		error.value = e instanceof Error ? e.message : String(e);
 	}
 }
@@ -40,9 +37,7 @@ async function act(name: string, run: () => Promise<string>) {
 		message.value = `${name}: ${await run()}`;
 	} catch (e) {
 		if (isUnauthorized(e)) {
-			// 再読込の401による通知重複回避
 			busy.value = null;
-			emit('unauthorized');
 			return;
 		}
 		message.value = e instanceof Error ? e.message : String(e);

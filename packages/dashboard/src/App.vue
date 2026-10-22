@@ -29,6 +29,7 @@ import {
 	listRuns,
 	listSchedules,
 	tokenCookie,
+	unauthorized,
 	type Job,
 	type Run,
 } from './api';
@@ -57,7 +58,6 @@ const picked = ref<string[]>([]);
 const creating = ref(false);
 const message = ref<string | null>(null);
 const error = ref<string | null>(null);
-const unauthorized = ref(false);
 const refreshMs = ref(loadRefresh(localStorage));
 const canPromptToken = tokenCookie() !== null;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -175,11 +175,8 @@ async function load() {
 	} catch (e) {
 		if (stale()) return;
 		appliedSequence = sequence;
-		if (isUnauthorized(e)) {
-			// HTMLは未認証でも返却, 認証要否はここで判明
-			unauthorized.value = true;
-			return;
-		}
+		// HTMLは未認証でも返却, 認証要否はAPIの401で判明
+		if (isUnauthorized(e)) return;
 		error.value = e instanceof Error ? e.message : String(e);
 	} finally {
 		inFlight--;
@@ -412,17 +409,11 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 				</div>
 			</div>
 
-			<MetricsView v-if="tab === 'metrics'" ref="metricsView" :bindings="bindings" @unauthorized="unauthorized = true" />
+			<MetricsView v-if="tab === 'metrics'" ref="metricsView" :bindings="bindings" />
 
-			<SchedulesView
-				v-else-if="tab === 'schedules'"
-				ref="schedulesView"
-				@unauthorized="unauthorized = true"
-				@job="selected = $event"
-				@run="selectedRun = $event"
-			/>
+			<SchedulesView v-else-if="tab === 'schedules'" ref="schedulesView" @job="selected = $event" @run="selectedRun = $event" />
 
-			<BindingsView v-else-if="tab === 'bindings'" ref="bindingsView" @unauthorized="unauthorized = true" />
+			<BindingsView v-else-if="tab === 'bindings'" ref="bindingsView" />
 
 			<div v-else-if="tab === 'runs'" class="relative w-full overflow-x-auto rounded-card border border-border">
 				<table class="w-full caption-bottom text-sm">

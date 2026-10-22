@@ -11,7 +11,6 @@ const WINDOWS = [
 ];
 
 const props = defineProps<{ bindings: string[] }>();
-const emit = defineEmits<{ unauthorized: [] }>();
 
 const hours = ref(24);
 const binding = ref('');
@@ -30,10 +29,7 @@ async function load() {
 		error.value = null;
 	} catch (e) {
 		if (requested !== generation) return;
-		if (isUnauthorized(e)) {
-			emit('unauthorized');
-			return;
-		}
+		if (isUnauthorized(e)) return;
 		error.value = e instanceof Error ? e.message : String(e);
 	}
 }

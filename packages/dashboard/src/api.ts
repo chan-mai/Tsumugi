@@ -1,3 +1,5 @@
+import { ref } from 'vue';
+
 // 応答型はtsumugi側で定義, 二重定義はREST API変更への追随漏れ要因
 import type {
 	AttemptRecord,
@@ -48,15 +50,27 @@ export function isUnauthorized(error: unknown): boolean {
 /** httpsのみSecure付与, http動作のwrangler devでの保存失敗対策 */
 export const cookieAttributes = (protocol: string): string => `path=/; SameSite=Strict${protocol === 'https:' ? '; Secure' : ''}`;
 
+// どの画面の401もトークン入力へ切替
+export const unauthorized = ref(false);
+// トークン保存前に発行した要求の401は対象外
+let authGeneration = 0;
+
+function markUnauthorized(generation: number): never {
+	if (generation === authGeneration) unauthorized.value = true;
+	throw new UnauthorizedError();
+}
+
 export function saveToken(value: string): void {
+	authGeneration++;
 	const name = tokenCookie();
 	if (!name) return;
 	document.cookie = `${name}=${encodeURIComponent(value)}; ${cookieAttributes(location.protocol)}`;
 }
 
 async function call<T>(path: string, init: RequestInit = {}, Unavailable?: new () => Error): Promise<T> {
+	const generation = authGeneration;
 	const res = await fetch(path, { ...init, credentials: 'same-origin' });
-	if (res.status === 401) throw new UnauthorizedError();
+	if (res.status === 401) markUnauthorized(generation);
 	if (res.status === 501 && Unavailable) throw new Unavailable();
 	if (!res.ok) {
 		const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -69,8 +83,9 @@ export type MutationOutcome = { ok: boolean; gone: boolean; message: string };
 
 // 410は保持期間経過でDOから削除済み, 一覧に残存しても操作不可
 async function mutate(path: string): Promise<MutationOutcome> {
+	const generation = authGeneration;
 	const res = await fetch(path, { method: 'POST', credentials: 'same-origin' });
-	if (res.status === 401) throw new UnauthorizedError();
+	if (res.status === 401) markUnauthorized(generation);
 	if (res.ok) return { ok: true, gone: false, message: 'Accepted' };
 
 	const body = (await res.json().catch(() => ({}))) as { error?: string };
