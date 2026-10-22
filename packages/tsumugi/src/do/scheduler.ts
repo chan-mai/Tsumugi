@@ -14,7 +14,7 @@ import { ACTIVE_STATES } from '../core/transitions.js';
 import type { SettledTarget } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput } from './job-shard.js';
-import type { StartInput, StartResult } from './run.js';
+import type { RunLifecycleStub } from './run.js';
 import { SchedulerRepo, type FiredPatch } from './scheduler-repo.js';
 import type { ScheduleRow } from './scheduler-schema.js';
 
@@ -60,12 +60,6 @@ export type ScheduleTriggerResult =
 // DOクラス非参照でDO実装不要(ADR-0023)
 interface SchedulerJobStub extends Rpc.DurableObjectBranded {
 	stateOf(jobId: string): Promise<string | null>;
-}
-
-// DO本体の型は型展開過剰
-interface SchedulerRunStub extends Rpc.DurableObjectBranded {
-	start(input: StartInput): Promise<StartResult>;
-	state(): Promise<string | null>;
 }
 
 // 匿名クラス推論ではprotected混入で宣言出力不可
@@ -339,8 +333,8 @@ export function createSchedulerClass({
 			return typeof source === 'function' ? await (source as (context: ScheduleContext) => unknown)(context) : source;
 		}
 
-		#runStub(runId: string): DurableObjectStub<SchedulerRunStub> {
-			const namespace = this.env.RUN as DurableObjectNamespace<SchedulerRunStub> | undefined;
+		#runStub(runId: string): DurableObjectStub<RunLifecycleStub> {
+			const namespace = this.env.RUN as DurableObjectNamespace<RunLifecycleStub> | undefined;
 			if (!namespace) throw new Error('RUN binding is not configured, add the Run DO binding to wrangler');
 			return namespace.get(namespace.idFromName(runId));
 		}

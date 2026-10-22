@@ -9,7 +9,7 @@ import { normalizeTraceparent } from '../core/trace.js';
 import type { BulkFailure, MutationResult, TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 import type { Ui } from '../ui/serve.js';
-import type { RunControl, SchedulerControl, StartOptions } from '../worker.js';
+import type { RunControlStub, SchedulerControl, StartOptions } from '../worker.js';
 import type { AuthMiddleware } from './auth.js';
 import { MetricsQueryError, parseMetricsQuery, readMetrics, type MetricsResolver } from '../analytics/reader.js';
 import { openapiDocument } from './openapi.js';
@@ -74,7 +74,7 @@ export type RestOptions<Env extends RestEnv> = {
 	flows?: readonly string[];
 	start?: (env: Env, flow: string, input: unknown, options?: StartOptions) => Promise<string>;
 	/** 取り消し, 再開はDOへ直接送信, 読み取りモデルは正でない(ADR-0015) */
-	runFor?: (env: Env, runId: string) => Pick<RunControl, 'cancel' | 'retry'>;
+	runFor?: (env: Env, runId: string) => Pick<RunControlStub, 'cancel' | 'retry'>;
 	/** 定期実行の照会, 操作, Scheduler DOへ直接送信(ADR-0040), 未設定時`/api/schedules`は501 */
 	schedulerFor?: (env: Env) => Pick<SchedulerControl, 'list' | 'setPaused' | 'trigger'>;
 	/** 未設定時`/api/metrics`は501 */

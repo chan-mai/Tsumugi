@@ -15,7 +15,7 @@ export type { MetricPoint } from '../analytics/writer.js';
 export type { OutboxRow } from '../projection/projector.js';
 export type {
 	BindingConfig,
-	RunControl,
+	RunControlStub,
 	RunNamespaceEnv,
 	SchedulerControl,
 	SchedulerNamespaceEnv,
@@ -24,10 +24,10 @@ export type {
 	TsumugiConfig,
 } from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
-export type { DispatchMessage, EnqueueInput, FailureNotifyStub, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
+export type { DispatchMessage, EnqueueInput, NoticeEnqueueStub, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
 // createRunClass非公開, `defineTsumugi().runClass`迂回は設定二重管理の原因
 export { DEFAULT_MAX_NODES } from '../do/run.js';
-export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } from '../do/run.js';
+export type { RunClass, RunEnv, RunSettings, RunNotifyStub, StartInput, StartResult } from '../do/run.js';
 // createSchedulerClassも同理由で非公開(ADR-0040)
 export { SCHEDULER_DO_NAME } from '../do/scheduler.js';
 export type { ScheduleMutationResult, SchedulerClass, SchedulerEnv, ScheduleTriggerResult, ScheduleView } from '../do/scheduler.js';

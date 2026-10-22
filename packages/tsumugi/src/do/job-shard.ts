@@ -19,7 +19,7 @@ import type {
 	SettledNotice,
 	SettledTarget,
 } from '../core/types.js';
-import type { RunStub } from './run.js';
+import type { RunNotifyStub } from './run.js';
 import { systemClock, type Clock } from './clock.js';
 import { writeMetrics } from '../analytics/writer.js';
 import { project } from '../projection/projector.js';
@@ -58,13 +58,13 @@ export type ShardEnv = {
 	/** 未設定時メトリクス無効 */
 	TSUMUGI_METRICS?: AnalyticsEngineDataset;
 	/** flows利用時の完了通知先(ADR-0031) */
-	RUN?: DurableObjectNamespace<RunStub>;
+	RUN?: DurableObjectNamespace<RunNotifyStub>;
 	/** 通知投入用の自己参照(#30) */
-	JOB_SHARD?: DurableObjectNamespace<FailureNotifyStub>;
+	JOB_SHARD?: DurableObjectNamespace<NoticeEnqueueStub>;
 };
 
 /** 通知投入用の型, DO本体の型は展開が過剰に深い(#30) */
-export interface FailureNotifyStub extends Rpc.DurableObjectBranded {
+export interface NoticeEnqueueStub extends Rpc.DurableObjectBranded {
 	enqueueMany(inputs: readonly EnqueueInput[]): Promise<string[]>;
 }
 

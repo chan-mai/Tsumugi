@@ -86,12 +86,12 @@ type BuiltJob = Omit<EnqueueInput, 'binding' | 'id' | 'runId' | 'nodeId' | 'part
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** Job DO用のRun DOインタフェース, 通知送信のみ(ADR-0031) */
-export interface RunStub extends Rpc.DurableObjectBranded {
+export interface RunNotifyStub extends Rpc.DurableObjectBranded {
 	notify(events: readonly NodeEvent[]): Promise<void>;
 }
 
 // 型展開過多の回避で使用分のみ宣言
-interface RunPeerStub extends Rpc.DurableObjectBranded {
+export interface RunLifecycleStub extends Rpc.DurableObjectBranded {
 	start(input: StartInput): Promise<StartResult>;
 	state(): Promise<RunState | null>;
 	cancel(): Promise<MutationResult>;
@@ -723,7 +723,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		}
 
 		// 終端済み子runは通知済みで再通知なし(ADR-0034)
-		async #resumeChild(stub: DurableObjectStub<RunPeerStub>, nodeId: string, now: number): Promise<boolean> {
+		async #resumeChild(stub: DurableObjectStub<RunLifecycleStub>, nodeId: string, now: number): Promise<boolean> {
 			const state = await stub.state();
 			if (state === 'FAILED') {
 				await stub.retry();
@@ -751,8 +751,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			return true;
 		}
 
-		#runStub(runId: string): DurableObjectStub<RunPeerStub> {
-			const namespace = this.env.RUN as DurableObjectNamespace<RunPeerStub> | undefined;
+		#runStub(runId: string): DurableObjectStub<RunLifecycleStub> {
+			const namespace = this.env.RUN as DurableObjectNamespace<RunLifecycleStub> | undefined;
 			if (!namespace) throw new Error('RUN binding is not configured, add the Run DO binding to wrangler');
 			return namespace.get(namespace.idFromName(runId));
 		}

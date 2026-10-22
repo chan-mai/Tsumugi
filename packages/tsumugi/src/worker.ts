@@ -30,10 +30,10 @@ export type { BindingConfig, ClientEnv };
 
 /** flows利用時のみ必要, 未設定時は開始時エラー(ADR-0013) */
 export type RunNamespaceEnv = {
-	RUN?: DurableObjectNamespace<RunControl>;
+	RUN?: DurableObjectNamespace<RunControlStub>;
 };
 
-export interface RunControl extends Rpc.DurableObjectBranded {
+export interface RunControlStub extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown; deadlineMs?: number }): Promise<StartResult>;
 	cancel(): Promise<MutationResult>;
 	retry(): Promise<MutationResult>;
@@ -112,7 +112,7 @@ export type Tsumugi<Env, M extends Performers = Performers, F extends Flows = Fl
 	 * `deadlineMs`はflow定義の期限より優先(ADR-0039)
 	 */
 	start<K extends keyof F & string>(env: Env, flow: K, input: InputOf<F[K]>, options?: StartOptions): Promise<string>;
-	runFor(env: Env, runId: string): DurableObjectStub<RunControl>;
+	runFor(env: Env, runId: string): DurableObjectStub<RunControlStub>;
 	/**
 	 * Run DOクラス, flow定義参照でパッケージから直接エクスポート不可(ADR-0030)
 	 * wranglerのclass_nameはエクスポート名
@@ -193,7 +193,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 	};
 
 	// 設定漏れは開始時エラー, 放置ではノード永久未実行(ADR-0013)
-	const runFor = (env: Env, runId: string): DurableObjectStub<RunControl> => {
+	const runFor = (env: Env, runId: string): DurableObjectStub<RunControlStub> => {
 		const namespace = env.RUN;
 		// RUNのみ個別判定, 不足一覧より短いメッセージ
 		if (!namespace) throw new Error('RUN binding is not configured, add the Run DO binding to wrangler');
