@@ -234,3 +234,34 @@ describe('読み取りモデルの終端ジョブ削除', () => {
 		expect(removed).toBe(2);
 	});
 });
+
+describe('読み取りモデルの終端run削除', () => {
+	const insertRun = async (id: string, state: string, updatedAt: number) => {
+		await env.TSUMUGI_DB.prepare(
+			`INSERT INTO run (id, seq, flow, state, input, node_total, node_done, node_failed, created_at, updated_at)
+			 VALUES (?, 1, 'F', ?, '{}', 1, 1, 0, ?, ?)`,
+		)
+			.bind(id, state, updatedAt, updatedAt)
+			.run();
+		await env.TSUMUGI_DB.prepare(
+			`INSERT INTO run_node (run_id, node_id, seq, binding, state, container, origin, after, position, created_at, updated_at)
+			 VALUES (?, 'a', 1, 'B', ?, 0, 'static', '[]', 0, ?, ?)`,
+		)
+			.bind(id, state, updatedAt, updatedAt)
+			.run();
+	};
+	const count = async (table: 'run' | 'run_node', column: 'id' | 'run_id', id: string) =>
+		(await env.TSUMUGI_DB.prepare(`SELECT count(*) AS c FROM ${table} WHERE ${column} = ?`).bind(id).first<{ c: number }>())!.c;
+
+	it('保持期間を過ぎた終端runとそのノードを削除する', async () => {
+		await insertRun('F:old', 'COMPLETED', T0 - 8 * DAY);
+		await insertRun('F:recent', 'FAILED', T0 - 1 * DAY);
+		await insertRun('F:running', 'RUNNING', T0 - 100 * DAY);
+
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 7 * DAY });
+
+		expect([await count('run', 'id', 'F:old'), await count('run_node', 'run_id', 'F:old')]).toEqual([0, 0]);
+		expect([await count('run', 'id', 'F:recent'), await count('run_node', 'run_id', 'F:recent')]).toEqual([1, 1]);
+		expect([await count('run', 'id', 'F:running'), await count('run_node', 'run_id', 'F:running')]).toEqual([1, 1]);
+	});
+});

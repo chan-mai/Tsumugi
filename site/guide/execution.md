@@ -230,7 +230,7 @@ const tsumugi = defineTsumugi({
 ```
 
 一覧そのものの保持はこれとは別の設定で、`retention`で指定します。
-cronトリガーを設定すると、期間を過ぎた終了済みのジョブが一覧から削除されます。詳細は[SweepOptions](/reference/config#sweepoptions)を参照してください。
+cronトリガーを設定すると、期間を過ぎた終了済みのジョブとRunが一覧から削除されます。詳細は[SweepOptions](/reference/config#sweepoptions)を参照してください。
 
 既定では両者の期間が揃っているため、一覧に表示されているジョブはリトライが可能ですが、片方だけ変えた場合には、一覧に表示されていてもリトライを受け付けないジョブが発生してしまう可能性があります。
 

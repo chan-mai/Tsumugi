@@ -277,7 +277,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 			prime(env, ctx);
 			// D1読み取りモデルのみ, DO側はtickで削除
 			const removed = await sweepReadModel(env.TSUMUGI_DB, Date.now(), config.retention ?? {});
-			if (removed > 0) console.log(`tsumugi: swept ${removed} jobs from the read model`);
+			if (removed > 0) console.log(`tsumugi: swept ${removed} jobs and runs from the read model`);
 		},
 		jobs(env: Env): JobQueue<PerformersOf<R>> {
 			return {
