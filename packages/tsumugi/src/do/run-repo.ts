@@ -136,10 +136,6 @@ export class RunRepo {
 		this.db.update(run).set({ expired: 1, updatedAt: now }).where(eq(run.id, id)).run();
 	}
 
-	resetDeadline(now: number): void {
-		this.sql.exec(`UPDATE run SET deadline_at = ? + deadline_ms, expired = 0, updated_at = ? WHERE deadline_ms IS NOT NULL`, now, now);
-	}
-
 	insertNodes(nodes: readonly NewNode[], now: number): void {
 		for (const part of chunk(nodes, NODE_COLUMNS)) {
 			this.#insertNodeChunk(part, now);
@@ -244,7 +240,17 @@ export class RunRepo {
 	 */
 	resetForRetry(now: number, aborted: string | null): string[] {
 		// 親への通知済みフラグ解除, 未解除では再開後の終端が親へ未通知
-		this.db.update(run).set({ parentNotified: 0, updatedAt: now }).run();
+		// 期限の再計算と超過フラグ解除, 未解除では再開直後に再超過(ADR-0039)
+		this.sql.exec(
+			`UPDATE run SET
+				state = 'RUNNING',
+				parent_notified = 0,
+				deadline_at = CASE WHEN deadline_ms IS NULL THEN deadline_at ELSE ? + deadline_ms END,
+				expired = 0,
+				updated_at = ?`,
+			now,
+			now,
+		);
 		// 子を戻すコンテナは集約待ちへ, COMPLETEDのままでは集計値が古いまま
 		const containers = this.sql.exec<{ id: string }>(
 			`UPDATE node SET state = 'RUNNING', updated_at = ?

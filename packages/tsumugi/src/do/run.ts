@@ -303,9 +303,6 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const aborted = row.expired === 1 && row.cancelling === 0 ? deadlineErrorOf(row.deadline_ms) : null;
 			const reset = this.repo.resetForRetry(now, aborted);
 			this.#cancelSent.clear();
-			// 再開直後の再超過防止(ADR-0039)
-			this.repo.resetDeadline(now);
-			this.repo.setRunState(row.id, 'RUNNING', now);
 			this.repo.appendRunOutbox();
 			this.repo.appendNodeOutbox(row.id, reset);
 			await this.#armAlarm(now);
