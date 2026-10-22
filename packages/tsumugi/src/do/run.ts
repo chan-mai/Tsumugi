@@ -343,7 +343,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			} catch (error) {
 				// alarm()がthrowするとworkerdのリトライは6回で枯渇, 捕捉して必ず再設定
 				console.error('tsumugi: run tick failed', error);
-				await this.ctx.storage.setAlarm(this.clock.now() + 5_000);
+				// 割り込んだ処理が設定した早い予定は維持
+				await this.#armAlarm(this.clock.now() + 5_000);
 			}
 		}
 

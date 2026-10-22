@@ -712,7 +712,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			// alarm()がthrowするとworkerdは2秒起点の指数バックオフで最大6回のみリトライ
 			// 捕捉して必ず次のalarmを再設定し、一時的な失敗での調停停止を防止
 			console.error('tsumugi: tick failed', error);
-			await this.ctx.storage.setAlarm(this.clock.now() + 5_000);
+			// 割り込んだ処理が設定した早い予定は維持
+			await this.#armAlarm(this.clock.now() + 5_000);
 		}
 	}
 
