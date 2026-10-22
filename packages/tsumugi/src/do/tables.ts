@@ -154,7 +154,3 @@ export const outbox = sqliteTable('outbox', {
 	jobId: text('job_id').notNull(),
 	snapshot: text('snapshot').notNull(),
 });
-
-export type JobRecord = typeof job.$inferSelect;
-export type AttemptRecord = typeof attempt.$inferSelect;
-export type OutboxRecord = typeof outbox.$inferSelect;

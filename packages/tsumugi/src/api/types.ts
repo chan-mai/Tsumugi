@@ -201,25 +201,6 @@ export type MutationResponse = { ok: true; requested?: true };
 /** 4xx / 5xxで返る本文 */
 export type ErrorResponse = { error: string };
 
-/** 一覧の並べ替え, 許可した列以外はサーバ側で既定を使用 */
-export type ListOrder = 'asc' | 'desc';
-
-export type ListJobsQuery = {
-	state?: string;
-	binding?: string;
-	sort?: string;
-	order?: ListOrder;
-	limit?: number;
-	offset?: number;
-};
-
-export type ListRunsQuery = {
-	state?: string;
-	flow?: string;
-	limit?: number;
-	offset?: number;
-};
-
 /** Analytics Engineのbinding単位の集計 */
 export type BindingMetricsView = {
 	binding: string;

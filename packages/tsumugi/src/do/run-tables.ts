@@ -83,7 +83,3 @@ export const runOutbox = sqliteTable('run_outbox', {
 	target: text('target').notNull(),
 	snapshot: text('snapshot').notNull(),
 });
-
-export type RunRecord = typeof run.$inferSelect;
-export type NodeRecord = typeof node.$inferSelect;
-export type RunOutboxRecord = typeof runOutbox.$inferSelect;
