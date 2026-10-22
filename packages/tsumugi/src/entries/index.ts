@@ -9,7 +9,7 @@ export { project } from '../projection/projector.js';
 export { projectRun } from '../projection/run-projector.js';
 export type { RunOutboxRow } from '../projection/run-projector.js';
 export { sweepReadModel, DEFAULT_RETENTION_MS } from '../projection/sweep.js';
-export type { SweepOptions } from '../projection/sweep.js';
+export type { FailedRetention, SweepOptions } from '../projection/sweep.js';
 export { toPoint, writeMetrics } from '../analytics/writer.js';
 export type { MetricPoint } from '../analytics/writer.js';
 export type { OutboxRow } from '../projection/projector.js';

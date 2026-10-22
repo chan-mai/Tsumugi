@@ -233,6 +233,36 @@ describe('読み取りモデルの終端ジョブ削除', () => {
 		const removed = await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 7 * DAY, limit: 2 });
 		expect(removed).toBe(2);
 	});
+
+	it('失敗ジョブはbindingごとのDOの保持期間まで残す', async () => {
+		const insertAs = (id: string, binding: string, state: string, updatedAt: number) =>
+			env.TSUMUGI_DB.prepare(
+				`INSERT INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, created_at, updated_at, payload)
+				 VALUES (?, 1, ?, ?, 0, 1, 3, 'at-least-once', ?, ?, '{}')`,
+			)
+				.bind(id, binding, state, updatedAt, updatedAt)
+				.run();
+		await insertAs('LONG#0:failed', 'LONG', 'FAILED', T0 - 10 * DAY);
+		await insertAs('LONG#0:stalled', 'LONG', 'STALLED', T0 - 10 * DAY);
+		await insertAs('LONG#0:failed-old', 'LONG', 'FAILED', T0 - 15 * DAY);
+		await insertAs('LONG#0:done', 'LONG', 'COMPLETED', T0 - 10 * DAY);
+		await insertAs('PLAIN#0:failed', 'PLAIN', 'FAILED', T0 - 10 * DAY);
+
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 1 * DAY }, { jobs: { LONG: 14 * DAY } });
+
+		expect(await exists('LONG#0:failed')).toBe(true);
+		expect(await exists('LONG#0:stalled')).toBe(true);
+		expect(await exists('LONG#0:failed-old')).toBe(false);
+		expect(await exists('LONG#0:done')).toBe(false);
+		// 未指定bindingは既定7日
+		expect(await exists('PLAIN#0:failed')).toBe(false);
+	});
+
+	it('既定では失敗ジョブを7日まで残す', async () => {
+		await insert('RM#0:failed-recent', 'FAILED', T0 - 3 * DAY);
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 1 * DAY });
+		expect(await exists('RM#0:failed-recent')).toBe(true);
+	});
 });
 
 describe('読み取りモデルの終端run削除', () => {
@@ -263,5 +293,31 @@ describe('読み取りモデルの終端run削除', () => {
 		expect([await count('run', 'id', 'F:old'), await count('run_node', 'run_id', 'F:old')]).toEqual([0, 0]);
 		expect([await count('run', 'id', 'F:recent'), await count('run_node', 'run_id', 'F:recent')]).toEqual([1, 1]);
 		expect([await count('run', 'id', 'F:running'), await count('run_node', 'run_id', 'F:running')]).toEqual([1, 1]);
+	});
+
+	it('FAILEDのrunはRun DOの保持期間まで残す', async () => {
+		await insertRun('F:failed', 'FAILED', T0 - 8 * DAY);
+		await insertRun('F:failed-old', 'FAILED', T0 - 15 * DAY);
+
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 7 * DAY }, { runs: 14 * DAY });
+
+		expect([await count('run', 'id', 'F:failed'), await count('run_node', 'run_id', 'F:failed')]).toEqual([1, 1]);
+		expect([await count('run', 'id', 'F:failed-old'), await count('run_node', 'run_id', 'F:failed-old')]).toEqual([0, 0]);
+	});
+
+	it('ノードが上限より多いrunも全ノードを削除する', async () => {
+		await insertRun('F:wide', 'COMPLETED', T0 - 8 * DAY);
+		for (let i = 0; i < 4; i++) {
+			await env.TSUMUGI_DB.prepare(
+				`INSERT INTO run_node (run_id, node_id, seq, binding, state, container, origin, after, position, created_at, updated_at)
+				 VALUES ('F:wide', ?, 1, 'B', 'COMPLETED', 0, 'static', '[]', 0, 0, 0)`,
+			)
+				.bind(`b${i}`)
+				.run();
+		}
+
+		await sweepReadModel(env.TSUMUGI_DB, T0, { olderThanMs: 7 * DAY, limit: 2 });
+
+		expect([await count('run', 'id', 'F:wide'), await count('run_node', 'run_id', 'F:wide')]).toEqual([0, 0]);
 	});
 });

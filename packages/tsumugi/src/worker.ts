@@ -276,7 +276,13 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
 			prime(env, ctx);
 			// D1読み取りモデルのみ, DO側はtickで削除
-			const removed = await sweepReadModel(env.TSUMUGI_DB, Date.now(), config.retention ?? {});
+			const jobs = Object.fromEntries(
+				Object.entries(config.bindings ?? {}).flatMap(([binding, c]) => (c.failedRetentionMs === undefined ? [] : [[binding, c.failedRetentionMs]])),
+			);
+			const removed = await sweepReadModel(env.TSUMUGI_DB, Date.now(), config.retention ?? {}, {
+				jobs,
+				...(config.runs?.failedRetentionMs !== undefined ? { runs: config.runs.failedRetentionMs } : {}),
+			});
 			if (removed > 0) console.log(`tsumugi: swept ${removed} jobs and runs from the read model`);
 		},
 		jobs(env: Env): JobQueue<PerformersOf<R>> {

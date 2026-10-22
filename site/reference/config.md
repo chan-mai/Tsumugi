@@ -205,6 +205,8 @@ cronトリガーを設定すると、終了したジョブとRunを一覧から�
 | `limit`       | `1000` | 1回で削除する件数の上限(ジョブ・Runそれぞれ) |
 
 Runを再開できる期間は`runs`で指定します。
+`FAILED`のRunは、`olderThanMs`か`runs.failedRetentionMs`のいずれか長い方が経過すると一覧から削除されます。
+`FAILED`と`STALLED`のジョブは、`olderThanMs`かbindingの`failedRetentionMs`のいずれか長い方が経過すると一覧から削除されます。
 
 ## wranglerのbinding
 
