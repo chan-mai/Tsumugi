@@ -1,4 +1,4 @@
-export { defineTsumugi, enqueue, enqueueMany, shardFor } from '../worker.js';
+export { defineTsumugi, enqueue, enqueueMany, shardAt } from '../worker.js';
 export { bearerAuth, unsafeNoAuth } from '../api/auth.js';
 export type { AuthMiddleware, BearerOptions, TokenResolver } from '../api/auth.js';
 export { cloudflareAccess, clearJwksCache, verifyAccessJwt } from '../api/access.js';

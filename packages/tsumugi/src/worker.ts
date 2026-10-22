@@ -123,7 +123,7 @@ export type Tsumugi<Env, M extends Performers = Performers, F extends Flows = Fl
 };
 
 /** shards=1の既定構成向け, 常に0番(ADR-0011) */
-export function shardFor<Env extends ConsumerEnv>(env: Env, binding: string, shard = 0): DurableObjectStub<TsumugiJobShard> {
+export function shardAt<Env extends ConsumerEnv>(env: Env, binding: string, shard = 0): DurableObjectStub<TsumugiJobShard> {
 	return env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardName(binding, shard)));
 }
 
