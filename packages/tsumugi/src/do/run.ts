@@ -28,7 +28,7 @@ import type { Retention, SettledTarget } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
-import type { NodeRow } from './run-schema.js';
+import type { NodeRow, RunRow } from './run-schema.js';
 import { deadlineErrorOf, RunRepo, type NewNode } from './run-repo.js';
 
 export type RunEnv = ClientEnv & {
@@ -341,16 +341,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			const flow = Object.hasOwn(flows, runRow.flow) ? flows[runRow.flow] : undefined;
 			if (!flow) {
-				// flow定義の消失は待機で解決不可, 理由を記録しFAILEDへ(ADR-0030)
-				// 決着済みは再設定なし, 状態と投影の再追記回避
-				if (runRow.state === 'RUNNING') this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
-				const projected = await this.#project();
-				// 親への通知と削除は通常の決着と同手順, 省略時は親ノードとDOが残存
-				const notified = await this.#notifyParent(this.repo.findRun()?.state as RunState, now);
-				if (notified && (await this.#sweep(now))) return;
-				if (projected >= PROJECTION_LIMIT || this.repo.hasOutbox()) await this.#armAlarm(now);
-				else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
-				else await this.#armSweep(now);
+				await this.#settleWithoutFlow(runRow, now);
 				return;
 			}
 
@@ -407,36 +398,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				}
 			}
 
-			if (inputs.length > 0) {
-				await client.enqueueMany(this.env, inputs);
-			}
-			// 子runは同一IDの再開始で既存返却, 再実行でも重複なし(ADR-0029)
-			const unstarted = new Set<string>();
-			for (const child of subflows) {
-				try {
-					const stub = this.#runStub(child.childRunId);
-					const started = await stub.start({
-						flow: child.flow,
-						input: child.input,
-						parent: { runId: runRow.id, nodeId: child.nodeId },
-						depth: runRow.depth + 1,
-					});
-					if (!started.created && (await this.#resumeChild(stub, child.nodeId, now))) touched.add(child.nodeId);
-				} catch (error) {
-					// 上限超過等は待機で解決不可, FAILEDにしないと毎tick同じ失敗
-					this.repo.updateNode(child.nodeId, { state: 'FAILED', error: `failed to start child run: ${messageOf(error)}` }, now);
-					unstarted.add(child.nodeId);
-					touched.add(child.nodeId);
-				}
-			}
-			for (const id of starting) {
-				if (unstarted.has(id)) continue;
-				const current = this.repo.findNode(id);
-				// 投入待ち中に完了通知があり得る, 終端ノードを戻すと以後の通知なし
-				if (!current || isNodeTerminal(current.state as NodeState)) continue;
-				this.repo.updateNode(id, { state: subflows.some((child) => child.nodeId === id) ? 'RUNNING' : 'SCHEDULED' }, now);
-				touched.add(id);
-			}
+			for (const id of await this.#startPending(runRow, inputs, starting, subflows, now)) touched.add(id);
 
 			// 決定反映後の内容で状態決定, 反映前では1tick前の状態を投影
 			const settled = advance({ nodes: this.repo.views(), cancelling, expired });
@@ -464,6 +426,61 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
 			else if (settled.state === 'RUNNING') await this.#armDeadline(now);
 			else await this.#armSweep(now);
+		}
+
+		// flow定義の消失は待機で解決不可, 理由を記録しFAILEDへ(ADR-0030)
+		async #settleWithoutFlow(runRow: RunRow, now: number): Promise<void> {
+			// 決着済みは再設定なし, 状態と投影の再追記回避
+			if (runRow.state === 'RUNNING') this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
+			const projected = await this.#project();
+			// 親への通知と削除は通常の決着と同手順, 省略時は親ノードとDOが残存
+			const notified = await this.#notifyParent(this.repo.findRun()?.state as RunState, now);
+			if (notified && (await this.#sweep(now))) return;
+			if (projected >= PROJECTION_LIMIT || this.repo.hasOutbox()) await this.#armAlarm(now);
+			else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
+			else await this.#armSweep(now);
+		}
+
+		// 投入と子runの起動, 戻り値は投影対象のノード
+		async #startPending(
+			runRow: RunRow,
+			inputs: EnqueueInput[],
+			starting: string[],
+			subflows: SubflowStart[],
+			now: number,
+		): Promise<string[]> {
+			const touched: string[] = [];
+			if (inputs.length > 0) {
+				await client.enqueueMany(this.env, inputs);
+			}
+			// 子runは同一IDの再開始で既存返却, 再実行でも重複なし(ADR-0029)
+			const unstarted = new Set<string>();
+			for (const child of subflows) {
+				try {
+					const stub = this.#runStub(child.childRunId);
+					const started = await stub.start({
+						flow: child.flow,
+						input: child.input,
+						parent: { runId: runRow.id, nodeId: child.nodeId },
+						depth: runRow.depth + 1,
+					});
+					if (!started.created && (await this.#resumeChild(stub, child.nodeId, now))) touched.push(child.nodeId);
+				} catch (error) {
+					// 上限超過等は待機で解決不可, FAILEDにしないと毎tick同じ失敗
+					this.repo.updateNode(child.nodeId, { state: 'FAILED', error: `failed to start child run: ${messageOf(error)}` }, now);
+					unstarted.add(child.nodeId);
+					touched.push(child.nodeId);
+				}
+			}
+			for (const id of starting) {
+				if (unstarted.has(id)) continue;
+				const current = this.repo.findNode(id);
+				// 投入待ち中に完了通知があり得る, 終端ノードを戻すと以後の通知なし
+				if (!current || isNodeTerminal(current.state as NodeState)) continue;
+				this.repo.updateNode(id, { state: subflows.some((child) => child.nodeId === id) ? 'RUNNING' : 'SCHEDULED' }, now);
+				touched.push(id);
+			}
+			return touched;
 		}
 
 		async #apply(
