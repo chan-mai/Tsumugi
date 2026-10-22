@@ -46,6 +46,9 @@ const ADVANCE_ROUNDS = 32;
 /** 1回の投影で処理するアウトボックスの上限 */
 const PROJECTION_LIMIT = 200;
 
+/** 親への通知に失敗した後の再送間隔 */
+const NOTIFY_RETRY_MS = 5_000;
+
 /** 1つのrunに入るノード数の既定上限(ADR-0035) */
 export const DEFAULT_MAX_NODES = 10_000;
 
@@ -371,7 +374,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				// 親への通知と削除は通常の決着と同じ手順, 省くと親ノードとDOが残存
 				const notified = await this.#notifyParent(this.repo.findRun()?.state as RunState, now);
 				if (notified && (await this.#sweep(now))) return;
-				if (!notified || projected >= PROJECTION_LIMIT || this.repo.countOutbox() > 0) await this.#armAlarm(now);
+				if (projected >= PROJECTION_LIMIT || this.repo.countOutbox() > 0) await this.#armAlarm(now);
+				else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
 				else await this.#armSweep(now);
 				return;
 			}
@@ -483,9 +487,9 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				deferred > 0 ||
 				projected >= PROJECTION_LIMIT ||
 				settled.decisions.some((decision) => !waiting.has(decision.id)) ||
-				this.repo.countOutbox() > 0 ||
-				!notified;
+				this.repo.countOutbox() > 0;
 			if (hasMore) await this.#armAlarm(now);
+			else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
 			else if (settled.state === 'RUNNING') await this.#armDeadline(now);
 			else await this.#armSweep(now);
 		}

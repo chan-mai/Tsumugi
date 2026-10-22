@@ -181,6 +181,46 @@ describe('subflowの縦串', () => {
 		expect(alarm).not.toBeNull();
 	});
 
+	it('親への通知に失敗したら間隔を空けて再送する', async () => {
+		const child = 'GREETINGS:notify-retry';
+		const T = 2_600_000_000_000;
+		await runStub(child).start({
+			flow: 'GREETINGS',
+			input: { prefix: 'x' },
+			parent: { runId: 'PIPELINE:notify-retry', nodeId: 'greetings' },
+			depth: 1,
+		});
+		await settleRuns([child]);
+		sent.length = 0;
+		const jobId = (await nodeOf(child, 'list'))?.job_id;
+		if (!jobId) throw new Error('the first node of the child run has no job id');
+
+		const alarm = await runInDurableObject(runStub(child), async (instance) => {
+			(instance as any).clock = { now: () => T };
+			// 親のRun DOへ届かない状況, envは他のテストと共有で終了時に復元
+			const original = (instance as any).env.RUN;
+			(instance as any).env.RUN = {
+				idFromName: (name: string) => ({ name }),
+				get: () => ({
+					notifyChild: async () => {
+						throw new Error('unreachable');
+					},
+				}),
+			};
+			try {
+				await (instance as any).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'boom' }]);
+				await (instance as any).ctx.storage.deleteAlarm();
+				await (instance as any).alarm();
+				return (await (instance as any).ctx.storage.getAlarm()) as number | null;
+			} finally {
+				(instance as any).env.RUN = original;
+			}
+		});
+
+		// 即時の再起動では失敗の間ずっとtickを反復
+		expect(alarm).toBeGreaterThan(T);
+	});
+
 	it('親を取り消すと子も取り消される', async () => {
 		const parent = 'PIPELINE:sub-cancel';
 		const child = 'GREETINGS:sub-cancel-greetings';
