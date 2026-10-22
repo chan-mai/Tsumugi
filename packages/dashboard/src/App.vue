@@ -97,6 +97,17 @@ function commitSearch(value: string) {
 let conditionGeneration = 0;
 let requestSequence = 0;
 let appliedSequence = 0;
+let inFlight = 0;
+// 登録済みbindingとflowはデプロイまで不変, 取得成功後は再取得なし
+let definitionsLoaded = false;
+
+async function loadDefinitions() {
+	if (definitionsLoaded) return;
+	const [available, definedFlows] = await Promise.all([getBindings(), getFlows()]);
+	bindings.value = available.bindings;
+	flows.value = definedFlows.flows;
+	definitionsLoaded = true;
+}
 
 function reloadForConditions() {
 	conditionGeneration++;
@@ -108,6 +119,7 @@ async function load() {
 	const sequence = ++requestSequence;
 	const requested = tab.value;
 	const stale = () => generation !== conditionGeneration || sequence < appliedSequence;
+	inFlight++;
 	try {
 		if (requested === 'metrics') {
 			await metricsView.value?.load();
@@ -122,26 +134,25 @@ async function load() {
 			return;
 		}
 		if (requested === 'runs') {
-			const [list, available] = await Promise.all([
+			const [list] = await Promise.all([
 				listRuns({
 					state: state.value || undefined,
 					flow: runFlow.value || undefined,
 					limit: pageSize.value,
 					offset: page.value * pageSize.value,
 				}),
-				getFlows(),
+				loadDefinitions(),
 			]);
 			if (stale()) return;
 			appliedSequence = sequence;
 			runs.value = list.runs;
 			total.value = list.total;
-			flows.value = available.flows;
 			error.value = null;
 			unauthorized.value = false;
 			return;
 		}
 
-		const [list, available, definedFlows] = await Promise.all([
+		const [list] = await Promise.all([
 			listJobs({
 				state: state.value || undefined,
 				binding: binding.value || undefined,
@@ -153,15 +164,12 @@ async function load() {
 				limit: pageSize.value,
 				offset: page.value * pageSize.value,
 			}),
-			getBindings(),
-			getFlows(),
+			loadDefinitions(),
 		]);
 		if (stale()) return;
 		appliedSequence = sequence;
 		jobs.value = list.jobs;
 		total.value = list.total;
-		bindings.value = available.bindings;
-		flows.value = definedFlows.flows;
 		error.value = null;
 		unauthorized.value = false;
 	} catch (e) {
@@ -173,7 +181,15 @@ async function load() {
 			return;
 		}
 		error.value = e instanceof Error ? e.message : String(e);
+	} finally {
+		inFlight--;
 	}
+}
+
+// 前回未完了と非表示中は省略, 応答遅延時の要求の累積防止
+function tick() {
+	if (inFlight > 0 || document.hidden) return;
+	load();
 }
 
 function switchTab(next: 'jobs' | 'runs' | 'schedules' | 'bindings' | 'metrics') {
@@ -212,7 +228,7 @@ function toggleAll() {
 
 function restartTimer() {
 	if (timer) clearInterval(timer);
-	if (refreshMs.value > 0) timer = setInterval(load, refreshMs.value);
+	if (refreshMs.value > 0) timer = setInterval(tick, refreshMs.value);
 }
 
 function setRefresh(ms: number) {
