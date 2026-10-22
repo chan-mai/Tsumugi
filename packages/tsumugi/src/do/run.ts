@@ -159,6 +159,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 		#repo: RunRepo | undefined;
 		#ticking = false;
+		// 取り消し要求の送信済みノード
+		#cancelSent = new Set<string>();
 
 		get repo(): RunRepo {
 			if (!this.#repo) this.#repo = new RunRepo(this.ctx.storage);
@@ -300,6 +302,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			const aborted = row.expired === 1 && row.cancelling === 0 ? deadlineErrorOf(row.deadline_ms) : null;
 			const reset = this.repo.resetForRetry(now, aborted);
+			this.#cancelSent.clear();
 			// 再開直後の再超過防止(ADR-0039)
 			this.repo.resetDeadline(now);
 			this.repo.setRunState(row.id, 'RUNNING', now);
@@ -551,7 +554,9 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						deadlineError !== null ? ({ state: 'FAILED', error: deadlineError } as const) : ({ state: 'CANCELLED' } as const);
 					if (row.child_run_id !== null) {
 						// 子のcancelは要求受理のみ, 終端は子からの通知で確定
-						await this.#runStub(row.child_run_id).cancel();
+						const key = `${row.id}:${row.child_run_id}`;
+						if (!this.#cancelSent.has(key)) await this.#runStub(row.child_run_id).cancel();
+						this.#cancelSent.add(key);
 						waiting.add(row.id);
 						return [];
 					}
@@ -559,9 +564,15 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						this.repo.updateNode(row.id, terminal, now);
 						return [row.id];
 					}
+					const key = `${row.id}:${row.job_id}`;
+					if (this.#cancelSent.has(key)) {
+						waiting.add(row.id);
+						return [];
+					}
 					// QUEUED以降は協調的取り消しの要求のみ, 終端はジョブの通知で確定(ADR-0052)
 					const result = await this.#jobStub(row.job_id).cancel(row.job_id);
 					if (!result.ok || result.requested) {
+						this.#cancelSent.add(key);
 						waiting.add(row.id);
 						return [];
 					}

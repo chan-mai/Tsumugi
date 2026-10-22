@@ -204,6 +204,35 @@ describe('取り消し要求(#95)', () => {
 		expect(runState).toBe('CANCELLED');
 	});
 
+	it('runの取り消し要求は終端通知待ちの間に再送しない', async () => {
+		const runNamespace = env.RUN as unknown as DurableObjectNamespace<Rpc.DurableObjectBranded>;
+		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:cancel-once'));
+		const calls = await runInDurableObject(run as never, async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cancel-once' } });
+			inner.repo.sql.exec(`UPDATE node SET state = 'SCHEDULED', job_id = 'ListNames#0:once' WHERE id = 'list'`);
+			const original = inner.env.JOB_SHARD;
+			let count = 0;
+			inner.env.JOB_SHARD = {
+				idFromName: (name: string) => original.idFromName(name),
+				get: () => ({
+					cancel: async () => {
+						count++;
+						return { ok: true, requested: true };
+					},
+				}),
+			};
+			try {
+				await inner.cancel();
+				for (let i = 0; i < 3; i++) await inner.alarm();
+			} finally {
+				inner.env.JOB_SHARD = original;
+			}
+			return count;
+		});
+		expect(calls).toBe(1);
+	});
+
 	it('確定したCANCELLEDは終端の通知(onSettled)の対象になる', async () => {
 		const jobId = await queued('CX10#0');
 		await shard('CX10#0').configure({ settled: { binding: 'CXNOTIFY', states: ['CANCELLED'] } });
