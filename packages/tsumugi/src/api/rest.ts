@@ -108,7 +108,7 @@ export function validateCreateJob(
 		return { error: 'expiresInMs must be a positive integer' };
 	}
 
-	for (const name of ['concurrencyKey', 'uniqueKey'] as const) {
+	for (const name of ['concurrencyKey', 'uniqueKey', 'partitionKey'] as const) {
 		if (raw[name] !== undefined && typeof raw[name] !== 'string') return { error: `${name} must be a string` };
 	}
 
@@ -129,6 +129,7 @@ export function validateCreateJob(
 	if (typeof raw.priority === 'number') input.priority = raw.priority;
 	if (typeof raw.concurrencyKey === 'string' && raw.concurrencyKey) input.concurrencyKey = raw.concurrencyKey;
 	if (typeof raw.uniqueKey === 'string' && raw.uniqueKey) input.uniqueKey = raw.uniqueKey;
+	if (typeof raw.partitionKey === 'string' && raw.partitionKey) input.partitionKey = raw.partitionKey;
 	return { input };
 }
 
@@ -590,7 +591,14 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const parsed = validateCreateJob(body, bindings, c.req.header('traceparent'));
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
-		const id = await enqueue(c.env, parsed.input);
+		let id: string;
+		try {
+			id = await enqueue(c.env, parsed.input);
+		} catch (error) {
+			// 分割構成のpartitionKey欠落, binding名の不正は入力の誤り
+			if (error instanceof InvalidJobIdError) return c.json({ error: error.message } satisfies ErrorResponse, 400);
+			throw error;
+		}
 		return c.json({ id } satisfies CreateJobResponse, 201);
 	});
 

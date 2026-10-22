@@ -147,6 +147,7 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
   "priority": 10,
   "concurrencyKey": "domain:example.com",
   "uniqueKey": "mail:a@example.com:hi",
+  "partitionKey": "tenant-42",
   "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 }
 ```
@@ -156,12 +157,13 @@ Flowを登録していない構成では、Runの開始と再開と取り消し�
 
 `expiresInMs`は投入時刻からの相対の期限です。期限を過ぎたジョブは実行されずCANCELLEDになります。
 
+`partitionKey`は、`shards`を2以上にしたbindingで投入先を決定するキーです。bindingを分割した環境では必ず明示する必要があります。
+
 `traceparent`は任意。本文に指定が無い場合は`traceparent`ヘッダーを利用し、両方存在する場合は本文を優先します。
 採用した値がW3C Trace Contextのversion `00`の形式に合わない場合は400を返します。形式の詳細は[ジョブの投入](/guide/enqueue#traceparent)を参照してください。
 指定した値はリトライ時にも保持され、performerの`ctx.traceparent`へ渡されます。
 
 指定できるのは上記の項目のみです。`timeoutMs`や`backoff`などは指定できず、既定値が使われます。
-`partitionKey`も指定できないため、分割したbindingへの投入には利用できません。
 
 成功すると201で`{ "id": "..." }`が返ります。
 `uniqueKey`が既存のジョブと衝突した場合も201です。新規には作成されず、応答には既存のジョブIDが含まれます。

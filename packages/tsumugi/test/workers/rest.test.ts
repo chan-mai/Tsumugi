@@ -6,6 +6,7 @@ import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
 import { createRest, SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
+import { hashToShard } from '../../src/core/shard.js';
 import type { ScheduleView } from '../../src/do/scheduler.js';
 
 const T0 = 2_200_000_000_000;
@@ -559,6 +560,26 @@ describe('ジョブの投入', () => {
 	it('認証が無ければ401', async () => {
 		const res = await post({ binding: 'REST', payload: {} }, { 'content-type': 'application/json' });
 		expect(res.status).toBe(401);
+	});
+
+	it('分割したbindingへはpartitionKeyで投入先を決定する(ADR-0011)', async () => {
+		const sharded = defineTsumugi({ performers: { REST: Noop }, auth: bearerAuth(TOKEN), bindings: { REST: { shards: 2 } } });
+		const postTo = (body: unknown) =>
+			sharded.fetch!(
+				new Request('https://example.com/api/jobs', { method: 'POST', headers: authorized, body: JSON.stringify(body) }),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+
+		// 省略は入力の誤り, 0番への暗黙の割り当てなし
+		const missing = await postTo({ binding: 'REST', payload: {} });
+		expect(missing.status).toBe(400);
+		expect((await missing.json<{ error: string }>()).error).toContain('partitionKey');
+
+		const res = await postTo({ binding: 'REST', payload: {}, partitionKey: 'tenant-42' });
+		expect(res.status).toBe(201);
+		const { id } = await res.json<{ id: string }>();
+		expect(id).toMatch(new RegExp(`^REST#${hashToShard('tenant-42', 2)}:`));
 	});
 
 	it('登録済みbindingが選択肢として返る', async () => {
