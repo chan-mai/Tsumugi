@@ -9,8 +9,8 @@ import { node, run, runOutbox } from './run-tables.js';
 const NODE_COLUMNS = Object.keys(getTableColumns(node)).length;
 const OUTBOX_COLUMNS = Object.keys(getTableColumns(runOutbox)).length;
 
-/** 期限超過で中断したノードの理由接頭辞 */
-export const DEADLINE_ERROR_PREFIX = 'run deadline exceeded';
+/** 期限超過で中断したノードの理由 */
+export const deadlineErrorOf = (deadlineMs: number | null) => `run deadline exceeded: ${deadlineMs}ms`;
 
 export type NewNode = {
 	id: string;
@@ -264,16 +264,15 @@ export class RunRepo {
 	 * 子のrunIDも解除, 残すと旧い子の遅れた通知が再開後の状態を上書き
 	 * fan-outの子は期限超過で中断したもののみ対象, 実行済みの失敗は集計値で後段へ渡り済み
 	 */
-	resetForRetry(now: number): string[] {
+	resetForRetry(now: number, aborted: string | null): string[] {
 		// 親への通知済みの印を解除, 設定のままでは再開後の終端が親へ届かない
 		this.db.update(run).set({ parentNotified: 0, updatedAt: now }).run();
-		const aborted = `${DEADLINE_ERROR_PREFIX}%`;
 		// 子を戻すコンテナは集約待ちへ, COMPLETEDのままでは集計値が再開前のまま
 		const containers = this.sql.exec<{ id: string }>(
 			`UPDATE node SET state = 'RUNNING', updated_at = ?
 			WHERE container = 1 AND state = 'COMPLETED' AND EXISTS(
 				SELECT 1 FROM node child
-				WHERE child.parent = node.id AND child.origin = 'fanOut' AND child.state = 'FAILED' AND child.error LIKE ?
+				WHERE child.parent = node.id AND child.origin = 'fanOut' AND child.state = 'FAILED' AND child.error = ?
 			)
 			RETURNING id`,
 			now,
@@ -288,7 +287,7 @@ export class RunRepo {
 				error = NULL,
 				updated_at = ?
 			WHERE state IN ('FAILED', 'STALLED', 'SKIPPED', 'CANCELLED')
-				AND (origin <> 'fanOut' OR (state = 'FAILED' AND error LIKE ?))
+				AND (origin <> 'fanOut' OR (state = 'FAILED' AND error = ?))
 			RETURNING id`,
 			now,
 			aborted,

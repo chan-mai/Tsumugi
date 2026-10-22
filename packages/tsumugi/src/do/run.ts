@@ -29,7 +29,7 @@ import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
 import type { NodeRow } from './run-schema.js';
-import { DEADLINE_ERROR_PREFIX, RunRepo } from './run-repo.js';
+import { deadlineErrorOf, RunRepo } from './run-repo.js';
 
 export type RunEnv = ClientEnv & {
 	TSUMUGI_DB: D1Database;
@@ -329,7 +329,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			if (!row) return { ok: false, reason: 'gone' };
 			if (row.state !== 'FAILED') return { ok: false, reason: 'invalid-state' };
 
-			const reset = this.repo.resetForRetry(now);
+			const aborted = row.expired === 1 && row.cancelling === 0 ? deadlineErrorOf(row.deadline_ms) : null;
+			const reset = this.repo.resetForRetry(now, aborted);
 			// 期限を再計算し超過の印を解除, 元のままでは再開直後に再び超過(ADR-0039)
 			this.repo.resetDeadline(now);
 			this.repo.setRunState(row.id, 'RUNNING', now);
@@ -396,7 +397,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				expired = true;
 			}
 			// 中断されたノードへ残す理由, runには理由の置き場が無い, 取り消しはCANCELLEDのまま
-			const deadlineError = expired && !cancelling ? `${DEADLINE_ERROR_PREFIX}: ${runRow.deadline_ms}ms` : null;
+			const deadlineError = expired && !cancelling ? deadlineErrorOf(runRow.deadline_ms) : null;
 
 			const touched = new Set<string>();
 			const inputs: EnqueueInput[] = [];

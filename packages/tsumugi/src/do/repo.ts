@@ -772,7 +772,7 @@ export class JobRepo {
 
 	/** キー別バケットの読み出し(ADR-0045), 対象は投入候補のキーのみで有界 */
 	readKeyBuckets(keys: readonly string[]): KeyBuckets {
-		const buckets: KeyBuckets = {};
+		const buckets: KeyBuckets = Object.create(null);
 		for (const part of chunk(keys, 1)) {
 			const rows = this.db.select().from(keyBucket).where(inArray(keyBucket.key, part)).all();
 			this.reads++;

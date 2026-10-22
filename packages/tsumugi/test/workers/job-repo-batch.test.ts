@@ -23,6 +23,16 @@ describe('キー別バケットの分割', () => {
 		expect(size).toBe(120);
 	});
 
+	it('`__proto__`のキーが読める', async () => {
+		const read = await runInDurableObject(shard('BUCKET:proto'), (instance) => {
+			const repo = (instance as unknown as { repo: JobRepo }).repo;
+			repo.writeKeyBuckets(Object.fromEntries([['__proto__', { tokens: 1, refilledAt: 1 }]]));
+			const buckets = repo.readKeyBuckets(['__proto__']);
+			return { own: Object.hasOwn(buckets, '__proto__'), keys: Object.keys(buckets) };
+		});
+		expect(read).toEqual({ own: true, keys: ['__proto__'] });
+	});
+
 	it('上限を超える件数のキーを削除できる', async () => {
 		const size = await runInDurableObject(shard('BUCKET:delete'), (instance) => {
 			const repo = (instance as unknown as { repo: JobRepo }).repo;

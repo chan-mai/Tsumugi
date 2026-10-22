@@ -265,17 +265,16 @@ describe('縦串: runの開始から完了まで', () => {
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'fr' } });
 
 		// 各ノードを投入まで進め、終端の通知を手で届ける
-		const finish = async (nodeId: string, state: 'COMPLETED' | 'FAILED', result: unknown = null) => {
+		const finish = async (nodeId: string, state: 'COMPLETED' | 'FAILED', result: unknown = null, error = 'intentional failure') => {
 			await settleRun(runId);
 			sent.length = 0;
 			const jobId = await jobIdOf(runId, nodeId);
 			if (jobId === null) throw new Error(`${nodeId} has no job id`);
-			await stub.notify([
-				{ nodeId, jobId, state, result: JSON.stringify(result), error: state === 'FAILED' ? 'intentional failure' : null },
-			]);
+			await stub.notify([{ nodeId, jobId, state, result: JSON.stringify(result), error: state === 'FAILED' ? error : null }]);
 		};
 		await finish('list', 'COMPLETED', { names: ['a', 'b'] });
-		await finish('greet:0', 'FAILED');
+		// 期限超過と同様の理由であっても期限の無いrunでは許容済みの失敗
+		await finish('greet:0', 'FAILED', null, 'run deadline exceeded: 10000ms');
 		await finish('greet:1', 'COMPLETED');
 		await finish('report', 'FAILED');
 		await settleRun(runId);

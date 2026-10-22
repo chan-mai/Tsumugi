@@ -113,6 +113,8 @@ function commitSearch(value: string) {
  * 遅れて届いた旧条件の応答の破棄用, 定期更新では据え置き(応答が間隔より遅いと全件破棄)
  */
 let conditionGeneration = 0;
+let requestSequence = 0;
+let appliedSequence = 0;
 
 /** 条件を変えた後の再読込, 変更前に発行した要求の応答は反映なし */
 function reloadForConditions() {
@@ -122,7 +124,9 @@ function reloadForConditions() {
 
 async function load() {
 	const generation = conditionGeneration;
+	const sequence = ++requestSequence;
 	const requested = tab.value;
+	const stale = () => generation !== conditionGeneration || sequence < appliedSequence;
 	try {
 		if (requested === 'metrics') {
 			await metricsView.value?.load();
@@ -146,7 +150,8 @@ async function load() {
 				}),
 				getFlows(),
 			]);
-			if (generation !== conditionGeneration) return;
+			if (stale()) return;
+			appliedSequence = sequence;
 			runs.value = list.runs;
 			total.value = list.total;
 			flows.value = available.flows;
@@ -171,7 +176,8 @@ async function load() {
 			getBindings(),
 			getFlows(),
 		]);
-		if (generation !== conditionGeneration) return;
+		if (stale()) return;
+		appliedSequence = sequence;
 		jobs.value = list.jobs;
 		total.value = list.total;
 		byState.value = stats.byState;
@@ -180,7 +186,8 @@ async function load() {
 		error.value = null;
 		unauthorized.value = false;
 	} catch (e) {
-		if (generation !== conditionGeneration) return;
+		if (stale()) return;
+		appliedSequence = sequence;
 		if (isUnauthorized(e)) {
 			// HTML自体は未認証でも返り、ここで初めて認証の要否が判明
 			unauthorized.value = true;
@@ -276,7 +283,8 @@ async function detectFeatures() {
  */
 function reload() {
 	unauthorized.value = false;
-	load();
+	// トークン入力前の要求の401で入力画面へ戻さない
+	reloadForConditions();
 	detectFeatures();
 }
 
