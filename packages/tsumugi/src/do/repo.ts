@@ -126,15 +126,17 @@ export class JobRepo {
 	}
 
 	// UPSERT内容そのもので投影側の追加読み取り不要(ADR-0008)
-	#appendOutbox(id: string): void {
+	#appendOutbox(id: string): { row: JobRow; attempts: AttemptRow[] } | null {
 		const row = this.find(id);
-		if (!row) return;
+		if (!row) return null;
+		const attempts = this.attemptsOf(id);
 		// 試行履歴も同梱, 別経路は冪等性判定が別途必要(ADR-0028)
 		this.db
 			.insert(outbox)
-			.values({ jobId: id, snapshot: JSON.stringify({ ...row, attempts_log: this.attemptsOf(id), logs: this.logsOf(id) }) })
+			.values({ jobId: id, snapshot: JSON.stringify({ ...row, attempts_log: attempts, logs: this.logsOf(id) }) })
 			.run();
 		this.writes++;
+		return { row, attempts };
 	}
 
 	attemptsOf(jobId: string): AttemptRow[] {
@@ -350,9 +352,13 @@ export class JobRepo {
 		this.writes++;
 		const row = updated[0];
 		if (!row) return false;
-		this.#appendOutbox(id);
-		if (FAILURE_STATES.includes(to)) this.#appendFailure(id, to as FailureNotice['state'], patch.error ?? null, patch.now);
-		if (TERMINAL_STATES.includes(to)) this.#appendSettled(id, to as SettledState, patch.error ?? null, patch.now);
+		const current = this.#appendOutbox(id);
+		if (current && FAILURE_STATES.includes(to)) {
+			this.#appendFailure(current.row, current.attempts, to as FailureNotice['state'], patch.error ?? null, patch.now);
+		}
+		if (current && TERMINAL_STATES.includes(to)) {
+			this.#appendSettled(current.row, current.attempts, to as SettledState, patch.error ?? null, patch.now);
+		}
 		// 終端検出を1箇所に集約, 呼び出し側ごとの実装は漏れの原因
 		if (row.runId !== null && row.nodeId !== null && TERMINAL_STATES.includes(to)) {
 			this.appendNotify(row.runId, {
@@ -420,24 +426,22 @@ export class JobRepo {
 	}
 
 	// 送信時はジョブ削除済みの可能性で内容をここで確定(#30)
-	#appendFailure(id: string, state: FailureNotice['state'], error: string | null, now: number): void {
-		const row = this.find(id);
-		if (!row) return;
+	#appendFailure(row: JobRow, attempts: AttemptRow[], state: FailureNotice['state'], error: string | null, now: number): void {
 		const notice: FailureNotice = {
-			jobId: id,
+			jobId: row.id,
 			binding: row.binding,
 			state,
 			attempts: row.attempts,
 			maxAttempts: row.max_attempts,
 			// 理由無しは直近の試行から補完, reaper起因は理由無し
-			error: error ?? this.attemptsOf(id)[0]?.error ?? null,
+			error: error ?? attempts[0]?.error ?? null,
 			runId: row.run_id,
 			nodeId: row.node_id,
 			failedAt: now,
 		};
 		this.db
 			.insert(failureNotify)
-			.values({ jobId: id, payload: JSON.stringify(notice) })
+			.values({ jobId: row.id, payload: JSON.stringify(notice) })
 			.run();
 		this.writes++;
 	}
@@ -474,19 +478,17 @@ export class JobRepo {
 	}
 
 	// 送信時はジョブ削除済みの可能性で内容をここで確定(#96)
-	#appendSettled(id: string, state: SettledState, error: string | null, now: number): void {
+	#appendSettled(row: JobRow, attempts: AttemptRow[], state: SettledState, error: string | null, now: number): void {
 		const target = this.settledTarget();
 		if (target === null || !target.states.includes(state)) return;
-		const row = this.find(id);
-		if (!row) return;
 		if (row.binding === target.binding) return;
 		const notice: SettledNotice = {
-			jobId: id,
+			jobId: row.id,
 			binding: row.binding,
 			state,
 			attempts: row.attempts,
 			maxAttempts: row.max_attempts,
-			error: error ?? (FAILURE_STATES.includes(state) ? (this.attemptsOf(id)[0]?.error ?? null) : null),
+			error: error ?? (FAILURE_STATES.includes(state) ? (attempts[0]?.error ?? null) : null),
 			result: row.result !== null ? JSON.parse(row.result) : null,
 			runId: row.run_id,
 			nodeId: row.node_id,
@@ -494,7 +496,7 @@ export class JobRepo {
 		};
 		this.db
 			.insert(settledNotify)
-			.values({ jobId: id, payload: JSON.stringify(notice) })
+			.values({ jobId: row.id, payload: JSON.stringify(notice) })
 			.run();
 		this.writes++;
 	}
