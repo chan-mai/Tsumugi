@@ -74,7 +74,7 @@ describe('tickの読み取り行数', () => {
 				},
 			};
 			try {
-				const state = repo.sweepState(T0 + 1, { doneMs: 60_000, failedMs: 60_000 });
+				const state = repo.sweepState(T0 + 1, { sweepAfterMs: 60_000, failedRetentionMs: 60_000 });
 				expect(state).toEqual({ jobs: false, uniqueKeys: false, nextDueAt: T0 + 60_000 });
 			} finally {
 				(repo as any).sql = original;
@@ -91,8 +91,8 @@ describe('tickの読み取り行数', () => {
 			seed(repo.sql, 'STALLED', T0, T0 - 1_000);
 
 			// STALLEDは古いが保持期間が長く、COMPLETEDが先に対象
-			expect(repo.sweepState(T0, { doneMs: 10_000, failedMs: 60_000 }).nextDueAt).toBe(T0 + 10_000);
-			expect(repo.sweepState(T0, { doneMs: 60_000, failedMs: 10_000 }).nextDueAt).toBe(T0 - 1_000 + 10_000);
+			expect(repo.sweepState(T0, { sweepAfterMs: 10_000, failedRetentionMs: 60_000 }).nextDueAt).toBe(T0 + 10_000);
+			expect(repo.sweepState(T0, { sweepAfterMs: 60_000, failedRetentionMs: 10_000 }).nextDueAt).toBe(T0 - 1_000 + 10_000);
 		});
 	});
 

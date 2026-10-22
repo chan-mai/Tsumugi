@@ -787,7 +787,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const row = this.repo.findRun();
 			if (!row || row.state === 'RUNNING') return false;
 			if (this.repo.hasOutbox()) return false;
-			const keepFor = row.state === 'FAILED' ? retention.failedMs : retention.doneMs;
+			const keepFor = row.state === 'FAILED' ? retention.failedRetentionMs : retention.sweepAfterMs;
 			if (row.updated_at + keepFor > now) return false;
 			// SQLiteごと削除, 1 run 1インスタンスで残す行なし(ADR-0029)
 			// 完了待機, 未待機では削除失敗が検知不能
@@ -808,7 +808,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		async #armSweep(now: number): Promise<void> {
 			const row = this.repo.findRun();
 			if (!row || row.state === 'RUNNING') return;
-			const keepFor = row.state === 'FAILED' ? retention.failedMs : retention.doneMs;
+			const keepFor = row.state === 'FAILED' ? retention.failedRetentionMs : retention.sweepAfterMs;
 			// tick中設定のalarm後退防止, 後退では通知処理が保持期間まで遅延
 			await this.#armAlarm(Math.max(row.updated_at + keepFor, now + 1_000));
 		}

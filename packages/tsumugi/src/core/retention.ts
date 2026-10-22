@@ -8,7 +8,7 @@ export const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function retentionOf(settings: { sweepAfterMs?: number; failedRetentionMs?: number }): Retention {
 	return {
-		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
-		failedMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
+		sweepAfterMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
+		failedRetentionMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 	};
 }

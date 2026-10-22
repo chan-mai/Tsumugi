@@ -137,7 +137,7 @@ export type DispatchOutput = {
 
 export type Retention = {
 	/** COMPLETED / CANCELLED */
-	doneMs: number;
+	sweepAfterMs: number;
 	/** FAILED / STALLED, 手動リトライを受け付ける期間 */
-	failedMs: number;
+	failedRetentionMs: number;
 };

@@ -72,8 +72,8 @@ const toView = (row: JobRow): JobView => ({
 // sweepStateのSQLと同条件を維持
 const sweepable = (now: number, retention: Retention) =>
 	or(
-		and(inArray(job.state, ['COMPLETED', 'CANCELLED']), lt(job.updatedAt, now - retention.doneMs)),
-		and(inArray(job.state, ['FAILED', 'STALLED']), lt(job.updatedAt, now - retention.failedMs)),
+		and(inArray(job.state, ['COMPLETED', 'CANCELLED']), lt(job.updatedAt, now - retention.sweepAfterMs)),
+		and(inArray(job.state, ['FAILED', 'STALLED']), lt(job.updatedAt, now - retention.failedRetentionMs)),
 	);
 
 /** 状態遷移は条件付きUPDATEの`returning`で成否判定, 読んでから書く方式は不使用 */
@@ -582,11 +582,11 @@ export class JobRepo {
 						UNION ALL SELECT MIN(updated_at) + ?4 FROM job WHERE state = 'CANCELLED'
 						UNION ALL SELECT MIN(updated_at) + ?5 FROM job WHERE state = 'FAILED'
 						UNION ALL SELECT MIN(updated_at) + ?5 FROM job WHERE state = 'STALLED')) AS next_due`,
-				now - retention.doneMs,
-				now - retention.failedMs,
+				now - retention.sweepAfterMs,
+				now - retention.failedRetentionMs,
 				now,
-				retention.doneMs,
-				retention.failedMs,
+				retention.sweepAfterMs,
+				retention.failedRetentionMs,
 			)
 			.one();
 		return { jobs: row.jobs === 1, uniqueKeys: row.unique_keys === 1, nextDueAt: row.next_due };
