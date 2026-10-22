@@ -41,6 +41,12 @@ export function addPerformer(rawName: string, deps: CliDeps): number {
 		return 1;
 	}
 
+
+	if (names.fileBase === 'index') {
+		deps.error('tsumugi: "index" is reserved for the barrel src/performers/index.ts, choose another name');
+		return 1;
+	}
+
 	const dir = join(deps.cwd, 'src', 'performers');
 	if (!deps.fs.exists(dir)) {
 		deps.error('tsumugi: src/performers/ does not exist, run `tsumugi init` first');
