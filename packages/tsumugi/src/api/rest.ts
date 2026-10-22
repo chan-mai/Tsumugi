@@ -70,7 +70,7 @@ export type RestOptions<Env extends RestEnv> = {
 	failedRetentionMs?: (binding: string) => number;
 	/** 失敗runの保持期間, 詳細`retryable`判定用(ADR-0034) */
 	runFailedRetentionMs?: number;
-	/** 開始先の検証, 選択肢用 */
+	/** 開始先の検証, 選択肢用, 省略時は検証なし */
 	flows?: readonly string[];
 	start?: (env: Env, flow: string, input: unknown, options?: StartOptions) => Promise<string>;
 	/** 取り消し, 再開はDOへ直接送信, 読み取りモデルは正でない(ADR-0015) */
@@ -164,13 +164,13 @@ export function validateReschedule(body: unknown, now: number): { input: Resched
 
 export type StartRunInput = StartRunRequest;
 
-export function validateStartRun(body: unknown, flows: readonly string[]): { input: StartRunInput } | { error: string } {
+export function validateStartRun(body: unknown, flows: readonly string[] | undefined): { input: StartRunInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
 	const raw = body as Record<string, unknown>;
 
 	if (typeof raw.flow !== 'string' || raw.flow.length === 0) return { error: 'flow is required' };
 	// 未登録flowは開始後に必ず失敗, 開始時に拒否
-	if (flows.length > 0 && !flows.includes(raw.flow)) return { error: `unknown flow: ${raw.flow}` };
+	if (flows !== undefined && !flows.includes(raw.flow)) return { error: `unknown flow: ${raw.flow}` };
 	if (!('input' in raw)) return { error: 'input is required' };
 	if (raw.id !== undefined && typeof raw.id !== 'string') return { error: 'id must be a string' };
 	if (raw.deadlineMs !== undefined && (typeof raw.deadlineMs !== 'number' || !Number.isInteger(raw.deadlineMs) || raw.deadlineMs <= 0)) {
@@ -447,19 +447,8 @@ export type { SortColumn };
  * 稼働中も投影済み, ページング, ソートは通常のSQL
  */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const {
-		dashboard,
-		bindings,
-		shardsOf,
-		enqueue,
-		failedRetentionMs,
-		runFailedRetentionMs,
-		flows = [],
-		start,
-		runFor,
-		schedulerFor,
-		metrics,
-	} = options;
+	const { dashboard, bindings, shardsOf, enqueue, failedRetentionMs, runFailedRetentionMs, flows, start, runFor, schedulerFor, metrics } =
+		options;
 
 	// 読み取りモデルはDO行の有無を持たず保持期間から近似
 	// 実際の可否はDOが判定し410が最終回答, ここは操作前の目安
@@ -924,7 +913,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	});
 
 	// 未実行flowも含め`flows`から返却
-	app.get('/api/flows', (c) => c.json({ flows: [...flows].sort() } satisfies FlowsResponse));
+	app.get('/api/flows', (c) => c.json({ flows: [...(flows ?? [])].sort() } satisfies FlowsResponse));
 
 	app.post('/api/runs', async (c) => {
 		if (!start) return c.json({ error: 'run creation is not available' } satisfies ErrorResponse, 501);
