@@ -1,3 +1,4 @@
+import type { MetricsResponse } from '../api/types.js';
 import { FAILURE_STATES } from '../core/transitions.js';
 
 // `writeDataPoint`の値はWorker bindingから読込不可, アカウントのAPIトークンが必要
@@ -26,33 +27,6 @@ export type MetricsQuery = {
 	/** 遡る時間数, 既定24, 最大720 */
 	hours: number;
 	binding?: string;
-};
-
-export type BindingMetrics = {
-	binding: string;
-	total: number;
-	failed: number;
-	/** 0以上1以下 */
-	failureRate: number;
-	avgDurationMs: number;
-	maxDurationMs: number;
-	p95DurationMs: number;
-	avgAttempts: number;
-};
-
-/** 1時間ごとの推移 */
-export type MetricsPoint = {
-	/** 区間の開始時刻, epochミリ秒 */
-	at: number;
-	total: number;
-	failed: number;
-	avgDurationMs: number;
-};
-
-export type MetricsResult = {
-	hours: number;
-	bindings: BindingMetrics[];
-	series: MetricsPoint[];
 };
 
 export class MetricsQueryError extends Error {
@@ -153,7 +127,7 @@ export async function readMetrics(
 	config: MetricsConfig,
 	input: MetricsQuery,
 	fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<MetricsResult> {
+): Promise<MetricsResponse> {
 	const [byBinding, overTime] = await Promise.all([
 		query(config, bindingSql(input, config.dataset), fetchImpl),
 		query(config, seriesSql(input, config.dataset), fetchImpl),

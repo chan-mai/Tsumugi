@@ -10,6 +10,7 @@ import type {
 	ScheduleSummary,
 	StartRunRequest,
 	DiagnosticsResponse,
+	MetricsResponse,
 	PolicyView,
 	TriggerScheduleResponse,
 	UpdatePolicyRequest,
@@ -144,19 +145,7 @@ export const startRun = (input: StartRunInput) =>
 		body: JSON.stringify(input),
 	});
 
-export type BindingMetrics = {
-	binding: string;
-	total: number;
-	failed: number;
-	failureRate: number;
-	avgDurationMs: number;
-	maxDurationMs: number;
-	p95DurationMs: number;
-	avgAttempts: number;
-};
-
-export type MetricsPoint = { at: number; total: number; failed: number; avgDurationMs: number };
-export type Metrics = { hours: number; bindings: BindingMetrics[]; series: MetricsPoint[] };
+export type Metrics = MetricsResponse;
 
 export class MetricsUnavailableError extends Error {
 	readonly unavailable = true;

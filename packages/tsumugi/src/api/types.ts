@@ -191,6 +191,12 @@ export type BindingMetricsView = {
 };
 
 /** 1時間ごとの推移 */
-export type MetricsPointView = { at: number; total: number; failed: number; avgDurationMs: number };
+export type MetricsPointView = {
+	/** 区間の開始時刻, epochミリ秒 */
+	at: number;
+	total: number;
+	failed: number;
+	avgDurationMs: number;
+};
 
 export type MetricsResponse = { hours: number; bindings: BindingMetricsView[]; series: MetricsPointView[] };
