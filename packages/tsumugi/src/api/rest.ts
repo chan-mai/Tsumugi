@@ -839,10 +839,10 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	function refusal(result: { ok: false; reason: 'invalid-state' | 'gone' }, subject: 'job' | 'run' = 'job') {
 		return result.reason === 'gone'
 			? ({
-					body: { ok: false, error: `${subject} not found: it does not exist or was removed after the retention period` },
+					body: { error: `${subject} not found: it does not exist or was removed after the retention period` } satisfies ErrorResponse,
 					status: 410,
 				} as const)
-			: ({ body: { ok: false, error: 'not allowed in the current state' }, status: 409 } as const);
+			: ({ body: { error: 'not allowed in the current state' } satisfies ErrorResponse, status: 409 } as const);
 	}
 
 	// 変更は正であるDOへ送信

@@ -408,6 +408,7 @@ describe('REST API', () => {
 		await shard('REST#0').report(jobId, { ok: true });
 		const res = await call(withAuth, 'POST', `/api/jobs/${encodeURIComponent(jobId)}/cancel`, authorized);
 		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: 'not allowed in the current state' });
 	});
 
 	it('不正な形式のジョブIDは400', async () => {
@@ -1145,7 +1146,9 @@ describe('予約済みジョブの実行時刻の変更', () => {
 	it('DOに無いジョブは410', async () => {
 		const res = await post('/api/jobs/REST%230:missingjob/reschedule', { runAt: T0 + 60_000 });
 		expect(res.status).toBe(410);
-		expect((await res.json<{ error: string }>()).error).toContain('does not exist');
+		const body = await res.json<{ error: string }>();
+		expect(Object.keys(body)).toEqual(['error']);
+		expect(body.error).toContain('does not exist');
 	});
 
 	it('検証に落ちた本文は400', async () => {
