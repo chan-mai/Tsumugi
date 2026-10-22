@@ -454,14 +454,14 @@ describe('scheduleの操作', () => {
 				list: async () => [],
 				setPaused: async (name: string, paused: boolean) => {
 					calls.push([name, paused]);
-					return name === 'nightly' ? { ok: true as const } : { ok: false as const, reason: 'not-found' as const };
+					return name === 'nightly' ? { ok: true as const } : { ok: false as const, reason: 'unknown' as const };
 				},
 				trigger: async (name: string) =>
 					name === 'nightly'
 						? { ok: true as const, kind: 'flow' as const, id: 'REPORT:nightly-1-manual' }
 						: name === 'broken'
 							? { ok: false as const, reason: 'failed' as const, error: 'payload resolver failed' }
-							: { ok: false as const, reason: 'not-found' as const },
+							: { ok: false as const, reason: 'unknown' as const },
 			}),
 		});
 		return { app, calls };

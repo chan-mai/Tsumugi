@@ -487,10 +487,10 @@ describe('一時停止と手動発火', () => {
 		expect(row?.input).toBe(JSON.stringify({ prefix: `nightly-${base}` }));
 	});
 
-	it('不明な名前はnot-found', async () => {
+	it('不明な名前はunknown', async () => {
 		await sync(day(22));
-		expect(await inside().setPaused('missing', true)).toEqual({ ok: false, reason: 'not-found' });
-		expect(await inside().trigger('missing')).toEqual({ ok: false, reason: 'not-found' });
+		expect(await inside().setPaused('missing', true)).toEqual({ ok: false, reason: 'unknown' });
+		expect(await inside().trigger('missing')).toEqual({ ok: false, reason: 'unknown' });
 	});
 
 	it('一時停止はsyncを跨いで維持される', async () => {

@@ -52,10 +52,10 @@ export type ScheduleView = {
 	last_error: string | null;
 };
 
-export type ScheduleMutationResult = { ok: true } | { ok: false; reason: 'not-found' };
+export type ScheduleMutationResult = { ok: true } | { ok: false; reason: 'unknown' };
 
 export type ScheduleTriggerResult =
-	{ ok: true; kind: 'job' | 'flow'; id: string } | { ok: false; reason: 'not-found' } | { ok: false; reason: 'failed'; error: string };
+	{ ok: true; kind: 'job' | 'flow'; id: string } | { ok: false; reason: 'unknown' } | { ok: false; reason: 'failed'; error: string };
 
 // DOクラス非参照でDO実装不要(ADR-0023)
 interface SchedulerJobStub extends Rpc.DurableObjectBranded {
@@ -166,7 +166,7 @@ export function createSchedulerClass({
 			const now = this.clock.now();
 			this.#reconcile(now);
 			const row = this.repo.find(name);
-			if (!row) return { ok: false, reason: 'not-found' };
+			if (!row) return { ok: false, reason: 'unknown' };
 			// 非停止行へのresumeは予定維持
 			const elapsed = !paused && row.paused === 1 && row.next_occurrence_at <= now;
 			this.repo.setPaused(
@@ -184,7 +184,7 @@ export function createSchedulerClass({
 			this.#reconcile(now);
 			const row = this.repo.find(name);
 			const def = Object.hasOwn(schedules, name) ? schedules[name] : undefined;
-			if (!row || !def) return { ok: false, reason: 'not-found' };
+			if (!row || !def) return { ok: false, reason: 'unknown' };
 
 			// 連番で同一ミリ秒の再発火もID区別
 			const seq = Number(this.repo.readSetting(MANUAL_SEQ_KEY) ?? '0') + 1;

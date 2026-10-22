@@ -781,7 +781,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const name = c.req.param('name');
 		const result = await schedulerFor(c.env).trigger(name);
 		if (result.ok) return c.json({ id: result.id, kind: result.kind } satisfies TriggerScheduleResponse, 201);
-		if (result.reason === 'not-found') return c.json({ error: `unknown schedule: ${name}` } satisfies ErrorResponse, 404);
+		if (result.reason === 'unknown') return c.json({ error: `unknown schedule: ${name}` } satisfies ErrorResponse, 404);
 		// 写像関数, 投入の失敗, 理由は一覧のlast_errorにも記録
 		return c.json({ error: result.error } satisfies ErrorResponse, 500);
 	});
