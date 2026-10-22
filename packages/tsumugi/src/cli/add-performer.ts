@@ -41,7 +41,6 @@ export function addPerformer(rawName: string, deps: CliDeps): number {
 		return 1;
 	}
 
-
 	if (names.fileBase === 'index') {
 		deps.error('tsumugi: "index" is reserved for the barrel src/performers/index.ts, choose another name');
 		return 1;
