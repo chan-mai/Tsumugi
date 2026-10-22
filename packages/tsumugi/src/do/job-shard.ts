@@ -551,6 +551,12 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/** FAILED / STALLEDは終端だが可逆(ADR-0012) */
 	async retry(jobId: string): Promise<MutationResult> {
 		const now = this.clock.now();
+		const result = this.#retryOne(jobId, now);
+		if (result.ok) await this.#armAlarm(now);
+		return result;
+	}
+
+	#retryOne(jobId: string, now: number): MutationResult {
 		// 取り消し要求クリア, 残すと再投入直後にCANCELLED(#95)
 		const ok = this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', {
 			now,
@@ -558,10 +564,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			dispatchedAt: null,
 			cancelRequestedAt: null,
 		});
-		if (ok) {
-			await this.#armAlarm(now);
-			return { ok: true };
-		}
+		if (ok) return { ok: true };
 		// 削除済みと状態違いの区別, 利用者の対応が別(ADR-0027)
 		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
 	}
@@ -613,19 +616,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const failed: BulkFailure[] = [];
 
 		for (const jobId of jobIds) {
-			if (action === 'retry') {
-				const applied = this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', {
-					now,
-					runAfter: now,
-					dispatchedAt: null,
-					cancelRequestedAt: null,
-				});
-				if (applied) ok.push(jobId);
-				else failed.push({ id: jobId, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' });
-				continue;
-			}
-			// 要求受理分もok, 確定は読み取りモデルで判別(ADR-0052)
-			const result = this.#cancelOne(jobId, now);
+			// cancelの要求受理分もok, 確定は読み取りモデルで判別(ADR-0052)
+			const result = action === 'retry' ? this.#retryOne(jobId, now) : this.#cancelOne(jobId, now);
 			if (result.ok) ok.push(jobId);
 			else failed.push({ id: jobId, reason: result.reason });
 		}
