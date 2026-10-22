@@ -277,7 +277,9 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 			prime(env, ctx);
 			// D1読み取りモデルのみ, DO側はtickで削除
 			const jobs = Object.fromEntries(
-				Object.entries(config.bindings ?? {}).flatMap(([binding, c]) => (c.failedRetentionMs === undefined ? [] : [[binding, c.failedRetentionMs]])),
+				Object.entries(config.bindings ?? {}).flatMap(([binding, c]) =>
+					c.failedRetentionMs === undefined ? [] : [[binding, c.failedRetentionMs]],
+				),
 			);
 			const removed = await sweepReadModel(env.TSUMUGI_DB, Date.now(), config.retention ?? {}, {
 				jobs,

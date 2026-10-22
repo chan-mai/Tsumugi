@@ -76,17 +76,21 @@ async function sweepRuns(db: D1Database, before: number, failedBefore: number, l
 		.select({ id: run.id })
 		.from(run)
 		.where(
-			or(
-				and(inArray(run.state, RUN_SETTLED), lt(run.updatedAt, before)),
-				and(eq(run.state, 'FAILED'), lt(run.updatedAt, failedBefore)),
-			),
+			or(and(inArray(run.state, RUN_SETTLED), lt(run.updatedAt, before)), and(eq(run.state, 'FAILED'), lt(run.updatedAt, failedBefore))),
 		)
 		.orderBy(asc(run.updatedAt), asc(run.id))
 		.limit(limit);
 	// fan-outのrunはノード数が多く1文の削除行数を制限
 	for (;;) {
-		const chunk = d.select({ rowid: sql`rowid` }).from(runNode).where(inArray(runNode.runId, targets)).limit(limit);
-		const removed = await d.delete(runNode).where(inArray(sql`rowid`, chunk)).run();
+		const chunk = d
+			.select({ rowid: sql`rowid` })
+			.from(runNode)
+			.where(inArray(runNode.runId, targets))
+			.limit(limit);
+		const removed = await d
+			.delete(runNode)
+			.where(inArray(sql`rowid`, chunk))
+			.run();
 		if ((removed.meta.changes ?? 0) < limit) break;
 	}
 	const removed = await d.delete(run).where(inArray(run.id, targets)).run();
