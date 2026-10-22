@@ -3,9 +3,9 @@ import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
 import { configOf, createClient, type BindingConfig, type ClientEnv, type EnqueueHook } from './client/enqueue.js';
 import { TERMINAL_STATES } from './core/transitions.js';
 import type { SettledState } from './core/types.js';
-import { DEFAULT_FAILED_RETENTION_MS } from './do/job-shard.js';
 import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
-import { createRunClass, DEFAULT_RUN_FAILED_RETENTION_MS, type RunClass, type RunSettings, type StartResult } from './do/run.js';
+import { createRunClass, type RunClass, type RunSettings, type StartResult } from './do/run.js';
+import { DEFAULT_FAILED_RETENTION_MS } from './core/retention.js';
 import {
 	createSchedulerClass,
 	SCHEDULER_DO_NAME,
@@ -244,7 +244,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 				enqueue: (env, input) => client.enqueue(env, input),
 				// 一覧のretryable判定用, 操作前の可否表示(ADR-0027)
 				failedRetentionMs: (binding) => configOf(config.bindings ?? {}, binding)?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
-				runFailedRetentionMs: config.runs?.failedRetentionMs ?? DEFAULT_RUN_FAILED_RETENTION_MS,
+				runFailedRetentionMs: config.runs?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 				flows: Object.keys(flows),
 				// 未設定時`/api/metrics`は501
 				...(config.metrics ? { metrics: config.metrics as MetricsResolver<Env> } : {}),

@@ -3,6 +3,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { embedJobId, formatJobId, shardName } from '../core/ids.js';
 import type { FailOptions } from '../core/api.js';
 import { nextAttempt } from '../core/backoff.js';
+import { retentionOf } from '../core/retention.js';
 import { schedule } from '../core/schedule.js';
 import { normalizeTraceparent } from '../core/trace.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
@@ -167,19 +168,6 @@ const FAILURE_BINDING_KEY = 'failure_binding';
 
 const BUCKET_KEY = 'rate_bucket';
 
-// 投影遅延考慮
-const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
-
-/** D1読み取りモデル既定と同値, 不一致時は一覧にあり再開不能なジョブが発生(ADR-0027) */
-export const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-
-function retentionOf(settings: ShardSettings): Retention {
-	return {
-		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
-		failedMs: settings.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
-	};
-}
-
 /**
  * 判断は`core/schedule.ts`の純粋関数, 本クラスはSQLite入出力のみ(ADR-0018)
  * 時刻は`this.clock`経由, `Date.now()`直接呼び出しはテスト不能
@@ -189,7 +177,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	clock: Clock = systemClock;
 	policy: Policy = DEFAULT_POLICY;
 	#failureBinding: string | null = null;
-	retention: Retention = { doneMs: DEFAULT_SWEEP_AFTER_MS, failedMs: DEFAULT_FAILED_RETENTION_MS };
+	retention: Retention = retentionOf({});
 
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
@@ -247,7 +235,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.repo.deleteSetting('settings_pinned');
 		this.repo.deleteSetting('settings');
 		this.policy = DEFAULT_POLICY;
-		this.retention = { doneMs: DEFAULT_SWEEP_AFTER_MS, failedMs: DEFAULT_FAILED_RETENTION_MS };
+		this.retention = retentionOf({});
 		await this.#armAlarm(this.clock.now());
 	}
 

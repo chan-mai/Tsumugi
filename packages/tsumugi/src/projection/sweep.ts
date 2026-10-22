@@ -1,5 +1,6 @@
 import { and, inArray, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import { DEFAULT_FAILED_RETENTION_MS } from '../core/retention.js';
 import { TERMINAL_STATES } from '../core/transitions.js';
 import { job } from './tables.js';
 
@@ -11,7 +12,7 @@ export type SweepOptions = {
 	limit?: number;
 };
 
-export const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEFAULT_RETENTION_MS = DEFAULT_FAILED_RETENTION_MS;
 export const DEFAULT_SWEEP_LIMIT = 1_000;
 
 export async function sweepReadModel(db: D1Database, now: number, options: SweepOptions = {}): Promise<number> {

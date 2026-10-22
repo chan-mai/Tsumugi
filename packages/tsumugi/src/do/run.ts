@@ -23,8 +23,9 @@ import {
 	type RunState,
 	type SpawnRequest,
 } from '../core/run.js';
+import { retentionOf } from '../core/retention.js';
 import { resolveShard } from '../core/shard.js';
-import type { Retention, SettledTarget } from '../core/types.js';
+import type { SettledTarget } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
@@ -52,12 +53,6 @@ export const DEFAULT_MAX_NODES = 10_000;
 
 // ノード数上限は親子別集計(ADR-0035)
 export const DEFAULT_MAX_DEPTH = 3;
-
-// 投影完了の猶予(ADR-0034)
-const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
-
-// 再開受付期間(ADR-0034)
-export const DEFAULT_RUN_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type RunSettings = {
 	/** 1つのrunに入るノード数の上限(ADR-0035) */
@@ -140,10 +135,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 	const maxNodes = settings.maxNodes ?? DEFAULT_MAX_NODES;
 	const maxDepth = settings.maxDepth ?? DEFAULT_MAX_DEPTH;
 	const nameOf = (child: AnyFlow) => Object.keys(flows).find((name) => flows[name] === child);
-	const retention: Retention = {
-		doneMs: settings.sweepAfterMs ?? DEFAULT_SWEEP_AFTER_MS,
-		failedMs: settings.failedRetentionMs ?? DEFAULT_RUN_FAILED_RETENTION_MS,
-	};
+	const retention = retentionOf(settings);
 	const client = createClient<RunEnv>(
 		bindings,
 		{
