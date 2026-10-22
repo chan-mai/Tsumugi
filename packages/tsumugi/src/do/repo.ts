@@ -106,8 +106,6 @@ export class JobRepo {
 	readonly sql: SqlStorage;
 	/** 書き込みを行うクエリの回数, 1ジョブあたりの予算のテスト固定用 */
 	writes = 0;
-	/** 読み取りを行うクエリの回数 */
-	reads = 0;
 	/** 終端の通知の宛先と対象(#96), undefinedは未読 */
 	#settledTarget: SettledTarget | null | undefined;
 
@@ -168,7 +166,6 @@ export class JobRepo {
 	/** 新しい試行から順に返す, 削除は古い方から */
 	attemptsOf(jobId: string): AttemptRow[] {
 		const rows = this.db.select().from(attempt).where(eq(attempt.jobId, jobId)).orderBy(desc(attempt.attempt)).limit(ATTEMPT_KEEP).all();
-		this.reads++;
 		return rows.map((r) => ({
 			job_id: r.jobId,
 			attempt: r.attempt,
@@ -187,7 +184,6 @@ export class JobRepo {
 			.orderBy(asc(jobLog.seq))
 			.limit(LOG_KEEP)
 			.all();
-		this.reads++;
 		return rows;
 	}
 
@@ -199,7 +195,6 @@ export class JobRepo {
 			.from(jobLog)
 			.where(eq(jobLog.jobId, id))
 			.get();
-		this.reads++;
 		if (history?.lastAt !== null && history?.lastAt !== undefined && now - history.lastAt < LOG_MIN_INTERVAL_MS) return 'throttled';
 		this.db
 			.insert(jobLog)
@@ -242,7 +237,6 @@ export class JobRepo {
 
 	outboxBatch(limit: number): { seq: number; job_id: string; snapshot: string }[] {
 		const rows = this.db.select().from(outbox).orderBy(asc(outbox.seq)).limit(limit).all();
-		this.reads++;
 		return rows.map((r) => ({ seq: r.seq, job_id: r.jobId, snapshot: r.snapshot }));
 	}
 
@@ -257,28 +251,13 @@ export class JobRepo {
 			.select({ c: sql<number>`count(*)` })
 			.from(outbox)
 			.get();
-		this.reads++;
 		return row?.c ?? 0;
 	}
 
 	/** 残りの有無のみ */
 	hasOutbox(): boolean {
 		const row = this.db.select({ seq: outbox.seq }).from(outbox).limit(1).get();
-		this.reads++;
 		return row !== undefined;
-	}
-
-	/** スケジューラに渡す稼働中ジョブ, 有界化のためlimitは必須 */
-	activeJobs(limit: number): JobView[] {
-		const rows = this.db
-			.select()
-			.from(job)
-			.where(inArray(job.state, [...ACTIVE]))
-			.orderBy(asc(job.createdAt), asc(job.id))
-			.limit(limit)
-			.all();
-		this.reads++;
-		return rows.map((r) => toView(this.#toJobRow(r)));
 	}
 
 	/**
@@ -317,7 +296,6 @@ export class JobRepo {
 			.orderBy(asc(job.runAfter))
 			.limit(1)
 			.all();
-		this.reads += 3;
 		// 3つは状態/run_afterで互いに素, 重複なし
 		const jobs = [...inFlight, ...ready, ...future].map((r) => toView(this.#toJobRow(r)));
 		return { jobs, readyCount: ready.length };
@@ -329,13 +307,11 @@ export class JobRepo {
 			.from(job)
 			.where(inArray(job.state, [...ACTIVE]))
 			.get();
-		this.reads++;
 		return row?.c ?? 0;
 	}
 
 	find(id: string): JobRow | undefined {
 		const row = this.db.select().from(job).where(eq(job.id, id)).get();
-		this.reads++;
 		return row ? this.#toJobRow(row) : undefined;
 	}
 
@@ -528,7 +504,6 @@ export class JobRepo {
 
 	failureBatch(limit: number): { seq: number; payload: string }[] {
 		const rows = this.db.select().from(failureNotify).orderBy(asc(failureNotify.seq)).limit(limit).all();
-		this.reads++;
 		return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
 	}
 
@@ -536,15 +511,6 @@ export class JobRepo {
 	deleteFailureThrough(seq: number): void {
 		this.db.delete(failureNotify).where(lte(failureNotify.seq, seq)).run();
 		this.writes++;
-	}
-
-	countFailureNotify(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(failureNotify)
-			.get();
-		this.reads++;
-		return row?.c ?? 0;
 	}
 
 	/**
@@ -605,7 +571,6 @@ export class JobRepo {
 
 	settledBatch(limit: number): { seq: number; payload: string }[] {
 		const rows = this.db.select().from(settledNotify).orderBy(asc(settledNotify.seq)).limit(limit).all();
-		this.reads++;
 		return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
 	}
 
@@ -620,7 +585,6 @@ export class JobRepo {
 			.select({ c: sql<number>`count(*)` })
 			.from(settledNotify)
 			.get();
-		this.reads++;
 		return row?.c ?? 0;
 	}
 
@@ -634,7 +598,6 @@ export class JobRepo {
 
 	notifyBatch(limit: number): { seq: number; run_id: string; event: string }[] {
 		const rows = this.db.select().from(runNotify).orderBy(asc(runNotify.seq)).limit(limit).all();
-		this.reads++;
 		return rows.map((row) => ({ seq: row.seq, run_id: row.runId, event: row.event }));
 	}
 
@@ -642,15 +605,6 @@ export class JobRepo {
 	deleteNotifyThrough(seq: number): void {
 		this.db.delete(runNotify).where(lte(runNotify.seq, seq)).run();
 		this.writes++;
-	}
-
-	countNotify(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(runNotify)
-			.get();
-		this.reads++;
-		return row?.c ?? 0;
 	}
 
 	payloadOf(row: JobRow): unknown {
@@ -715,7 +669,6 @@ export class JobRepo {
 				retention.failedMs,
 			)
 			.one();
-		this.reads++;
 		return { jobs: row.jobs === 1, uniqueKeys: row.unique_keys === 1, nextDueAt: row.next_due };
 	}
 
@@ -733,7 +686,6 @@ export class JobRepo {
 			.select({ c: sql<number>`count(*)` })
 			.from(job)
 			.get();
-		this.reads++;
 		return row?.c ?? 0;
 	}
 
@@ -756,13 +708,11 @@ export class JobRepo {
 		if (inserted.length > 0) return null;
 
 		const row = this.db.select({ jobId: uniqueKey.jobId }).from(uniqueKey).where(eq(uniqueKey.key, key)).get();
-		this.reads++;
 		return row?.jobId ?? null;
 	}
 
 	readSetting(key: string): string | undefined {
 		const row = this.db.select({ value: setting.value }).from(setting).where(eq(setting.key, key)).get();
-		this.reads++;
 		return row?.value;
 	}
 
@@ -782,7 +732,6 @@ export class JobRepo {
 		const buckets: KeyBuckets = Object.create(null);
 		for (const part of chunk(keys, 1)) {
 			const rows = this.db.select().from(keyBucket).where(inArray(keyBucket.key, part)).all();
-			this.reads++;
 			for (const r of rows) buckets[r.key] = { tokens: r.tokens, refilledAt: r.refilledAt };
 		}
 		return buckets;
@@ -823,7 +772,6 @@ export class JobRepo {
 			.select({ c: sql<number>`count(*)` })
 			.from(keyBucket)
 			.get();
-		this.reads++;
 		return row?.c ?? 0;
 	}
 }

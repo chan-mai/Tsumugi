@@ -560,7 +560,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						return [row.id];
 					}
 					// 子の入力は状態の更新前に構築, 失敗時の起動中ノードの残存を防止
-					const input = this.#evaluate(row, 'input', now, () => definition.input(runInput, this.#depsOf(definition, runInput)));
+					const input = this.#evaluate(row, 'input', now, () => definition.input(runInput, this.#depsOf(definition)));
 					if (!input.ok) return [row.id];
 
 					if (row.child_run_id === null) this.repo.updateNode(row.id, { childRunId }, now);
@@ -617,7 +617,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				return [row.id];
 			}
 
-			const items = this.#evaluate(row, 'over', now, () => definition.over!(runInput, this.#depsOf(definition, runInput)));
+			const items = this.#evaluate(row, 'over', now, () => definition.over!(runInput, this.#depsOf(definition)));
 			if (!items.ok) return [row.id];
 			if (this.repo.countNodes() + items.value.length > maxNodes) {
 				this.repo.updateNode(row.id, { state: 'FAILED', error: `node count exceeded the limit: ${maxNodes}` }, now);
@@ -697,7 +697,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			const definition = definitions.get(row.id);
 			if (!definition) return null;
-			const deps = this.#depsOf(definition, runInput);
+			const deps = this.#depsOf(definition);
 			const concurrencyKey =
 				typeof definition.concurrencyKey === 'function' ? definition.concurrencyKey(runInput, deps) : definition.concurrencyKey;
 			return {
@@ -725,7 +725,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const definition = definitions.get(row.id);
 			if (!definition?.when) return null;
 
-			const passed = this.#evaluate(row, 'when', now, () => definition.when!(runInput, this.#depsOf(definition, runInput)));
+			const passed = this.#evaluate(row, 'when', now, () => definition.when!(runInput, this.#depsOf(definition)));
 			if (!passed.ok) return [row.id];
 			if (passed.value) return null;
 
@@ -734,7 +734,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		}
 
 		/** 写像関数へ渡す受け取り口, `after`のキーがそのまま名前 */
-		#depsOf(definition: FlowNode, _runInput: unknown): Record<string, unknown> {
+		#depsOf(definition: FlowNode): Record<string, unknown> {
 			const entries = Object.entries(definition.after);
 			const results = this.repo.resultsOf(entries.map(([, id]) => id));
 			return Object.fromEntries(entries.map(([name, id]) => [name, results.get(id)]));

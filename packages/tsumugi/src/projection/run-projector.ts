@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { NodeSnapshot, RunSnapshot } from '../do/run-repo.js';
 import { run, runNode } from './run-tables.js';
@@ -84,18 +84,4 @@ export async function projectRun(db: D1Database, rows: readonly RunOutboxRow[]):
 	if (rows.length === 0) return;
 	const statements = toStatements(db, rows);
 	await drizzle(db).batch(statements as [Upsert, ...Upsert[]]);
-}
-
-/** 画面の詳細で使用, 1つのrunのノードを並び順で取得 */
-export function nodesOf(db: D1Database, runId: string) {
-	return drizzle(db).select().from(runNode).where(eq(runNode.runId, runId)).orderBy(runNode.position);
-}
-
-/** ジョブからの参照用, runIdとnodeIdの組で1件取得 */
-export function nodeOf(db: D1Database, runId: string, nodeId: string) {
-	return drizzle(db)
-		.select()
-		.from(runNode)
-		.where(and(eq(runNode.runId, runId), eq(runNode.nodeId, nodeId)))
-		.limit(1);
 }
