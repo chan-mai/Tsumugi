@@ -387,9 +387,9 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
 					<div v-if="!isList" class="grow" />
-					<!-- 一覧向けの操作は他のタブでは非表示, 選択が残っていても対象が見えない -->
+					<!-- ジョブの一括操作は他のタブでは非表示, 選択が残っていても対象が見えない -->
 					<BulkActions
-						v-if="isList && selectedIds.length > 0"
+						v-if="tab === 'jobs' && selectedIds.length > 0"
 						:ids="selectedIds"
 						@changed="
 							clearSelection();
