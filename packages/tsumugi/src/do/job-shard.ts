@@ -721,7 +721,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const now = this.clock.now();
 		this.#loadPolicy();
 		this.#loadBucket();
-		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT);
+		// 実行中がconcurrency未満なら全件が範囲内, 以上なら空きは0で集計漏れの影響なし
+		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT, Math.max(TICK_LIMIT, this.policy.concurrency));
 
 		const readyKeys =
 			this.policy.perKeyRate === null

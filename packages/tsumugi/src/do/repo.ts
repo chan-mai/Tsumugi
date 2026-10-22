@@ -282,15 +282,16 @@ export class JobRepo {
 	 * 実行可能ジョブ自体がlimitを超える滞留は解消不能, 到来順の範囲を超えた分は次tick以降で処理
 	 *
 	 * readyCountは有界判定用, limit到達なら残りがある可能性が高く即座に再実行
+	 * inFlightLimitはconcurrency以上, 未満では実行中を少なく数え上限超過で投入
 	 */
-	scheduleWindow(now: number, limit: number): { jobs: JobView[]; readyCount: number } {
+	scheduleWindow(now: number, limit: number, inFlightLimit = limit): { jobs: JobView[]; readyCount: number } {
 		// 実行中(QUEUED/RUNNING): reaperの無応答判定と実行中件数の集計に必要
 		const inFlight = this.db
 			.select()
 			.from(job)
 			.where(inArray(job.state, ['QUEUED', 'RUNNING']))
 			.orderBy(asc(job.createdAt), asc(job.id))
-			.limit(limit)
+			.limit(inFlightLimit)
 			.all();
 		// 実行可能(SCHEDULED且つrun_after<=now): 投入候補, 実行中と未到来のジョブによる範囲の占有なし
 		// 到来順はjob_dueで解決, 滞留時も読み取りはlimit件まで(#104)

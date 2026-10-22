@@ -272,6 +272,25 @@ describe('投入候補の読み取り範囲(ADR-0019 / ADR-0020, #4)', () => {
 		expect(sent.map((m) => m.jobId)).toContain(late);
 		expect(await stateOf('WIN#0', late)).toBe('QUEUED');
 	});
+
+	it('TICK_LIMITを超えるconcurrencyでも実行中の件数を上限まで数える', async () => {
+		const { sent, queue } = captureQueue();
+		await install('WIN2#0', T0, queue);
+		await shard('WIN2#0').configure({ policy: { concurrency: 250, perKeyConcurrency: 250 } });
+
+		// readyの範囲は1tick200件, 2tickで上限の250件が実行中
+		await shard('WIN2#0').enqueueMany(Array.from({ length: 250 }, () => ({ binding: 'WIN2', payload: {} })));
+		await runDurableObjectAlarm(shard('WIN2#0'));
+		await runDurableObjectAlarm(shard('WIN2#0'));
+		expect(sent).toHaveLength(250);
+
+		// 上限到達後の候補は投入しない, 実行中を200件と数えると50件分の空きと誤認
+		sent.length = 0;
+		await install('WIN2#0', T0 + 1_000, queue);
+		await shard('WIN2#0').enqueueMany(Array.from({ length: 10 }, () => ({ binding: 'WIN2', payload: {} })));
+		await runDurableObjectAlarm(shard('WIN2#0'));
+		expect(sent).toHaveLength(0);
+	});
 });
 
 describe('同時実行数待ちでの即時の再実行(#103)', () => {
