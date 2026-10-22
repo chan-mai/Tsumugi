@@ -23,7 +23,6 @@ import {
 	getBindings,
 	getFlows,
 	getMetrics,
-	getStats,
 	isMetricsUnavailable,
 	isUnauthorized,
 	listJobs,
@@ -43,7 +42,6 @@ const RUN_STATES = ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
 const jobs = ref<Job[]>([]);
 const total = ref(0);
-const byState = ref<Record<string, number>>({});
 const bindings = ref<string[]>([]);
 const state = ref('');
 const binding = ref('');
@@ -160,7 +158,7 @@ async function load() {
 			return;
 		}
 
-		const [list, stats, available, definedFlows] = await Promise.all([
+		const [list, available, definedFlows] = await Promise.all([
 			listJobs({
 				state: state.value || undefined,
 				binding: binding.value || undefined,
@@ -172,7 +170,6 @@ async function load() {
 				limit: pageSize.value,
 				offset: page.value * pageSize.value,
 			}),
-			getStats(),
 			getBindings(),
 			getFlows(),
 		]);
@@ -180,7 +177,6 @@ async function load() {
 		appliedSequence = sequence;
 		jobs.value = list.jobs;
 		total.value = list.total;
-		byState.value = stats.byState;
 		bindings.value = available.bindings;
 		flows.value = definedFlows.flows;
 		error.value = null;

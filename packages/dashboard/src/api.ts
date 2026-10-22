@@ -247,7 +247,6 @@ export const updatePolicy = (binding: string, patch: UpdatePolicyRequest) =>
 export const resetPolicy = (binding: string) =>
 	call<{ ok: true }>(`/api/bindings/${encodeURIComponent(binding)}/policy/reset`, { method: 'POST' });
 
-export const getStats = () => call<{ byState: Record<string, number> }>('/api/stats');
 export const getBindings = () => call<{ bindings: string[] }>('/api/bindings');
 export const getJob = (id: string) => call<{ job: Job }>(`/api/jobs/${encodeURIComponent(id)}`);
 export const retryJob = (id: string) => mutate(`/api/jobs/${encodeURIComponent(id)}/retry`);
