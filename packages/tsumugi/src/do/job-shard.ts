@@ -150,6 +150,9 @@ const TICK_LIMIT = 200;
 
 const STAGE_RETRY_MS = 5_000;
 
+// heartbeat, ログの投影待ち, 報告ごとのtick実行回避
+const PROGRESS_PROJECTION_DELAY_MS = 3_000;
+
 // D1バッチ上限とtick時間を考慮
 const PROJECTION_LIMIT = 200;
 
@@ -503,7 +506,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const result = this.repo.heartbeat(jobId, now, clamped);
 		if (!result.accepted) return result;
 		// 投影用alarm, 無いと進捗表示がreaper期限まで遅延
-		await this.#armAlarm(now);
+		await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
 		return result;
 	}
 
@@ -511,7 +514,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		if (typeof message !== 'string' || !Number.isInteger(attempt) || attempt < 1) return false;
 		const now = this.clock.now();
 		const result = this.repo.log(jobId, attempt, message, now);
-		if (result === 'stored') await this.#armAlarm(now);
+		if (result === 'stored') await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
 		return result !== 'rejected';
 	}
 

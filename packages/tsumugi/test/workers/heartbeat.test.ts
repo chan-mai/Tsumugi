@@ -35,6 +35,18 @@ describe('生存報告(#35)', () => {
 		expect(row.progress).toBeCloseTo(0.4);
 	});
 
+	it('報告ごとに即時のtickを起動せず投影のalarmを数秒後に設定する', async () => {
+		const stub = shard('HBG#0');
+		const jobId = await queued('HBG#0');
+		await runInDurableObject(stub, async (instance) => {
+			(instance as any).clock = { now: () => T0 + 30_000 };
+			await (instance as any).ctx.storage.deleteAlarm();
+		});
+		await stub.heartbeat(jobId, 0.5);
+		const alarm = await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.getAlarm());
+		expect(alarm).toBe(T0 + 33_000);
+	});
+
 	it('範囲外の進捗を0以上1以下へ丸める', async () => {
 		const stub = shard('HBB#0');
 		const jobId = await queued('HBB#0');
