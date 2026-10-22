@@ -135,6 +135,27 @@ describe('subflowの縦串', () => {
 		expect(await stateOf(parent)).toBe('FAILED');
 	});
 
+	it('親の再開で失敗した子も失敗したノードから再開する(ADR-0034)', async () => {
+		const parent = 'PIPELINE:sub-retry';
+		const child = 'GREETINGS:sub-retry-greetings';
+		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
+		await settleRuns([parent, child]);
+		sent.length = 0;
+		const jobId = (await nodeOf(child, 'list'))?.job_id;
+		if (!jobId) throw new Error('the first node of the child run has no job id');
+		await runStub(child).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'intentional failure' }]);
+		await settleRuns([parent, child]);
+		expect(await stateOf(parent)).toBe('FAILED');
+
+		// 子は保持期間内で残存, 同じ子runIdの起動は既存を返す
+		await runStub(parent).retry();
+		await settle([parent, child], registry);
+
+		expect(await stateOf(child)).toBe('COMPLETED');
+		expect((await nodeOf(parent, 'greetings'))?.state).toBe('COMPLETED');
+		expect(await stateOf(parent)).toBe('COMPLETED');
+	});
+
 	it('親を取り消すと子も取り消される', async () => {
 		const parent = 'PIPELINE:sub-cancel';
 		const child = 'GREETINGS:sub-cancel-greetings';

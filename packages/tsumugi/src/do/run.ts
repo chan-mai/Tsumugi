@@ -104,7 +104,9 @@ export interface RunStub extends Rpc.DurableObjectBranded {
  */
 export interface RunPeerStub extends Rpc.DurableObjectBranded {
 	start(input: StartInput): Promise<StartResult>;
+	state(): Promise<RunState | null>;
 	cancel(): Promise<MutationResult>;
+	retry(): Promise<MutationResult>;
 	notifyChild(nodeId: string, childRunId: string, state: RunState): Promise<void>;
 }
 
@@ -428,12 +430,14 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const unstarted = new Set<string>();
 			for (const child of subflows) {
 				try {
-					await this.#runStub(child.childRunId).start({
+					const stub = this.#runStub(child.childRunId);
+					const started = await stub.start({
 						flow: child.flow,
 						input: child.input,
 						parent: { runId: runRow.id, nodeId: child.nodeId },
 						depth: runRow.depth + 1,
 					});
+					if (!started.created && (await this.#resumeChild(stub, child.nodeId, now))) touched.add(child.nodeId);
 				} catch (error) {
 					// 入れ子の上限超過等は待機では解決しない, FAILEDへ進めないとtickが同じ失敗を反復
 					this.repo.updateNode(child.nodeId, { state: 'FAILED', error: `failed to start child run: ${messageOf(error)}` }, now);
@@ -723,6 +727,22 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		#shardOf(binding: string, runId: string): number {
 			// runIdをpartitionKeyに使用, run内のノードが同じshardに集約されRun DO側でIDを決定可能(ADR-0011)
 			return resolveShard(binding, configOf(bindings, binding)?.shards ?? 1, runId);
+		}
+
+		/**
+		 * 再開時に残存する終端の子runの再開(ADR-0034)
+		 * 子は通知済みで再通知なし, 放置では親ノードが待機のまま停止
+		 * 失敗は子も再開, それ以外の終端は状態をノードへ反映しtrueを返す
+		 */
+		async #resumeChild(stub: DurableObjectStub<RunPeerStub>, nodeId: string, now: number): Promise<boolean> {
+			const state = await stub.state();
+			if (state === 'FAILED') {
+				await stub.retry();
+				return false;
+			}
+			if (state !== 'COMPLETED' && state !== 'CANCELLED') return false;
+			this.repo.updateNode(nodeId, { state }, now);
+			return true;
 		}
 
 		/**
