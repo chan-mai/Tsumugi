@@ -37,6 +37,8 @@ export const job = sqliteTable(
 		index('job_state').on(t.state, t.updatedAt),
 		index('job_binding').on(t.binding, t.updatedAt),
 		index('job_created').on(t.createdAt),
+		// 既定一覧のフィルタ無しupdated_at降順用
+		index('job_updated').on(t.updatedAt, t.id),
 		// 障害調査のキー検索用, 索引無しは全表走査
 		index('job_unique_key').on(t.uniqueKey, t.updatedAt),
 		index('job_concurrency_key').on(t.concurrencyKey, t.updatedAt),

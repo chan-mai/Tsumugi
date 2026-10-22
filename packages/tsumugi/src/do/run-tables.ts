@@ -48,7 +48,6 @@ export const node = sqliteTable(
 	},
 	(t) => [
 		index('node_parent').on(t.parent),
-		index('node_state').on(t.state),
 		// 進行判断の毎tick全件順次読み取り用
 		index('node_seq').on(t.seq, t.id),
 	],

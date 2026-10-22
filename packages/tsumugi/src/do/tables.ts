@@ -40,8 +40,6 @@ export const job = sqliteTable(
 		index('job_due').on(t.state, t.runAfter, t.id),
 		// sweep次回時刻の状態別MIN取得用
 		index('job_terminal').on(t.state, t.updatedAt),
-		index('job_concurrency_key').on(t.concurrencyKey, t.state),
-		index('job_run').on(t.runId, t.nodeId),
 	],
 );
 

@@ -39,8 +39,6 @@ export const SCHEMA = [
 	`CREATE INDEX IF NOT EXISTS job_due ON job (state, run_after, id)`,
 	// sweep次回時刻の状態別MIN取得用
 	`CREATE INDEX IF NOT EXISTS job_terminal ON job (state, updated_at)`,
-	`CREATE INDEX IF NOT EXISTS job_concurrency_key ON job (concurrency_key, state)`,
-	`CREATE INDEX IF NOT EXISTS job_run ON job (run_id, node_id)`,
 	// 重複排除キー(ADR-0021 / ADR-0022), KVに条件付き書き込み無くDO内配置
 	`CREATE TABLE IF NOT EXISTS unique_key (
 		key TEXT PRIMARY KEY,
@@ -120,6 +118,9 @@ export function applySchema(sql: SqlStorage): void {
 		['cancel_requested_at', 'INTEGER'],
 	]);
 	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
+	// 既存DOに残る未使用索引, 書き込みごとに更新
+	sql.exec(`DROP INDEX IF EXISTS job_concurrency_key`);
+	sql.exec(`DROP INDEX IF EXISTS job_run`);
 	// job_dueが先頭列を含み代替
 	sql.exec(`DROP INDEX IF EXISTS job_active`);
 }

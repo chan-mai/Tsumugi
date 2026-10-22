@@ -45,7 +45,6 @@ const RUN_SCHEMA = [
 		updated_at INTEGER NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS node_parent ON node (parent)`,
-	`CREATE INDEX IF NOT EXISTS node_state ON node (state)`,
 	// 進行判断の毎tick全件順次読み取り用
 	`CREATE INDEX IF NOT EXISTS node_seq ON node (seq, id)`,
 	`CREATE TABLE IF NOT EXISTS run_outbox (
@@ -58,6 +57,8 @@ const RUN_SCHEMA = [
 
 export function applyRunSchema(sql: SqlStorage): void {
 	for (const statement of RUN_SCHEMA) sql.exec(statement);
+	// 既存DOに残る未使用索引, 書き込みごとに更新
+	sql.exec(`DROP INDEX IF EXISTS node_state`);
 	ensureColumns(sql, 'run', [
 		['parent_run_id', 'TEXT'],
 		['parent_node_id', 'TEXT'],

@@ -25,7 +25,6 @@ export const run = sqliteTable(
 	(t) => [
 		index('run_state').on(t.state, t.updatedAt),
 		index('run_flow').on(t.flow, t.updatedAt),
-		index('run_created').on(t.createdAt),
 		// 既定一覧のフィルタ無しupdated_at降順用
 		index('run_updated').on(t.updatedAt, t.id),
 	],
