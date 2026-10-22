@@ -1,5 +1,6 @@
 import { and, inArray, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import { TERMINAL_STATES } from '../core/transitions.js';
 import { job } from './tables.js';
 
 /** 明細は個別ジョブ調査用で数日分, 傾向の時系列はAnalytics Engine側(ADR-0016) */
@@ -13,8 +14,6 @@ export type SweepOptions = {
 export const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const DEFAULT_SWEEP_LIMIT = 1_000;
 
-const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
-
 export async function sweepReadModel(db: D1Database, now: number, options: SweepOptions = {}): Promise<number> {
 	const before = now - (options.olderThanMs ?? DEFAULT_RETENTION_MS);
 	const limit = options.limit ?? DEFAULT_SWEEP_LIMIT;
@@ -23,7 +22,7 @@ export async function sweepReadModel(db: D1Database, now: number, options: Sweep
 	const targets = d
 		.select({ id: job.id })
 		.from(job)
-		.where(and(inArray(job.state, TERMINAL), lt(job.updatedAt, before)))
+		.where(and(inArray(job.state, [...TERMINAL_STATES]), lt(job.updatedAt, before)))
 		.limit(limit);
 
 	// 件数はD1のmetaから取得, returningは削除行を全件転送

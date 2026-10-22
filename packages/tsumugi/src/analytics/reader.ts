@@ -1,3 +1,5 @@
+import { FAILURE_STATES } from '../core/transitions.js';
+
 // `writeDataPoint`の値はWorker bindingから読込不可, アカウントのAPIトークンが必要
 // トークンはsecretで`env`経由のみ読込可, 設定形式は`bearerAuth`と同一
 
@@ -8,8 +10,6 @@ const COLUMNS = {
 	attempts: 'double1',
 	durationMs: 'double2',
 } as const;
-
-const FAILED_STATES = ['FAILED', 'STALLED'];
 
 export type MetricsConfig = {
 	accountId: string;
@@ -78,7 +78,7 @@ export function parseMetricsQuery(url: URL): { query: MetricsQuery } | { error: 
 	return { query: { hours: Math.floor(hours), ...(binding ? { binding } : {}) } };
 }
 
-const failedSum = `sum(if(${COLUMNS.state} IN ('${FAILED_STATES.join("', '")}'), _sample_interval, 0))`;
+const failedSum = `sum(if(${COLUMNS.state} IN ('${FAILURE_STATES.join("', '")}'), _sample_interval, 0))`;
 const totalSum = 'sum(_sample_interval)';
 
 /**

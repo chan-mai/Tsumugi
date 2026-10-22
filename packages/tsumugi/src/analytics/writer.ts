@@ -1,8 +1,9 @@
+import { TERMINAL_STATES } from '../core/transitions.js';
 import type { JobRow } from '../do/schema.js';
 
 // 明細とメトリクスは要求保持期間が異なり, 明細のみsweepで削除(ADR-0016)
 // 終端遷移のみ記録, 全遷移記録は件数3倍で情報増加なし
-const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED']);
+const TERMINAL = new Set<string>(TERMINAL_STATES);
 
 export type MetricPoint = {
 	indexes: [string];

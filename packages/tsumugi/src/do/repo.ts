@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
-import { assertTransition } from '../core/transitions.js';
+import { ACTIVE_STATES, assertTransition, FAILURE_STATES, TERMINAL_STATES } from '../core/transitions.js';
 import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../core/log.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type {
@@ -31,8 +31,6 @@ export const RESULT_MAX_CHARS = 8_192;
 /** スナップショット肥大防止 */
 export const ATTEMPT_KEEP = 20;
 
-const ACTIVE = ['SCHEDULED', 'QUEUED', 'RUNNING'] as const;
-
 export type NewJob = {
 	id: string;
 	binding: string;
@@ -51,10 +49,6 @@ export type NewJob = {
 	runId?: string | null;
 	nodeId?: string | null;
 };
-
-const NOTIFIABLE: readonly JobState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
-
-const FAILURES: readonly JobState[] = ['FAILED', 'STALLED'];
 
 const SETTLED_TARGET_KEY = 'settled_target';
 
@@ -276,7 +270,7 @@ export class JobRepo {
 		const row = this.db
 			.select({ c: sql<number>`count(*)` })
 			.from(job)
-			.where(inArray(job.state, [...ACTIVE]))
+			.where(inArray(job.state, [...ACTIVE_STATES]))
 			.get();
 		return row?.c ?? 0;
 	}
@@ -357,10 +351,10 @@ export class JobRepo {
 		const row = updated[0];
 		if (!row) return false;
 		this.#appendOutbox(id);
-		if (FAILURES.includes(to)) this.#appendFailure(id, to as FailureNotice['state'], patch.error ?? null, patch.now);
-		if (NOTIFIABLE.includes(to)) this.#appendSettled(id, to as SettledState, patch.error ?? null, patch.now);
+		if (FAILURE_STATES.includes(to)) this.#appendFailure(id, to as FailureNotice['state'], patch.error ?? null, patch.now);
+		if (TERMINAL_STATES.includes(to)) this.#appendSettled(id, to as SettledState, patch.error ?? null, patch.now);
 		// 終端検出を1箇所に集約, 呼び出し側ごとの実装は漏れの原因
-		if (row.runId !== null && row.nodeId !== null && NOTIFIABLE.includes(to)) {
+		if (row.runId !== null && row.nodeId !== null && TERMINAL_STATES.includes(to)) {
 			this.appendNotify(row.runId, {
 				nodeId: row.nodeId,
 				jobId: id,
@@ -492,7 +486,7 @@ export class JobRepo {
 			state,
 			attempts: row.attempts,
 			maxAttempts: row.max_attempts,
-			error: error ?? (FAILURES.includes(state) ? (this.attemptsOf(id)[0]?.error ?? null) : null),
+			error: error ?? (FAILURE_STATES.includes(state) ? (this.attemptsOf(id)[0]?.error ?? null) : null),
 			result: row.result !== null ? JSON.parse(row.result) : null,
 			runId: row.run_id,
 			nodeId: row.node_id,

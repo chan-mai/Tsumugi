@@ -10,6 +10,7 @@ import {
 	type ScheduleContext,
 } from '../core/recurring.js';
 import { resolveShard } from '../core/shard.js';
+import { ACTIVE_STATES } from '../core/transitions.js';
 import type { SettledTarget } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput } from './job-shard.js';
@@ -92,8 +93,6 @@ export type SchedulerOptions = {
 	/** 投入時の既定値付与フック(#96), 定期実行の投入にも適用 */
 	onEnqueue?: EnqueueHook;
 };
-
-const JOB_ACTIVE: readonly string[] = ['SCHEDULED', 'QUEUED', 'RUNNING'];
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -327,7 +326,7 @@ export function createSchedulerClass({
 				const stub = namespace.get(namespace.idFromName(shardNameOf(row.last_job_id)));
 				const state = await stub.stateOf(row.last_job_id);
 				// 削除済み(null)は終了扱い, 保持期間超過の発火は待機不要
-				return state !== null && JOB_ACTIVE.includes(state);
+				return state !== null && (ACTIVE_STATES as readonly string[]).includes(state);
 			}
 			if (row.last_run_id === null) return false;
 			// 削除済みrunはnull, 照会で再生成される空のDOは行もalarmも無く無害

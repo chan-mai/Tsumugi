@@ -1,4 +1,5 @@
 import type { NodeJobOptions, NodeTrigger } from './flow.js';
+import { TERMINAL_STATES } from './transitions.js';
 import type { JobState } from './types.js';
 
 // runの進行判断, 依存解決と中断判断はここで完結(ADR-0018)
@@ -78,7 +79,7 @@ export type NodeEvent = {
 	spawns?: readonly SpawnRequest[];
 };
 
-const TERMINAL: readonly NodeState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED', 'SKIPPED'];
+const TERMINAL: readonly NodeState[] = [...TERMINAL_STATES, 'SKIPPED'];
 
 // 不実行理由, 画面確認用にノードのerrorへ記録(ADR-0041)
 const reasonOf = (trigger: NodeTrigger): string => (trigger === 'failure' ? 'no dependency failed' : 'a dependency did not succeed');
