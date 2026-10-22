@@ -627,6 +627,23 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 		expect((await res.json<{ error: string }>()).error).toContain('retention');
 	});
 
+	it('条件指定のbulk-retryは保持期間を過ぎた行を対象にしない', async () => {
+		await orphan('GONE#0:bulk-old', 'FAILED', Date.now() - 10 * 60 * 1000);
+		for (const body of [{ binding: 'GONE' }, {}]) {
+			const res = await shortLived.fetch!(
+				new Request('https://example.com/api/jobs/bulk-retry', {
+					method: 'POST',
+					headers: { ...authorized, 'content-type': 'application/json' },
+					body: JSON.stringify(body),
+				}),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+			const result = await res.json<{ failed: { id: string }[]; remaining: number }>();
+			expect(result.failed.map((f) => f.id)).not.toContain('GONE#0:bulk-old');
+		}
+	});
+
 	it('状態が違うだけなら409', async () => {
 		const jobId = await seedJob();
 		// 終端にして取り消し不可の状態を作る, QUEUEDのままでは要求として受理される(ADR-0052)
@@ -1053,10 +1070,13 @@ describe('一括リトライと一括取り消し', () => {
 
 	it('DOに無いジョブは理由付きで拒否する', async () => {
 		// 読み取りモデルにだけ残っている行, 全体は成功の扱い
+		// 保持期間内の更新時刻, 過ぎた行は抽出対象外
 		await env.TSUMUGI_DB.prepare(
 			`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, created_at, updated_at, payload)
-			 VALUES ('BULKGONE#0:x', 1, 'BULKGONE', 'FAILED', 0, 3, 3, 'at-least-once', 1, 1, '{}')`,
-		).run();
+			 VALUES ('BULKGONE#0:x', 1, 'BULKGONE', 'FAILED', 0, 3, 3, 'at-least-once', 1, ?, '{}')`,
+		)
+			.bind(Date.now())
+			.run();
 
 		const res = await post('retry', { binding: 'BULKGONE' });
 		expect(res.status).toBe(200);

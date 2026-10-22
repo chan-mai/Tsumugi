@@ -1,4 +1,4 @@
-import { and, asc, desc as sqlDesc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc as sqlDesc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
@@ -623,6 +623,19 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	});
 
 	/**
+	 * DOに残る失敗ジョブの条件, retryableと同じ保持期間からの近似
+	 * 除外しないと消えた行がcreatedAt順の先頭に残り、繰り返しても後続へ未到達
+	 * binding未指定時は登録一覧ごとの条件, 一覧が無ければ近似不能で条件なし
+	 */
+	const retainedClause = (binding: string | undefined, now: number) => {
+		if (!failedRetentionMs) return undefined;
+		const retained = (name: string) => gt(readModel.updatedAt, now - failedRetentionMs(name));
+		if (binding) return retained(binding);
+		if (!bindings || bindings.length === 0) return undefined;
+		return or(...bindings.map((name) => and(eq(readModel.binding, name), retained(name))));
+	};
+
+	/**
 	 * 条件に一致するジョブの一括処理
 	 *
 	 * 対象は読み取りモデルから取得, 横断的な抽出はDOには問い合わせ不能(ADR-0008)
@@ -645,6 +658,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				...[
 					inArray(readModel.state, [...states]),
 					action === 'cancel' ? isNull(readModel.cancelRequestedAt) : undefined,
+					action === 'retry' ? retainedClause(binding, Date.now()) : undefined,
 					binding ? eq(readModel.binding, binding) : undefined,
 					uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
 					concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
