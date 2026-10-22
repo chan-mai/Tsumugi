@@ -231,6 +231,35 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
+	it('再開で期限超過により中断したfan-outの子を実行し集計し直す', async () => {
+		await installQueues();
+		await shard('ListNames').configure({ policy: { concurrency: 100 } });
+		await shard('Greet').configure({ policy: { concurrency: 0 } });
+
+		const runId = 'GREETINGS:deadline-fanout';
+		const stub = runStub(runId);
+		await setClock(runId, T0);
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'df' }, deadlineMs: DEADLINE });
+		await settle(runId);
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ greet: 'RUNNING', 'greet:0': 'SCHEDULED' });
+
+		await setClock(runId, T0 + DEADLINE);
+		await runDurableObjectAlarm(stub);
+		await settleRun(runId);
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ greet: 'COMPLETED', 'greet:0': 'FAILED', report: 'FAILED' });
+		expect(await stateOf(runId)).toBe('FAILED');
+
+		await shard('Greet').configure({ policy: { concurrency: 100 } });
+		await setClock(runId, T0 + 60_000);
+		expect(await stub.retry()).toEqual({ ok: true });
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ greet: 'RUNNING', 'greet:0': 'PENDING', report: 'PENDING' });
+
+		performed.length = 0;
+		await settle(runId);
+		expect(await stateOf(runId)).toBe('COMPLETED');
+		expect(performed.find((p) => p.binding === 'Report')?.payload).toEqual({ total: 1, failed: 0 });
+	});
+
 	it('期限前に完了したrunは超過後のtickで反転しない', async () => {
 		await installQueues();
 		await shard('ListNames').configure({ policy: { concurrency: 100 } });

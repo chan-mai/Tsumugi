@@ -29,7 +29,7 @@ import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
 import type { NodeRow } from './run-schema.js';
-import { RunRepo } from './run-repo.js';
+import { DEADLINE_ERROR_PREFIX, RunRepo } from './run-repo.js';
 
 export type RunEnv = ClientEnv & {
 	TSUMUGI_DB: D1Database;
@@ -396,7 +396,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				expired = true;
 			}
 			// 中断されたノードへ残す理由, runには理由の置き場が無い, 取り消しはCANCELLEDのまま
-			const deadlineError = expired && !cancelling ? `run deadline exceeded: ${runRow.deadline_ms}ms` : null;
+			const deadlineError = expired && !cancelling ? `${DEADLINE_ERROR_PREFIX}: ${runRow.deadline_ms}ms` : null;
 
 			const touched = new Set<string>();
 			const inputs: EnqueueInput[] = [];

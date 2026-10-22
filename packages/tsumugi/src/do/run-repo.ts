@@ -9,6 +9,9 @@ import { node, run, runOutbox } from './run-tables.js';
 const NODE_COLUMNS = Object.keys(getTableColumns(node)).length;
 const OUTBOX_COLUMNS = Object.keys(getTableColumns(runOutbox)).length;
 
+/** 期限超過で中断したノードの理由接頭辞 */
+export const DEADLINE_ERROR_PREFIX = 'run deadline exceeded';
+
 export type NewNode = {
 	id: string;
 	binding: string;
@@ -259,10 +262,24 @@ export class RunRepo {
 	 * 再開のために中断されたノードを起動前の状態へ復帰(ADR-0034)
 	 * fan-outノードは子を作り直さず集約待ちへ戻す, 作り直しでは成功済みの子も削除
 	 * 子のrunIDも解除, 残すと旧い子の遅れた通知が再開後の状態を上書き
+	 * fan-outの子は期限超過で中断したもののみ対象, 実行済みの失敗は集計値で後段へ渡り済み
 	 */
 	resetForRetry(now: number): string[] {
 		// 親への通知済みの印を解除, 設定のままでは再開後の終端が親へ届かない
 		this.db.update(run).set({ parentNotified: 0, updatedAt: now }).run();
+		const aborted = `${DEADLINE_ERROR_PREFIX}%`;
+		// 子を戻すコンテナは集約待ちへ, COMPLETEDのままでは集計値が再開前のまま
+		const containers = this.sql.exec<{ id: string }>(
+			`UPDATE node SET state = 'RUNNING', updated_at = ?
+			WHERE container = 1 AND state = 'COMPLETED' AND EXISTS(
+				SELECT 1 FROM node child
+				WHERE child.parent = node.id AND child.origin = 'fanOut' AND child.state = 'FAILED' AND child.error LIKE ?
+			)
+			RETURNING id`,
+			now,
+			aborted,
+		);
+		const reopened = containers.toArray().map((row) => row.id);
 		const cursor = this.sql.exec<{ id: string }>(
 			`UPDATE node SET
 				state = CASE WHEN container = 1 AND EXISTS(SELECT 1 FROM node child WHERE child.parent = node.id) THEN 'RUNNING' ELSE 'PENDING' END,
@@ -271,10 +288,12 @@ export class RunRepo {
 				error = NULL,
 				updated_at = ?
 			WHERE state IN ('FAILED', 'STALLED', 'SKIPPED', 'CANCELLED')
+				AND (origin <> 'fanOut' OR (state = 'FAILED' AND error LIKE ?))
 			RETURNING id`,
 			now,
+			aborted,
 		);
-		return cursor.toArray().map((row) => row.id);
+		return [...reopened, ...cursor.toArray().map((row) => row.id)];
 	}
 
 	countNodes(): number {

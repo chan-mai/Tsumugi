@@ -258,6 +258,39 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
+	it('再開はfan-outで許容済みの子の失敗を再実行しない(ADR-0034)', async () => {
+		const runId = 'GREETINGS:fanretry';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'fr' } });
+
+		// 各ノードを投入まで進め、終端の通知を手で届ける
+		const finish = async (nodeId: string, state: 'COMPLETED' | 'FAILED', result: unknown = null) => {
+			await settleRun(runId);
+			sent.length = 0;
+			const jobId = await jobIdOf(runId, nodeId);
+			if (jobId === null) throw new Error(`${nodeId} has no job id`);
+			await stub.notify([
+				{ nodeId, jobId, state, result: JSON.stringify(result), error: state === 'FAILED' ? 'intentional failure' : null },
+			]);
+		};
+		await finish('list', 'COMPLETED', { names: ['a', 'b'] });
+		await finish('greet:0', 'FAILED');
+		await finish('greet:1', 'COMPLETED');
+		await finish('report', 'FAILED');
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('FAILED');
+		const tolerated = await jobIdOf(runId, 'greet:0');
+
+		expect(await stub.retry()).toEqual({ ok: true });
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ greet: 'COMPLETED', 'greet:0': 'FAILED', report: 'PENDING' });
+
+		await finish('report', 'COMPLETED');
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('COMPLETED');
+		expect(await jobIdOf(runId, 'greet:0')).toBe(tolerated);
+	});
+
 	it('取り消しは未起動を止めて終端を待つ', async () => {
 		const runId = 'GREETINGS:cancel1';
 		const stub = runStub(runId);
