@@ -293,6 +293,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const row = this.repo.findNode(nodeId);
 			// 再開で子が差し替わっているなら古い通知, 適用すると再実行の結果を上書き(ADR-0034)
 			if (!row || row.child_run_id !== childRunId || state === 'RUNNING') return;
+			// 起動失敗と判定済みのノード, 応答喪失で子だけ進んだ通知の適用なし
+			if (isNodeTerminal(row.state as NodeState)) return;
 
 			this.repo.updateNode(nodeId, { state, ...(state === 'FAILED' ? { error: `child run failed: ${childRunId}` } : {}) }, now);
 			this.repo.appendRunOutbox();

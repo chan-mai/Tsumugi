@@ -181,6 +181,22 @@ describe('subflowの縦串', () => {
 		expect(alarm).not.toBeNull();
 	});
 
+	it('起動失敗と判定済みのノードへ子の完了を適用しない', async () => {
+		const parent = 'PIPELINE:sub-lost';
+		const child = 'GREETINGS:sub-lost-greetings';
+		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
+		await settleRuns([parent, child]);
+		sent.length = 0;
+
+		// 子の起動RPCが応答を失い、親だけが失敗と判定した状況
+		await runInDurableObject(runStub(parent), (instance) => {
+			(instance as any).repo.sql.exec(`UPDATE node SET state = 'FAILED' WHERE id = 'greetings'`);
+		});
+		await runStub(parent).notifyChild('greetings', child, 'COMPLETED');
+
+		expect((await nodeOf(parent, 'greetings'))?.state).toBe('FAILED');
+	});
+
 	it('親への通知に失敗したら間隔を空けて再送する', async () => {
 		const child = 'GREETINGS:notify-retry';
 		const T = 2_600_000_000_000;
