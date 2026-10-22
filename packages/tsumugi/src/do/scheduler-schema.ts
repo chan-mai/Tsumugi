@@ -1,3 +1,5 @@
+import { ensureColumns } from './columns.js';
+
 /** 全scheduleの状態を1テーブルに保持, 定義はコード側(ADR-0040) */
 export const SCHEDULER_SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS schedule (
@@ -30,16 +32,12 @@ export const SCHEDULER_SCHEMA = [
 
 export function applySchedulerSchema(sql: SqlStorage): void {
 	for (const statement of SCHEDULER_SCHEMA) sql.exec(statement);
-	const columns = sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('schedule')`).toArray();
-	if (!columns.some((column) => column.name === 'time_zone')) {
-		sql.exec(`ALTER TABLE schedule ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'UTC'`);
-	} else {
-		// NULL許容で作成済みの既存列への対処
-		sql.exec(`UPDATE schedule SET time_zone = 'UTC' WHERE time_zone IS NULL`);
-	}
-	if (!columns.some((column) => column.name === 'paused')) {
-		sql.exec(`ALTER TABLE schedule ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`);
-	}
+	const added = ensureColumns(sql, 'schedule', [
+		['time_zone', "TEXT NOT NULL DEFAULT 'UTC'"],
+		['paused', 'INTEGER NOT NULL DEFAULT 0'],
+	]);
+	// NULL許容で作成済みの既存列への対処
+	if (!added.has('time_zone')) sql.exec(`UPDATE schedule SET time_zone = 'UTC' WHERE time_zone IS NULL`);
 }
 
 export type ScheduleRow = {

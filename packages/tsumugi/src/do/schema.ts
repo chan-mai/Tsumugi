@@ -1,3 +1,5 @@
+import { ensureColumns } from './columns.js';
+
 /**
  * 稼働中ジョブの正データ(ADR-0002)
  * 終端ジョブも保持期間経過まで残存, sweepで削除
@@ -109,23 +111,17 @@ export const SCHEMA = [
 export function applySchema(sql: SqlStorage): void {
 	for (const statement of SCHEMA) sql.exec(statement);
 	// 既存DOへの追加列反映(#9)
-	ensureColumn(sql, 'job', 'result', 'TEXT');
-	ensureColumn(sql, 'job', 'heartbeat_at', 'INTEGER');
-	ensureColumn(sql, 'job', 'progress', 'REAL');
-	ensureColumn(sql, 'job', 'expires_at', 'INTEGER');
-	ensureColumn(sql, 'job', 'traceparent', 'TEXT');
-	ensureColumn(sql, 'job', 'cancel_requested_at', 'INTEGER');
+	ensureColumns(sql, 'job', [
+		['result', 'TEXT'],
+		['heartbeat_at', 'INTEGER'],
+		['progress', 'REAL'],
+		['expires_at', 'INTEGER'],
+		['traceparent', 'TEXT'],
+		['cancel_requested_at', 'INTEGER'],
+	]);
 	sql.exec(`CREATE INDEX IF NOT EXISTS run_notify_run ON run_notify (run_id)`);
 	// job_dueが先頭列を含み代替
 	sql.exec(`DROP INDEX IF EXISTS job_active`);
-}
-
-function ensureColumn(sql: SqlStorage, table: string, column: string, type: string): void {
-	const exists = sql
-		.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
-		.toArray()
-		.some((row) => row.name === column);
-	if (!exists) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 export type AttemptRow = {

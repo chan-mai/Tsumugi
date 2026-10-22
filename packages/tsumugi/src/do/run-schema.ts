@@ -1,3 +1,5 @@
+import { ensureColumns } from './columns.js';
+
 /**
  * run 1件につき1インスタンス, `run`は常に1行(ADR-0029)
  * 終端runも投影完了まで残存, 保持期間後にDOごと削除(ADR-0034)
@@ -56,29 +58,20 @@ export const RUN_SCHEMA = [
 
 export function applyRunSchema(sql: SqlStorage): void {
 	for (const statement of RUN_SCHEMA) sql.exec(statement);
-	// 既存DOへの追加列反映, CREATE TABLE IF NOT EXISTSは既存テーブル不変
-	for (const [table, column, type] of [
-		['run', 'parent_run_id', 'TEXT'],
-		['run', 'parent_node_id', 'TEXT'],
-		['run', 'depth', 'INTEGER NOT NULL DEFAULT 0'],
-		['run', 'parent_notified', 'INTEGER NOT NULL DEFAULT 0'],
-		['run', 'deadline_ms', 'INTEGER'],
-		['run', 'deadline_at', 'INTEGER'],
-		['run', 'expired', 'INTEGER NOT NULL DEFAULT 0'],
-		['node', 'trigger', "TEXT NOT NULL DEFAULT 'success'"],
-		['node', 'subflow', 'TEXT'],
-		['node', 'child_run_id', 'TEXT'],
-	] as const) {
-		ensureColumn(sql, table, column, type);
-	}
-}
-
-function ensureColumn(sql: SqlStorage, table: string, column: string, type: string): void {
-	const exists = sql
-		.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
-		.toArray()
-		.some((row) => row.name === column);
-	if (!exists) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+	ensureColumns(sql, 'run', [
+		['parent_run_id', 'TEXT'],
+		['parent_node_id', 'TEXT'],
+		['depth', 'INTEGER NOT NULL DEFAULT 0'],
+		['parent_notified', 'INTEGER NOT NULL DEFAULT 0'],
+		['deadline_ms', 'INTEGER'],
+		['deadline_at', 'INTEGER'],
+		['expired', 'INTEGER NOT NULL DEFAULT 0'],
+	]);
+	ensureColumns(sql, 'node', [
+		['trigger', "TEXT NOT NULL DEFAULT 'success'"],
+		['subflow', 'TEXT'],
+		['child_run_id', 'TEXT'],
+	]);
 }
 
 export type RunRow = {
