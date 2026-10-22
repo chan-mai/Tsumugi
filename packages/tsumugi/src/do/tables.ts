@@ -1,10 +1,8 @@
 import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
- * Job DOのSQLiteスキーマ
- *
- * 稼働中ジョブについて正となるデータ(ADR-0002)
- * 終端に達したジョブもアウトボックスの投影が済むまでは残り、sweepで削除
+ * 稼働中ジョブの正データ(ADR-0002)
+ * 終端ジョブも保持期間経過まで残存, sweepで削除
  */
 export const job = sqliteTable(
 	'job',
@@ -21,40 +19,33 @@ export const job = sqliteTable(
 		timeoutMs: integer('timeout_ms').notNull(),
 		backoff: text('backoff').notNull(),
 		runAfter: integer('run_after').notNull(),
-		// 実行開始の期限, 経過後は実行せず終了
+		// 実行開始期限, 経過後は実行せず終了
 		expiresAt: integer('expires_at'),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 		dispatchedAt: integer('dispatched_at'),
-		/** performerからの最後の生存報告, reaperの無応答判定の起点 */
 		heartbeatAt: integer('heartbeat_at'),
-		/** 実行中の進捗, 0以上1以下 */
+		// 0以上1以下
 		progress: real('progress'),
 		payload: text('payload').notNull(),
-		// performの戻り値, 成功時にJSON文字列で入る(#9)
 		result: text('result'),
 		traceparent: text('traceparent'),
-		// 取り消し要求の時刻(#95)
 		cancelRequestedAt: integer('cancel_requested_at'),
-		// v2のDAG用の予約列(ADR-0015), 後からのスキーマ変更が不要なよう最初から配置
+		// DAGノード投入時の宛先(ADR-0015)
 		runId: text('run_id'),
 		nodeId: text('node_id'),
 	},
 	(t) => [
-		// tickが最初に実行するクエリ, 実行可能なジョブの抽出に使用
-		// idまで含めORDER BY run_after, idをインデックスで解決(#104)
+		// tickの実行可能ジョブ抽出, ORDER BYもインデックスで解決(#104)
 		index('job_due').on(t.state, t.runAfter, t.id),
-		// sweepの次回時刻を状態ごとのMINで取得
+		// sweep次回時刻の状態別MIN取得用
 		index('job_terminal').on(t.state, t.updatedAt),
 		index('job_concurrency_key').on(t.concurrencyKey, t.state),
 		index('job_run').on(t.runId, t.nodeId),
 	],
 );
 
-/**
- * 重複排除(ADR-0021 / ADR-0022), ジョブ本体ではなくキーだけを一定期間保持
- * KVには条件付き書き込みが無く「無ければ挿入」の不可分な実行が不能, DO内に配置
- */
+/** 重複排除キー(ADR-0021 / ADR-0022), KVに条件付き書き込み無くDO内配置 */
 export const uniqueKey = sqliteTable(
 	'unique_key',
 	{
@@ -65,7 +56,7 @@ export const uniqueKey = sqliteTable(
 	(t) => [index('unique_key_expiry').on(t.expiresAt)],
 );
 
-/** binding単位のポリシー, tickの同期読み取り用にSQLiteへ配置 */
+/** binding単位ポリシー, tickの同期読み取り用 */
 export const setting = sqliteTable('setting', {
 	key: text('key').primaryKey(),
 	value: text('value').notNull(),
@@ -82,10 +73,7 @@ export const keyBucket = sqliteTable(
 	(t) => [index('key_bucket_refilled').on(t.refilledAt)],
 );
 
-/**
- * 試行ごとの記録(ADR-0028), 失敗の事後調査に必要
- * ジョブ行は最新の状態しか持たず、何回目がいつ何で失敗したかは残らない
- */
+/** ジョブ行に無い失敗履歴の調査用(ADR-0028) */
 export const attempt = sqliteTable(
 	'attempt',
 	{
@@ -111,34 +99,21 @@ export const jobLog = sqliteTable(
 	(t) => [index('job_log_job').on(t.jobId, t.seq)],
 );
 
-/**
- * D1への投影待ち(ADR-0008), snapshotはD1へUPSERTする内容そのもの
- * D1書き込みの成功まで削除せず、失敗時もカーソルが進まず次回で追いつく
- */
-/**
- * Run DOへの通知待ち(ADR-0031)
- * D1への投影とは宛先もまとめ方も別で表も分離
- */
-/**
- * 失敗の通知待ち(#30)
- * Run DOへの通知とは宛先も対象も別で表も分離
- */
+/** 失敗通知待ち(#30), run_notifyと宛先/対象が別で別表 */
 export const failureNotify = sqliteTable('failure_notify', {
 	seq: integer('seq').primaryKey({ autoIncrement: true }),
 	jobId: text('job_id').notNull(),
 	payload: text('payload').notNull(),
 });
 
-/**
- * 終端の通知待ち(#96)
- * 失敗の通知とは対象も宛先も別で表も分離
- */
+/** 終端通知待ち(#96), failure_notifyと宛先/対象が別で別表 */
 export const settledNotify = sqliteTable('settled_notify', {
 	seq: integer('seq').primaryKey({ autoIncrement: true }),
 	jobId: text('job_id').notNull(),
 	payload: text('payload').notNull(),
 });
 
+/** Run DO通知待ち(ADR-0031), outboxと宛先/集約単位が別で別表 */
 export const runNotify = sqliteTable(
 	'run_notify',
 	{
@@ -149,6 +124,7 @@ export const runNotify = sqliteTable(
 	(t) => [index('run_notify_run').on(t.runId)],
 );
 
+/** D1投影待ち(ADR-0008), snapshotはUPSERT内容, 書き込み成功まで保持 */
 export const outbox = sqliteTable('outbox', {
 	seq: integer('seq').primaryKey({ autoIncrement: true }),
 	jobId: text('job_id').notNull(),

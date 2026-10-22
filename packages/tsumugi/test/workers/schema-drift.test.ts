@@ -5,16 +5,11 @@ import { attempt, failureNotify, job, outbox, setting, settledNotify, uniqueKey 
 import { schedule, schedulerSetting } from '../../src/do/scheduler-tables.js';
 import { job as readModel } from '../../src/projection/tables.js';
 
-/**
- * DDLとDrizzleの定義のずれの検出
- *
- * DOのテーブルは`schema.ts`の`CREATE TABLE`が作り、クエリは`tables.ts`の定義で構築
- * 片方だけの修正では、型検査は成功するのに実行時に列が無い状態が発生
- */
+// DOのテーブルは`schema.ts`のDDLで作成, クエリは`tables.ts`で構築
+// 片方のみの修正では型検査成功でも実行時に列欠落
 describe('DDLとDrizzle定義の一致', () => {
 	const shard = env.JOB_SHARD.get(env.JOB_SHARD.idFromName('DRIFT#0'));
 
-	/** DDLが実際に作った列名, DOを一度起こしてSQLiteに問い合わせる */
 	const columnsOf = (table: string) =>
 		runInDurableObject(shard, (instance) => {
 			const sql = (instance as any).repo.sql as SqlStorage;
@@ -38,9 +33,9 @@ describe('DDLとDrizzle定義の一致', () => {
 	}
 });
 
-/** Scheduler DOも`scheduler-schema.ts`と`scheduler-tables.ts`の二重管理(ADR-0040) */
+// Scheduler DOも`scheduler-schema.ts`と`scheduler-tables.ts`の二重管理(ADR-0040)
 describe('Scheduler DOのDDLとDrizzle定義の一致', () => {
-	// 面をそのまま使うと型の展開が深くなりTS2589に抵触, ここでは呼ばず空で受ける
+	// DO型直接参照でTS2589発生, 呼び出しなしで空宣言
 	interface SchedulerFace extends Rpc.DurableObjectBranded {}
 	const namespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 	const stub = namespace.get(namespace.idFromName('scheduler'));
@@ -65,10 +60,7 @@ describe('Scheduler DOのDDLとDrizzle定義の一致', () => {
 	}
 });
 
-/**
- * D1の読み取りモデルも同じ問題を持つ
- * DDLは`migrations/`のSQLが作り、クエリは`projection/tables.ts`の定義で構築
- */
+// D1読み取りモデルも`migrations/`のDDLと`projection/tables.ts`の二重管理
 describe('D1のDDLとDrizzle定義の一致', () => {
 	it('jobの列が一致する', async () => {
 		const config = getTableConfig(readModel);

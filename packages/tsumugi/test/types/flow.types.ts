@@ -1,7 +1,4 @@
-/**
- * flow定義の型レベル検証, 実行時テストではなく`tsc --noEmit`で検査
- * 依存の受け取り口が実際に前段の戻り値の型になるかがここの主眼(ADR-0030)
- */
+// flow定義の型レベル検証, `tsc --noEmit`で検査
 import { Performer } from '../../src/performer/entrypoint.js';
 import type { JobContext } from '../../src/core/api.js';
 import { createFlow } from '../../src/core/flow.js';
@@ -18,14 +15,12 @@ class ProcessItem extends Performer<{ id: string }, { ok: boolean }> {
 	}
 }
 
-/** 顧客単位の直列化用にconcurrencyKeyを必須化 */
 class ChargeCard extends Performer<{ customerId: string }, { txId: string }, { concurrencyKey: true }> {
 	async perform(_payload: { customerId: string }, _ctx: JobContext) {
 		return { txId: 't' };
 	}
 }
 
-/** uniqueKey必須のperformerはノードに使えない(ADR-0033) */
 class SyncInventory extends Performer<{ sku: string }, void, { uniqueKey: true }> {
 	async perform(_payload: { sku: string }, _ctx: JobContext) {}
 }
@@ -41,28 +36,25 @@ export const order = flow<{ orderId: string; since: number }>((f) => {
 		concurrencyKey: (i) => i.orderId,
 	});
 
-	// overの要素型がinputのitemへ流れる
 	const each = f.fanOut('process', 'PROCESS', {
 		after: { fetched },
 		over: (_i, d) => d.fetched.items,
 		input: (item) => ({ id: item.id }),
 	});
 
-	// 合流, 受け取り口の名前は`after`のキーそのもの
 	f.node('report', 'PROCESS', {
 		after: { each, charge },
 		input: (_i, d) => ({ id: `${d.each.total}-${d.charge.txId}` }),
 	});
 });
 
-/** 発火条件で受け取り口の型が変わる(ADR-0041) */
 export const triggers = flow<{ orderId: string }>((f) => {
 	const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 
-	// successでは依存の戻り値が揃う
+	// successでは依存の戻り値が全て存在
 	f.node('ok', 'PROCESS', { after: { fetched }, input: (_i, d) => ({ id: d.fetched.items[0]!.id }) });
 
-	// failureとalwaysでは失敗した依存の戻り値が無い
+	// failure, alwaysでは失敗した依存の戻り値なし
 	f.node('cleanup', 'PROCESS', {
 		after: { fetched },
 		trigger: 'failure',
@@ -95,7 +87,7 @@ export const negatives = flow<{ orderId: string }>((f) => {
 	const fetched = f.node('fetch3', 'FETCH', { input: () => ({ since: 1 }) });
 	f.node('after-typo', 'PROCESS', {
 		after: { fetched },
-		// @ts-expect-error 宣言していない受け取り口
+		// @ts-expect-error afterに無いdepsのプロパティ
 		input: (_i, d) => ({ id: d.missing.items[0].id }),
 	});
 

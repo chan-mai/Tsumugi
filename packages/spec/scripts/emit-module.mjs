@@ -1,24 +1,18 @@
-// tsp compileが出したdist/openapi.jsonをTSモジュールとして焼き込む
 // `@tsumugi/dashboard`のemit-module.mjsと同じ配布方式(ADR-0038)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 
 const document = JSON.parse(readFileSync(new URL('../dist/openapi.json', import.meta.url), 'utf8'));
 
-/**
- * 生成器の表現差を従来の手書き文書の形へ正規化する
- * 意味は同じでも表現が変わると, 利用者のクライアント生成物が移行だけで変わってしまう
- * - `anyOf: [{...}, {type: 'null'}]`は3.1のtype配列へ畳む。枝が2つでnull側が型だけの場合に限る
- * - `unevaluatedProperties`は`additionalProperties`へ(Recordの表現, 対応する生成器が広い)
- * - スカラーのクエリパラメータで意味を持たない`explode: false`, 既定値と同じ`required: false`, 空のparametersは落とす
- */
+// 生成器出力を公開済み文書の表現へ正規化, 利用者のクライアント生成物の差分防止
+// `additionalProperties`は対応生成器が多い
 const isNullUnion = (value) =>
 	Array.isArray(value?.anyOf) &&
 	value.anyOf.length === 2 &&
 	value.anyOf.some((entry) => entry?.type === 'null' && Object.keys(entry).length === 1) &&
 	value.anyOf.some((entry) => typeof entry?.type === 'string' && entry.type !== 'null');
 
-// explodeは配列とオブジェクトでは直列化を変えるので, スカラーに限って落とす
+// explodeは配列, オブジェクトの直列化に影響, スカラーのみ削除
 const scalarSchema = (schema) => typeof schema?.type === 'string' && schema.type !== 'array' && schema.type !== 'object';
 
 const normalize = (value) => {
@@ -31,7 +25,6 @@ const normalize = (value) => {
 		if (key === 'required' && entry === false) continue;
 		if (key === 'parameters' && Array.isArray(entry) && entry.length === 0) continue;
 		if (key === 'anyOf' && isNullUnion(value)) {
-			// 型以外の制約は枝が持つので, 畳んだ後も同じ階層へ引き上げる
 			const { type, ...rest } = entry.find((option) => option.type !== 'null');
 			out.type = [type, 'null'];
 			for (const [name, constraint] of Object.entries(rest)) out[name] = normalize(constraint);
@@ -44,7 +37,7 @@ const normalize = (value) => {
 
 const normalized = normalize(document);
 delete normalized.tags;
-// httpのscheme名は小文字で書く, 従来の文書に合わせる
+// 公開済み文書と同じ小文字のscheme名
 normalized.components.securitySchemes.bearerAuth.scheme = 'bearer';
 
 const source = JSON.stringify(normalized);

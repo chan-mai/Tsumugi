@@ -14,7 +14,7 @@ const nodes = ref<RunNode[]>([]);
 const error = ref<string | null>(null);
 const message = ref<string | null>(null);
 const busy = ref(false);
-/** 親子のrunを素早く移動した時、前のrunの応答で上書きしないための連番 */
+// 親子run間の高速移動時の旧応答上書き防止用連番
 let loadSequence = 0;
 
 const canRetry = computed(() => run.value?.retryable === true);
@@ -39,7 +39,7 @@ watch(
 	async (id) => {
 		loadSequence++;
 		if (!id) return;
-		// 閉じるアニメーションの間に中身が消えないよう、開く時だけ差し替え
+		// 閉じるアニメーション中の内容消失防止、開く時のみ差し替え
 		run.value = null;
 		nodes.value = [];
 		error.value = null;
@@ -54,11 +54,10 @@ async function act(kind: 'retry' | 'cancel') {
 	try {
 		const outcome = kind === 'retry' ? await retryRun(props.runId) : await cancelRun(props.runId);
 		message.value = outcome.message;
-		// 投影は数秒遅れ即時には変わらないが、反映され次第この再読込で追いつく
+		// 投影の数秒遅延で未反映の場合あり
 		await load(props.runId);
 		emit('changed');
 	} catch (e) {
-		// 捕捉しないと何も起きなかったように見える
 		message.value = e instanceof Error ? e.message : String(e);
 	} finally {
 		busy.value = false;

@@ -4,19 +4,14 @@ import { fixedClock } from '../../src/do/clock.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { SettledNotice } from '../../src/core/types.js';
 
-/**
- * 実行中のジョブの協調的取り消し(#95 / ADR-0052)
- *
- * SCHEDULEDは即時CANCELLED, QUEUED/RUNNINGは要求として記録
- * 確定はperformerの応答(報告)か要求後reaperGraceMs(既定30秒)の経過
- */
+// 確定はperformerの報告か要求後reaperGraceMs(既定30秒)経過時
 
 const T0 = 2_700_000_000_000;
 const GRACE = 30_000;
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
-/** 投入先を差し替える, 実キューへ送るとconsumerが実行され状態が変わる */
+// 実キューはconsumer実行で状態変化
 async function install(name: string) {
 	const sent: DispatchMessage[] = [];
 	await runInDurableObject(shard(name), (instance) => {
@@ -30,14 +25,13 @@ async function install(name: string) {
 	return sent;
 }
 
-/** DOは再生成されると時計が既定に戻り操作の直前に必ず再設定 */
+// DO再生成で時計が既定へ復帰、操作直前に再設定
 const setClock = (name: string, at: number) =>
 	runInDurableObject(shard(name), (instance) => void ((instance as any).clock = fixedClock(at)));
 
 type Row = { state: string; attempts: number; result: string | null; cancel_requested_at: number | null } | undefined;
 const rowOf = (name: string, jobId: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.find(jobId) as Row);
 
-/** QUEUEDのジョブを1件用意 */
 async function queued(name: string, options: Record<string, unknown> = {}): Promise<string> {
 	await install(name);
 	await setClock(name, T0);
@@ -65,7 +59,6 @@ describe('取り消し要求(#95)', () => {
 		expect(row?.cancel_requested_at).toBe(T0);
 		expect(await shard('CX2#0').heartbeat(jobId)).toEqual({ accepted: true, cancelRequested: true });
 
-		// 要求は投影され読み取りモデルからも参照可能
 		await runDurableObjectAlarm(shard('CX2#0'));
 		const projected = await env.TSUMUGI_DB.prepare('SELECT cancel_requested_at FROM job WHERE id = ?').bind(jobId).first();
 		expect(projected?.cancel_requested_at).toBe(T0);
@@ -83,7 +76,7 @@ describe('取り消し要求(#95)', () => {
 	});
 
 	it('要求後の成功報告はCOMPLETEDのまま', async () => {
-		// 要求が間に合わなかっただけで処理は完了, 結果も保持(ADR-0052)
+		// 要求より先に処理完了, 結果も保持(ADR-0052)
 		const jobId = await queued('CX4#0');
 		await shard('CX4#0').cancel(jobId);
 
@@ -98,7 +91,7 @@ describe('取り消し要求(#95)', () => {
 		const jobId = await queued('CX5#0', { timeoutMs: 600_000 });
 		await shard('CX5#0').cancel(jobId);
 
-		// 無応答判定(timeout+grace)よりも早く確定する
+		// 無応答判定(timeout+grace)より早く確定
 		await setClock('CX5#0', T0 + GRACE);
 		await runDurableObjectAlarm(shard('CX5#0'));
 		expect((await rowOf('CX5#0', jobId))?.state).toBe('CANCELLED');
@@ -126,7 +119,7 @@ describe('取り消し要求(#95)', () => {
 		const jobId = await queued('CX8#0', { maxAttempts: 1 });
 		await shard('CX8#0').report(jobId, { ok: false, error: 'boom' });
 		expect((await rowOf('CX8#0', jobId))?.state).toBe('FAILED');
-		// 旧版の残留等で終端行に要求が残った場合の防御, 公開経路では要求済みの終端はCANCELLEDのみ
+		// 終端行に要求が残存した場合の防御, 公開経路では要求済み終端はCANCELLEDのみ
 		await runInDurableObject(shard('CX8#0'), (instance) =>
 			(instance as any).repo.sql.exec(`UPDATE job SET cancel_requested_at = ? WHERE id = ?`, T0, jobId),
 		);
@@ -141,14 +134,13 @@ describe('取り消し要求(#95)', () => {
 		await install('CX9#0');
 		await setClock('CX9#0', T0);
 		const jobId = await shard('CX9#0').enqueue({ binding: 'CX9', payload: {}, delayMs: 60_000 });
-		// SCHEDULEDへ要求は記録されないため残留を直接再現, 回収との交錯時に残るぶんの検証
+		// SCHEDULEDへは要求記録なし、reaper処理との競合時の残留を直接再現
 		await runInDurableObject(shard('CX9#0'), (instance) =>
 			(instance as any).repo.sql.exec(`UPDATE job SET cancel_requested_at = ? WHERE id = ?`, T0, jobId),
 		);
 
 		expect(await shard('CX9#0').reschedule(jobId, { runAfter: T0 + 120_000 })).toEqual({ ok: false, reason: 'invalid-state' });
 
-		// 残留した要求は次のtickで投入されずCANCELLEDへ確定
 		await runDurableObjectAlarm(shard('CX9#0'));
 		await setClock('CX9#0', T0 + 60_000);
 		await runDurableObjectAlarm(shard('CX9#0'));
@@ -156,7 +148,6 @@ describe('取り消し要求(#95)', () => {
 	});
 
 	it('実行中のノードを持つrunの取り消しはジョブの終端通知で確定する', async () => {
-		// Run DOは要求の受理後ノードを進めず, ジョブ側のCANCELLEDの通知で確定(ADR-0052)
 		interface RunFace extends Rpc.DurableObjectBranded {
 			start(input: { flow: string; input: unknown }): Promise<{ id: string }>;
 			cancel(): Promise<{ ok: boolean }>;
@@ -168,7 +159,7 @@ describe('取り消し要求(#95)', () => {
 		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:cancel-coop'));
 		await run.start({ flow: 'GREETINGS', input: { prefix: 'cancel-coop' } });
 
-		// ノードの投入はRun DOのtickが行う, 確定するまでalarmを繰り返す
+		// ノード投入はRun DOのtickで実施, 確定までalarm反復
 		let jobId: string | null = null;
 		for (let i = 0; i < 10 && jobId === null; i++) {
 			await runDurableObjectAlarm(run as never);
@@ -177,7 +168,7 @@ describe('取り消し要求(#95)', () => {
 				(instance) => ((instance as any).repo.findNode('list')?.job_id ?? null) as string | null,
 			);
 		}
-		// 共有shardには他テストの残留があり1回のtickで確定しない, 投入までalarmを繰り返す
+		// 共有shardに他テストの残留あり、投入までalarm反復
 		let jobState: string | undefined;
 		for (let i = 0; i < 20 && jobState !== 'QUEUED'; i++) {
 			await runDurableObjectAlarm(shard('ListNames#0'));
@@ -187,8 +178,7 @@ describe('取り消し要求(#95)', () => {
 
 		expect(await run.cancel()).toEqual({ ok: true });
 
-		// ノードは終端にならず要求だけがジョブへ記録される
-		// Run DOは実時刻のalarmで背景でも進む, 要求の記録はポーリングで待つ
+		// Run DOは実時刻alarmで並行進行, 要求記録はポーリングで待機
 		let requestedAt: number | null = null;
 		for (let i = 0; i < 20 && requestedAt === null; i++) {
 			await runDurableObjectAlarm(run as never);
@@ -199,7 +189,6 @@ describe('取り消し要求(#95)', () => {
 		const nodeState = await runInDurableObject(run as never, (instance) => (instance as any).repo.findNode('list')?.state as string);
 		expect(['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED']).not.toContain(nodeState);
 
-		// 応答期限の経過で確定, 同じtickの通知でノードも確定しrunがCANCELLEDへ
 		await setClock('ListNames#0', T0 + GRACE);
 		for (let i = 0; i < 20 && jobState !== 'CANCELLED'; i++) {
 			await runDurableObjectAlarm(shard('ListNames#0'));

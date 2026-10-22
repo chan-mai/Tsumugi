@@ -5,20 +5,13 @@ import type { SettledNotice, SettledTarget } from '../../src/core/types.js';
 import { settledNotify } from '../../src/do/tables.js';
 import { embedJobId } from '../../src/core/ids.js';
 
-/**
- * 終端に達したジョブの通知(#96)
- *
- * statesに含めた終端だけを通知先のbindingへジョブとして投入
- * 宛先自身とonFailure宛先の遷移は対象外, 自己循環と相互連鎖の防止
- */
-
 const T0 = 2_600_000_000_000;
 const TARGET = 'NotifySettled';
 const FAILURE = 'NotifyFailure';
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
-/** 投入先を差し替える, 実キューへ出すとconsumerが走って状態が変わる */
+// 実キューはconsumer実行で状態変化
 async function install(name: string, sent: DispatchMessage[] = []): Promise<void> {
 	await runInDurableObject(shard(name), (instance) => {
 		(instance as any).clock = { now: () => T0 };
@@ -31,14 +24,12 @@ async function install(name: string, sent: DispatchMessage[] = []): Promise<void
 	});
 }
 
-/** 通知先へ届いたジョブのpayload, 宛先はshard 0に固定 */
 const payloadOf = (shardName: string, jobId: string) =>
 	runInDurableObject(shard(shardName), (instance) => {
 		const row = (instance as any).repo.find(jobId) as { payload: string } | undefined;
 		return row ? (JSON.parse(row.payload) as SettledNotice) : undefined;
 	});
 
-/** 通知として投入されるジョブのID, 元のID全体と試行回数と状態から決まる */
 const noticeIdOf = (jobId: string, attempts: number, state: string) => `${TARGET}#0:settled-${embedJobId(jobId)}-${attempts}-${state}`;
 
 const countOf = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countJobs() as number);
@@ -46,10 +37,10 @@ const countOf = (name: string) => runInDurableObject(shard(name), (instance) => 
 const settledRowsOf = (name: string) =>
 	runInDurableObject(shard(name), (instance) => (instance as any).repo.countSettledNotify() as number);
 
-/** 終端の通知の設定を書き込む, 実際はenqueueに同梱されて届く */
+// 実運用ではenqueueに同梱
 const configure = (name: string, states: SettledTarget['states']) => shard(name).configure({ settled: { binding: TARGET, states } });
 
-/** flowと定期実行の起動口, RPCの型はブランドを継承する必要がある */
+// RPC型はブランド継承が必要
 interface RunFace extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown }): Promise<unknown>;
 }
@@ -57,7 +48,6 @@ interface SchedulerFace extends Rpc.DurableObjectBranded {
 	sync(): Promise<void>;
 }
 
-/** DOが保存した宛先と対象, 投入の経路ごとに届いているかを見る */
 const targetOf = (name: string) =>
 	runInDurableObject(shard(name), (instance) => {
 		const raw = (instance as any).repo.readSetting('settled_target') as string | undefined;
@@ -120,7 +110,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 	});
 
 	it('宛先自身の遷移は記録しない', async () => {
-		// COMPLETEDを対象にすると通知ジョブの完了が次の通知を生み, 止まらなくなる
+		// COMPLETED対象時は通知ジョブの完了で次の通知が無限に発生
 		const sent: DispatchMessage[] = [];
 		await install(`${TARGET}#0`, sent);
 		await configure(`${TARGET}#0`, ['COMPLETED', 'FAILED']);
@@ -131,13 +121,13 @@ describe('終端に達したジョブの通知(#96)', () => {
 		await shard(`${TARGET}#0`).report(sent[0]!.jobId, { ok: true });
 		await runDurableObjectAlarm(shard(`${TARGET}#0`));
 
-		// 投入した1件だけが増える, その完了から新しい通知は生まれない
+		// 投入1件のみ増加, その完了から新規通知なし
 		expect(await settledRowsOf(`${TARGET}#0`)).toBe(0);
 		expect(await countOf(`${TARGET}#0`)).toBe(before + 1);
 	});
 
 	it('onFailure宛先の遷移は投入しない', async () => {
-		// 失敗の通知ジョブの終端を通知すると、2宛先の相互連鎖が発生
+		// 失敗通知ジョブの終端を通知すると2宛先の相互連鎖が発生
 		const sent: DispatchMessage[] = [];
 		await install(`${FAILURE}#0`, sent);
 		await shard(`${FAILURE}#0`).configure({ failureBinding: FAILURE, settled: { binding: TARGET, states: ['FAILED'] } });
@@ -192,7 +182,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		await runDurableObjectAlarm(shard('SET6#0'));
 		const after = await countOf(`${TARGET}#0`);
 
-		// 送信の後で中断した場合と同じ状況, カーソルが進まず同じ通知が再送
+		// 送信後中断を再現, カーソル未更新で同じ通知を再送
 		await runInDurableObject(shard('SET6#0'), (instance) => {
 			(instance as any).repo.db
 				.insert(settledNotify)
@@ -201,18 +191,17 @@ describe('終端に達したジョブの通知(#96)', () => {
 		});
 		await runDurableObjectAlarm(shard('SET6#0'));
 
-		// 決定的なIDのため既存が返り, 通知先のジョブは増えない(ADR-0029)
 		expect(await countOf(`${TARGET}#0`)).toBe(after);
 		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 1, 'completed'))).toBeDefined();
 	});
 
 	it('リトライ後の別の終端は別の通知として届く', async () => {
-		// attemptsが同値でも状態がIDに入り, STALLED後のCANCELLEDが飲み込まれない
+		// attempts同値でもIDに状態を含め, STALLED後のCANCELLEDも個別通知
 		const sent: DispatchMessage[] = [];
 		await install('SET7#0', sent);
 		await configure('SET7#0', ['STALLED', 'CANCELLED']);
 
-		// at-most-onceは再投入が二重実行になり得るためSTALLEDで止まる(ADR-0007)
+		// at-most-onceは二重実行回避でSTALLED停止(ADR-0007)
 		const jobId = await shard('SET7#0').enqueue({
 			binding: 'SET7',
 			payload: {},
@@ -221,7 +210,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 			guarantee: 'at-most-once',
 		});
 		await runDurableObjectAlarm(shard('SET7#0'));
-		// 応答が無いまま期限と猶予を過ぎると回収
+		// 無応答で期限と猶予経過後にreaper処理
 		await runInDurableObject(shard('SET7#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 120_000 }));
 		await runDurableObjectAlarm(shard('SET7#0'));
 
@@ -229,7 +218,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		await shard('SET7#0').cancel(jobId);
 		await runDurableObjectAlarm(shard('SET7#0'));
 
-		// 報告が無く試行は計上されていない, 理由も記録されずnull
+		// 報告なしで試行未計上, 理由もnull
 		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 0, 'stalled'))).toMatchObject({ jobId, state: 'STALLED', error: null });
 		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 0, 'cancelled'))).toMatchObject({ jobId, state: 'CANCELLED' });
 	});
@@ -248,7 +237,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 	});
 
 	it('flowと定期実行が投入するshardにも設定が届く', async () => {
-		// 経路ごとにクライアントが別, 設定が欠けた経路の終端は通知対象外
+		// 経路ごとに別クライアント, 設定欠落経路の終端は通知対象外
 		const runNamespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
 		await runNamespace
 			.get(runNamespace.idFromName('GREETINGS:settled-wiring'))
@@ -257,7 +246,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		const schedulerNamespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 		const scheduler = schedulerNamespace.get(schedulerNamespace.idFromName('scheduler'));
 		await scheduler.sync();
-		// 最短の定義が1分間隔, 発火のために時計を前進
+		// 最短定義は1分間隔, 発火用に時計を前進
 		const ahead = Date.now() + 2 * 60_000;
 		await runInDurableObject(scheduler, (instance) => void ((instance as any).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);

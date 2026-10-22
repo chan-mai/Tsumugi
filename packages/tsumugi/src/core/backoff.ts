@@ -3,9 +3,8 @@ import type { Backoff } from './types.js';
 export type NextAttempt = { kind: 'retry'; runAfter: number; delayMs: number } | { kind: 'exhausted' };
 
 /**
- * 失敗後の次回実行時刻の算出
- * 上限とジッタを持たせ、同時失敗した大量ジョブの一斉回帰を防止
- * 乱数は引数で受け取り純粋性を維持(呼び出し側のDOがMath.random()を渡す)
+ * 上限とジッタで同時失敗した大量ジョブの一斉再実行を防止
+ * 乱数は引数渡し, 純粋性維持
  */
 export function nextAttempt(args: {
 	/** 失敗計上後の試行回数 */
@@ -15,7 +14,7 @@ export function nextAttempt(args: {
 	now: number;
 	/** 0以上1未満, jitter有効時のみ使用 */
 	rand?: number;
-	/** performer指定の次回時刻(#91), 過去は現在へ丸め */
+	/** performer指定の次回時刻(#91) */
 	retryAt?: number;
 }): NextAttempt {
 	const { attempts, maxAttempts, backoff, now, rand = 0.5, retryAt } = args;

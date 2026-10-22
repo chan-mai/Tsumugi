@@ -1,25 +1,18 @@
-// ダッシュボードをJSに焼き込む以上(ADR-0025),無警戒ではバンドルが膨らむ
-// 中身が空のM0時点から検査を入れておく,実装後に初めて測ると太った後で削る羽目になる
 import { externalsIn } from './externals.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-/** entry -> gzip後の上限バイト数 */
 const BUDGETS = {
 	'dist/ui.js': 400 * 1024,
 	'dist/index.js': 100 * 1024,
 	'dist/performer.js': 16 * 1024,
 	'dist/client.js': 16 * 1024,
 	'dist/testing.js': 16 * 1024,
-	// @clack/promptsを同梱するため他の小entryより広い
+	// @clack/prompts同梱分を加算
 	'dist/cli.js': 32 * 1024,
 };
 
-/**
- * 取り込んではならない実体
- * サブパス分割の意味はサイズだけでなく依存の遮断,予算内でも混入は失敗扱い
- */
 const FORBIDDEN = {
 	'dist/client.js': [/extends DurableObject/, /CREATE TABLE/],
 	'dist/performer.js': [/extends DurableObject/, /CREATE TABLE/],
@@ -27,38 +20,28 @@ const FORBIDDEN = {
 	'dist/cli.js': [/extends DurableObject/, /hono/],
 };
 
-/** 印の実在確認,常に当たらないパターンは検査の形骸化 */
 const CANARY = { 'dist/index.js': [/extends DurableObject/, /CREATE TABLE/] };
 
 const IMPORT = /(?:from|import)\s*["'](\.[^"']+)["']/g;
 
-/**
- * entryごとに載ってよい外部依存
- * 外部依存はバンドルされずimport文として残るためgzip量に現れない
- * 量ではなく集合で見る, 増えた時に気づけることが目的
- */
+// 外部依存はgzip量に非反映で集合検査
 const ALLOWED_EXTERNALS = {
 	'dist/ui.js': [],
 	'dist/index.js': ['@paralleldrive/cuid2', 'drizzle-orm', 'hono'],
 	'dist/performer.js': [],
 	'dist/client.js': [],
 	'dist/testing.js': [],
-	// node:*はexternalsInが組み込みとして除外する, @clack/promptsの外部化漏れはここで捕まる
-	// 'tsumugi'は雛形のテンプレート文字列が持つimport行の検出分, 実importではない
+	// @clack/prompts外部化漏れの検出対象
+	// 'tsumugi'は雛形テンプレート文字列内のimport行
 	'dist/cli.js': ['tsumugi'],
 };
 
-/** entryの読み込み先すべてから外部依存を集める */
 function externalsOf(files) {
 	const found = new Set();
 	for (const path of files) for (const spec of externalsIn(readFileSync(path, 'utf8'))) found.add(spec);
 	return [...found].sort();
 }
 
-/**
- * entryが読み込むファイルの再帰的な収集
- * tsdownは共有チャンクへ切り出すため, entry単体では再エクスポート行しか見えない
- */
 function closureOf(entry) {
 	const seen = new Set();
 	const stack = [normalize(entry)];

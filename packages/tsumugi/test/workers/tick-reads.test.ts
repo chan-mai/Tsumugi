@@ -11,7 +11,6 @@ const LIMIT = 200;
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
-/** 指定状態のジョブをN件直接挿入 */
 function seed(sql: SqlStorage, state: string, runAfter: number, updatedAt: number): void {
 	sql.exec(
 		`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
@@ -24,10 +23,7 @@ function seed(sql: SqlStorage, state: string, runAfter: number, updatedAt: numbe
 	);
 }
 
-/**
- * 滞留件数に比例する読み取りの防止(#104)
- * tickごとに滞留全件を読むと、解消までの読み取り行数が件数の2乗に比例
- */
+// tickごとの滞留全件読み取りでは総読み取り行数が件数の2乗に比例(#104)
 describe('tickの読み取り行数', () => {
 	it('実行可能ジョブの滞留中もreadyの読み取りはlimit程度', async () => {
 		await runInDurableObject(shard('READS1#0'), (instance) => {
@@ -55,7 +51,7 @@ describe('tickの読み取り行数', () => {
 			expect(cursor.toArray()).toHaveLength(LIMIT);
 			expect(cursor.rowsRead).toBeLessThan(N / 2);
 
-			// seedのcreated_atはIDの逆順, 作成順へ戻ると検出
+			// seedのcreated_atはIDの逆順, 作成順ソートを検出
 			const { jobs, readyCount } = repo.scheduleWindow(T0, LIMIT);
 			expect(readyCount).toBe(LIMIT);
 			const ids = jobs.map((j) => j.id);
@@ -94,7 +90,7 @@ describe('tickの読み取り行数', () => {
 			seed(repo.sql, 'COMPLETED', T0, T0);
 			seed(repo.sql, 'STALLED', T0, T0 - 1_000);
 
-			// STALLEDは古いが保持が長く、COMPLETED側が先に対象となる
+			// STALLEDは古いが保持期間が長く、COMPLETEDが先に対象
 			expect(repo.sweepState(T0, { doneMs: 10_000, failedMs: 60_000 }).nextDueAt).toBe(T0 + 10_000);
 			expect(repo.sweepState(T0, { doneMs: 60_000, failedMs: 10_000 }).nextDueAt).toBe(T0 - 1_000 + 10_000);
 		});

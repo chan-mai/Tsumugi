@@ -13,23 +13,19 @@ export default defineConfig([
 		format: ['esm'],
 		dts: true,
 		clean: true,
-		// Workers向けなのでNode向けのshimは入れない
 		platform: 'neutral',
-		// ダッシュボードのHTMLとOpenAPI文書は同梱する,非公開のワークスペースパッケージなので外部化できない
+		// 非公開ワークスペースパッケージ
 		noExternal: ['@tsumugi/dashboard', '@tsumugi/spec'],
 		target: 'es2022',
 	},
 	{
-		// CLIはNodeで動くのでWorkers向けとconfigを分ける(ADR-0036)
 		entry: { cli: 'src/entries/cli.ts' },
 		format: ['esm'],
-		// type: moduleなので.jsのままESMになる, 他のentryと拡張子を揃える
 		fixedExtension: false,
 		dts: false,
-		// trueにすると1つ目のconfigの出力を消す
 		clean: false,
 		platform: 'node',
-		// 対話モードの@clack/promptsはdevDependencyのまま同梱し, 利用者の依存に乗せない
+		// devDependencyのまま同梱, 利用者の依存から除外
 		noExternal: ['@clack/prompts'],
 		target: 'es2022',
 	},

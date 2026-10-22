@@ -1,25 +1,18 @@
 import type { NodeJobOptions, NodeTrigger } from './flow.js';
 import type { JobState } from './types.js';
 
-/**
- * runの進行判断(ADR-0018)
- *
- * Run DOはこの関数の決定に従うだけで、依存の解決も中断もここで完結
- * 時刻もIDの採番も不要で純粋に維持可能
- */
+// runの進行判断, 依存解決と中断判断はここで完結(ADR-0018)
+// 時刻, ID採番不要の純粋関数
 
-/**
- * ノードの状態
- * ジョブの7状態(ADR-0012)に、未起動のPENDINGと上流の失敗で実行されずに終わるSKIPPEDを追加
- */
+/** ジョブの7状態(ADR-0012)に未起動のPENDINGと不実行で終端のSKIPPEDを追加 */
 export type NodeState = 'PENDING' | JobState | 'SKIPPED';
 
-/** runの状態,ノードを集約した結果 */
 export type RunState = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
 /**
  * ノードの生成経路(ADR-0032)
- * fanOutの子の失敗数は要約で後段へ渡り親は許容, spawnの子は受け取る口が無く非許容(ADR-0035)
+ * fanOutの子の失敗は要約で後段へ渡し親の成否に不算入(ADR-0035)
+ * spawnの子の失敗は親の失敗に算入
  */
 export type NodeOrigin = 'static' | 'fanOut' | 'spawn';
 
@@ -30,12 +23,12 @@ export type NodeView = {
 	container: boolean;
 	/** subflowノード, ジョブを持たず子のrunの終端を待機 */
 	subflow: boolean;
-	/** 実行時に増えたノードの親,静的ノードはnull */
+	/** 実行時追加ノードの親, 静的ノードはnull */
 	parent: string | null;
 	origin: NodeOrigin;
-	/** 静的な依存のノードID, 実行時に増えたノードには無し */
+	/** 静的な依存のノードID, 実行時追加ノードは空 */
 	after: readonly string[];
-	/** 依存の成否に対する発火条件, 実行時に増えたノードは依存が無く既定のまま(ADR-0041) */
+	/** 実行時追加ノードは既定値(ADR-0041) */
 	trigger: NodeTrigger;
 };
 
@@ -50,14 +43,14 @@ export type RunDecision =
 	| { type: 'aggregate'; id: string }
 	/** 発火条件を満たさないノードの不実行, 理由はノードのerrorへ記録(ADR-0041) */
 	| { type: 'skip'; id: string; reason: string }
-	/** 取り消し, 未起動はその場で終端に, SCHEDULEDはJob DOへ取り消しを送信 */
+	/** 取り消し, 未起動は即時終端, SCHEDULEDはJob DOへ取り消し送信 */
 	| { type: 'cancel'; id: string };
 
 export type AdvanceInput = {
 	nodes: readonly NodeView[];
-	/** 取り消しの要求中, 未起動を停止して実行中の終端を待機 */
+	/** 取り消し要求中, 未起動を停止し実行中の終端を待機 */
 	cancelling: boolean;
-	/** 期限超過の印, 取り消しと同じ処理で決着をFAILEDへ(ADR-0039) */
+	/** 期限超過, 取り消しと同じ処理で結果はFAILED(ADR-0039) */
 	expired?: boolean;
 };
 
@@ -65,7 +58,7 @@ export type AdvanceOutput = { decisions: RunDecision[]; state: RunState };
 
 /** performの中で要求された子ノード(ADR-0032) */
 export type SpawnRequest = {
-	/** 親の下での名前, 利用者が明示 */
+	/** 親の下での名前, 利用者が指定 */
 	id: string;
 	binding: string;
 	payload: unknown;
@@ -73,8 +66,8 @@ export type SpawnRequest = {
 };
 
 /**
- * Job DOがRun DOへ送る1件(ADR-0031)
- * spawnは同じ通知に同梱, 分けると親の決着が先に届き下流が子を待たず実行
+ * Job DOからRun DOへのノード終端通知(ADR-0031)
+ * spawnは同じ通知に同梱, 分割すると親の終端が先に届き下流が子を待たず実行
  */
 export type NodeEvent = {
 	nodeId: string;
@@ -87,7 +80,7 @@ export type NodeEvent = {
 
 const TERMINAL: readonly NodeState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED', 'SKIPPED'];
 
-/** 実行しなかった理由, 画面での確認用にノードのerrorへ記録(ADR-0041) */
+// 不実行理由, 画面確認用にノードのerrorへ記録(ADR-0041)
 const reasonOf = (trigger: NodeTrigger): string => (trigger === 'failure' ? 'no dependency failed' : 'a dependency did not succeed');
 
 export function isNodeTerminal(state: NodeState): boolean {
@@ -95,10 +88,8 @@ export function isNodeTerminal(state: NodeState): boolean {
 }
 
 /**
- * 次の操作とrunの状態の決定
- *
- * 待ち合わせの単位は「自身が終端かつ子孫も全て終端」(ADR-0032)
- * 親を`after`で待つノードは、実行時に増えた子孫の完了も自動的に待機
+ * 待ち合わせ単位は自身と子孫全ての終端(ADR-0032)
+ * 親を`after`に指定したノードは実行時追加の子孫の終端も待機
  */
 export function advance({ nodes, cancelling, expired = false }: AdvanceInput): AdvanceOutput {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -113,33 +104,30 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 	const settledMemo = new Map<string, boolean>();
 	const succeededMemo = new Map<string, boolean>();
 
-	/** 後続が待つ単位,自身が終端で子孫も全て終端 */
 	const settled = (node: NodeView): boolean => {
 		const memo = settledMemo.get(node.id);
 		if (memo !== undefined) return memo;
-		// 再入は無い, 子は親より後にしか作られず親子関係に循環は無い
+		// 子は親より後に作成, 親子関係に循環なしで再入なし
 		const value = isNodeTerminal(node.state) && (children.get(node.id) ?? []).every(settled);
 		settledMemo.set(node.id, value);
 		return value;
 	};
 
-	/** 下流を実行してよいか, 自身の成功と子孫の成功の両方が必要 */
 	const succeeded = (node: NodeView): boolean => {
 		const memo = succeededMemo.get(node.id);
 		if (memo !== undefined) return memo;
 		const value =
 			settled(node) &&
 			node.state === 'COMPLETED' &&
-			// fanOutの子の失敗は要約に含まれ後段へ渡り、親の成否には不算入(ADR-0035)
+			// fanOutの子の失敗は要約で後段へ, 親の成否に不算入(ADR-0035)
 			(children.get(node.id) ?? []).every((child) => child.origin === 'fanOut' || succeeded(child));
 		succeededMemo.set(node.id, value);
 		return value;
 	};
 
 	/**
-	 * 自身か子孫に失敗があるか(ADR-0041)
-	 * SKIPPEDは経路の不選択で失敗ではなく不算入, 上流の失敗はその上流のノードに出現
-	 * fanOutの子の失敗は要約で後段へ渡り親の失敗には不算入(ADR-0035)
+	 * SKIPPEDは経路の不選択で不算入, 上流の失敗は上流ノードで計上
+	 * fanOutの子の失敗は親の失敗に不算入(ADR-0035)
 	 */
 	const failed = (node: NodeView): boolean =>
 		node.state === 'FAILED' ||
@@ -147,29 +135,27 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 		node.state === 'CANCELLED' ||
 		(children.get(node.id) ?? []).some((child) => child.origin !== 'fanOut' && failed(child));
 
-	// 期限超過も取り消しと同じ処理, 未起動を停止して実行中の終端を待機(ADR-0039)
 	const halting = cancelling || expired;
 
 	const decisions: RunDecision[] = [];
 	for (const node of nodes) {
-		// fan-outノードのジョブは非実行, 子孫全ての終端到達で自身を終端へ
-		// 取り消し中も集約は継続, 停止すると子孫終了後もRUNNINGのまま残りrunが未決着
+		// 取り消し中も集約継続, 停止時は子孫終了後もRUNNINGのまま残りrunが未完了
 		if (node.container && node.state === 'RUNNING' && (children.get(node.id) ?? []).every(settled)) {
 			decisions.push({ type: 'aggregate', id: node.id });
 			continue;
 		}
 
 		if (halting) {
-			// QUEUED以降は取り消し成功の保証が無く送っても拒否(ADR-0012), 送信は省略
+			// ジョブのノードは終端までSCHEDULED, 投入済みジョブにも取り消し要求(ADR-0052)
 			if (node.state === 'PENDING' || node.state === 'SCHEDULED') decisions.push({ type: 'cancel', id: node.id });
-			// 子のrunは実行中でも取り消し可能, 親の終了後の継続実行を防止
+			// 子runは実行中も取り消し, 親終了後の継続実行防止
 			else if (node.subflow && node.state === 'RUNNING') decisions.push({ type: 'cancel', id: node.id });
 			continue;
 		}
 
 		if (node.state === 'PENDING') {
 			const deps = node.after.map((id) => byId.get(id));
-			// 消えた依存は成否が不明, どの発火条件でも中断(ADR-0030)
+			// flowから消えた依存は成否不明, 発火条件に関わらずSKIPPED(ADR-0030)
 			const missing = deps.some((dep) => dep === undefined);
 			if (missing) {
 				decisions.push({ type: 'skip', id: node.id, reason: 'a dependency is missing from the flow' });
@@ -178,7 +164,7 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 			const settledDeps = deps.filter((dep) => dep !== undefined);
 			if (!settledDeps.every(settled)) continue;
 
-			// failureは1つ以上の失敗が条件, SKIPPEDは経路の不選択で後処理は不要(ADR-0041)
+			// failureは1つ以上の失敗が条件, SKIPPEDは経路の不選択で後処理不要(ADR-0041)
 			const ready = node.trigger === 'always' ? true : node.trigger === 'failure' ? settledDeps.some(failed) : settledDeps.every(succeeded);
 			if (!ready) decisions.push({ type: 'skip', id: node.id, reason: reasonOf(node.trigger) });
 			else if (node.container) decisions.push({ type: 'expand', id: node.id });
@@ -187,10 +173,9 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 	}
 
 	const roots = nodes.filter((node) => node.parent === null);
-	// 全ノードは必ずいずれかの根に連なり、根の決着で全体の決着が確定
+	// 全ノードはいずれかの根の子孫, 根の終端で全体も終端
 	const done = roots.every(settled);
-	// 取り消しを優先, 期限超過は残りが全て成功していてもFAILED
-	// fan-outの子の失敗は非致命(ADR-0035)で、ノードの状態から期限による中断は区別不能(ADR-0039)
+	// fan-outの子の失敗は非致命(ADR-0035), ノード状態から期限による中断は区別不能(ADR-0039)
 	const state: RunState = !done ? 'RUNNING' : cancelling ? 'CANCELLED' : expired ? 'FAILED' : roots.some(failed) ? 'FAILED' : 'COMPLETED';
 
 	return { decisions, state };

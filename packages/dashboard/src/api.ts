@@ -1,5 +1,4 @@
-// 応答の型はtsumugi側が持つ, 二重に書くとREST APIの変更に画面が追随不能
-// 型のみの取り込みなのでビルド時には消える
+// 応答型はtsumugi側で定義, 二重定義はREST API変更への追随漏れ要因
 import type {
 	AttemptRecord,
 	CreateJobRequest,
@@ -16,7 +15,6 @@ import type {
 	UpdatePolicyRequest,
 } from '../../tsumugi/src/api/types.js';
 
-/** 一覧と詳細を同じ型で扱う, 詳細でだけ返る列は任意 */
 export type Job = JobSummary & Partial<JobDetail>;
 export type Attempt = AttemptRecord;
 export type Run = RunSummary & Partial<RunDetail>;
@@ -29,13 +27,10 @@ declare global {
 	}
 }
 
-/** 設定されていればトークン入力を表示可能, Cloudflare Access等では不要でnull */
+/** Cloudflare Access等ではnull */
 export const tokenCookie = () => window.__TSUMUGI__?.tokenCookie ?? null;
 
-/**
- * 401の判別
- * instanceofはミニファイやバンドル境界で壊れやすく値で保持
- */
+/** 401判別用, ミニファイ, バンドル境界でのinstanceof不一致対策に値で保持 */
 export class UnauthorizedError extends Error {
 	readonly unauthorized = true;
 
@@ -49,7 +44,7 @@ export function isUnauthorized(error: unknown): boolean {
 	return typeof error === 'object' && error !== null && (error as { unauthorized?: unknown }).unauthorized === true;
 }
 
-/** httpsの時だけSecureを付与, wrangler devはhttpで動作し常時付与では開発時に保存不能 */
+/** httpsのみSecure付与, http動作のwrangler devでの保存失敗対策 */
 export const cookieAttributes = (protocol: string): string => `path=/; SameSite=Strict${protocol === 'https:' ? '; Secure' : ''}`;
 
 export function saveToken(value: string): void {
@@ -62,7 +57,6 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 	const res = await fetch(path, { ...init, credentials: 'same-origin' });
 	if (res.status === 401) throw new UnauthorizedError();
 	if (!res.ok) {
-		// サーバが理由を返す場合はそのまま表示, 数字だけでは対処が不明
 		const body = (await res.json().catch(() => ({}))) as { error?: string };
 		throw new Error(body.error ?? `${res.status}`);
 	}
@@ -71,10 +65,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export type MutationOutcome = { ok: boolean; gone: boolean; message: string };
 
-/**
- * retry / cancelの結果
- * 410は保持期間を過ぎてDOから消えた状態, 一覧には残るが操作の成功は二度と無い
- */
+// 410は保持期間経過でDOから削除済み, 一覧に残存しても操作不可
 async function mutate(path: string): Promise<MutationOutcome> {
 	const res = await fetch(path, { method: 'POST', credentials: 'same-origin' });
 	if (res.status === 401) throw new UnauthorizedError();
@@ -166,7 +157,6 @@ export type BindingMetrics = {
 export type MetricsPoint = { at: number; total: number; failed: number; avgDurationMs: number };
 export type Metrics = { hours: number; bindings: BindingMetrics[]; series: MetricsPoint[] };
 
-/** 未設定の構成では501が返る, 画面はそれを受けてタブを非表示 */
 export class MetricsUnavailableError extends Error {
 	readonly unavailable = true;
 }
@@ -185,7 +175,6 @@ export const getMetrics = async (params: { hours: number; binding?: string }): P
 export const isMetricsUnavailable = (error: unknown): boolean =>
 	typeof error === 'object' && error !== null && (error as { unavailable?: unknown }).unavailable === true;
 
-/** schedulesを定義していない構成では501が返る, 画面はそれを受けてタブを非表示 */
 export class SchedulesUnavailableError extends Error {
 	readonly unavailable = true;
 }
@@ -199,11 +188,11 @@ export const listSchedules = async (): Promise<Schedule[]> => {
 	return body.schedules ?? [];
 };
 
-/** 停止中に経過した回は再開時に破棄される */
+/** 停止中に経過した回は再開時に破棄 */
 export const setSchedulePaused = (name: string, paused: boolean) =>
 	call<{ ok: true }>(`/api/schedules/${encodeURIComponent(name)}/${paused ? 'pause' : 'resume'}`, { method: 'POST' });
 
-/** 手動発火, 一時停止中も対象で次回の予定は変わらない */
+/** 一時停止中も可, 次回予定は不変 */
 export const triggerSchedule = (name: string) =>
 	call<TriggerScheduleResponse>(`/api/schedules/${encodeURIComponent(name)}/trigger`, { method: 'POST' });
 
@@ -214,7 +203,7 @@ export type BulkOutcome = {
 	failed: { id: string; reason: string }[];
 };
 
-/** 選択したジョブの一括処理, 状態の判定はサーバ側が担当 */
+/** 状態判定はサーバ側 */
 export const bulkAction = async (action: 'retry' | 'cancel', input: BulkInput): Promise<BulkOutcome> => {
 	const res = await fetch(`/api/jobs/bulk-${action}`, {
 		method: 'POST',
@@ -233,7 +222,7 @@ export type BindingDiagnostics = DiagnosticsResponse['bindings'][string];
 
 export const getDiagnostics = () => call<DiagnosticsResponse>('/api/diagnostics');
 
-/** 渡した項目だけを重ねる, 省略した項目は変わらない(#27) */
+/** 省略項目は不変(#27) */
 export const updatePolicy = (binding: string, patch: UpdatePolicyRequest) =>
 	call<{ binding: string; shards: number; policy: Policy }>(`/api/bindings/${encodeURIComponent(binding)}/policy`, {
 		method: 'POST',
@@ -241,7 +230,7 @@ export const updatePolicy = (binding: string, patch: UpdatePolicyRequest) =>
 		body: JSON.stringify(patch),
 	});
 
-/** 実行時の設定を破棄して静的設定へ復帰(#27) */
+/** 静的設定へ復帰(#27) */
 export const resetPolicy = (binding: string) =>
 	call<{ ok: true }>(`/api/bindings/${encodeURIComponent(binding)}/policy/reset`, { method: 'POST' });
 

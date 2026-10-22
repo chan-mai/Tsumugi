@@ -2,31 +2,16 @@ import { isRemoteRef } from '../core/api.js';
 import type { PerformerRegistry } from '../queue/consumer.js';
 import type { Flows } from '../core/flow.js';
 
-/**
- * 起動時の設定検証(ADR-0036)
- *
- * bindingの記述漏れはジョブを投入した後の実行時エラーとして現れる
- * 最初の呼び出しで`env`を確認し、不足を貼り付け可能な断片とともに返す
- * wrangler設定そのものは読めず、判定は`env`に見える範囲に限定
- */
-
-/** 不足したbindingの種別, 生成する設定断片の形が種別ごとに違う */
 export type BindingKind = 'durable-object' | 'd1' | 'queue' | 'analytics' | 'service';
 
 export type MissingBinding = {
 	kind: BindingKind;
-	/** wrangler設定に書くbinding名 */
 	name: string;
 	/** Durable Objectのクラス名, またはservice bindingのentrypointのクラス名 */
 	className?: string;
-	/** 不足の理由, 存在しないのか形が違うのか */
 	reason: 'absent' | 'invalid';
 };
 
-/**
- * 検証結果
- * `migrations.ts`の`MigrationStatus`に倣い、判別可能なユニオンで返す
- */
 export type ConfigStatus = { ok: true } | { ok: false; missing: MissingBinding[] };
 
 export type ValidateInput = {
@@ -35,10 +20,7 @@ export type ValidateInput = {
 	schedules?: Record<string, unknown>;
 };
 
-/**
- * 常に必要なbinding, flowを使う構成では`RUN`, scheduleを使う構成では`SCHEDULER`が加わる
- * `TSUMUGI_METRICS`は対象外, 未設定でもメトリクスが書かれないだけで実行は成立(ADR-0036)
- */
+// `TSUMUGI_METRICS`は未設定でも実行可能で対象外(ADR-0036)
 const REQUIRED: readonly { name: string; kind: BindingKind; className?: string }[] = [
 	{ name: 'JOB_SHARD', kind: 'durable-object', className: 'TsumugiJobShard' },
 	{ name: 'TSUMUGI_DB', kind: 'd1' },
@@ -51,7 +33,7 @@ const SCHEDULER_BINDING = { name: 'SCHEDULER', kind: 'durable-object' as const, 
 
 const absent = (value: unknown): boolean => value === undefined || value === null;
 
-/** 必須bindingを全て不足として返す, CLIの新規生成が断片の入力に使う(ADR-0036) */
+/** CLIの新規生成の断片入力用(ADR-0036) */
 export function requiredAsMissing(withFlows = false, withSchedules = false): MissingBinding[] {
 	const required = [...REQUIRED, ...(withFlows ? [RUN_BINDING] : []), ...(withSchedules ? [SCHEDULER_BINDING] : [])];
 	return required.map((entry) => ({
@@ -62,10 +44,7 @@ export function requiredAsMissing(withFlows = false, withSchedules = false): Mis
 	}));
 }
 
-/**
- * `env`と`defineTsumugi`の設定を突き合わせる
- * リモートperformerの検査はconsumerと同じ判定を起動時へ前倒し(ADR-0026)
- */
+/** リモートperformerはconsumerと同判定を起動時に実施(ADR-0026) */
 export function validateConfig(env: Record<string, unknown>, config: ValidateInput): ConfigStatus {
 	const missing: MissingBinding[] = [];
 
@@ -77,13 +56,12 @@ export function validateConfig(env: Record<string, unknown>, config: ValidateInp
 		if (absent(env[entry.name])) missing.push(entry);
 	}
 
-	// 別Workerのperformerはservice bindingで解決, binding名は`performers`のキー(ADR-0037)
-	// キーは一意なので同じbindingが二度並ぶことはない
+	// 別Workerのperformerはservice binding, binding名は`performers`のキー(ADR-0037)
 	for (const [name, entry] of Object.entries(config.performers)) {
 		if (!isRemoteRef(entry)) continue;
 		const service = env[name] as { perform?: unknown } | undefined;
 		if (absent(service)) missing.push({ kind: 'service', name, reason: 'absent' });
-		// 名前は在るが相手がperformerでない場合, 実行時まで発覚せず同じ扱い
+		// 非performerも実行時まで未発覚, 不足扱い
 		else if (typeof service?.perform !== 'function') missing.push({ kind: 'service', name, reason: 'invalid' });
 	}
 
@@ -91,11 +69,8 @@ export function validateConfig(env: Record<string, unknown>, config: ValidateInp
 }
 
 /**
- * 検証結果をisolate単位で再利用(ADR-0036)
- *
- * Workersに起動フックは無く、最初の呼び出しを起動とみなす
- * 成功は永続でキャッシュ, `env`は同じisolateの間は不変
- * 不足はキャッシュなし, 設定の追加後に再デプロイせず自動で復帰
+ * 検証結果のisolate単位キャッシュ, `env`はisolate内で不変(ADR-0036)
+ * 不足は非キャッシュ, 設定追加後に再デプロイ無しで復帰
  */
 export function cachedValidate(config: ValidateInput): (env: Record<string, unknown>) => ConfigStatus {
 	let settled: ConfigStatus | undefined;

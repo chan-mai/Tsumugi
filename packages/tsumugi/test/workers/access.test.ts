@@ -12,7 +12,6 @@ const KID = 'test-key-1';
 
 let signingKey: CryptoKey;
 let jwks: Jwks;
-/** 署名だけ違う鍵,正しい鍵で検証できないことを確かめる */
 let attackerKey: CryptoKey;
 
 const bytesToBase64Url = (bytes: Uint8Array) => {
@@ -117,7 +116,7 @@ describe('Access JWTの検証', () => {
 	});
 
 	it('algをnoneに差し替えても拒否する', async () => {
-		// ヘッダのalgをそのまま採用すると署名検証の迂回が可能
+		// ヘッダalg採用時は署名検証迂回が可能
 		const header = encodeSegment({ alg: 'none', kid: KID, typ: 'JWT' });
 		const payload = encodeSegment(validClaims());
 		expect(await verifyAccessJwt(`${header}.${payload}.`, options(), Date.now())).toBeNull();

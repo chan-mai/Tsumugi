@@ -1,35 +1,22 @@
-/**
- * Scheduler DOのSQLiteスキーマ(ADR-0040)
- *
- * インスタンスは1つで、全scheduleの状態を1枚の表に持つ
- * 定義そのものはコードにあり、ここには次回時刻と直近の観測だけを配置
- */
+/** 全scheduleの状態を1テーブルに保持, 定義はコード側(ADR-0040) */
 export const SCHEDULER_SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS schedule (
 		name TEXT PRIMARY KEY,
-		-- 'job' | 'flow', 発火経路とID形式の分岐
 		kind TEXT NOT NULL,
-		-- binding名またはflow名
 		target TEXT NOT NULL,
-		-- 固定間隔(ms), cronと排他
 		every_ms INTEGER,
 		cron TEXT,
 		time_zone TEXT NOT NULL DEFAULT 'UTC',
-		-- 'skip' | 'overlap', 前回未了時の扱い
 		overlap TEXT NOT NULL,
-		-- 一時停止中は1, tickの発火対象から除外
 		paused INTEGER NOT NULL DEFAULT 0,
 		next_run_at INTEGER NOT NULL,
-		-- 直近発火の予定時刻
 		last_run_at INTEGER,
-		-- 実際に発火した時刻, 予定との差で遅延を観測
+		-- 予定との差で遅延観測
 		last_fired_at INTEGER,
-		-- skip判定の照会先, 画面から詳細への参照にも使用
 		last_job_id TEXT,
 		last_run_id TEXT,
 		last_skipped_at INTEGER,
 		skipped_count INTEGER NOT NULL DEFAULT 0,
-		-- 写像関数や発火の失敗の理由
 		last_error TEXT,
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
@@ -47,7 +34,7 @@ export function applySchedulerSchema(sql: SqlStorage): void {
 	if (!columns.some((column) => column.name === 'time_zone')) {
 		sql.exec(`ALTER TABLE schedule ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'UTC'`);
 	} else {
-		// NULL許容で作られた既存列への防御
+		// NULL許容で作成済みの既存列への対処
 		sql.exec(`UPDATE schedule SET time_zone = 'UTC' WHERE time_zone IS NULL`);
 	}
 	if (!columns.some((column) => column.name === 'paused')) {
@@ -55,7 +42,6 @@ export function applySchedulerSchema(sql: SqlStorage): void {
 	}
 }
 
-/** SQLiteの行そのまま, 射影はscheduler-repo.tsが担当 */
 export type ScheduleRow = {
 	name: string;
 	kind: string;

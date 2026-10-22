@@ -1,17 +1,11 @@
 import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
-/**
- * D1の読み取りモデル(ADR-0008)
- *
- * ダッシュボードとREST APIが読む投影先で, 数秒遅れる
- * DOのSQLiteとは列が異なる, こちらは`seq`と`attempts_log`を持ち実行制御用の列を持たない
- * DDLは`migrations/`のSQLが持つ, ここは型とクエリのための定義
- */
+/** DDLは`migrations/`のSQL, ここは型とクエリ用の定義 */
 export const job = sqliteTable(
 	'job',
 	{
 		id: text('id').primaryKey(),
-		// 投影元のアウトボックス連番, 古い投影による新しい状態の上書きを防止
+		// 投影元アウトボックス連番, 古い投影での上書き防止
 		seq: integer('seq').notNull(),
 		binding: text('binding').notNull(),
 		state: text('state').notNull(),
@@ -24,16 +18,14 @@ export const job = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
 		dispatchedAt: integer('dispatched_at'),
-		/** SCHEDULEDが実行可能になる時刻, 後から変更可能で投影対象 */
+		/** SCHEDULEDの実行可能時刻, 後から変更可能で投影対象 */
 		runAfter: integer('run_after'),
-		/** 実行開始の期限, 経過後は実行されずCANCELLED */
+		/** 実行開始期限, 経過後は非実行でCANCELLED */
 		expiresAt: integer('expires_at'),
-		/** 取り消し要求の時刻(#95) */
 		cancelRequestedAt: integer('cancel_requested_at'),
-		/** 実行中のジョブが報告した進捗, 0以上1以下 */
+		/** 0以上1以下 */
 		progress: real('progress'),
 		payload: text('payload').notNull(),
-		// performの戻り値, DOのjob.resultをそのまま投影(#9)
 		result: text('result'),
 		traceparent: text('traceparent'),
 		runId: text('run_id'),
@@ -45,7 +37,7 @@ export const job = sqliteTable(
 		index('job_state').on(t.state, t.updatedAt),
 		index('job_binding').on(t.binding, t.updatedAt),
 		index('job_created').on(t.createdAt),
-		// 障害の調査はキーから入ることが多い, 索引が無いと全表走査
+		// 障害調査のキー検索用, 索引無しは全表走査
 		index('job_unique_key').on(t.uniqueKey, t.updatedAt),
 		index('job_concurrency_key').on(t.concurrencyKey, t.updatedAt),
 	],

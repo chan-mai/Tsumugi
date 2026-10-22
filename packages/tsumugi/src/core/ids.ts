@@ -1,8 +1,5 @@
-/**
- * ジョブIDのアドレッシング(ADR-0005)
- * 形式は`<binding>#<shard>:<localId>`, IDからDO stubをO(1)で解決可能でグローバル索引が不要
- * 乱数を使うlocalIdの生成(cuid2)はここに置かない, coreは純粋に維持(ADR-0018)
- */
+// ジョブID形式`<binding>#<shard>:<localId>`, IDからDO stubをO(1)で解決(ADR-0005)
+// 乱数を使うlocalId生成(cuid2)は対象外, core純粋性維持(ADR-0018)
 
 export type JobAddress = {
 	binding: string;
@@ -10,9 +7,9 @@ export type JobAddress = {
 	localId: string;
 };
 
-/** env.NAME参照に使うbinding名はJS識別子に限定, #や:の混入防止も兼用 */
+// env.NAME参照用にJS識別子へ限定, #と:の混入防止兼用
 const BINDING_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-/** cuid2は英数字, 往復不能になる区切り文字の混入は拒否 */
+// cuid2は英数字, 往復不能な区切り文字は拒否
 const LOCAL_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export class InvalidJobIdError extends Error {
@@ -22,10 +19,6 @@ export class InvalidJobIdError extends Error {
 	}
 }
 
-/**
- * ジョブIDを別IDのローカル部へ埋め込める形へ変換(#30)
- * 区切り文字は1対1の置換, bindingやshardが違えば結果も必ず別
- */
 export function embedJobId(jobId: string): string {
 	return jobId.replace(/_/g, '_0').replace(/#/g, '_1').replace(/:/g, '_2');
 }
@@ -42,7 +35,7 @@ function assertValidShard(shard: number): void {
 	}
 }
 
-/** DOの名前, 既定のshard数1では`<binding>#0`へ集約(ADR-0011) */
+/** DO名(ADR-0011) */
 export function shardName(binding: string, shard: number): string {
 	assertValidBinding(binding);
 	assertValidShard(shard);
@@ -78,19 +71,14 @@ export function parseJobId(jobId: string): JobAddress {
 	return { binding, shard, localId };
 }
 
-/** ジョブIDから所属するDOの名前を取得 */
 export function shardNameOf(jobId: string): string {
 	const { binding, shard } = parseJobId(jobId);
 	return `${binding}#${shard}`;
 }
 
-/**
- * runIDのアドレッシング(ADR-0029)
- * 形式は`<flow>:<localId>`, そのままDOの名前でIDからRun DOをO(1)で解決可能
- */
+/** runIdはそのままRun DO名(ADR-0029) */
 export type RunAddress = { flow: string; localId: string };
 
-/** flow名は`flows`のキーで区切り文字は不可, 文字種はノードIDと同一 */
 const FLOW_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export class InvalidRunIdError extends Error {

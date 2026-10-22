@@ -16,10 +16,7 @@ const boom = {
 	},
 };
 
-/**
- * 期限まで待つ, `deadlineAt`から中断を構築できるかの検証(ADR-0037)
- * 自分では解決しない, 解決するとconsumerの中断と競合して成功で終わる場合がある
- */
+// 自己解決するとconsumerの中断と競合し成功で終了する場合あり
 const waitForDeadline = {
 	perform: (_payload: unknown, ctx: JobContext): Promise<void> => {
 		const signal = AbortSignal.timeout(Math.max(0, ctx.deadlineAt - Date.now()));
@@ -62,7 +59,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
 
-/** DOは再生成されると時計が既定に戻り、操作の直前に必ず再設定 */
+// DO再生成で時計が既定へ復帰、操作直前に再設定
 async function install(binding: string, clock: Clock, queue: unknown) {
 	await runInDurableObject(shard(binding), (instance) => {
 		(instance as any).clock = clock;
@@ -84,7 +81,7 @@ describe('リトライ', () => {
 	});
 
 	it('失敗するとバックオフぶん先の時刻にalarmが設定される', async () => {
-		// 時間を進めるAPIが無く、次のalarmの予定時刻を検証
+		// 時刻を進めるAPI無し、次alarmの予定時刻で検証
 		const clock = fixedClock(T0);
 		const { sent, queue } = captureQueue();
 		await install('BOOM', clock, queue);
@@ -93,7 +90,7 @@ describe('リトライ', () => {
 			binding: 'BOOM',
 			payload: {},
 			maxAttempts: 3,
-			// ジッタ無しで予定時刻を決定的に固定
+			// ジッタなしで予定時刻を固定
 			backoff: { kind: 'fixed', delayMs: 5_000 },
 		});
 		await runDurableObjectAlarm(shard('BOOM'));
@@ -150,7 +147,6 @@ describe('timeout', () => {
 		await runDurableObjectAlarm(shard('SLOW'));
 		await handleBatch(makeBatch(sent), consumerEnv, performers);
 
-		// consumerが待つのをやめるだけでなく, performer側でも期限が分かること
 		expect(aborted).toBe(true);
 		expect(await stateOf('SLOW', jobId)).toBe('SCHEDULED');
 	});
@@ -166,7 +162,7 @@ describe('reaper', () => {
 		await runDurableObjectAlarm(shard('BOOM'));
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 
-		// 完了報告が届かないままtimeout + graceを過ぎた状況を作る
+		// 完了報告なしでtimeout + grace経過
 		clock.advance(60_000 + 30_000);
 		await install('BOOM', clock, queue);
 		await runDurableObjectAlarm(shard('BOOM'));
@@ -193,7 +189,7 @@ describe('reaper', () => {
 		await install('ONCE', clock, queue);
 		await runDurableObjectAlarm(shard('ONCE'));
 
-		// 再投入は二重実行になり得るため人手の判断を待つ(ADR-0006 / ADR-0007)
+		// 再投入は二重実行の可能性、人手の判断待ち(ADR-0006 / ADR-0007)
 		expect(await stateOf('ONCE', jobId)).toBe('STALLED');
 	});
 
@@ -222,7 +218,7 @@ describe('claim (ADR-0007)', () => {
 		const jobId = await shard('ONCE').enqueue({ binding: 'ONCE', payload: {}, guarantee: 'at-most-once' });
 		await runDurableObjectAlarm(shard('ONCE'));
 
-		// Queues自体がat-least-onceで重複配送は起こり得る
+		// Queues自体がat-least-once、重複配送あり
 		const results = await Promise.all([shard('ONCE').claim(jobId), shard('ONCE').claim(jobId)]);
 		expect(results.filter(Boolean)).toHaveLength(1);
 		expect(await stateOf('ONCE', jobId)).toBe('RUNNING');
@@ -249,7 +245,7 @@ describe('cancel (ADR-0012)', () => {
 		await runDurableObjectAlarm(shard('BOOM'));
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 
-		// 実行済みの可能性があり即時のCANCELLEDにはしない, 協調的な要求として受理(ADR-0052)
+		// 実行済みの可能性で即時CANCELLEDなし, 協調的要求として受理(ADR-0052)
 		expect(await shard('BOOM').cancel(jobId)).toEqual({ ok: true, requested: true });
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 	});

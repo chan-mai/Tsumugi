@@ -4,13 +4,8 @@ import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { TsumugiRunInstance } from '../../src/do/run.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
-/**
- * 縦串: 親のrunが子のrunを起動して待つ
- *
- * flowの定義はexamples/basicが持つ(PIPELINEがGREETINGSを起動する)
- */
+// flow定義はexamples/basic(PIPELINEがGREETINGSを起動)
 
-// consumerへ渡すのは`perform`を持つ実体, `ctx.exports`から引かれる形と同じ(ADR-0037)
 const ListNames = {
 	perform: async (payload: { prefix: string }) => ({ names: [`${payload.prefix}-1`, `${payload.prefix}-2`] }),
 };
@@ -52,7 +47,6 @@ function makeBatch(bodies: DispatchMessage[]) {
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;
 }
 
-/** 親と子のRun DOとJob DOを交互に発火させ, 進みが止まるまで回す */
 async function settle(runIds: string[], performers: Record<string, unknown>, rounds = 16): Promise<void> {
 	for (let i = 0; i < rounds; i++) {
 		for (const binding of BINDINGS) {
@@ -77,10 +71,7 @@ const nodesOf = (runId: string) =>
 		((instance as any).repo.views() as { id: string; state: string }[]).map((node) => [node.id, node.state] as const),
 	);
 
-/**
- * Run DOのalarmだけを、ノードの状態が変わらなくなるまで発火
- * performerを実行せず投入までで止まる, ラウンド数で状況を作ると進みすぎる場合がある
- */
+// performer未実行で投入まで, 固定ラウンド数では進行過多の場合あり
 async function settleRuns(runIds: string[], rounds = 8): Promise<void> {
 	let previous = '';
 	for (let i = 0; i < rounds; i++) {
@@ -103,7 +94,6 @@ describe('subflowの縦串', () => {
 
 		expect(await stateOf(child)).toBe('COMPLETED');
 		expect((await nodeOf(parent, 'greetings'))?.state).toBe('COMPLETED');
-		// 子の終端を待ってから後段が動く
 		expect((await nodeOf(parent, 'summary'))?.state).toBe('COMPLETED');
 		expect(await stateOf(parent)).toBe('COMPLETED');
 	});
@@ -120,9 +110,8 @@ describe('subflowの縦串', () => {
 		const parent = 'PIPELINE:sub-fail';
 		const child = 'GREETINGS:sub-fail-greetings';
 		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
-		// 子の先頭ノードを投入まで進めてから, 失敗の通知だけを手で届ける
 		await settleRuns([parent, child]);
-		// 投入されたメッセージは配送しない, 実行されると完了報告が返る
+		// 投入メッセージは配送対象外, 実行時は完了報告あり
 		sent.length = 0;
 		const jobId = (await nodeOf(child, 'list'))?.job_id;
 		if (!jobId) throw new Error('the first node of the child run has no job id');
@@ -147,7 +136,7 @@ describe('subflowの縦串', () => {
 		await settleRuns([parent, child]);
 		expect(await stateOf(parent)).toBe('FAILED');
 
-		// 子は保持期間内で残存, 同じ子runIdの起動は既存を返す
+		// 子は保持期間内で残存, 同じ子runIdの起動で既存を返却
 		await runStub(parent).retry();
 		await settle([parent, child], registry);
 
@@ -163,7 +152,7 @@ describe('subflowの縦串', () => {
 		await settleRuns([parent, child]);
 		sent.length = 0;
 
-		// デプロイで子のflowが定義から外れた状況, ジョブの完了待ちでalarmは無く直接起動
+		// デプロイで子flowが定義から削除, ジョブ完了待ちでalarmなく直接起動
 		await runInDurableObject(runStub(child), async (instance) => {
 			(instance as any).repo.sql.exec(`UPDATE run SET flow = 'REMOVED'`);
 			await (instance as any).alarm();
@@ -173,7 +162,7 @@ describe('subflowの縦串', () => {
 		expect(await stateOf(child)).toBe('FAILED');
 		expect((await nodeOf(parent, 'greetings'))?.state).toBe('FAILED');
 		expect(await stateOf(parent)).toBe('FAILED');
-		// 保持期間の経過後に削除する予定, 無いとDOが残存
+		// 保持期間経過後の削除予定, 未設定時はDO残存
 		const alarm = await runInDurableObject(
 			runStub(child),
 			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,
@@ -188,7 +177,7 @@ describe('subflowの縦串', () => {
 		await settleRuns([parent, child]);
 		sent.length = 0;
 
-		// 子の起動RPCが応答を失い、親だけが失敗と判定した状況
+		// 子の起動RPCが無応答、親のみ失敗と判定
 		await runInDurableObject(runStub(parent), (instance) => {
 			(instance as any).repo.sql.exec(`UPDATE node SET state = 'FAILED' WHERE id = 'greetings'`);
 		});
@@ -213,7 +202,7 @@ describe('subflowの縦串', () => {
 
 		const alarm = await runInDurableObject(runStub(child), async (instance) => {
 			(instance as any).clock = { now: () => T };
-			// 親のRun DOへ届かない状況, envは他のテストと共有で終了時に復元
+			// 親Run DOへ通知不達, envは他テストと共有で終了時に復元
 			const original = (instance as any).env.RUN;
 			(instance as any).env.RUN = {
 				idFromName: (name: string) => ({ name }),
@@ -233,7 +222,7 @@ describe('subflowの縦串', () => {
 			}
 		});
 
-		// 即時の再起動では失敗の間ずっとtickを反復
+		// 即時再起動では失敗中にtick反復
 		expect(alarm).toBeGreaterThan(T);
 	});
 
@@ -241,7 +230,6 @@ describe('subflowの縦串', () => {
 		const parent = 'PIPELINE:sub-cancel';
 		const child = 'GREETINGS:sub-cancel-greetings';
 		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
-		// 子が動き出すところまで進めてから取り消す
 		await settle([parent, child], registry, 2);
 		expect(await stateOf(child)).toBe('RUNNING');
 
@@ -253,8 +241,8 @@ describe('subflowの縦串', () => {
 	});
 
 	it('入れ子の上限を超える起動を拒否する', async () => {
-		// 既定は3, 深さの判定は起動された側が行う
-		// RPC越しの例外はvitest-pool-workersが未処理rejectionとして報告するためDO内で実行
+		// 既定上限3, 深さ判定は起動先で実施
+		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
 		await expect(
 			runInDurableObject(runStub('GREETINGS:too-deep'), (instance) =>
 				(instance as any).start({ flow: 'GREETINGS', input: { prefix: 'x' }, depth: 4 }),

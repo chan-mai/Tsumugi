@@ -3,14 +3,8 @@ import type { JobLogEntry } from '../core/log.js';
 
 export type { JobLogEntry };
 
-/**
- * REST APIの要求と応答の型
- *
- * `api/rest.ts`の応答をこの型で縛り, ダッシュボードも同じ定義を読む
- * パッケージからは出さない, 外部の利用者向けの仕様は`api/openapi.ts`が持つ
- */
+// パッケージ非公開, 外部利用者向け仕様は`api/openapi.ts`
 
-/** 一覧の1行, 詳細だけが返す列は持たない */
 export type JobSummary = {
 	id: string;
 	binding: string;
@@ -21,11 +15,10 @@ export type JobSummary = {
 	created_at: number;
 	updated_at: number;
 	dispatched_at: number | null;
-	/** 保持期間からの近似, 最終的な可否はretryの応答で確定(ADR-0027) */
+	/** 保持期間からの近似, 最終可否はretry応答で確定(ADR-0027) */
 	retryable: boolean;
 };
 
-/** 試行1回ぶんの記録(ADR-0028) */
 export type AttemptRecord = {
 	attempt: number;
 	state: string;
@@ -38,24 +31,22 @@ export type JobDetail = JobSummary & {
 	concurrency_key: string | null;
 	unique_key: string | null;
 	guarantee: string;
-	/** SCHEDULEDが実行可能になる時刻, 投影前の古い行はnull */
+	/** SCHEDULEDの実行可能時刻, 投影前の古い行はnull */
 	run_after: number | null;
-	/** 実行開始の期限, 経過後は実行されずCANCELLED, 無期限はnull */
+	/** 実行開始期限, 経過後は未実行でCANCELLED, 無期限はnull */
 	expires_at: number | null;
-	/** 取り消し要求の時刻(#95), 要求が無ければnull */
 	cancel_requested_at: number | null;
-	/** 実行中のジョブが報告した進捗, 0以上1以下で報告が無ければnull */
+	/** 0以上1以下 */
 	progress: number | null;
 	traceparent: string | null;
 	logs: JobLogEntry[];
 	payload: string;
-	/** performの戻り値, 成功時のみ入る(#9) */
+	/** performの戻り値, 成功時のみ(#9) */
 	result: string | null;
-	/** 投入元のrun, 単発で投入したジョブはnull(ADR-0015) */
 	run_id: string | null;
-	/** 投入元のノード, runと対で入る */
+	/** run_idと対で設定 */
 	node_id: string | null;
-	/** 新しい試行から順に入る */
+	/** 新しい試行順 */
 	attempts_log: AttemptRecord[];
 };
 
@@ -67,12 +58,12 @@ export type CreateJobRequest = {
 	payload: unknown;
 	maxAttempts?: number;
 	delayMs?: number;
-	/** 投入時刻からの相対の期限, 経過後は実行されずCANCELLED */
+	/** 投入時刻からの相対期限, 経過後は未実行でCANCELLED */
 	expiresInMs?: number;
 	priority?: number;
 	concurrencyKey?: string;
 	uniqueKey?: string;
-	/** 分割したbindingの投入先shardの決定, shards>=2では必須(ADR-0011) */
+	/** 分割bindingの投入先shard決定用, shards>=2で必須(ADR-0011) */
 	partitionKey?: string;
 	traceparent?: string;
 };
@@ -81,17 +72,14 @@ export type CreateJobResponse = { id: string };
 
 export type StatsResponse = {
 	byState: Record<string, number>;
-	/** 最古のSCHEDULEDの経過時間, 対象が無ければnull(#10) */
 	oldestScheduledMs: number | null;
 };
 
 export type BindingsResponse = { bindings: string[] };
 
-/** binding単位の運用診断(#10)と現在適用中の流量設定(#27) */
 export type DiagnosticsEntry = { active: number; outbox: number; blocked: BlockedBy; policy: PolicyView };
 export type DiagnosticsResponse = { shard: number; bindings: Record<string, DiagnosticsEntry> };
 
-/** 流量設定, DOのPolicyをそのまま転送(#27) */
 export type PolicyView = {
 	paused: boolean;
 	concurrency: number;
@@ -102,17 +90,11 @@ export type PolicyView = {
 	reaperGraceMs: number;
 };
 
-/**
- * 流量の変更(#27)
- * 渡した項目だけを今の設定へ重ねる, 省略した項目は変わらない
- */
+/** 指定項目のみ現設定へ上書き */
 export type UpdatePolicyRequest = Partial<PolicyView>;
 export type UpdatePolicyResponse = { binding: string; shards: number; policy: PolicyView };
 
-/**
- * 一部のshardにだけ届いた場合の応答(#27)
- * 同じ要求を送り直せば残りへ届く, 反映は冪等
- */
+/** 一部shardのみ反映時の応答(#27), 同一要求の再送で残りへ反映(冪等) */
 export type PartialPolicyResponse = { error: string; binding: string; shards: number; failed: number[] };
 
 export type RunSummary = {
@@ -128,10 +110,10 @@ export type RunSummary = {
 
 export type RunDetail = RunSummary & {
 	input: string;
-	/** subflowとして起動された場合の親, それ以外はnull */
+	/** subflow起動時の親, 他はnull */
 	parent_run_id: string | null;
 	parent_node_id: string | null;
-	/** 終端でなければ再開できない(ADR-0034) */
+	/** 終端のみ再開可能(ADR-0034) */
 	retryable: boolean;
 };
 
@@ -139,15 +121,14 @@ export type RunNodeView = {
 	id: string;
 	binding: string;
 	state: string;
-	/** fan-outノード, ジョブを実行せず子ノードのみを持つ */
+	/** fan-outノード, ジョブ実行なしで子ノードのみ保持 */
 	container: boolean;
 	parent: string | null;
 	origin: string;
 	after: string[];
 	job_id: string | null;
-	/** subflowノードが起動した子のrunID */
 	child_run_id: string | null;
-	/** fan-outノードの集計値のみが入る(ADR-0035) */
+	/** fan-outノードの集計値のみ(ADR-0035) */
 	result: string | null;
 	error: string | null;
 	position: number;
@@ -168,7 +149,6 @@ export type StartRunRequest = {
 };
 export type StartRunResponse = { id: string };
 
-/** 定期実行の1件, Scheduler DOのlist()をそのまま転送(ADR-0040) */
 export type ScheduleSummary = {
 	name: string;
 	kind: 'job' | 'flow';
@@ -177,7 +157,6 @@ export type ScheduleSummary = {
 	cron: string | null;
 	time_zone: string;
 	overlap: 'skip' | 'overlap';
-	/** 一時停止中か, 停止中は定期の発火なし */
 	paused: boolean;
 	next_run_at: number;
 	/** 直近発火の予定時刻, last_fired_atとの差が遅延 */
@@ -192,16 +171,13 @@ export type ScheduleSummary = {
 
 export type SchedulesResponse = { schedules: ScheduleSummary[] };
 
-/** 手動発火の応答, idは投入したジョブまたは開始したRun */
 export type TriggerScheduleResponse = { id: string; kind: 'job' | 'flow' };
 
-/** retry / cancelの応答, requestedは協調的な取り消し要求の受理(ADR-0052) */
+/** requestedは協調的な取り消し要求の受理(ADR-0052) */
 export type MutationResponse = { ok: true; requested?: true };
 
-/** 4xx / 5xxで返る本文 */
 export type ErrorResponse = { error: string };
 
-/** Analytics Engineのbinding単位の集計 */
 export type BindingMetricsView = {
 	binding: string;
 	total: number;

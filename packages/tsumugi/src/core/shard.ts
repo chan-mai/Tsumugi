@@ -1,10 +1,8 @@
 import { InvalidJobIdError } from './ids.js';
 
 /**
- * partitionKeyからshard番号を決める(ADR-0011)
- *
- * FNV-1a, 実装が短く分布も十分で外部依存が不要
- * ハッシュを変えると既存ジョブの配置先が変わる, 一度公開したら変更不可
+ * FNV-1a, 短い実装で分布十分, 外部依存不要(ADR-0011)
+ * ハッシュ変更で既存ジョブの配置先が変化, 公開後変更不可
  */
 export function hashToShard(partitionKey: string, shards: number): number {
 	if (shards <= 1) return 0;
@@ -17,9 +15,8 @@ export function hashToShard(partitionKey: string, shards: number): number {
 }
 
 /**
- * 投入先のshardを決める
- * 分割構成でpartitionKeyが無いと、キー単位の制御も重複排除も警告なく無効化
- * 0番への暗黙の割り当てはせず、明示的に拒否(ADR-0011)
+ * 分割構成でpartitionKey省略時はエラー(ADR-0011)
+ * 0番への暗黙割当はキー単位制御と重複排除を警告なく無効化
  */
 export function resolveShard(binding: string, shards: number, partitionKey: string | undefined): number {
 	if (shards <= 1) return 0;

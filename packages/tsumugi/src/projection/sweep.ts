@@ -2,16 +2,11 @@ import { and, inArray, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { job } from './tables.js';
 
-/**
- * 読み取りモデルの保持(ADR-0016)
- *
- * 明細とメトリクスは要求される保持期間が違う
- * 明細は個別のジョブを調べるためのもので数日あれば足り、傾向を見るための時系列はAnalytics Engine側に残る
- */
+/** 明細は個別ジョブ調査用で数日分, 傾向の時系列はAnalytics Engine側(ADR-0016) */
 export type SweepOptions = {
-	/** 終端に達したジョブをD1に残す時間,既定7日 */
+	/** 終端ジョブのD1保持時間, 既定7日 */
 	olderThanMs?: number;
-	/** 1回で消す上限, 1リクエストの時間を有界に維持 */
+	/** 1回の削除上限, 1リクエストの時間を有界に維持 */
 	limit?: number;
 };
 
@@ -20,10 +15,6 @@ export const DEFAULT_SWEEP_LIMIT = 1_000;
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 
-/**
- * 古い終端ジョブをD1から削除
- * 稼働中のジョブは対象外, 実行が長引いているだけのものの削除は禁止
- */
 export async function sweepReadModel(db: D1Database, now: number, options: SweepOptions = {}): Promise<number> {
 	const before = now - (options.olderThanMs ?? DEFAULT_RETENTION_MS);
 	const limit = options.limit ?? DEFAULT_SWEEP_LIMIT;
@@ -35,7 +26,7 @@ export async function sweepReadModel(db: D1Database, now: number, options: Sweep
 		.where(and(inArray(job.state, TERMINAL), lt(job.updatedAt, before)))
 		.limit(limit);
 
-	// 件数はD1のmetaから取得, returningでは削除した行を全件転送
+	// 件数はD1のmetaから取得, returningは削除行を全件転送
 	const result = await d.delete(job).where(inArray(job.id, targets)).run();
 	return result.meta.changes ?? 0;
 }

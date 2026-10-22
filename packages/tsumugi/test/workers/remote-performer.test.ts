@@ -51,7 +51,6 @@ describe('別Workerのperformer(ADR-0026)', () => {
 		await install('MAIL#0', queue);
 
 		const calls: { payload: unknown; ctx: Record<string, unknown> }[] = [];
-		// binding名でそのまま`env`を引く, 対応付けはwrangler設定だけが持つ(ADR-0037)
 		const consumerEnv = {
 			...env,
 			MAIL: {
@@ -72,7 +71,7 @@ describe('別Workerのperformer(ADR-0026)', () => {
 	});
 
 	it('service bindingが未設定ならリトライへ回す', async () => {
-		// 捕捉して無視すると成功扱いになり, 設定漏れが完了ジョブとして残る
+		// 例外無視時は設定漏れが完了ジョブとして残存
 		const { sent, queue } = captureQueue();
 		await install('MISSING#0', queue);
 
@@ -106,7 +105,6 @@ describe('実際のservice binding越し', () => {
 		if (!fail) expect(JSON.parse(row!.result!)).toMatchObject({ traceparent });
 	});
 
-	// 偽のオブジェクトでは直列化もentrypointの解決も通らない,ここだけが本物の経路
 	it('別Workerのentrypointが呼ばれ完了する', async () => {
 		const { sent, queue } = captureQueue();
 		await install('MAIL#0', queue);
@@ -130,7 +128,6 @@ describe('実際のservice binding越し', () => {
 	});
 
 	it('文脈がそのまま渡りspawnも呼べる', async () => {
-		// 関数はRPCのstubとして越え、別Workerでもspawnが使用可能(ADR-0037)
 		const service = (env as unknown as { MAIL: { perform(p: unknown, c: unknown): Promise<{ keys: string[]; spawned: boolean }> } }).MAIL;
 		const spawned: unknown[] = [];
 		const result = await service.perform(
@@ -172,7 +169,7 @@ describe('投入だけを行うclient(ADR-0023)', () => {
 
 		expect(ids).toHaveLength(12);
 		expect(new Set(ids).size).toBe(12);
-		// 宛先ごとの集約投入,戻す順序の誤りはIDと入力の対応崩れ
+		// 宛先別集約投入, 返却順誤りでIDと入力が不一致
 		for (const [i, id] of ids.entries()) {
 			const state = await runInDurableObject(shard(id.split(':')[0]!), (instance) => (instance as any).repo.find(id)?.payload as string);
 			expect(JSON.parse(state)).toEqual({ i });

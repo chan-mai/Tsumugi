@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createFlow, InvalidFlowError, shapeOf } from '../../src/core/flow.js';
 
-// 型の導出だけを見るのでperformの中身は問わない
 class Fetch {
 	async perform(_payload: { since: number }) {
 		return { items: ['a', 'b'] };
@@ -42,7 +41,7 @@ describe('flowの構築', () => {
 			{ id: 'fetch', binding: 'FETCH', container: false, after: [], trigger: 'success' },
 			{ id: 'each', binding: 'WORK', container: true, after: ['fetch'], trigger: 'success' },
 		]);
-		// JSON化してDOに渡す前提で関数が混ざっていないこと自体が要件
+		// JSON化してDOへ渡す前提, 関数の混入なしが要件
 		expect(JSON.parse(JSON.stringify(shape))).toEqual(shape);
 	});
 
@@ -105,7 +104,7 @@ describe('flowの構築', () => {
 	});
 
 	it('依存の無いノードのtrigger指定を拒否する', () => {
-		// 成否を問う相手がいない, 書けてしまうと意図が伝わらない
+		// 成否判定の対象なし, 記述可能だと意図が不明瞭
 		expect(() =>
 			flow<void>((f) => f.node('lonely', 'FETCH', { trigger: 'failure', input: () => ({ since: 0 }) }) as unknown as void),
 		).toThrow(InvalidFlowError);

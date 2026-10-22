@@ -37,7 +37,6 @@ import { isJobId, type SearchField } from './search';
 import { formatTimestamp } from './time';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
-/** runが取る4つ(ADR-0029) */
 const RUN_STATES = ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
 const jobs = ref<Job[]>([]);
@@ -63,13 +62,9 @@ const refreshMs = ref(loadRefresh(localStorage));
 const canPromptToken = tokenCookie() !== null;
 let timer: ReturnType<typeof setInterval> | undefined;
 
-/** flowsを設定していない利用者にはrunの画面自体を非表示 */
 const tab = ref<'jobs' | 'runs' | 'schedules' | 'bindings' | 'metrics'>('jobs');
-/** Analytics Engineの設定がある構成でのみメトリクスのタブを表示 */
 const hasMetrics = ref(false);
-/** schedulesを定義した構成でのみ定期実行のタブを表示 */
 const hasSchedules = ref(false);
-/** 設定した機能のぶんだけタブを表示 */
 const tabs = computed(
 	() =>
 		[
@@ -80,41 +75,29 @@ const tabs = computed(
 			...(hasMetrics.value ? ['metrics'] : []),
 		] as const,
 );
-/** 抽出条件とページングを持つのはjobsとrunsだけ, 他のタブは自前で読む */
 const isList = computed(() => tab.value === 'jobs' || tab.value === 'runs');
 const flows = ref<string[]>([]);
 const runs = ref<Run[]>([]);
 const runFlow = ref('');
 const selectedRun = ref<string | null>(null);
 const startingRun = ref(false);
-/** 定期更新でメトリクスを取り直すための参照 */
 const metricsView = ref<InstanceType<typeof MetricsView> | null>(null);
-/** 同じく定期実行の一覧を取り直すための参照 */
 const schedulesView = ref<InstanceType<typeof SchedulesView> | null>(null);
-/** 同じく流量の一覧を取り直すための参照 */
 const bindingsView = ref<InstanceType<typeof BindingsView> | null>(null);
 
-/** 選んだ対象だけをクエリに含める, 対象の切り替えで前の条件は残らない */
 const searchParam = () => (search.value ? { [searchField.value]: search.value } : {});
 
-/**
- * 検索語の確定
- * ジョブIDの形式なら詳細を直接開く, 障害の調査はIDから入ることが多い
- */
+// 障害調査はID起点が多い
 function commitSearch(value: string) {
 	search.value = value;
 	if (searchField.value === 'id' && isJobId(value)) selected.value = value;
 }
 
-/**
- * 条件の世代, タブ / 抽出条件 / 頁の変更で更新
- * 遅れて届いた旧条件の応答の破棄用, 定期更新では据え置き(応答が間隔より遅いと全件破棄)
- */
+// 定期更新では据え置き, 応答遅延時の全件破棄回避
 let conditionGeneration = 0;
 let requestSequence = 0;
 let appliedSequence = 0;
 
-/** 条件を変えた後の再読込, 変更前に発行した要求の応答は反映なし */
 function reloadForConditions() {
 	conditionGeneration++;
 	load();
@@ -185,7 +168,7 @@ async function load() {
 		if (stale()) return;
 		appliedSequence = sequence;
 		if (isUnauthorized(e)) {
-			// HTML自体は未認証でも返り、ここで初めて認証の要否が判明
+			// HTMLは未認証でも返却, 認証要否はここで判明
 			unauthorized.value = true;
 			return;
 		}
@@ -193,7 +176,6 @@ async function load() {
 	}
 }
 
-/** 一覧の切替では抽出条件と頁を引き継がない */
 function switchTab(next: 'jobs' | 'runs' | 'schedules' | 'bindings' | 'metrics') {
 	if (tab.value === next) return;
 	tab.value = next;
@@ -213,7 +195,6 @@ function resetFilters() {
 
 const progressOf = (run: Run) => `${run.node_done} / ${run.node_total}`;
 
-/** 一覧に残っている行だけを選択として扱う, 再読込で消えた行は除外 */
 const selectedIds = computed(() => picked.value.filter((id) => jobs.value.some((job) => job.id === id)));
 const allPicked = computed(() => jobs.value.length > 0 && jobs.value.every((job) => picked.value.includes(job.id)));
 
@@ -234,7 +215,6 @@ function restartTimer() {
 	if (refreshMs.value > 0) timer = setInterval(load, refreshMs.value);
 }
 
-/** 間隔の変更を保存して即座に反映 */
 function setRefresh(ms: number) {
 	refreshMs.value = ms;
 	restartTimer();
@@ -251,7 +231,6 @@ watch([state, binding, runFlow, searchField, search, createdFrom, createdTo, pag
 });
 watch(page, reloadForConditions);
 
-/** 同一列で向きの反転, 別列なら降順から */
 function sortBy(column: string) {
 	if (sort.value === column) desc.value = !desc.value;
 	else {
@@ -260,26 +239,20 @@ function sortBy(column: string) {
 	}
 }
 
-/**
- * 構成にある機能だけタブを表示
- * 未設定なら501, 認証前は401になり、トークンの入力後にもう一度確認
- */
+// 未設定は501, 認証前の401はトークン入力後に再確認
 async function detectFeatures() {
 	const [metrics, schedules] = await Promise.allSettled([getMetrics({ hours: 24 }), listSchedules()]);
-	// 501と401以外の失敗はタブを表示した上で画面側に理由を表示
+	// 501, 401以外の失敗はタブ表示, 理由は各画面で表示
 	const available = (result: PromiseSettledResult<unknown>) =>
 		result.status === 'fulfilled' || (!isMetricsUnavailable(result.reason) && !isUnauthorized(result.reason));
 	hasMetrics.value = available(metrics);
 	hasSchedules.value = available(schedules);
 }
 
-/**
- * トークンを入れ直した後の再読込, 認証で隠れていたタブもここで戻る
- * jobs / runs以外のタブは再マウント時に自前で読み込み, 401なら再びトークン入力へ
- */
+// jobs / runs以外のタブは再マウント時に各自で読込, 401なら再びトークン入力へ
 function reload() {
 	unauthorized.value = false;
-	// トークン入力前の要求の401で入力画面へ戻さない
+	// トークン入力前の要求の401応答を破棄
 	reloadForConditions();
 	detectFeatures();
 }
@@ -295,10 +268,7 @@ const at = (value: number | null) => (value === null ? '' : formatTimestamp(valu
 const durationOf = (job: Job) =>
 	job.dispatched_at && job.updated_at > job.dispatched_at ? `${job.updated_at - job.dispatched_at} ms` : '';
 
-/**
- * 画面幅に応じた列の省略
- * 横スクロール前提は狭い画面で操作しづらく、重要度の低い列から非表示
- */
+// 狭い画面での操作性確保、重要度の低い列から非表示
 const COLUMN = {
 	id: 'hidden lg:table-cell',
 	startedAt: 'hidden xl:table-cell',
@@ -308,7 +278,7 @@ const COLUMN = {
 };
 const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
 
-/** Viewで切り替え可能な列, BindingとStatusは行の識別に必要なため固定 */
+// Binding, Statusは行識別用に固定
 const TOGGLEABLE = [
 	{ key: 'id', label: 'ID' },
 	{ key: 'startedAt', label: 'Started at' },
@@ -321,7 +291,6 @@ const VIEW_KEY = 'tsumugi:columns';
 function loadVisible(): Record<string, boolean> {
 	const all = Object.fromEntries(TOGGLEABLE.map((c) => [c.key, true]));
 	try {
-		// 壊れた値では既定へ復帰, 画面が表示されない状態を回避
 		return { ...all, ...(JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as Record<string, boolean>) };
 	} catch {
 		return all;
@@ -339,7 +308,6 @@ function toggleColumn(key: string) {
 	}
 }
 
-/** 画面幅の規則へViewの選択を重ねる, 適用は非表示の方向のみ */
 const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[key] : 'hidden');
 </script>
 
@@ -402,7 +370,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 					<span v-if="message" class="text-sm text-muted-foreground">{{ message }}</span>
 					<span v-if="error" class="text-sm text-destructive">Failed to load: {{ error }}</span>
 					<div v-if="!isList" class="grow" />
-					<!-- ジョブの一括操作は他のタブでは非表示, 選択が残っていても対象が見えない -->
+					<!-- 他タブでは選択対象が不可視, 一括操作も非表示 -->
 					<BulkActions
 						v-if="tab === 'jobs' && selectedIds.length > 0"
 						:ids="selectedIds"
@@ -460,7 +428,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 						>
 							<td class="p-4 align-middle">
 								{{ run.flow }}
-								<!-- ID列を隠す幅では行の識別が不能になり、ここに含めて表示 -->
+								<!-- ID列非表示の幅での行識別用 -->
 								<span class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ run.id }}</span>
 							</td>
 							<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ run.id }}</td>
@@ -495,7 +463,6 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 							<th :class="HEAD">
 								<SortHeader label="Binding" column="binding" :sort="sort" :desc="desc" @sort="sortBy" />
 							</th>
-							<!-- IDは並べ替えの意味を持たないため非活性 -->
 							<th :class="[HEAD, columnClass('id')]">ID</th>
 							<th :class="HEAD">
 								<SortHeader label="Status" column="state" :sort="sort" :desc="desc" @sort="sortBy" />
@@ -530,7 +497,7 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 							</td>
 							<td class="p-4 align-middle">
 								{{ job.binding }}
-								<!-- ID列を隠す幅では行の識別が不能になり、ここに含めて表示 -->
+								<!-- ID列非表示の幅での行識別用 -->
 								<span v-if="visible.id" class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ job.id }}</span>
 							</td>
 							<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ job.id }}</td>
@@ -539,7 +506,6 @@ const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[k
 							<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('updatedAt')">{{ at(job.updated_at) }}</td>
 							<td class="p-4 align-middle tabular-nums" :class="columnClass('attempts')">{{ job.attempts }} / {{ job.max_attempts }}</td>
 							<td class="p-4 align-middle tabular-nums" :class="columnClass('processingTime')">{{ durationOf(job) }}</td>
-							<!-- 行のクリックで詳細が開く, 操作メニューへの伝播は停止 -->
 							<td class="p-4 align-middle" @click.stop>
 								<RowActions :job-id="job.id" :state="job.state" :retryable="job.retryable" @changed="load" @message="message = $event" />
 							</td>

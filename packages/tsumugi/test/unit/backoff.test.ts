@@ -26,14 +26,12 @@ describe('nextAttempt', () => {
 	});
 
 	it('maxMsで頭打ちになる', () => {
-		// 上限が無いと試行回数の増加で遅延が際限なく伸びる
 		const backoff: Backoff = { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 10_000 };
 		const r = nextAttempt({ attempts: 20, maxAttempts: 30, backoff, now: T0 });
 		expect(r).toEqual({ kind: 'retry', runAfter: T0 + 10_000, delayMs: 10_000 });
 	});
 
 	it('ジッタは乱数で決まり、範囲は半分から全体まで', () => {
-		// ジッタが無いと同時失敗した大量ジョブが同じ秒数で一斉に戻る
 		const backoff: Backoff = { kind: 'fixed', delayMs: 10_000, jitter: true };
 		const lo = nextAttempt({ attempts: 1, maxAttempts: 5, backoff, now: T0, rand: 0 });
 		const hi = nextAttempt({ attempts: 1, maxAttempts: 5, backoff, now: T0, rand: 0.999999 });

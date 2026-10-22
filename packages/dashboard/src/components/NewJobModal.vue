@@ -42,7 +42,6 @@ async function submit() {
 	try {
 		parsed = JSON.parse(payload.value);
 	} catch {
-		// 送信前に拒否, サーバ往復の待ちを回避
 		error.value = 'Payload must be valid JSON';
 		return;
 	}

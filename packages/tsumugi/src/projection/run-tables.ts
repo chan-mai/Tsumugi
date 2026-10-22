@@ -1,16 +1,14 @@
 import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
- * runの読み取りモデル(ADR-0008 / ADR-0029)
- *
- * Run DOはrunごとに独立し、横断的な一覧の置き場はここのみ
- * DDLは`migrations/`のSQLが持ち, ここは型とクエリのための定義
+ * Run DO横断の一覧用(ADR-0008 / ADR-0029)
+ * DDLは`migrations/`のSQL, ここは型とクエリ用の定義
  */
 export const run = sqliteTable(
 	'run',
 	{
 		id: text('id').primaryKey(),
-		// 投影元のアウトボックス連番, 古い投影による新しい状態の上書きを防止
+		// 投影元アウトボックス連番, 古い投影での上書き防止
 		seq: integer('seq').notNull(),
 		flow: text('flow').notNull(),
 		state: text('state').notNull(),
@@ -20,7 +18,7 @@ export const run = sqliteTable(
 		nodeFailed: integer('node_failed').notNull(),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull(),
-		/** subflowとして起動された場合の親 */
+		/** subflow起動時の親 */
 		parentRunId: text('parent_run_id'),
 		parentNodeId: text('parent_node_id'),
 	},
@@ -28,7 +26,7 @@ export const run = sqliteTable(
 		index('run_state').on(t.state, t.updatedAt),
 		index('run_flow').on(t.flow, t.updatedAt),
 		index('run_created').on(t.createdAt),
-		// 既定の一覧はフィルタ無しでupdated_atの降順, 先頭列がupdated_atの索引が必要
+		// 既定一覧のフィルタ無しupdated_at降順用
 		index('run_updated').on(t.updatedAt, t.id),
 	],
 );
@@ -46,9 +44,8 @@ export const runNode = sqliteTable(
 		origin: text('origin').notNull(),
 		after: text('after').notNull(),
 		jobId: text('job_id'),
-		/** subflowノードが起動した子のrunID */
 		childRunId: text('child_run_id'),
-		/** fan-outノードの集計値のみが入る,通常ノードの戻り値はjob表に投影済み(ADR-0035) */
+		/** fan-outノードの集計値のみ, 通常ノードの戻り値はjob表へ投影済み(ADR-0035) */
 		result: text('result'),
 		error: text('error'),
 		/** 画面の並び順 */

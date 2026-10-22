@@ -7,18 +7,17 @@ const emit = defineEmits<{ unauthorized: [] }>();
 const entries = ref<[string, BindingDiagnostics][]>([]);
 const error = ref<string | null>(null);
 const message = ref<string | null>(null);
-/** 操作中のbinding, 二度押しを防ぐ */
 const busy = ref<string | null>(null);
-/** 入力中の同時実行数, 反映までは画面の値だけを保持, 空欄は非数値 */
+// 空欄は非数値
 const draft = ref<Record<string, number | string>>({});
 
-/** 入力が0以上の整数の時だけ送信, 空欄のままではサーバが拒否 */
+// 空欄はサーバ側でエラー
 const draftValue = (binding: string): number | null => {
 	const value = draft.value[binding];
 	return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 };
 
-/** 遅れて届いた古い応答で最新の結果を上書きしないための連番 */
+// 遅延した旧応答による上書き防止用の連番
 let generation = 0;
 
 async function load() {
@@ -28,7 +27,7 @@ async function load() {
 		if (requested !== generation) return;
 		entries.value = Object.entries(loaded.bindings).sort(([a], [b]) => (a < b ? -1 : 1));
 		for (const [binding, entry] of entries.value) {
-			// 入力中の値は上書きなし, 定期更新のたびに戻ると入力が不能
+			// 定期更新での入力値リセット防止
 			if (draft.value[binding] === undefined) draft.value[binding] = entry.policy.concurrency;
 		}
 		error.value = null;
@@ -54,7 +53,7 @@ async function act(binding: string, run: () => Promise<unknown>, done: string) {
 		message.value = e instanceof Error ? e.message : String(e);
 	} finally {
 		busy.value = null;
-		// 操作の後はサーバの値で再取得, resetで戻った値の入力欄への残存を防止
+		// reset後の旧入力値残存防止
 		delete draft.value[binding];
 		await load();
 	}
@@ -71,7 +70,6 @@ function applyConcurrency(binding: string) {
 
 const reset = (binding: string) => act(binding, () => resetPolicy(binding), 'reset to the static settings');
 
-/** 投入が止まっている理由, 複数該当する場合は全て表示 */
 const blockedBy = (entry: BindingDiagnostics) =>
 	Object.entries(entry.blocked)
 		.filter(([, on]) => on)

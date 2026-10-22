@@ -1,4 +1,3 @@
-// ジョブ管理Worker本体が使うエントリ
 export { defineTsumugi, enqueue, enqueueMany, shardFor } from '../worker.js';
 export { bearerAuth, unsafeNoAuth } from '../api/auth.js';
 export type { AuthMiddleware, BearerOptions, TokenResolver } from '../api/auth.js';
@@ -26,10 +25,10 @@ export type {
 } from '../worker.js';
 export { TsumugiJobShard, DEFAULT_POLICY } from '../do/job-shard.js';
 export type { DispatchMessage, EnqueueInput, FailureNotifyStub, MutationResult, ShardEnv, ShardSettings } from '../do/job-shard.js';
-// createRunClassは非公開, `defineTsumugi().runClass`の迂回は設定の二重管理につながる
+// createRunClass非公開, `defineTsumugi().runClass`迂回は設定二重管理の原因
 export { DEFAULT_MAX_NODES } from '../do/run.js';
 export type { RunClass, RunEnv, RunSettings, RunStub, StartInput, StartResult } from '../do/run.js';
-// createSchedulerClassはschedules定義を参照するので出さない, runClassと同じ理由(ADR-0040)
+// createSchedulerClassも同理由で非公開(ADR-0040)
 export { SCHEDULER_DO_NAME } from '../do/scheduler.js';
 export type { ScheduleMutationResult, SchedulerClass, SchedulerEnv, ScheduleTriggerResult, ScheduleView } from '../do/scheduler.js';
 export { InvalidScheduleError } from '../core/recurring.js';
@@ -56,7 +55,7 @@ export type {
 	Requirements,
 	TypedEnqueueInput,
 } from '../core/api.js';
-// assertNodeIdとadvanceは内部の判定, 検証に使うものは`tsumugi/testing`から出す
+// assertNodeId, advanceは内部用, 検証用途は`tsumugi/testing`から公開
 export { createFlow, InvalidFlowError, shapeOf } from '../core/flow.js';
 export {
 	InvalidJobIdError,

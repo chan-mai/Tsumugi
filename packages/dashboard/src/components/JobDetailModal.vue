@@ -42,7 +42,7 @@ watch(
 		loadSequence++;
 		loading.value = false;
 		if (!id) return;
-		// 閉じるアニメーションの間に中身が消えないよう、開く時だけ差し替え
+		// 閉じるアニメーション中の内容消失防止、開く時のみ差し替え
 		job.value = null;
 		attempts.value = [];
 		error.value = null;
@@ -55,7 +55,7 @@ watch(
 async function run(kind: 'retry' | 'cancel') {
 	if (!props.jobId) return;
 	message.value = await act(kind, props.jobId);
-	// 投影は数秒遅れ即時には変わらないが、反映され次第この再読込で追いつく
+	// 投影の数秒遅延で未反映の場合あり
 	await load(props.jobId);
 	emit('changed');
 }
@@ -140,7 +140,6 @@ const pretty = (payload: string | undefined) => {
 								</template>
 								<dt class="text-muted-foreground">Attempts</dt>
 								<dd class="tabular-nums">{{ job.attempts }} / {{ job.max_attempts }}</dd>
-								<!-- 報告するperformerでのみ埋まる -->
 								<template v-if="job.progress !== null && job.progress !== undefined">
 									<dt class="text-muted-foreground">Progress</dt>
 									<dd class="flex items-center gap-2">
@@ -160,12 +159,10 @@ const pretty = (payload: string | undefined) => {
 								<dd>{{ job.unique_key ?? '-' }}</dd>
 								<dt class="text-muted-foreground">Created at</dt>
 								<dd>{{ at(job.created_at) }}</dd>
-								<!-- 期限を設定したジョブでのみ埋まる -->
 								<template v-if="job.expires_at !== null && job.expires_at !== undefined">
 									<dt class="text-muted-foreground">Expires at</dt>
 									<dd>{{ at(job.expires_at) }}</dd>
 								</template>
-								<!-- 取り消し要求を受けたジョブでのみ埋まる(ADR-0052) -->
 								<template v-if="job.cancel_requested_at !== null && job.cancel_requested_at !== undefined">
 									<dt class="text-muted-foreground">Cancel requested at</dt>
 									<dd>{{ at(job.cancel_requested_at) }}</dd>

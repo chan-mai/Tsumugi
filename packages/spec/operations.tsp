@@ -7,8 +7,8 @@ using OpenAPI;
 
 namespace Tsumugi;
 
-// 経路の網羅は`createRest`が登録したものと単体テストで突き合わせる, 片方だけ増えると生成物が実装とずれる
-// operationIdは生成器の既定名に任せず明示する
+// 経路は`createRest`の登録と単体テストで照合(生成物と実装の不一致防止)
+// operationIdは既定名でなく明示
 
 @route("/api/jobs")
 @operationId("listJobs")
@@ -347,7 +347,7 @@ op getOpenApi(): {
 	@body body: {};
 } | Unauthorized;
 
-// metrics専用の応答, 説明が他の400 / 502と異なる
+// metrics専用応答(説明が他の400 / 502と異なる)
 @doc("Invalid window or binding name")
 model BadMetricsQuery {
 	@statusCode statusCode: 400;

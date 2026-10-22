@@ -1,3 +1,3 @@
-// performerを実装するWorker向け, DOやSQLやHonoを引き込まないよう本体とは分ける
+// performer実装Worker向け, DO, SQL, Hono非依存用に本体と分離
 export { Performer } from '../performer/entrypoint.js';
 export type { FailOptions, JobContext, Requirements } from '../core/api.js';

@@ -1,10 +1,8 @@
 import { readCookie, type AuthMiddleware } from './auth.js';
 
 /**
- * Cloudflare AccessのJWT検証
- *
- * Accessはリクエストに`Cf-Access-Jwt-Assertion`ヘッダを付けて転送
- * 署名を検証せずヘッダの存在だけを判定すると、Accessを迂回した直接アクセスの拒否が不能
+ * Accessは`Cf-Access-Jwt-Assertion`ヘッダ付与で転送
+ * ヘッダ存在のみの判定ではAccess迂回の直接アクセスを拒否不能
  */
 export type AccessOptions = {
 	/** `<team>.cloudflareaccess.com`のteam部分 */
@@ -13,7 +11,7 @@ export type AccessOptions = {
 	aud: string;
 	/** JWKSの再取得間隔 */
 	cacheTtlMs?: number;
-	/** テスト用の差し替え口,既定は公開鍵エンドポイントへのfetch */
+	/** テスト用差し替え, 既定は公開鍵エンドポイントへのfetch */
 	fetchJwks?: (certsUrl: string) => Promise<Jwks>;
 };
 
@@ -47,14 +45,13 @@ function decodeJson<T>(segment: string): T | null {
 	}
 }
 
-/** 検証済みのクレーム,失敗時はnull */
 export async function verifyAccessJwt(token: string, options: AccessOptions, now: number): Promise<Claims | null> {
 	const parts = token.split('.');
 	if (parts.length !== 3) return null;
 	const [headerSegment, payloadSegment, signatureSegment] = parts as [string, string, string];
 
 	const header = decodeJson<{ alg?: string; kid?: string }>(headerSegment);
-	// algをJWTの値のまま採用するとalg=noneやHS256への差し替えが可能
+	// alg固定, JWT記載値の採用ではnone, HS256へ差し替え可能
 	if (!header || header.alg !== 'RS256' || !header.kid) return null;
 
 	const claims = decodeJson<Claims>(payloadSegment);
@@ -74,7 +71,7 @@ export async function verifyAccessJwt(token: string, options: AccessOptions, now
 	const jwk = jwks.keys.find((key) => key.kid === header.kid);
 	if (!jwk) return null;
 
-	// 署名部の復号と鍵の取り込みの失敗も検証の失敗の扱い, 例外のままでは401ではなく500
+	// 鍵取り込み失敗も検証失敗扱い, 例外では401でなく500
 	try {
 		const key = await crypto.subtle.importKey(
 			'jwk',
@@ -106,7 +103,7 @@ async function loadJwks(options: AccessOptions): Promise<Jwks> {
 	return jwks;
 }
 
-/** テストや鍵ローテーション時のキャッシュ削除 */
+/** テスト, 鍵ローテーション時のキャッシュ削除 */
 export function clearJwksCache(): void {
 	jwksCache.clear();
 }

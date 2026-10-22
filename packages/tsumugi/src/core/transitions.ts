@@ -1,23 +1,22 @@
 import type { ActiveState, JobState } from './types.js';
 
 /**
- * 状態機械の遷移表(ADR-0012)
- * 重複配送や競合で終端状態のジョブが再び動き出すのを防止
- * QUEUED以降のcancelは即時遷移せず協調的な要求として扱う(ADR-0052), 実行済みの可能性があり取り消し成功の保証が不可能
- * QUEUED / RUNNINGからのCANCELLEDは期限切れ(ADR-0047)と取り消し要求後の確定(ADR-0052)に限定
+ * 重複配送や競合による終端ジョブ再開防止(ADR-0012)
+ * QUEUED以降のcancelは即時遷移でなく協調的要求, 実行済みの可能性あり(ADR-0052)
+ * QUEUED, RUNNINGからのCANCELLEDは期限切れ(ADR-0047)と取り消し確定(ADR-0052)のみ
  */
 export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
-	// dispatch / cancel /期限切れ
+	// dispatch, cancel, 期限切れ
 	SCHEDULED: ['QUEUED', 'CANCELLED'],
-	// claim(at-most-onceのみ) /完了報告/ reaper /期限切れ
+	// claim(at-most-onceのみ), 完了報告, reaper, 期限切れ
 	QUEUED: ['RUNNING', 'COMPLETED', 'FAILED', 'SCHEDULED', 'STALLED', 'CANCELLED'],
-	// 完了報告/ reaper /期限を越える再試行の中止
+	// 完了報告, reaper, 期限超過再試行の中止
 	RUNNING: ['COMPLETED', 'FAILED', 'SCHEDULED', 'STALLED', 'CANCELLED'],
 	COMPLETED: [],
-	// ダッシュボードからの手動リトライ
+	// ダッシュボードから手動リトライ
 	FAILED: ['SCHEDULED'],
 	CANCELLED: [],
-	// 無応答で回収できなかったジョブ, 人手で判断して再投入
+	// 無応答で回収不能, 人手判断で再投入
 	STALLED: ['SCHEDULED'],
 } as const;
 
@@ -29,7 +28,7 @@ export function isActive(state: JobState): state is ActiveState {
 	return state === 'SCHEDULED' || state === 'QUEUED' || state === 'RUNNING';
 }
 
-/** 終端判定, FAILEDとSTALLEDは終端だが手動復帰が可能 */
+/** FAILED, STALLEDは終端だが手動復帰可能 */
 export function isTerminal(state: JobState): boolean {
 	return !isActive(state);
 }

@@ -45,7 +45,6 @@ describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 		const first = await shard('UNIQ#0').enqueue({ binding: 'UNIQ', payload: { n: 1 }, uniqueKey: 'daily-report' });
 		const second = await shard('UNIQ#0').enqueue({ binding: 'UNIQ', payload: { n: 2 }, uniqueKey: 'daily-report' });
 
-		// 衝突を正常系として扱い、呼び出し側に例外処理が不要
 		expect(second).toBe(first);
 	});
 
@@ -63,7 +62,6 @@ describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 		await install('UNIQ3#0', T0, queue);
 		const first = await shard('UNIQ3#0').enqueue({ binding: 'UNIQ3', payload: {}, uniqueKey: 'k', uniqueForMs: 1_000 });
 
-		// キーだけを一定期間残す方式で、期限を過ぎれば同じキーでも成功
 		await install('UNIQ3#0', T0 + 1_001, queue);
 		const second = await shard('UNIQ3#0').enqueue({ binding: 'UNIQ3', payload: {}, uniqueKey: 'k', uniqueForMs: 1_000 });
 
@@ -93,7 +91,7 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 		await install('CKEY2#0', T0, queue);
 		await shard('CKEY2#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 1 } });
 
-		// 実装がcontinueではなくbreakしていると,先頭のキーが詰まった時点で全体が止まる
+		// continueでなくbreakの場合、先頭キーの上限到達で全体停止
 		await shard('CKEY2#0').enqueueMany([
 			{ binding: 'CKEY2', payload: {}, concurrencyKey: 'a' },
 			{ binding: 'CKEY2', payload: {}, concurrencyKey: 'a' },
@@ -127,7 +125,7 @@ describe('ポリシーの永続化', () => {
 		await shard('POL2#0').enqueueMany([{ binding: 'POL2', payload: {} }], settings);
 		const after = await writesOf('POL2#0');
 
-		// 増えるのはジョブのinsertとアウトボックス追記の2回だけ,ポリシーの再書き込みは起きない
+		// ジョブinsertとアウトボックス追記の2回のみ, ポリシー再書き込みなし
 		expect(after - before).toBe(2);
 	});
 
@@ -135,13 +133,11 @@ describe('ポリシーの永続化', () => {
 		const { sent, queue } = captureQueue();
 		await install('PAUSE#0', T0, queue);
 
-		// 実行時にconcurrency=0で止める, 現状で唯一のpause手段
+		// 実行時にconcurrency=0で停止, 唯一のpause手段
 		await shard('PAUSE#0').configure({ policy: { concurrency: 0 } });
-		// 静的設定を同梱したenqueue, 従来はこれがpauseを解除していた
 		await shard('PAUSE#0').enqueueMany([{ binding: 'PAUSE', payload: {} }], { policy: { concurrency: 100 } });
 		await runDurableObjectAlarm(shard('PAUSE#0'));
 
-		// pauseが保持され1件も投入なし
 		expect(sent).toHaveLength(0);
 	});
 
@@ -151,7 +147,6 @@ describe('ポリシーの永続化', () => {
 
 		await shard('PAUSE2#0').configure({ policy: { concurrency: 0 } });
 		await shard('PAUSE2#0').enqueueMany([{ binding: 'PAUSE2', payload: {} }], { policy: { concurrency: 100 } });
-		// 静的設定ではなく実行時のconfigure()なら解除可能
 		await shard('PAUSE2#0').configure({ policy: { concurrency: 100 } });
 		await runDurableObjectAlarm(shard('PAUSE2#0'));
 
@@ -163,7 +158,6 @@ describe('運用診断(#10)', () => {
 	it('バックログの深さと投入が止まった制約を返す', async () => {
 		const { queue } = captureQueue();
 		await install('DIAG#0', T0, queue);
-		// 上限1に対して2件, 1件は上限待ちで止まる
 		await shard('DIAG#0').configure({ policy: { concurrency: 1, perKeyConcurrency: 1 } });
 		await shard('DIAG#0').enqueueMany([
 			{ binding: 'DIAG', payload: {} },
@@ -174,7 +168,6 @@ describe('運用診断(#10)', () => {
 		const diag = await shard('DIAG#0').diagnostics();
 		// QUEUED1件+SCHEDULED1件, どちらも稼働中
 		expect(diag.active).toBe(2);
-		// 上限に達して投入が止まったことが外から分かる
 		expect(diag.blocked.capacity).toBe(true);
 	});
 
@@ -197,7 +190,7 @@ describe('運用診断(#10)', () => {
 	});
 
 	it('退避で消えても永続化したblockedをdiagnosticsが返す', async () => {
-		// tick前のshardはblockedがfalse既定,退避後の再ロードを模して直接書く
+		// tick前shardのblocked既定はfalse, 退避後の再ロードを模して直接書き込み
 		await runInDurableObject(shard('DIAGR#0'), (instance) =>
 			(instance as any).repo.writeSetting('last_blocked', JSON.stringify({ capacity: true, tokens: false, perKey: false })),
 		);
@@ -229,7 +222,7 @@ describe('enqueueMany', () => {
 		await shard('BOUND#0').enqueueMany(Array.from({ length: 300 }, () => ({ binding: 'BOUND', payload: {} })));
 		await runDurableObjectAlarm(shard('BOUND#0'));
 
-		// TICK_LIMITは200, alarmのwall time上限15分に当たらないための構造
+		// TICK_LIMITは200, alarmのwall time上限15分回避
 		expect(sent).toHaveLength(200);
 		const alarm = await runInDurableObject(shard('BOUND#0'), (_i, state) => state.storage.getAlarm());
 		expect(alarm).toBe(T0);
@@ -243,8 +236,7 @@ describe('enqueueMany', () => {
 		await shard('SPLIT#0').enqueueMany(Array.from({ length: 150 }, () => ({ binding: 'SPLIT', payload: {} })));
 		await runDurableObjectAlarm(shard('SPLIT#0'));
 
-		// 分割が無いと1回で150件を送りcaptureQueueがthrow
-		// 100件単位で分割し、過分割でないことも固定
+		// 分割なしでは150件一括送信でcaptureQueueが例外
 		expect(sent).toHaveLength(150);
 		expect(batches).toEqual([100, 50]);
 	});
@@ -254,21 +246,19 @@ describe('投入候補の読み取り範囲(ADR-0019 / ADR-0020, #4)', () => {
 	it('稼働中がTICK_LIMITを埋めても後から入った実行可能ジョブが投入される', async () => {
 		const { sent, queue } = captureQueue();
 		await install('WIN#0', T0, queue);
-		// 上限は空けたまま作成順の読み取り範囲を実行中のジョブで埋める
+		// 上限未到達のまま作成順の読み取り範囲を実行中ジョブで充填
 		await shard('WIN#0').configure({ policy: { concurrency: 400, perKeyConcurrency: 400 } });
 
-		// 200件を投入してtickでQUEUEDにする(実行中の在庫)
 		await shard('WIN#0').enqueueMany(Array.from({ length: 200 }, () => ({ binding: 'WIN', payload: {} })));
 		await runDurableObjectAlarm(shard('WIN#0'));
 		expect(sent).toHaveLength(200);
 
-		// 実行中200件より後に実行可能ジョブを入れる, 作成順では201件目に落ちる
 		sent.length = 0;
 		await install('WIN#0', T0 + 1_000, queue);
 		const late = await shard('WIN#0').enqueue({ binding: 'WIN', payload: { late: true }, priority: 10 });
 		await runDurableObjectAlarm(shard('WIN#0'));
 
-		// 作成順の単一の読み取り範囲では201件目は選考へ入らず投入なし
+		// 作成順の単一読み取り範囲では201件目は選考対象外
 		expect(sent.map((m) => m.jobId)).toContain(late);
 		expect(await stateOf('WIN#0', late)).toBe('QUEUED');
 	});
@@ -284,7 +274,7 @@ describe('投入候補の読み取り範囲(ADR-0019 / ADR-0020, #4)', () => {
 		await runDurableObjectAlarm(shard('WIN2#0'));
 		expect(sent).toHaveLength(250);
 
-		// 上限到達後の候補は投入しない, 実行中を200件と数えると50件分の空きと誤認
+		// 上限到達後は投入なし, 実行中を200件と数えると50件の空きと誤認
 		sent.length = 0;
 		await install('WIN2#0', T0 + 1_000, queue);
 		await shard('WIN2#0').enqueueMany(Array.from({ length: 10 }, () => ({ binding: 'WIN2', payload: {} })));
@@ -303,7 +293,7 @@ describe('同時実行数待ちでの即時の再実行(#103)', () => {
 		await shard('CAP1#0').configure({ policy: { concurrency: 10, perKeyConcurrency: 10 } });
 		await shard('CAP1#0').enqueueMany(Array.from({ length: 250 }, (_, i) => ({ binding: 'CAP1', payload: { i } })));
 
-		// 投影の残りを処理し終えるまで数tick, その後は完了報告まで待機
+		// 投影残り処理に数tick, 以後は完了報告まで待機
 		for (let i = 0; i < 3; i++) await runDurableObjectAlarm(shard('CAP1#0'));
 
 		expect(sent).toHaveLength(10);
@@ -332,7 +322,7 @@ describe('同時実行数待ちでの即時の再実行(#103)', () => {
 		for (let i = 0; i < 3; i++) await runDurableObjectAlarm(shard('CAP3#0'));
 		expect(sent).toHaveLength(10);
 
-		// 再試行時刻のalarmでは、バックオフの間に空いた枠へ投入なし
+		// 再試行時刻のalarmではバックオフ中の空き枠へ投入なし
 		await install('CAP3#0', T0 + 1_000, queue);
 		await shard('CAP3#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
 		expect(await alarmOf('CAP3#0')).toBe(T0 + 1_000);
@@ -344,20 +334,19 @@ describe('トークンバケットの永続化(ADR-0009)', () => {
 		runInDurableObject(shard(name), (instance) => (instance as any).repo.readSetting('rate_bucket') as string | undefined);
 
 	it('消費した残りをSQLiteへ保存する', async () => {
-		// メモリだけで持つとDOの退避で上限へ戻り、設定した流量を超えた投入が発生
+		// メモリのみ保持ではDO退避で上限へ復帰、設定流量超過の投入が発生
 		const { queue, sent } = captureQueue();
 		await install('BUCKET1#0', T0, queue);
 		await shard('BUCKET1#0').configure({ policy: { rate: { tokens: 2, intervalMs: 60_000 } } });
 		for (let i = 0; i < 5; i++) await shard('BUCKET1#0').enqueue({ binding: 'BUCKET1', payload: { i } });
 		await runDurableObjectAlarm(shard('BUCKET1#0'));
 
-		// 上限まで投入したため残りは0
 		expect(sent).toHaveLength(2);
 		expect(JSON.parse((await bucketOf('BUCKET1#0')) as string)).toEqual({ tokens: 0, refilledAt: T0 });
 	});
 
 	it('tokensが上限なら保存しない', async () => {
-		// 読み戻し時のrefillで同値になり、書き込みだけが増える
+		// 読み戻し時のrefillで同値、書き込みのみ増加
 		const { queue } = captureQueue();
 		await install('BUCKET2#0', T0, queue);
 		await shard('BUCKET2#0').configure({ policy: { rate: { tokens: 10, intervalMs: 60_000 } } });
@@ -376,7 +365,7 @@ describe('トークンバケットの永続化(ADR-0009)', () => {
 	});
 
 	it('保存した残りを読み戻して投入を制限する', async () => {
-		// DOの退避は再現不可, 初回tick前にSQLiteへ直接書き同じ状態を再現
+		// DO退避は再現不可, 初回tick前にSQLiteへ直接書き込み
 		const { queue, sent } = captureQueue();
 		await install('BUCKET4#0', T0, queue);
 		await runInDurableObject(shard('BUCKET4#0'), (instance) =>
@@ -401,7 +390,7 @@ describe('キー別トークンバケットの永続化(ADR-0045)', () => {
 	it('消費した残りをキーごとの行へ保存する', async () => {
 		const { queue, sent } = captureQueue();
 		await install('KB1#0', T0, queue);
-		// perKeyConcurrencyが1だと2件目は同時実行上限で除外されレート未検証
+		// perKeyConcurrency 1では2件目が同時実行上限で除外、レート未検証
 		await shard('KB1#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } } });
 		await shard('KB1#0').enqueueMany([
 			{ binding: 'KB1', payload: {}, concurrencyKey: 'cust-a' },
@@ -431,7 +420,7 @@ describe('キー別トークンバケットの永続化(ADR-0045)', () => {
 	});
 
 	it('保存した残りを読み戻して投入を制限する', async () => {
-		// DOの退避は再現不可, 初回tick前に行を直接書き同じ状態を再現
+		// DO退避は再現不可, 初回tick前に行を直接書き込み
 		const { queue, sent } = captureQueue();
 		await install('KB3#0', T0, queue);
 		await runInDurableObject(shard('KB3#0'), (instance) =>
@@ -467,11 +456,11 @@ describe('キー別トークンバケットの永続化(ADR-0045)', () => {
 		const inputs = Array.from({ length: 201 }, (_, i) => ({ binding: 'KB6', payload: { i }, concurrencyKey: 'cust-a' }));
 		await shard('KB6#0').enqueueMany(inputs);
 
-		// 投影の残りを処理し終えるまで数tick, その後はトークンの回復時刻まで待機
+		// 投影残り処理に数tick, 以後はトークン回復時刻まで待機
 		for (let i = 0; i < 3; i++) await runDurableObjectAlarm(shard('KB6#0'));
 
 		expect(sent).toHaveLength(1);
-		// readyCountが上限でも読める候補は不変, nowの再実行では回復までtickが空転
+		// readyCount上限でも候補は不変, nowで再実行すると回復まで無駄なtick反復
 		const alarm = await runInDurableObject(
 			shard('KB6#0'),
 			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,

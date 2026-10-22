@@ -44,7 +44,6 @@ describe('DOの終端ジョブ削除', () => {
 		await shard('SWEEP#0').report(sent[0]!.jobId, { ok: true });
 		expect(await stateOf('SWEEP#0', jobId)).toBe('COMPLETED');
 
-		// 削除の間隔は過ぎているが保持期間の手前のため対象外
 		await install('SWEEP#0', T0 + 5 * 60 * 1000, queue);
 		await runDurableObjectAlarm(shard('SWEEP#0'));
 		expect(await stateOf('SWEEP#0', jobId)).toBe('COMPLETED');
@@ -55,7 +54,7 @@ describe('DOの終端ジョブ削除', () => {
 	});
 
 	it('削除の間隔より短い間ではDELETEを実行しない', async () => {
-		// tickは完了報告のたびに実行され、毎回のDELETEは消すものが無くても書き込みが増える
+		// tickは完了報告ごとに実行, 対象なしのDELETEも書き込み増加
 		const { queue } = captureQueue();
 		await install('SWEEP5#0', T0, queue);
 		await shard('SWEEP5#0').enqueue({ binding: 'SWEEP5', payload: {} });
@@ -74,7 +73,6 @@ describe('DOの終端ジョブ削除', () => {
 		await install('SWEEP2#0', T0, queue);
 		await shard('SWEEP2#0').configure({ sweepAfterMs: 1 });
 
-		// 実行が長引いているだけのジョブの削除は禁止
 		const jobId = await shard('SWEEP2#0').enqueue({ binding: 'SWEEP2', payload: {}, timeoutMs: 10 ** 12 });
 		await runDurableObjectAlarm(shard('SWEEP2#0'));
 
@@ -88,7 +86,6 @@ describe('DOの終端ジョブ削除', () => {
 		await install('SWEEP3#0', T0, queue);
 		const first = await shard('SWEEP3#0').enqueue({ binding: 'SWEEP3', payload: {}, uniqueKey: 'k', uniqueForMs: 1_000 });
 
-		// enqueueが途絶えてもtickが削除し、期限後は同じキーで成功
 		await install('SWEEP3#0', T0 + 2_000, queue);
 		await runDurableObjectAlarm(shard('SWEEP3#0'));
 
@@ -108,7 +105,6 @@ describe('DOの終端ジョブ削除', () => {
 });
 
 describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
-	/** 失敗させてFAILEDまで進める */
 	async function failJob(name: string, binding: string, now: number, queue: { sent: DispatchMessage[]; queue: unknown }) {
 		await install(name, now, queue.queue);
 		const jobId = await shard(name).enqueue({ binding, payload: {}, maxAttempts: 1 });
@@ -130,12 +126,10 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 		expect(await stateOf('SPLIT#0', failed)).toBe('FAILED');
 		expect(await stateOf('SPLIT#0', done)).toBe('COMPLETED');
 
-		// 済んだ側の保持だけを過ぎた時点
 		await install('SPLIT#0', T0 + 120_000, q.queue);
 		await runDurableObjectAlarm(shard('SPLIT#0'));
 
 		expect(await stateOf('SPLIT#0', done)).toBeUndefined();
-		// 手動リトライを受け付ける期間の内の削除は禁止
 		expect(await stateOf('SPLIT#0', failed)).toBe('FAILED');
 	});
 
@@ -151,7 +145,7 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 	});
 
 	it('既定では失敗ジョブが5分では消えない', async () => {
-		// 既定を短いままにすると一覧に見えるのに再開できないジョブが出る
+		// 既定が短いと一覧表示中でも再開不能なジョブが発生
 		const q = captureQueue();
 		const failed = await failJob('SPLIT3#0', 'SPLIT3', T0, q);
 
@@ -161,7 +155,7 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 	});
 
 	it('次に対象が出る時刻へalarmを設定する', async () => {
-		// 一定間隔で起動すると, 失敗ジョブだけが残る間ずっと何もしない書き込みが積まれる
+		// 固定間隔起動では失敗ジョブ残存中に無用な書き込みが累積
 		const q = captureQueue();
 		await install('SPLIT4#0', T0, q.queue);
 		await shard('SPLIT4#0').configure({ sweepAfterMs: 1_000, failedRetentionMs: 60 * 60 * 1000 });
@@ -171,13 +165,12 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 		await runDurableObjectAlarm(shard('SPLIT4#0'));
 
 		const alarm = await runInDurableObject(shard('SPLIT4#0'), (_i, state) => state.storage.getAlarm());
-		// 失敗ジョブの期限は投入時刻+1時間, 短い間隔での起動は禁止
 		expect(alarm).toBeGreaterThan(T0 + 30 * 60 * 1000);
 	});
 });
 
 describe('状態を変える操作はalarmを設定する', () => {
-	// 設定しないとアウトボックスが滞留し、200を返した直後の読み取りモデルが古いまま残る
+	// 未設定時はアウトボックス滞留、200応答直後の読み取りモデルが古いまま
 	const alarmOf = (name: string) => runInDurableObject(shard(name), (_i, state) => state.storage.getAlarm());
 
 	it('cancelがalarmを設定する', async () => {
@@ -185,7 +178,7 @@ describe('状態を変える操作はalarmを設定する', () => {
 		await install('CANCEL#0', T0, queue);
 
 		const jobId = await shard('CANCEL#0').enqueue({ binding: 'CANCEL', payload: {}, delayMs: 60 * 60 * 1000 });
-		// 投入直後のalarmは投影のためのnow, 1回実行すると次は実行予定時刻
+		// 投入直後のalarmは投影用now, 1回実行後は実行予定時刻
 		await runDurableObjectAlarm(shard('CANCEL#0'));
 		expect(await alarmOf('CANCEL#0')).toBe(T0 + 60 * 60 * 1000);
 

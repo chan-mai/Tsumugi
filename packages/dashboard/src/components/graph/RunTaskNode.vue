@@ -11,13 +11,10 @@ const emit = defineEmits<{
 	(event: 'measure', id: string, height: number): void;
 }>();
 
-// dataは再構築のたびに別のオブジェクト, 都度再取得
+// dataは再構築ごとに別オブジェクト, 都度再取得
 const node = computed(() => props.data.node);
 
-/**
- * 中身の実寸を返す
- * 箱の高さはレイアウトが決める, 文字の折り返しで伸びた分は計測して返すしかない
- */
+// ノードの高さはレイアウト側, 折り返しで伸びた分は計測して通知
 const content = ref<HTMLElement | null>(null);
 let observer: ResizeObserver | undefined;
 
@@ -31,14 +28,14 @@ function observe(element: HTMLElement | null): void {
 }
 
 onMounted(() => observe(content.value));
-// 要素が差し替わっても観測を移す
+// 要素差し替え時も観測対象を更新
 watch(content, observe, { flush: 'post' });
 
 onBeforeUnmount(() => observer?.disconnect());
 </script>
 
 <template>
-	<!-- 辺は頭の行に刺す, 子で箱が伸びても中心へ寄らない -->
+	<!-- 辺の接続位置は先頭行, ノード伸長時の中心移動防止 -->
 	<Handle type="target" :position="Position.Left" :connectable="false" :style="{ top: `${HANDLE_TOP}px` }" />
 	<Handle type="source" :position="Position.Right" :connectable="false" :style="{ top: `${HANDLE_TOP}px` }" />
 
@@ -69,7 +66,6 @@ onBeforeUnmount(() => observer?.disconnect());
 			>
 				Run
 			</button>
-			<!-- 描き切れない子は状態ごとの件数で出す(ADR-0035) -->
 			<p v-if="data.summary" class="mt-2 truncate text-xs tabular-nums text-muted-foreground">{{ data.summary }}</p>
 		</div>
 	</div>

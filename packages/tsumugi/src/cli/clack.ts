@@ -1,10 +1,9 @@
 import { confirm, isCancel, select, text, type Option } from '@clack/prompts';
 import type { Prompts } from './tui.js';
 
-/** `Prompts`の@clack/prompts実装, キャンセルはundefinedへ変換 */
 export const clackPrompts = (): Prompts => ({
 	select: async <T extends string>(message: string, options: readonly { value: T; label: string }[]) => {
-		// Option<T>は条件型で、未解決のTのままでは代入できずキャスト
+		// Option<T>は条件型, 未解決Tへ代入不可でキャスト
 		const result = await select<T>({ message, options: [...options] as Option<T>[] });
 		return isCancel(result) ? undefined : result;
 	},

@@ -7,7 +7,6 @@ class Noop {
 	async perform(): Promise<void> {}
 }
 
-/** 必須bindingが揃った`env`, 個々のテストで一部を除いて使用 */
 const complete = () => ({
 	JOB_SHARD: {},
 	TSUMUGI_DB: {},
@@ -40,7 +39,7 @@ describe('必須bindingの検証', () => {
 	});
 
 	it('TSUMUGI_METRICSは求めない', () => {
-		// 未設定でもメトリクスが書かれないだけで実行は成立する(ADR-0036)
+		// 未設定時はメトリクス書き込みなしで実行は成立(ADR-0036)
 		const env = complete();
 		delete (env as Record<string, unknown>).TSUMUGI_METRICS;
 		expect(validateConfig(env, { performers })).toEqual({ ok: true });
@@ -73,7 +72,7 @@ describe('リモートperformerの整合(ADR-0026)', () => {
 	});
 
 	it('名前は在るがperformerでない場合も拒否する', () => {
-		// 実行時までずれが発覚せず、起動時も同じ扱い
+		// 実行時まで不整合が未発覚、起動時に同様に拒否
 		const status = validateConfig({ ...complete(), MAIL: {} }, { performers: withRemote });
 		expect(status.ok).toBe(false);
 		if (status.ok) return;
@@ -89,12 +88,12 @@ describe('検証結果のキャッシュ', () => {
 	it('成功は再利用する', () => {
 		const check = cachedValidate({ performers });
 		expect(check(complete())).toEqual({ ok: true });
-		// 2回目は`env`を空にしても再判定しない, 同じisolateでbindingは変わらない
+		// 同一isolate内でbindingは不変
 		expect(check({})).toEqual({ ok: true });
 	});
 
 	it('不足はキャッシュしない', () => {
-		// 設定の追加後に再デプロイせず自動で復帰
+		// 設定追加後は再デプロイなしで自動復帰
 		const check = cachedValidate({ performers });
 		expect(check({}).ok).toBe(false);
 		expect(check(complete())).toEqual({ ok: true });

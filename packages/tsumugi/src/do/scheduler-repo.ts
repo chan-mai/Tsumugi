@@ -4,17 +4,13 @@ import type { NormalizedSchedule } from '../core/recurring.js';
 import { applySchedulerSchema, type ScheduleRow } from './scheduler-schema.js';
 import { schedule, schedulerSetting, type ScheduleRecord } from './scheduler-tables.js';
 
-/** 発火の記録, jobとflowで使用する列が入れ替わる */
 export type FiredPatch = {
 	occurrence: number;
 	jobId?: string;
 	runId?: string;
 };
 
-/**
- * Scheduler DOのSQLiteとの仲介
- * 次回時刻の計算はcore/recurring.tsが持ち、ここは読み書きのみ(ADR-0018)
- */
+/** SQLite読み書きのみ, 次回時刻計算はcore/recurring.ts(ADR-0018) */
 export class SchedulerRepo {
 	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
 	readonly sql: SqlStorage;
@@ -60,7 +56,6 @@ export class SchedulerRepo {
 			.run();
 	}
 
-	/** 定義変更の反映, 間隔が変わった場合だけnextRunAtを渡して更新 */
 	updateSpec(spec: NormalizedSchedule, nextRunAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
@@ -86,7 +81,6 @@ export class SchedulerRepo {
 			.run();
 	}
 
-	/** 発火時刻を迎えた行, 予定の早い順に有界で読む, 一時停止中は対象外 */
 	due(now: number, limit: number): ScheduleRow[] {
 		return this.db
 			.select()
@@ -98,7 +92,6 @@ export class SchedulerRepo {
 			.map(this.#toRow);
 	}
 
-	/** 次のalarmを設定する時刻, 一時停止中を除き行が無ければnull */
 	minNextRunAt(): number | null {
 		const row = this.db
 			.select({ min: sql<number | null>`min(${schedule.nextRunAt})` })
@@ -108,7 +101,6 @@ export class SchedulerRepo {
 		return row?.min ?? null;
 	}
 
-	/** 一時停止の切り替え, 再開で予定が経過済みならnextRunAtで再計算値を受ける */
 	setPaused(name: string, paused: boolean, nextRunAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
@@ -117,7 +109,6 @@ export class SchedulerRepo {
 			.run();
 	}
 
-	/** 発火の記録, nextRunAtがnullなら手動発火で予定を進めない */
 	markFired(name: string, fired: FiredPatch, nextRunAt: number | null, now: number): void {
 		this.db
 			.update(schedule)
@@ -147,7 +138,6 @@ export class SchedulerRepo {
 			.run();
 	}
 
-	/** 失敗の記録, nextRunAtがnullなら行を進めず次のtickで再試行 */
 	markError(name: string, message: string, nextRunAt: number | null, now: number): void {
 		this.db
 			.update(schedule)

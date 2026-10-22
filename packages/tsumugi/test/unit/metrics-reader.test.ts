@@ -4,7 +4,6 @@ import { bindingSql, MetricsQueryError, parseMetricsQuery, readMetrics, seriesSq
 const config = { accountId: 'acct', apiToken: 'token', dataset: 'tsumugi_jobs' };
 const parse = (query: string) => parseMetricsQuery(new URL(`https://example.test/api/metrics${query}`));
 
-/** SQL APIの応答を差し替える, 送ったSQLも記録 */
 function stub(responses: unknown[], status = 200) {
 	const sent: string[] = [];
 	let at = 0;
@@ -32,7 +31,7 @@ describe('集計の区間と抽出条件', () => {
 	});
 
 	it('binding名として成立しない値を拒否する', () => {
-		// SQLへ直接埋め込む値で、入口で文字種を限定
+		// SQLへ直接埋め込む値、受付時に文字種を限定
 		for (const binding of ["MAIL' OR '1'='1", 'MAIL;DROP', '1MAIL', 'MA IL']) {
 			expect(parse(`?binding=${encodeURIComponent(binding)}`), binding).toEqual({ error: 'binding is not a valid name' });
 		}

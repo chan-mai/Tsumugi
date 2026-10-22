@@ -3,14 +3,9 @@ import { detectWranglerConfig, type ConfigFormat } from './config-file.js';
 import type { CliDeps } from './index.js';
 import { init, resolveWorkerName } from './init.js';
 
-/**
- * 引数なし起動の対話モード
- *
- * 入力を集めて`init` / `addPerformer`を呼ぶだけの薄い層
- * 対話の口は`Prompts`で受け取り、テストは台本を返す代替実装で検査
- */
+// 入力は`Prompts`経由, テストは固定応答の代替実装で検査
 
-/** キャンセルはundefinedで返す */
+/** キャンセルはundefined */
 export type Prompts = {
 	select<T extends string>(message: string, options: readonly { value: T; label: string }[]): Promise<T | undefined>;
 	text(message: string, initial: string): Promise<string | undefined>;
@@ -37,7 +32,6 @@ async function tuiInit(prompts: Prompts, deps: CliDeps): Promise<number> {
 		format = picked;
 	}
 
-	// 書き込みとリソース作成の前に必ず確認を実施
 	const summary = existing
 		? `create a queue and a D1 database named "${name.trim()}" and print a config fragment?`
 		: `create a queue and a D1 database named "${name.trim()}" and write wrangler.${format} and src/?`;

@@ -1,7 +1,4 @@
-/**
- * scheduleの型レベル検証, 実行時テストではなく`tsc --noEmit`で検査
- * binding名とflow名からpayloadとinputの型が決まるかがここの主眼(ADR-0040)
- */
+// scheduleの型レベル検証, `tsc --noEmit`で検査
 import { Performer } from '../../src/performer/entrypoint.js';
 import type { JobContext } from '../../src/core/api.js';
 import { createFlow } from '../../src/core/flow.js';
@@ -13,12 +10,10 @@ class Poll extends Performer<{ prefix: string }, { names: string[] }> {
 	}
 }
 
-/** 顧客単位の直列化用にconcurrencyKeyを必須化 */
 class Charge extends Performer<{ customerId: string }, void, { concurrencyKey: true }> {
 	async perform(_payload: { customerId: string }, _ctx: JobContext) {}
 }
 
-/** uniqueKey必須のperformerはscheduleに使えない(ADR-0040) */
 class Sync extends Performer<{ sku: string }, void, { uniqueKey: true }> {
 	async perform(_payload: { sku: string }, _ctx: JobContext) {}
 }
@@ -36,18 +31,14 @@ export const positives = defineTsumugi({
 	performers,
 	flows,
 	schedules: {
-		// payloadの型はbindingから決まる
 		'poll-fixed': { binding: 'POLL', payload: { prefix: 'a' }, everyMs: 60_000 },
-		// 写像関数は発火の予定時刻を受け取る, 戻り値の型も同じく縛られる
 		'poll-fn': {
 			binding: 'POLL',
 			payload: ({ scheduledAt }) => ({ prefix: `a-${scheduledAt}` }),
 			cron: '0 * * * *',
 			timeZone: 'Asia/Tokyo',
 		},
-		// 必須のconcurrencyKeyはscheduleでも必要
 		charge: { binding: 'CHARGE', payload: { customerId: 'c1' }, concurrencyKey: 'c1', everyMs: 3_600_000 },
-		// inputの型はflowから決まる
 		nightly: { flow: 'REPORT', input: ({ scheduledAt }) => ({ until: scheduledAt }), cron: '0 3 * * *', overlap: 'overlap' },
 	},
 });

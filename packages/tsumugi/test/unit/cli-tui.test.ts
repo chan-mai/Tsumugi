@@ -2,15 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { runTui, type Prompts } from '../../src/cli/tui.js';
 import { makeDeps, ok } from './cli-harness.js';
 
-// 対話モードは入力を集めて同じinit / addPerformerを呼ぶだけの層
-// 確認より前に書き込みやwranglerの実行が発生しないことをここで保証
-
 const DATABASE_ID = '9945ba53-b1cb-45a2-8f01-c650518c2f2a';
 const d1Script = (args: readonly string[]) => (args[0] === 'd1' && args[1] === 'create' ? ok(`{ "database_id": "${DATABASE_ID}" }`) : ok());
 
 type Script = { selects?: string[]; texts?: (string | undefined)[]; confirms?: (boolean | undefined)[] };
 
-/** 台本の値を順に返す, textの空文字は既定値の受け入れとして扱う */
 const scripted = (script: Script): Prompts => {
 	const selects = [...(script.selects ?? [])];
 	const texts = [...(script.texts ?? [])];
@@ -32,7 +28,6 @@ describe('対話モードのinit', () => {
 
 		expect(await runTui(prompts, deps)).toBe(0);
 
-		// 名前の既定値はディレクトリ名(/projのbasename)
 		expect(fs.read('/proj/wrangler.jsonc')).toContain('"name": "proj"');
 		expect(fs.read('/proj/wrangler.jsonc')).toContain(DATABASE_ID);
 	});
@@ -46,7 +41,7 @@ describe('対話モードのinit', () => {
 	});
 
 	it('既存の設定があれば形式を確認しない', async () => {
-		// 台本のselectは1回分しか無い, 形式を聞くとundefinedになりこのテストが落ちる
+		// 台本のselectは1回分のみ, 形式の質問時はundefinedで失敗
 		const { deps, fs, logs } = makeDeps(d1Script);
 		fs.write('/proj/wrangler.toml', 'name = "existing-app"\n');
 		const prompts = scripted({ selects: ['init'], texts: [''], confirms: [true] });

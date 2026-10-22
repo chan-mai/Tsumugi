@@ -1,4 +1,3 @@
-// 型のみのエントリ, ランタイムコードなし
 export type { JobLogEntry } from '../core/log.js';
 export type {
 	ActiveState,

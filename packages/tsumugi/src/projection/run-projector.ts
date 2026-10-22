@@ -5,12 +5,7 @@ import { run, runNode } from './run-tables.js';
 
 export type RunOutboxRow = { seq: number; kind: string; target: string; snapshot: string };
 
-/**
- * runの読み取りモデルへの投影(ADR-0008)
- *
- * ジョブ側と同じく`excluded.seq > seq`で古い状態の上書きを防止
- * 同じ範囲を何度処理しても結果は不変で、送信の再試行が安全
- */
+// ジョブ側と同じく`excluded.seq > seq`で古い状態の上書き防止, 送信再試行も安全
 function toRunValues(snapshot: RunSnapshot, seq: number): typeof run.$inferInsert {
 	return {
 		id: snapshot.id,

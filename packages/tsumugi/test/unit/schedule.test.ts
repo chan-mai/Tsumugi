@@ -178,8 +178,7 @@ describe('concurrencyKey単位の上限(ADR-0009)', () => {
 	});
 
 	it('上限に達したキーが他のキーの投入を止めない', () => {
-		// 実装がcontinueではなくbreakしていると'c'が投入されず,
-		// 1テナントが全体を止める事故につながる
+		// continueでなくbreakでは'c'が未投入, 1テナントが全体を停止
 		const jobs = [
 			job({ id: 'a', concurrencyKey: 'cust-1' }),
 			job({ id: 'b', concurrencyKey: 'cust-1' }),
@@ -221,7 +220,6 @@ describe('レート制限(ADR-0009)', () => {
 		const out = schedule({
 			now: T0,
 			jobs: [job({ id: 'a' })],
-			// 毎分60トークン= 1トークン/秒
 			policy: policy({ rate: { tokens: 60, intervalMs: 60_000 } }),
 			bucket: { tokens: 0, refilledAt: T0 },
 		});
@@ -236,7 +234,6 @@ describe('レート制限(ADR-0009)', () => {
 			policy: policy({ rate: { tokens: 60, intervalMs: 60_000 } }),
 			bucket: { tokens: 0, refilledAt: T0 },
 		});
-		// 5秒で5トークン回復し,1件消費して4
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
 		expect(out.bucket.tokens).toBeCloseTo(4, 5);
 	});
@@ -285,7 +282,6 @@ describe('キー単位のレート制限(ADR-0045)', () => {
 			policy: policy({ perKeyConcurrency: 10, rate: { tokens: 60, intervalMs: 60_000 }, perKeyRate: perKey }),
 			bucket: { tokens: 1, refilledAt: T0 },
 		});
-		// 1トークンで'a'のみ, 残りtokensでbreak
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
 		expect(out.blocked.tokens).toBe(true);
 	});
@@ -298,7 +294,6 @@ describe('キー単位のレート制限(ADR-0045)', () => {
 			bucket: unlimited,
 			keyBuckets: { 'cust-1': { tokens: 0, refilledAt: T0 } },
 		});
-		// 5秒で5トークン回復, 1件消費して4
 		expect(ids(out.decisions, 'dispatch')).toEqual(['a']);
 		expect(out.keyBuckets['cust-1']?.tokens).toBeCloseTo(4, 5);
 	});
@@ -324,7 +319,7 @@ describe('キー単位のレート制限(ADR-0045)', () => {
 			bucket: unlimited,
 			keyBuckets: { 'cust-1': { tokens: 0, refilledAt: T0 } },
 		});
-		// 上限まで回復したキーは出力から消え保存側の削除対象
+		// 上限まで回復したキーは出力から除外, 保存側の削除対象
 		expect(out.keyBuckets).toEqual({});
 
 		const disabled = schedule({
@@ -364,11 +359,7 @@ describe('優先度とエージング(ADR-0019 / ADR-0020)', () => {
 	});
 
 	it('エージング有効なら,十分待った低優先が高優先を追い越す', () => {
-		const jobs = [
-			// 10分待機,1分ごとに+1で実効優先度10
-			job({ id: 'old-low', priority: 0, createdAt: T0 - 600_000 }),
-			job({ id: 'new-high', priority: 5, createdAt: T0 }),
-		];
+		const jobs = [job({ id: 'old-low', priority: 0, createdAt: T0 - 600_000 }), job({ id: 'new-high', priority: 5, createdAt: T0 })];
 		const out = schedule({
 			now: T0,
 			jobs,
@@ -379,11 +370,7 @@ describe('優先度とエージング(ADR-0019 / ADR-0020)', () => {
 	});
 
 	it('追い越しの境界:まだ足りなければ追い越さない', () => {
-		const jobs = [
-			// 4分待機で実効優先度4 < 5
-			job({ id: 'old-low', priority: 0, createdAt: T0 - 240_000 }),
-			job({ id: 'new-high', priority: 5, createdAt: T0 }),
-		];
+		const jobs = [job({ id: 'old-low', priority: 0, createdAt: T0 - 240_000 }), job({ id: 'new-high', priority: 5, createdAt: T0 })];
 		const out = schedule({
 			now: T0,
 			jobs,
@@ -418,7 +405,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('生存報告があれば期限が延びる', () => {
-		// 所要時間が入力で変わるジョブに合わせてtimeoutMsを伸ばさずに済む
+		// 所要時間が入力依存のジョブでもtimeoutMs延長不要
 		const jobs = [dispatched({ id: 'a', heartbeatAt: T0 + 60_000 })];
 
 		expect(schedule({ now: T0 + 120_000, jobs, policy: policy(), bucket: unlimited }).decisions).toEqual([]);
@@ -430,7 +417,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('投入より前の生存報告では期限を縮めない', () => {
-		// 再投入で報告が消えなかった場合でも, 判定の前倒しは禁止
+		// 再投入後に報告が残存しても判定の前倒しは禁止
 		const out = schedule({
 			now: T0 + 90_000 - 1,
 			jobs: [dispatched({ id: 'a', heartbeatAt: T0 - 60_000 })],
@@ -441,7 +428,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('at-most-onceは再投入せずSTALLEDにする', () => {
-		// Queues自体がat-least-onceで、再投入すると二重実行になり得る
+		// Queues自体がat-least-once、再投入は二重実行の可能性
 		const out = schedule({
 			now: T0 + 90_000,
 			jobs: [dispatched({ id: 'a', guarantee: 'at-most-once' })],
@@ -462,7 +449,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	});
 
 	it('回収で空いた分は,同じtickで他のジョブが使える', () => {
-		// 応答しないジョブに上限を占有させ続ける方が害が大きい
+		// 無応答ジョブによる上限の占有継続の方が影響大
 		const jobs = [dispatched({ id: 'stuck' }), job({ id: 'waiting' })];
 		const out = schedule({ now: T0 + 90_000, jobs, policy: policy({ concurrency: 1 }), bucket: unlimited });
 		expect(ids(out.decisions, 'reap')).toEqual(['stuck']);
@@ -496,8 +483,7 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 
 describe('nextAlarmAt', () => {
 	it('投入したジョブの無応答判定時刻を含める', () => {
-		// 入力のスナップショットでは投入対象はまだSCHEDULEDで, nextSilenceには現れない
-		// この予定が無いと投入後のDO起動の予定が立たず、応答が無いジョブは永久に未回収
+		// 投入対象は入力時点でSCHEDULED, この予定なしでは無応答ジョブが永久に未処理
 		const out = schedule({
 			now: T0,
 			jobs: [job({ id: 'a', timeoutMs: 60_000 })],
@@ -520,7 +506,6 @@ describe('nextAlarmAt', () => {
 			job({ id: 'inflight', state: 'QUEUED', dispatchedAt: T0, timeoutMs: 1_000 }),
 		];
 		const out = schedule({ now: T0, jobs, policy: policy({ reaperGraceMs: 30_000 }), bucket: unlimited });
-		// 5秒後vs無応答判定31秒後-> 5秒後
 		expect(out.nextAlarmAt).toBe(T0 + 5_000);
 	});
 
@@ -586,7 +571,6 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			bucket: unlimited,
 		});
 		expect(out.decisions).toEqual([]);
-		// 無応答判定(T0+90_000)より早い
 		expect(out.nextAlarmAt).toBe(T0 + 5_000 + 30_000);
 	});
 
@@ -601,7 +585,7 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 	});
 
 	it('期限切れが要求より優先される', () => {
-		// どちらもCANCELLEDで帰結は同じ, 理由の区別だけを固定(ADR-0047)
+		// どちらもCANCELLED, 理由の区別のみ固定(ADR-0047)
 		const out = schedule({
 			now: T0 + 35_000,
 			jobs: [dispatched({ id: 'a', cancelRequestedAt: T0 + 5_000, expiresAt: T0 + 20_000 })],
@@ -626,7 +610,7 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 	});
 
 	it('要求済みのSCHEDULEDは投入せずcancelで終了する', () => {
-		// 回収のCASと要求が交錯した残留分の検証
+		// reapのCASと要求の競合で残った分の検証
 		const out = schedule({
 			now: T0,
 			jobs: [job({ id: 'a', cancelRequestedAt: T0 - 1_000 })],

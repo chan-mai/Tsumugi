@@ -6,19 +6,13 @@ import type { Decision, JobState, JobView, ScheduleInput } from '../../src/core/
 import { scheduleInput } from './schedule-arbitraries.js';
 import { expectedDispatchIds } from './schedule-model.js';
 
-/**
- * schedule()の不変条件をproperty-based testで固める
- *
- * テーブル駆動は境界を突くが組み合わせの隙間が空く
- * perKeyConcurrency > 1やreaperとレート制限の同時発火の検査はここが初めて
- */
+// テーブル駆動では組み合わせの網羅不足, perKeyConcurrency > 1やreaperとレート制限の同時発火はここで検査
 
 const RUNS = 500;
 
 const activeById = (input: ScheduleInput) => new Map(input.jobs.map((j) => [j.id, j]));
 const dispatches = (decisions: Decision[]) => decisions.filter((d) => d.type === 'dispatch');
 
-/** 回収後にin-flightとして残るジョブ数, 投入可能数の基準 */
 function inFlightAfterReap(input: ScheduleInput, decisions: Decision[]): number {
 	const reaped = new Set(decisions.filter((d) => d.type !== 'dispatch').map((d) => d.id));
 	return input.jobs.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id)).length;
@@ -57,7 +51,7 @@ describe('schedule()の不変条件', () => {
 				}
 
 				for (const [key, count] of after) {
-					// 既にスナップショットが上限を超えていてもdispatchで増やさなければ許容
+					// スナップショットが上限超過でもdispatchで不増なら許容
 					const ceiling = Math.max(input.policy.perKeyConcurrency, existing.get(key) ?? 0);
 					expect(count, `key ${key}`).toBeLessThanOrEqual(ceiling);
 				}
@@ -94,7 +88,6 @@ describe('schedule()の不変条件', () => {
 				}
 				for (const [key, count] of counts) {
 					const stored = input.keyBuckets?.[key];
-					// 格納が無いキーは補充済み, 有れば補充後の残量が上限
 					const refilled =
 						stored === undefined
 							? rate.tokens
@@ -182,7 +175,7 @@ describe('schedule()の不変条件', () => {
 	});
 
 	it('dispatchの決定が独立な参照モデルと一致する', () => {
-		// 上限だけの検査は上限を広げる変異を相殺で見逃す, あるべき結果を実装と別に計算して丸ごと突き合わせる
+		// 上限のみの検査では上限を広げる変異の検出漏れ, 期待結果を独立に算出し全体を照合
 		fc.assert(
 			fc.property(scheduleInput, (input) => {
 				const actual = dispatches(schedule(input).decisions).map((d) => d.id);
@@ -206,7 +199,7 @@ describe('schedule()の不変条件', () => {
 	});
 
 	it('取り消し要求済みのジョブはdispatchされない', () => {
-		// 要求はreapでは消えず、SCHEDULEDへ戻った後も投入せずcancelで終了(#95)
+		// 要求はreap後も保持、SCHEDULEDへ戻った後も投入なしでcancel(#95)
 		fc.assert(
 			fc.property(scheduleInput, (input) => {
 				const out = schedule(input);
@@ -220,7 +213,6 @@ describe('schedule()の不変条件', () => {
 	});
 });
 
-/** 決定的なシャッフル, seedからの単純な並べ替え */
 function shuffle(jobs: readonly JobView[], seed: number): JobView[] {
 	return [...jobs]
 		.map((job, i) => ({ job, key: Math.sin(seed + i) }))

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-/** 選択状態の印, 押下の扱いは呼び出し側のbuttonが持つ */
 defineProps<{ checked: boolean }>();
 </script>
 

@@ -1,19 +1,11 @@
 import { OPENAPI_DOCUMENT } from '@tsumugi/spec';
 
-/**
- * REST APIのOpenAPI定義
- *
- * 定義の原本は`packages/spec`のTypeSpecで、ビルドが文書を`@tsumugi/spec`へ出力(ADR-0038)
- * ここは版の注入のみ, `/api/openapi.json`が返す内容そのもの
- */
+// 定義原本は`packages/spec`のTypeSpec, ビルドで`@tsumugi/spec`へ出力(ADR-0038)
 
-/**
- * 定義に載せる版
- * package.jsonは実行時に読めず写しを保持, ずれは単体テストで検査
- */
+// package.jsonは実行時読込不可で写しを保持, 差異は単体テストで検査
 export const API_VERSION = '0.10.1';
 
-/** 3.1のJSON Schemaに沿う最小の型, 生成器へそのまま渡す前提で構造は緩いまま維持 */
+/** 3.1のJSON Schema準拠の最小型, 生成器へ直接渡す前提で構造は緩く維持 */
 export type OpenApiDocument = {
 	openapi: string;
 	info: { title: string; version: string; description?: string };
@@ -22,7 +14,6 @@ export type OpenApiDocument = {
 	security?: Record<string, string[]>[];
 };
 
-/** 生成した文書は版を持たず, ここで実際の版を設定 */
 export function openapiDocument(): OpenApiDocument {
 	return { ...OPENAPI_DOCUMENT, info: { ...OPENAPI_DOCUMENT.info, version: API_VERSION } };
 }

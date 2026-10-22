@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { requiredAsMissing } from '../../src/config/validate.js';
 import { configFragment, configFragmentToml, DEFAULT_MIGRATIONS_DIR } from '../../src/config/fragment.js';
 
-// 断片は起動時検証とCLIの2経路から使われる(ADR-0036)
-// 値の埋め込みがプレースホルダ経路を破損すると検証側のメッセージが崩れ、両方の出力を検査
+// 断片は起動時検証とCLIの2経路で使用(ADR-0036)
 
-/** initの新規生成が渡す実測値 */
 const values = { databaseId: '9945ba53-b1cb-45a2-8f01-c650518c2f2a', databaseName: 'my-jobs', queueName: 'my-jobs', migrationTag: 'v1' };
 
 describe('必須bindingの不足化', () => {
@@ -26,7 +24,7 @@ describe('必須bindingの不足化', () => {
 
 describe('実測値の埋め込み', () => {
 	it('database_idをそのまま書き込む', () => {
-		// 手で貼り直させると転記の誤りが入る(ADR-0036)
+		// 手動転記での誤り防止(ADR-0036)
 		const fragment = configFragment(requiredAsMissing(), values);
 		expect(fragment).toContain(`"database_id": "${values.databaseId}"`);
 		expect(fragment).toContain('"database_name": "my-jobs"');
@@ -54,7 +52,7 @@ describe('実測値の埋め込み', () => {
 	});
 
 	it('省略した項目はプレースホルダと指示コメントのまま', () => {
-		// 起動時検証は値を持たず、従来の出力が変わらないことを保証
+		// 起動時検証は値なし、プレースホルダ出力の維持を保証
 		const fragment = configFragment(requiredAsMissing());
 		expect(fragment).toContain('"database_id": "<id>"');
 		expect(fragment).toContain('paste database_id');

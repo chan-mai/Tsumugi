@@ -25,33 +25,28 @@ import { project } from '../projection/projector.js';
 import { JobRepo, RESULT_MAX_CHARS } from './repo.js';
 import type { JobRow } from './schema.js';
 
-/**
- * performの戻り値を保存用のJSON文字列へ変換(#9)
- * 戻り値なし/非直列化/上限超過はnull, 大きい結果はperformerがR2等へ書く運用
- */
 function serializeResult(value: unknown): string | null {
 	if (value === undefined) return null;
 	let text: string | undefined;
 	try {
 		text = JSON.stringify(value);
 	} catch {
-		// 循環参照等の直列化不能な値は保存対象外
 		return null;
 	}
 	if (text === undefined || text.length > RESULT_MAX_CHARS) return null;
 	return text;
 }
 
-/** Queuesへ送るメッセージ, ペイロード同梱でconsumerによるDO参照が不要 */
+/** payload同梱でconsumerのDO参照不要 */
 export type DispatchMessage = {
 	jobId: string;
 	binding: string;
 	attempt: number;
 	payload: unknown;
 	timeoutMs: number;
-	/** at-most-onceのジョブは実行前にclaimの取得が必要(ADR-0007) */
+	/** at-most-onceは実行前にclaim必須(ADR-0007) */
 	claimRequired: boolean;
-	/** 実行開始の期限, consumerが実行の直前に判定 */
+	/** 実行開始期限, consumerが実行直前に判定 */
 	expiresAt: number | null;
 	traceparent?: string;
 };
@@ -59,43 +54,40 @@ export type DispatchMessage = {
 export type ShardEnv = {
 	TSUMUGI_QUEUE: Queue<DispatchMessage>;
 	TSUMUGI_DB: D1Database;
-	/** 任意, 未設定ならメトリクスは無効 */
+	/** 未設定時メトリクス無効 */
 	TSUMUGI_METRICS?: AnalyticsEngineDataset;
-	/** 任意, flowsを使う場合のみ必要な完了通知の宛先(ADR-0031) */
+	/** flows利用時の完了通知先(ADR-0031) */
 	RUN?: DurableObjectNamespace<RunStub>;
-	/** 失敗の通知先への投入で自分自身を参照(#30) */
+	/** 通知投入用の自己参照(#30) */
 	JOB_SHARD?: DurableObjectNamespace<FailureNotifyStub>;
 };
 
-/** 失敗の通知先へ投入する面, DO本体の型を使うと型の展開が過剰に深い(#30) */
+/** 通知投入用の型, DO本体の型は展開が過剰に深い(#30) */
 export interface FailureNotifyStub extends Rpc.DurableObjectBranded {
 	enqueueMany(inputs: readonly EnqueueInput[]): Promise<string[]>;
 }
 
 /**
- * retry / cancelの結果
- * `requested`は取り消しを要求として受理した状態(ADR-0052), 遷移は応答か期限で確定
- * `gone`は保持期間を過ぎてDOから消えた状態, 一覧はD1由来で画面には残存(ADR-0027)
+ * `requested`は取り消し要求の受理(ADR-0052), 応答か期限で遷移確定
+ * `gone`は保持期間経過でDOから削除済み, 一覧はD1由来で残存(ADR-0027)
  */
 export type MutationResult = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' };
 
-/** まとめて処理した結果, 失敗の理由は個別のretry / cancelと同じ区別 */
 export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' };
 export type BulkResult = { ok: string[]; failed: BulkFailure[] };
 
-/** DOに持たせる設定,流量制御と保持期間 */
 export type ShardSettings = {
 	policy?: Partial<Policy>;
-	/** 済んだジョブ(COMPLETED / CANCELLED)をDOに残す時間, 既定5分 */
+	/** COMPLETED / CANCELLEDのDO保持時間, 既定5分 */
 	sweepAfterMs?: number;
 	/**
-	 * 失敗ジョブ(FAILED / STALLED)をDOに残す時間, 既定7日
-	 * 手動リトライを受け付ける期間, 短くすると一覧に見えるのに再開できないジョブが発生(ADR-0027)
+	 * FAILED / STALLEDのDO保持時間, 既定7日
+	 * 手動リトライ可能期間, 短縮時は一覧にあり再開不能なジョブが発生(ADR-0027)
 	 */
 	failedRetentionMs?: number;
-	/** 失敗を知らせる先のbinding(#30), nullは解除, 省略は現状維持 */
+	/** 失敗通知先binding(#30), nullは解除, 省略は現状維持 */
 	failureBinding?: string | null;
-	/** 終端を知らせる宛先と対象(#96), nullは解除, 省略は現状維持 */
+	/** 終端通知の宛先と対象(#96), nullは解除, 省略は現状維持 */
 	settled?: SettledTarget | null;
 };
 
@@ -112,20 +104,16 @@ export type EnqueueInput = {
 	backoff?: Backoff;
 	delayMs?: number;
 	runAt?: number;
-	/** 絶対時刻での期限, 経過後は実行せずCANCELLED */
+	/** 絶対時刻の期限, 経過後は実行せずCANCELLED */
 	expiresAt?: number;
-	/** 投入時刻からの相対の期限, expiresAtとは排他 */
+	/** 投入時刻からの相対期限, expiresAtと排他 */
 	expiresInMs?: number;
-	/** uniqueKeyの予約を保持する期間, 経過後は同じキーでも新規ジョブ */
+	/** uniqueKey予約の保持期間, 経過後は同キーでも新規ジョブ */
 	uniqueForMs?: number;
-	/** 分割している場合の投入先の決定に使う(ADR-0011) */
+	/** 分割時の投入先決定用(ADR-0011) */
 	partitionKey?: string;
-	/**
-	 * ジョブIDの指定
-	 * Run DOがノードを投入する時に使用, 同じIDの再投入は既存を返し二重投入を防止(ADR-0029)
-	 */
+	/** Run DOのノード投入用ID, 同ID再投入は既存IDを返却(ADR-0029) */
 	id?: string;
-	/** 完了をどのrunのどのノードとして知らせるか(ADR-0031) */
 	runId?: string;
 	nodeId?: string;
 };
@@ -156,45 +144,33 @@ const DEFAULTS: {
 	uniqueForMs: 24 * 60 * 60 * 1_000,
 };
 
-/**
- * 1 tickで扱うジョブ数の上限
- * alarmのwall time上限は15分, tickは必ず有界にし残りは次のtickへ送る
- */
+// alarmのwall time上限15分, 残りは次tick
 const TICK_LIMIT = 200;
 
-/** tickの後段(投影, 通知, 削除)が失敗した場合の再試行間隔 */
 const STAGE_RETRY_MS = 5_000;
 
-/** 1回の投影で処理するアウトボックスの上限, D1のバッチ上限とtickの時間に配慮 */
+// D1バッチ上限とtick時間を考慮
 const PROJECTION_LIMIT = 200;
 
-/** 1回のtickでRun DOへ送る通知の上限(ADR-0031) */
 const NOTIFY_LIMIT = 200;
 
-/** Cloudflare Queuesのプロデューサ側上限, 1回のsendBatchは100件まで, これを超えるTICK_LIMITぶんは分割 */
+// Queuesプロデューサ側のsendBatch上限
 const SEND_BATCH_LIMIT = 100;
 
-/** 1 tickで削除する終端ジョブの上限, tickを有界に維持 */
 const SWEEP_LIMIT = 200;
 
-/** 1回のtickで投入する失敗の通知の上限(#30) */
 const FAILURE_NOTIFY_LIMIT = 200;
 
-/** 1回のtickで投入する終端の通知の上限(#96) */
 const SETTLED_NOTIFY_LIMIT = 200;
 
-/** 宛先を置く設定のキー(#30) */
 const FAILURE_BINDING_KEY = 'failure_binding';
 
 const BUCKET_KEY = 'rate_bucket';
 
-/** 済んだジョブをDOに残す時間, 投影が追いつく余裕を考慮し既定5分 */
+// 投影遅延考慮
 const DEFAULT_SWEEP_AFTER_MS = 5 * 60 * 1000;
 
-/**
- * 失敗ジョブをDOに残す時間, 既定7日
- * D1の読み取りモデルの既定と揃える, 揃えないと一覧に見えるのに再開できないジョブが発生(ADR-0027)
- */
+/** D1読み取りモデル既定と同値, 不一致時は一覧にあり再開不能なジョブが発生(ADR-0027) */
 export const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function retentionOf(settings: ShardSettings): Retention {
@@ -205,26 +181,22 @@ function retentionOf(settings: ShardSettings): Retention {
 }
 
 /**
- * ジョブの調停役(ADR-0002)
- *
- * 判断は`core/schedule.ts`の純粋関数が担当、ここはSQLiteとの仲介のみ(ADR-0018)
- * 時刻は必ず`this.clock`経由で取得, `Date.now()`の直接呼び出しはテスト不能
+ * 判断は`core/schedule.ts`の純粋関数, 本クラスはSQLite入出力のみ(ADR-0018)
+ * 時刻は`this.clock`経由, `Date.now()`直接呼び出しはテスト不能
  */
 export class TsumugiJobShard extends DurableObject<ShardEnv> {
-	/** テストから差し替えるためpublicにしている */
+	/** テスト差し替え用にpublic */
 	clock: Clock = systemClock;
 	policy: Policy = DEFAULT_POLICY;
-	/** 失敗を知らせる先, 設定から届く(#30) */
 	#failureBinding: string | null = null;
 	retention: Retention = { doneMs: DEFAULT_SWEEP_AFTER_MS, failedMs: DEFAULT_FAILED_RETENTION_MS };
 
 	#repo: JobRepo | undefined;
 	#bucket: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 };
 	#bucketLoaded = false;
-	// falseならkey_bucketは空, perKeyRate無効時の存在確認
+	// falseならkey_bucket空, perKeyRate無効時の確認省略用
 	#keyBucketsMaybePresent = true;
 	#policyLoaded = false;
-	/** 直近tickで投入が止まった制約, 診断で外部へ公開(#10) */
 	#lastBlocked: BlockedBy = { paused: false, capacity: false, tokens: false, perKey: false, perKeyTokens: false };
 	#blockedLoaded = false;
 
@@ -233,7 +205,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return this.#repo;
 	}
 
-	/** 自分が何番のshardかは名前から読む,ルーティングの判断はworker側が持つ */
+	/** ルーティング判断はworker側 */
 	get shardIndex(): number {
 		const name = this.ctx.id.name;
 		if (!name) return 0;
@@ -243,7 +215,6 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
 	}
 
-	/** ポリシーはSQLiteに配置, tickの同期読み取り用 */
 	#loadPolicy(): void {
 		if (this.#policyLoaded) return;
 		const raw = this.repo.readSetting('settings');
@@ -257,28 +228,21 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	async configure(settings: ShardSettings): Promise<void> {
-		// configure()は実行時の意思, 静的設定より優先する印を付与(#6)
+		// 実行時設定, 静的設定より優先のpin付与(#6)
 		this.#applySettings(settings, true);
 	}
 
-	/**
-	 * 実行時の流量変更(#27)
-	 * 渡した項目だけを今の設定へ重ね、残りは不変
-	 * 変更は静的設定より優先, configure()と同じくpinを設定(#6)
-	 */
+	/** configure()同様pin設定で静的設定より優先(#6) */
 	async updatePolicy(patch: Partial<Policy>): Promise<Policy> {
 		this.#loadPolicy();
 		const settings = this.#currentSettings();
 		this.#applySettings({ ...settings, policy: { ...settings.policy, ...patch } }, true);
-		// 停止した場合も予定は再設定, 回収の予定まで消すと実行中のジョブが未回収のまま残存
+		// 停止時もalarm再設定, 無いと実行中ジョブがreaper未処理で残存
 		await this.#armAlarm(this.clock.now());
 		return this.policy;
 	}
 
-	/**
-	 * 実行時の設定を破棄して静的設定へ復帰(#27)
-	 * pinの解除のみで既定への上書きはなし, 次の投入に同梱された設定がそのまま有効(#6)
-	 */
+	/** pin解除後は次の投入同梱の静的設定が有効(#6) */
 	async resetPolicy(): Promise<void> {
 		this.repo.deleteSetting('settings_pinned');
 		this.repo.deleteSetting('settings');
@@ -287,33 +251,28 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		await this.#armAlarm(this.clock.now());
 	}
 
-	/** 今の設定, 保存が無ければ既定から構築 */
 	#currentSettings(): ShardSettings {
 		const raw = this.repo.readSetting('settings');
 		return raw ? (JSON.parse(raw) as ShardSettings) : { policy: this.policy };
 	}
 
 	/**
-	 * 運用診断(#10)
-	 * activeは稼働中ジョブのバックログの深さ, outboxは投影の滞留, blockedは直近tickで投入が止まった制約
-	 * 緩和対象の外部からの判断用(ADR-0009)
+	 * 運用診断(#10), 外部からの緩和対象判断用(ADR-0009)
+	 * activeは稼働中ジョブ数, outboxは投影の滞留数, blockedは直近tickの投入停止要因
 	 */
 	async diagnostics(): Promise<{ active: number; outbox: number; blocked: BlockedBy; policy: Policy }> {
 		this.#loadPolicy();
 		this.#loadBlocked();
-		// 現在適用中の値を返す, 画面は変更の前後をこれで確認(#27)
+		// 適用中のpolicy, 画面での変更前後確認用(#27)
 		return { active: this.repo.countActive(), outbox: this.repo.countOutbox(), blocked: this.#lastBlocked, policy: this.policy };
 	}
 
-	/** scheduleのskip判定のための読み取り, 削除済みはnull(ADR-0040) */
+	/** scheduleのskip判定用, 削除済みはnull(ADR-0040) */
 	async stateOf(jobId: string): Promise<string | null> {
 		return this.repo.find(jobId)?.state ?? null;
 	}
 
-	/**
-	 * 永続化した直近blockedを一度だけ読み戻す,無ければfalse既定のまま(#10)
-	 * 軸を追加した後の起動では古い記録に新しい軸が無く、既定へ重ねてから使用(#27)
-	 */
+	// 軸追加前の記録は既定で補完(#27)
 	#loadBlocked(): void {
 		if (this.#blockedLoaded) return;
 		const raw = this.repo.readSetting('last_blocked');
@@ -321,7 +280,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#blockedLoaded = true;
 	}
 
-	// メモリだけで持つとDOの退避で上限へ戻り、設定した流量を超えた投入が発生
+	// SQLite保存, メモリのみではDO退避で上限へ戻り流量超過
 	#loadBucket(): void {
 		if (this.#bucketLoaded) return;
 		const raw = this.repo.readSetting(BUCKET_KEY);
@@ -332,18 +291,16 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#bucketLoaded = true;
 	}
 
-	// tokensが上限の状態は保存対象外, 読み戻し時のrefillで同値になり毎tickの書き込みだけが増加
+	// tokens上限は保存対象外, 読込時のrefillで同値
 	#persistBucket(bucket: Bucket): void {
 		const rate = this.policy.rate;
 		if (rate === null || bucket.tokens >= rate.tokens) return;
 		this.repo.writeSetting(BUCKET_KEY, JSON.stringify(bucket));
 	}
 
-	/**
-	 * キー別バケットの反映(ADR-0045), 保存は使用中の行のみ
-	 * 読んだが出力に無いキー(上限到達)が削除対象
-	 * sweepは選考に入らないまま残った行の削除, tokensが0以上の行はintervalMs以内に上限へ回復
-	 */
+	// 対象は使用中の行のみ(ADR-0045)
+	// 読込済みで出力に無いキー(上限到達)は削除
+	// sweepは選考外で残った行の削除, tokens0以上の行はintervalMs以内に上限到達
 	#persistKeyBuckets(read: KeyBuckets, out: KeyBuckets, now: number): void {
 		const rate = this.policy.perKeyRate;
 		if (rate === null) {
@@ -358,7 +315,6 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.repo.sweepKeyBuckets(now - rate.intervalMs);
 	}
 
-	/** blockedの保存, 変化した時だけ書いて毎tickの書き込みを回避(#10) */
 	#persistBlocked(blocked: BlockedBy): void {
 		this.#loadBlocked();
 		const encoded = JSON.stringify(blocked);
@@ -367,16 +323,13 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.repo.writeSetting('last_blocked', encoded);
 	}
 
-	/**
-	 * 設定の反映, 内容が同じなら書き込みなし(enqueueごとの書き込み増加の回避)
-	 * pinnedはconfigure()由来か, enqueue同梱の静的設定か
-	 * 一度configure()されたら以降の静的設定は無視, 実行時に制限した流量の次の投入での復元を防止(#6)
-	 * 静的設定へ戻すには再度configure()が必要
-	 */
+	// pinnedはconfigure()由来, falseはenqueue同梱の静的設定
+	// pin後は静的設定を無視, 実行時に制限した流量の次の投入での復元防止(#6)
+	// 静的設定への復帰はresetPolicy()
 	#applySettings(settings: ShardSettings, pinned: boolean): void {
 		this.#loadPolicy();
-		// 宛先はpolicyのpinと分離, 流量を固定したshardにも後から追加した宛先が届く(#30)
-		// 省略された場合は今の宛先を維持, 投入の経路ごとに宛先の有無が別
+		// 宛先はpinと独立, pin済みshardにも後から追加した宛先を反映(#30)
+		// 省略時は現宛先維持, 投入経路ごとに宛先の有無が別
 		if (settings.failureBinding !== undefined) this.#writeFailureBinding(settings.failureBinding);
 		if (settings.settled !== undefined) this.repo.writeSettledTarget(settings.settled);
 		if (!pinned && this.repo.readSetting('settings_pinned') === '1') return;
@@ -389,7 +342,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.repo.writeSetting('settings', encoded);
 	}
 
-	/** 宛先はpolicyと寿命が別で別のキーに配置(#30) */
+	// policyと更新契機が別で別キー(#30)
 	#writeFailureBinding(value: string | null): void {
 		this.#failureBinding = value;
 		const stored = this.repo.readSetting(FAILURE_BINDING_KEY);
@@ -405,11 +358,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return id as string;
 	}
 
-	/**
-	 * まとめて投入
-	 * 個別RPCの逐次enqueueはDOの1,000 req/sソフト上限に律速され実測78件/秒が上限
-	 * 上限を回避する唯一の手段で、単発のenqueueもこれを使用
-	 */
+	/** 個別RPCの逐次enqueueはDOの1,000 req/sソフト上限で実測78件/秒 */
 	async enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]> {
 		const traceparents = inputs.map((input) => normalizeTraceparent(input.traceparent));
 		const now = this.clock.now();
@@ -421,7 +370,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		for (const [index, input] of inputs.entries()) {
 			const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createId() });
 
-			// IDを指定した再投入は既存のIDを回答, Run DOの再送での同一ノードのジョブ増加を防止
+			// ID指定の再投入は既存ID返却, Run DO再送での重複防止
 			if (input.id !== undefined && this.repo.find(id)) {
 				ids.push(id);
 				continue;
@@ -430,7 +379,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			if (input.uniqueKey !== undefined) {
 				const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
 				const existing = this.repo.reserveUniqueKey(input.uniqueKey, id, expiresAt, now);
-				// 衝突は正常系として扱い先行するジョブIDを返却, enqueueは冪等(ADR-0021)
+				// 衝突は正常系, 先行ジョブID返却で冪等(ADR-0021)
 				if (existing !== null) {
 					ids.push(existing);
 					continue;
@@ -463,10 +412,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
-	 * consumerからの完了報告
-	 * 失敗ならバックオフを計算してSCHEDULEDへ, 試行回数を使い切っていればFAILED
-	 * performerの`ctx.fail`の指定はバックオフの計算より優先(#91)
-	 * リトライ方針はここが持ち、Queuesの`max_retries`は非適用(ADR-0004)
+	 * performerの`ctx.fail`指定はバックオフ計算より優先(#91)
+	 * リトライ方針は本メソッドで管理, Queuesの`max_retries`は不使用(ADR-0004)
 	 */
 	async report(
 		jobId: string,
@@ -474,22 +421,20 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	): Promise<void> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
-		// 報告を受け付けられる状態かをここで判定
-		// compareAndSetでの判定は記録が遷移の後になり、アウトボックスに履歴が含まれない(ADR-0028)
+		// 受理可否は事前判定, compareAndSet判定では記録が遷移後でoutboxに履歴欠落(ADR-0028)
 		if (!row || (row.state !== 'QUEUED' && row.state !== 'RUNNING')) return;
 
 		const serialized = outcome.ok ? serializeResult(outcome.result) : null;
-		// runのノードでは戻り値が後段のpayloadの材料, 保存できないまま成功にすると警告なくnullが下流へ渡る(ADR-0035)
+		// runノードの戻り値は後段payload, 保存不能のまま成功では後段にnull(ADR-0035)
 		if (outcome.ok && row.run_id !== null && outcome.result !== undefined && serialized === null) {
 			await this.report(jobId, { ok: false, error: `cannot store the result (over ${RESULT_MAX_CHARS} chars or not serializable)` });
 			return;
 		}
 
 		const attempts = row.attempts + 1;
-		// 1回目で成功したジョブの履歴はジョブ行から導出可能で記録は省略
-		// 導出できないのは失敗の理由と試行ごとの時刻だけ, 常時書くと1ジョブあたりの書き込みが1回増える
+		// 初回成功はジョブ行から導出可能で記録省略, 常時記録は書き込み1回増
 		const worthRecording = !outcome.ok || attempts > 1;
-		// 遷移で消えるdispatched_atの開始時刻を先に確保
+		// 遷移でクリアされるdispatched_atを遷移前に記録
 		if (worthRecording)
 			this.#recordAttempt(
 				jobId,
@@ -501,21 +446,19 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			);
 
 		if (outcome.ok) {
-			// 1回実行して成功したならattemptsは1,失敗時だけ数えると完了ジョブが0回に見える
-			// 結果は同じ遷移のsetに同梱, 別UPDATEでは書き込みが1増加(#9)
+			// 成功も試行数に計上, 未計上だと完了ジョブが0回
 			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'COMPLETED', {
 				now,
 				countAttempt: true,
 				result: serialized,
-				// 失敗した試行のspawnは非送信, 再実行で再度要求が届く(ADR-0032)
+				// 失敗試行のspawnは非送信, 再実行時に再要求(ADR-0032)
 				...(outcome.spawns ? { spawns: outcome.spawns } : {}),
 			});
 			await this.#armAlarm(now);
 			return;
 		}
 
-		// 取り消し要求後の失敗報告はリトライせず確定(ADR-0052)
-		// 中断に応じたperformerのthrowが再試行されると要求の意図に反する
+		// 取り消し要求後の失敗は中断由来, リトライ無しで確定(ADR-0052)
 		if (row.cancel_requested_at !== null) {
 			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'CANCELLED', { now, attempts, error: outcome.error ?? null });
 			await this.#armAlarm(now);
@@ -532,19 +475,19 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 						maxAttempts: row.max_attempts,
 						backoff: JSON.parse(row.backoff) as Backoff,
 						now,
-						// 乱数はここで作成してcoreへ渡す, coreは純粋に維持(ADR-0018)
+						// 乱数生成はcore外, core純粋性維持(ADR-0018)
 						rand: Math.random(),
 						...(fail ? { retryAt: fail.retryAt } : {}),
 					});
 
 		if (next.kind === 'exhausted') {
-			// 理由はRun DOへ送信, ノード表示から参照不能だと失敗の原因がジョブ側にのみ残存(ADR-0031)
+			// 理由はノード表示用にRun DOへ送信(ADR-0031)
 			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'FAILED', { now, attempts, error: outcome.error ?? null });
 			await this.#armAlarm(now);
 			return;
 		}
 
-		// 期限を越える再試行は予約しない, この時点で期限切れとして終了(ADR-0047)
+		// 期限超過の再試行は予約せず期限切れで終了(ADR-0047)
 		if (row.expires_at !== null && next.runAfter >= row.expires_at) {
 			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'CANCELLED', { now, attempts });
 			await this.#armAlarm(now);
@@ -557,23 +500,21 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			runAfter: next.runAfter,
 			dispatchedAt: null,
 		});
-		// 枠の解放を即時反映, 再試行時刻は次tickで再設定
+		// 同時実行数の解放を即時反映, 再試行時刻は次tickで設定
 		await this.#armAlarm(now);
 	}
 
 	/**
-	 * 実行中のperformerからの生存報告
-	 *
-	 * reaperの無応答判定の起点をここへ移動, 所要時間が入力で変わるジョブでのtimeoutMsの最長化が不要
-	 * 進捗の画面表示用に投影にも追加, 報告の間隔はconsumer側で制限
+	 * 所要時間が変動するジョブでもtimeoutMsの最長化不要
+	 * 進捗表示用に投影対象, 報告間隔はconsumer側で制限
 	 */
 	async heartbeat(jobId: string, progress?: number): Promise<{ accepted: boolean; cancelRequested: boolean }> {
 		const now = this.clock.now();
-		// 範囲外は破棄, 保存すると画面の進捗が100%を超過
+		// 画面の進捗100%超過防止
 		const clamped = typeof progress === 'number' && Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : null;
 		const result = this.repo.heartbeat(jobId, now, clamped);
 		if (!result.accepted) return result;
-		// 投影のためのalarm設定, 次のreaper期限まで投影が無いと進捗が数分遅延
+		// 投影用alarm, 無いと進捗表示がreaper期限まで遅延
 		await this.#armAlarm(now);
 		return result;
 	}
@@ -587,9 +528,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
-	 * at-most-onceのジョブの実行権
-	 * Queues自体がat-least-onceで重複配送があり、単一SQLのrowsWritten判定で実行権を1つに限定(ADR-0007)
-	 * 取り消し要求済みは実行を開始せず終了, CASの条件に要求が含まれず先に確認(ADR-0052)
+	 * at-most-onceジョブの実行権, Queuesの重複配送下も条件付きUPDATEで1つに限定(ADR-0007)
+	 * 取り消し要求済みは実行せず終了, CAS条件に要求が無く事前確認(ADR-0052)
 	 */
 	async claim(jobId: string): Promise<boolean> {
 		const now = this.clock.now();
@@ -601,23 +541,17 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now });
 	}
 
-	/**
-	 * consumerからの期限切れ報告(ADR-0047)
-	 * 実行開始前の判定で二重実行の懸念なし, Queuesで滞留したメッセージも対象
-	 */
+	/** consumerからの実行開始前の期限切れ報告(ADR-0047), Queues滞留分も対象 */
 	async expire(jobId: string): Promise<void> {
 		const now = this.clock.now();
-		// 投影のためのalarm設定, 動きが無いシャードでは読み取りモデルが古いまま残存
+		// 投影用alarm, 無いと静止shardの読み取りモデルが未更新
 		if (this.repo.compareAndSet(jobId, ['QUEUED'], 'CANCELLED', { now })) await this.#armAlarm(now);
 	}
 
-	/**
-	 * ダッシュボードからの手動リトライ
-	 * FAILEDとSTALLEDは終端だが不可逆ではない(ADR-0012)
-	 */
+	/** FAILED / STALLEDは終端だが可逆(ADR-0012) */
 	async retry(jobId: string): Promise<MutationResult> {
 		const now = this.clock.now();
-		// 要求の明示クリア, 残すと再投入の直後に取り消しが確定(#95)
+		// 取り消し要求クリア, 残すと再投入直後にCANCELLED(#95)
 		const ok = this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', {
 			now,
 			runAfter: now,
@@ -628,21 +562,19 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			await this.#armAlarm(now);
 			return { ok: true };
 		}
-		// 理由を分けて返す, 保持期間経過で消えたのか状態違いかで利用者の対応が変わる(ADR-0027)
+		// 削除済みと状態違いの区別, 利用者の対応が別(ADR-0027)
 		return { ok: false, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' };
 	}
 
 	/**
-	 * 予約済みジョブの実行時刻と優先度の変更
-	 *
-	 * 対象はSCHEDULEDのみ, QUEUED以降は投入済みで予定を変えても実行は止まらない
-	 * 取り消しと再投入はジョブIDが変わりuniqueKeyの予約も解放, 同じ行の更新で回避
+	 * QUEUED以降は投入済みで対象外
+	 * 同じ行の更新でジョブIDとuniqueKey予約を維持
 	 */
 	async reschedule(jobId: string, patch: { runAfter: number; priority?: number }): Promise<MutationResult> {
 		const now = this.clock.now();
 		const ok = this.repo.reschedule(jobId, patch.runAfter, patch.priority, now);
 		if (ok) {
-			// 前倒しと後ろ倒しの両方に対応, alarm再設定なしでは早めた予定で発火が無い
+			// 前倒し時のalarm再設定
 			await this.#armAlarm(now);
 			return { ok: true };
 		}
@@ -650,36 +582,30 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	/**
-	 * ジョブの取り消し
-	 * SCHEDULEDは即時CANCELLED, QUEUED/RUNNINGは協調的な要求として記録(ADR-0052)
-	 * 要求の有無はheartbeatの戻り値に含まれ、応答か要求後reaperGraceMsの経過で確定
+	 * SCHEDULEDは即時CANCELLED, QUEUED/RUNNINGは協調的な取り消し要求を記録(ADR-0052)
+	 * 要求はheartbeatの戻り値で通知, 応答か要求後reaperGraceMs経過で確定
 	 */
 	async cancel(jobId: string): Promise<MutationResult> {
 		const now = this.clock.now();
 		const result = this.#cancelOne(jobId, now);
-		// 投影のためのtick起動, alarmなしでは動きが無いシャードの読み取りモデルが取り消し前のまま残存
-		// 要求の場合は応答期限のalarmもtickが設定
+		// 投影用alarm, 要求時の応答期限alarmもtickで設定
 		if (result.ok) await this.#armAlarm(now);
 		return result;
 	}
 
-	/** 1件の取り消し判定, cancel()とmutateMany()で共用 */
 	#cancelOne(jobId: string, now: number): MutationResult {
 		if (this.repo.compareAndSet(jobId, ['SCHEDULED'], 'CANCELLED', { now })) return { ok: true };
 		if (this.repo.requestCancel(jobId, now)) return { ok: true, requested: true };
 		const row = this.repo.find(jobId);
 		if (!row) return { ok: false, reason: 'gone' };
-		// 要求済みへの再要求は冪等に受理
+		// 要求済みへの再要求は冪等
 		if (row.cancel_requested_at !== null && (row.state === 'QUEUED' || row.state === 'RUNNING')) return { ok: true, requested: true };
 		return { ok: false, reason: 'invalid-state' };
 	}
 
 	/**
-	 * 一括のリトライと取り消し
-	 *
-	 * 対象は数秒遅れる読み取りモデル由来で、状態の判定はここで再実施
-	 * 1件ずつのRPCは200件で200往復、shard単位の1回に集約
-	 * alarmは全件の処理後に1回だけ設定、件数ぶんの再設定でも予定は不変
+	 * 一括リトライ/取り消し, shard単位の1 RPCに集約
+	 * 対象は数秒遅れの読み取りモデル由来, 状態はここで再判定
 	 */
 	async mutateMany(action: 'retry' | 'cancel', jobIds: readonly string[]): Promise<BulkResult> {
 		const now = this.clock.now();
@@ -698,7 +624,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				else failed.push({ id: jobId, reason: this.repo.find(jobId) ? 'invalid-state' : 'gone' });
 				continue;
 			}
-			// 要求として受理したぶんもokに含める, 確定の有無は読み取りモデルで判別可能(ADR-0052)
+			// 要求受理分もok, 確定は読み取りモデルで判別(ADR-0052)
 			const result = this.#cancelOne(jobId, now);
 			if (result.ok) ok.push(jobId);
 			else failed.push({ id: jobId, reason: result.reason });
@@ -712,10 +638,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		try {
 			await this.#tick();
 		} catch (error) {
-			// alarm()がthrowするとworkerdは2秒起点の指数バックオフで最大6回のみリトライ
-			// 捕捉して必ず次のalarmを再設定し、一時的な失敗での調停停止を防止
+			// alarm()の例外はworkerdのリトライが最大6回, 捕捉し次のalarmを必ず設定
 			console.error('tsumugi: tick failed', error);
-			// 割り込んだ処理が設定した早い予定は維持
+			// tick中に設定された早い予定は維持
 			await this.#armAlarm(this.clock.now() + 5_000);
 		}
 	}
@@ -724,7 +649,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const now = this.clock.now();
 		this.#loadPolicy();
 		this.#loadBucket();
-		// 実行中がconcurrency未満なら全件が範囲内, 以上なら空きは0で集計漏れの影響なし
+		// 実行中がconcurrency未満なら全件取得, 以上なら空き0で影響無し
 		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT, Math.max(TICK_LIMIT, this.policy.concurrency));
 
 		const readyKeys =
@@ -740,7 +665,6 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#bucket = output.bucket;
 		this.#persistBucket(output.bucket);
 		this.#persistKeyBuckets(keyBuckets, output.keyBuckets, now);
-		// どの制約で投入が止まったかを診断で外部へ公開, DO退避後も保持(#10)
 		this.#persistBlocked(output.blocked);
 
 		const messages: MessageSendRequest<DispatchMessage>[] = [];
@@ -749,7 +673,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				case 'dispatch': {
 					const row = this.repo.find(decision.id);
 					if (!row) break;
-					// 先に状態を進めてから投入, 投入に失敗してもQUEUEDのまま残りreaperが回収可能
+					// 遷移後に投入, 投入失敗時はQUEUEDのままreaperが処理
 					if (!this.repo.compareAndSet(decision.id, ['SCHEDULED'], 'QUEUED', { now, dispatchedAt: now })) break;
 					messages.push({
 						body: {
@@ -765,9 +689,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 					});
 					break;
 				}
-				// expireは無応答の期限切れも対象, QUEUED / RUNNINGからも遷移(ADR-0047)
+				// expireは無応答の期限切れも対象(ADR-0047)
 				case 'expire':
-				// cancelは取り消し要求後の確定, 応答期限の経過と回収後の残留が対象(ADR-0052)
+				// cancelは取り消し要求の確定, 応答期限経過とreap後の残留(ADR-0052)
 				case 'cancel':
 					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', { now });
 					break;
@@ -787,12 +711,12 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			}
 		}
 
-		// 100件上限で分割して送信, concurrency>100だと1 tickの投入がこれを超過(ADR-0009)
+		// concurrency>100で1 tickの投入が上限超過(ADR-0009)
 		for (let i = 0; i < messages.length; i += SEND_BATCH_LIMIT) {
 			await this.env.TSUMUGI_QUEUE.sendBatch(messages.slice(i, i + SEND_BATCH_LIMIT));
 		}
 
-		// 後段は互いに独立
+		// 後段は相互独立
 		let failed = false;
 		const stage = async <T>(name: string, run: () => T | Promise<T>, fallback: T): Promise<T> => {
 			try {
@@ -809,11 +733,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const notifiedSettled = await stage('notifySettled', () => this.#notifySettled(), 0);
 		const { deleted, retryAt } = await stage('sweep', () => this.#sweep(now), { deleted: 0, retryAt: null });
 
-		// 上限まで読んだなら残りがある可能性が高く、即座に自分を再起動
-		// 投入候補はreadyCountで判定, 実行中のジョブで範囲が埋まっても投入すべき候補が無ければ再実行なし
-		// ただしトークン待ちでは読める候補が変わらず, readyCount起因の再実行は回復時刻のalarmで代替
-		// 投入も期限切れも無いtickは同時実行数待ちで範囲が不変, 再実行は完了報告で代替(#103)
-		// 投影待ちの残りも確認, tickのawait中に入った報告やclaimは投影されないまま残る
+		// 上限到達は残りありとみなし即時再実行
+		// トークン待ちは候補不変, 回復時刻のalarmで代替
+		// 投入も期限切れも無いtickは同時実行数待ち, 完了報告で再実行(#103)
+		// tickのawait中の報告やclaimの投影待ちも確認
 		const blockedOnTokens = output.blocked.tokens || output.blocked.perKeyTokens;
 		const progressed = output.decisions.some((d) => d.type === 'dispatch' || d.type === 'expire' || d.type === 'cancel');
 		const hasMore =
@@ -823,33 +746,27 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			notified >= NOTIFY_LIMIT ||
 			notifiedFailures >= FAILURE_NOTIFY_LIMIT ||
 			notifiedSettled >= SETTLED_NOTIFY_LIMIT ||
-			// 失敗時のoutboxの残りは即時再起動の対象外, 含めると障害の間tickを反復
+			// 失敗時は対象外, 障害中のtick反復防止
 			(!failed && this.repo.hasOutbox());
 		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt, failed ? now + STAGE_RETRY_MS : null].filter(
 			(v): v is number => v !== null,
 		);
 		const next = candidates.length > 0 ? Math.min(...candidates) : null;
-		// tickの実行中に設定されたalarmを後ろへずらさない
-		// alarmはハンドラの開始時に消え、ここに在るものは割り込んだ処理が要求した予定
-		// setAlarmでの上書きは投影が保持期間の経過まで遅延
+		// ハンドラ開始時にalarmは消去済み, 現存分はtick中の設定
+		// setAlarmで上書きすると投影が保持期間経過まで遅延
 		if (next !== null) await this.#armAlarm(next);
 	}
 
-	/**
-	 * アウトボックスをD1へ転送(ADR-0008)
-	 * D1への書き込みの成功後に削除, 失敗時はカーソルが進まず次のtickで追いつく
-	 */
 	async #project(): Promise<number> {
 		const rows = this.repo.outboxBatch(PROJECTION_LIMIT);
 		if (rows.length === 0) return 0;
 		await project(this.env.TSUMUGI_DB, rows);
-		// 投影の成功後にカーソルを前進, 投影は冪等で再処理は無害(#7)
+		// 投影は冪等で再処理可(#7)
 		this.repo.deleteOutboxThrough(rows[rows.length - 1]!.seq);
-		// メトリクスはカーソルの後, 非冪等で冪等な投影とは再試行単位を分離(ADR-0016 / #7)
-		// カーソルより後で同じ行の二重書き込みは無い, 反面この回の失敗ぶんは記録されずat-most-once
-		// 省略可能な機能につき失敗は捕捉, ジョブ調停を含むtick全体は継続
+		// メトリクスは非冪等でカーソル前進後, 失敗分は欠落しat-most-once(ADR-0016 / #7)
+		// 任意機能で失敗は捕捉, tick継続
 		try {
-			// 明細と同じ材料から時系列を書く, sweepで明細が消えてもこちらは残る(ADR-0016)
+			// 明細と同じ行から時系列を記録, sweep後も残存(ADR-0016)
 			writeMetrics(
 				this.env.TSUMUGI_METRICS,
 				rows.map((row) => JSON.parse(row.snapshot) as JobRow),
@@ -860,19 +777,14 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return rows.length;
 	}
 
-	/**
-	 * 未送信の通知をRun DOへ送信(ADR-0031)
-	 *
-	 * 宛先ごとにまとめて送り、送信の成功後に削除
-	 * 失敗時はカーソルが進まず次のtickで再送, Run DO側は同じ通知を二度受けても結果が不変
-	 */
+	// 失敗時は次tickで再送, Run DO側は重複通知に冪等
 	async #notifyRuns(): Promise<number> {
 		const rows = this.repo.notifyBatch(NOTIFY_LIMIT);
 		if (rows.length === 0) return 0;
 
 		const namespace = this.env.RUN;
 		if (!namespace) {
-			// flowsを使うのにbindingが無い設定漏れ, 削除せず残して設定後に配送(ADR-0013)
+			// RUN binding未設定, 保持して設定後に配送(ADR-0013)
 			console.error('tsumugi: cannot notify the run, RUN binding is not configured');
 			return 0;
 		}
@@ -890,32 +802,27 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return rows.length;
 	}
 
-	/**
-	 * 未送信の失敗を通知先のperformerへ投入(#30)
-	 *
-	 * 投入の成功後に削除, 失敗時はカーソルが進まず次のtickで再送
-	 * 通知そのものの失敗は通知の対象外, 自分を呼び続ける循環の防止
-	 */
+	// 失敗時は次tickで再送(#30)
 	async #notifyFailures(): Promise<number> {
 		const rows = this.repo.failureBatch(FAILURE_NOTIFY_LIMIT);
 		if (rows.length === 0) return 0;
 
 		const target = this.#failureBinding;
 		if (target === null) {
-			// 宛先が無い間に記録されたぶんは破棄, 残すと設定後に古い失敗がまとめて届く
+			// 宛先未設定中の記録は破棄, 設定後の古い通知の一括配送防止
 			this.repo.deleteFailureThrough(rows[rows.length - 1]!.seq);
 			return rows.length;
 		}
 
 		const notices = rows.map((row) => JSON.parse(row.payload) as FailureNotice);
 		const inputs: EnqueueInput[] = notices
-			// 通知そのものの失敗は通知の対象外, 自分を呼び続ける循環の防止(#30)
+			// 通知ジョブ自身の失敗は対象外, 循環防止(#30)
 			.filter((notice) => notice.binding !== target)
 			.map((notice) => ({
 				binding: target,
 				payload: notice,
-				// 同じ失敗の二重投入は無し, 再送でも同じIDで既存が返る(ADR-0029)
-				// 元のIDはそのまま使えず埋め込める形へ変換, ローカル部だけではbindingを跨いで衝突
+				// 固定IDで再送時の二重投入防止(ADR-0029)
+				// 元ID全体を埋め込み形式へ変換, ローカル部のみではbinding間で衝突
 				id: formatJobId({
 					binding: target,
 					shard: 0,
@@ -924,10 +831,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			}));
 
 		if (inputs.length > 0) {
-			// 通知先は分割しない前提でshard 0へ送信, 宛先を分けても順序も流量も不変
+			// 通知先は非分割前提でshard 0へ送信
 			const namespace = this.env.JOB_SHARD;
 			if (!namespace) {
-				// 自分自身のbindingが無い構成, 削除せず残して設定後に配送(ADR-0013)
+				// JOB_SHARD binding未設定, 保持して設定後に配送(ADR-0013)
 				console.error('tsumugi: cannot notify the failure, JOB_SHARD binding is not configured');
 				return 0;
 			}
@@ -937,32 +844,27 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return rows.length;
 	}
 
-	/**
-	 * 未送信の終端の通知を通知先のperformerへ投入(#96)
-	 *
-	 * 投入の成功後に削除, 失敗時はカーソルが進まず次のtickで再送
-	 * 宛先自身とonFailure宛先の遷移は対象外, 自己循環と相互連鎖の防止
-	 */
+	// 失敗時は次tickで再送(#96)
 	async #notifySettled(): Promise<number> {
 		const rows = this.repo.settledBatch(SETTLED_NOTIFY_LIMIT);
 		if (rows.length === 0) return 0;
 
 		const target = this.repo.settledTarget();
 		if (target === null) {
-			// 宛先が無い間に記録されたぶんは破棄, 残すと設定後に古い通知がまとめて届く
+			// 宛先未設定中の記録は破棄, 設定後の古い通知の一括配送防止
 			this.repo.deleteSettledThrough(rows[rows.length - 1]!.seq);
 			return rows.length;
 		}
 
 		const notices = rows.map((row) => JSON.parse(row.payload) as SettledNotice);
 		const inputs: EnqueueInput[] = notices
-			// onFailure宛先の遷移も対象外, 2つの宛先が互いを通知し続ける連鎖の防止(#96)
+			// 宛先自身とonFailure宛先の遷移は対象外, 相互通知の連鎖防止(#96)
 			.filter((notice) => notice.binding !== target.binding && notice.binding !== this.#failureBinding)
 			.map((notice) => ({
 				binding: target.binding,
 				payload: notice,
-				// 同じ通知の二重投入は無し, 再送でも同じIDで既存が返る(ADR-0029)
-				// 状態もIDへ含める, リトライ後の別の終端が同じattemptsでも別の通知
+				// 固定IDで再送時の二重投入防止(ADR-0029)
+				// 状態もIDに含有, リトライ後の同attemptsの別終端を区別
 				id: formatJobId({
 					binding: target.binding,
 					shard: 0,
@@ -973,7 +875,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		if (inputs.length > 0) {
 			const namespace = this.env.JOB_SHARD;
 			if (!namespace) {
-				// 自分自身のbindingが無い構成, 削除せず残して設定後に配送(ADR-0013)
+				// JOB_SHARD binding未設定, 保持して設定後に配送(ADR-0013)
 				console.error('tsumugi: cannot notify the settled job, JOB_SHARD binding is not configured');
 				return 0;
 			}
@@ -983,29 +885,23 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return rows.length;
 	}
 
-	/**
-	 * 不要になった行の削除
-	 * 対象は投影済みの終端ジョブと期限切れの重複排除キー
-	 */
 	#sweep(now: number): { deleted: number; retryAt: number | null } {
-		// 対象の有無を先に読む, 状態をメモリに持つとDOのエビクトで削除が停止
+		// 対象有無はSQLiteから取得, メモリ保持ではDOエビクト後に削除停止
 		const state = this.repo.sweepState(now, this.retention);
 		if (state.uniqueKeys) this.repo.sweepExpiredUniqueKeys(now);
 		const deleted = state.jobs ? this.repo.sweepTerminal(now, this.retention, SWEEP_LIMIT) : 0;
 
-		// 次に対象が出る時刻まで待機
-		// 稼働中が無くなるとalarmが設定されず、削除の機会が永久に無い
-		// 一定間隔の起動は失敗ジョブだけが残る状態で無意味な書き込みが増加
+		// 次の削除対象の時刻を返却, 稼働中ジョブが無いとalarm未設定で削除不能
+		// 一定間隔起動は失敗ジョブのみ残存時に無駄な書き込み増
 		const next = deleted > 0 ? this.repo.sweepState(now, this.retention).nextDueAt : state.nextDueAt;
 		return { deleted, retryAt: next === null ? null : Math.max(next, now + 1_000) };
 	}
 
-	/** 履歴はアウトボックス経由, 記録してから遷移するとD1へ同じ投影で届く */
+	// 遷移前に記録, 同じ投影でD1へ反映
 	#recordAttempt(jobId: string, attempt: number, state: string, startedAt: number | null, finishedAt: number, error: string | null): void {
 		this.repo.recordAttempt({ job_id: jobId, attempt, state, started_at: startedAt, finished_at: finishedAt, error });
 	}
 
-	/** 予定より早い時刻のalarmがある場合は上書きなし */
 	async #armAlarm(at: number): Promise<void> {
 		const current = await this.ctx.storage.getAlarm();
 		if (current === null || current > at) await this.ctx.storage.setAlarm(at);

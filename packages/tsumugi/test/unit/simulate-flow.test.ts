@@ -3,8 +3,8 @@ import type { PerformerLike } from '../../src/core/api.js';
 import { createFlow } from '../../src/core/flow.js';
 import { simulateFlow } from '../../src/testing/flow.js';
 
-// `createFlow`はctorのインスタンス型からpayloadと戻り値を導出し、実体は呼ばれない
-// `Performer`は`cloudflare:workers`に依存し, workerdを起動しないこのプロジェクトでは読めない
+// `createFlow`はctorのインスタンス型から型導出のみ, 実体の呼び出しなし
+// `Performer`は`cloudflare:workers`依存, workerd非起動の本プロジェクトでは読込不可
 type Ctor<P, R> = new (...args: any[]) => PerformerLike<P, R>;
 
 const performers = {
@@ -15,7 +15,6 @@ const performers = {
 
 const flow = createFlow(performers);
 
-/** exampleと同じ形, 一覧を取り件数だけ実行時に決まる並列で挨拶し最後に要約 */
 const greetings = flow<{ prefix: string }>((f) => {
 	const list = f.node('list', 'LIST', { input: (i) => ({ prefix: i.prefix }) });
 	const each = f.fanOut('greet', 'GREET', {
@@ -48,7 +47,6 @@ describe('flowの通し実行', () => {
 		expect(payloads.list).toEqual({ prefix: 'hello' });
 		expect(payloads['greet:0']).toEqual({ name: 'a' });
 		expect(payloads['greet:1']).toEqual({ name: 'b' });
-		// fan-outノードの集計値が後段の材料になる(ADR-0035)
 		expect(payloads.report).toEqual({ total: 2, failed: 0 });
 	});
 
@@ -100,7 +98,6 @@ describe('flowの通し実行', () => {
 		const failed = simulateFlow(withCleanup, undefined, { fails: ['list'] });
 		expect(stateOf(failed, 'cleanup')).toBe('COMPLETED');
 		expect(stateOf(failed, 'done')).toBe('SKIPPED');
-		// 後始末が成功してもrunは失敗のまま
 		expect(failed.state).toBe('FAILED');
 
 		const ok = simulateFlow(withCleanup, undefined, { results: { list: { names: [] } } });
@@ -154,7 +151,6 @@ describe('flowの通し実行', () => {
 				},
 				input: () => ({ total: 0, failed: 0 }),
 			});
-			// 失敗しても後始末は通る
 			f.node('always', 'REPORT', { after: { list }, trigger: 'always', input: () => ({ total: 0, failed: 0 }) });
 		});
 
@@ -173,7 +169,7 @@ describe('flowの通し実行', () => {
 
 		const result = simulateFlow(branched, undefined, { results: { list: { names: [] } } });
 		expect(stateOf(result, 'gated')).toBe('SKIPPED');
-		// 経路を選ばなかっただけなので後始末は要らない
+		// 経路の非選択のみ, 後始末は不要
 		expect(stateOf(result, 'cleanup')).toBe('SKIPPED');
 		expect(result.state).toBe('COMPLETED');
 	});

@@ -2,18 +2,14 @@ import type { PayloadOf, Performers, ReqOf } from './api.js';
 import type { Flows, InputOf, NodeJobOptions } from './flow.js';
 import { InvalidCronError, nextCronAt, parseCron, resolveTimeZone } from './cron.js';
 
-/**
- * 定期実行の定義(ADR-0040)
- *
- * payloadとinputの写像関数はJSON化不能, 定義はコードにしか無い
- * Scheduler DOへ渡るのは`normalizeSchedules`が返す正規形だけで、関数はその都度closureから取得
- */
+// 定期実行定義, payloadとinputの関数はJSON化不能でコードにのみ存在(ADR-0040)
+// Scheduler DOへは`normalizeSchedules`の正規形のみ送信, 関数は都度closureから取得
 
-/** スケジュール名の許可文字, ローカル部(ジョブID/runId)に入る区切り文字は拒否 */
+// ジョブID, runIdのlocalIdに埋込, 区切り文字拒否
 const SCHEDULE_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const SCHEDULE_NAME_MAX = 64;
 
-/** cron式の充足検査の起点, 正規化の純粋性維持で現在時刻は不使用 */
+// cron式の到達可能性検査の起点, 正規化の純粋性維持で現在時刻不使用
 const CRON_PROBE_AT = Date.UTC(2024, 0, 1);
 
 export class InvalidScheduleError extends Error {
@@ -23,19 +19,17 @@ export class InvalidScheduleError extends Error {
 	}
 }
 
-/** 発火時に写像関数へ渡す文脈, scheduledAtは発火の予定時刻 */
+/** scheduledAtは予定発火時刻 */
 export type ScheduleContext = { scheduledAt: number };
 
 type Resolvable<T> = T | ((context: ScheduleContext) => T | Promise<T>);
 
 /**
- * scheduleに書けるジョブの設定
- * タイミングはスケジューラの所掌でdelayMs/runAtは非対応、uniqueKeyも不可(ADR-0040)
- * 静的なuniqueKeyは予約が残る間の発火を無効化(ADR-0021)
+ * scheduleのジョブ設定, タイミングはスケジューラ管理でdelayMs, runAt不可(ADR-0040)
+ * uniqueKey不可, 静的値は予約残存中の発火を無効化(ADR-0021)
  */
 export type ScheduleJobOptions = Omit<NodeJobOptions, 'delayMs' | 'runAt'>;
 
-/** uniqueKeyを必須と宣言したperformerはscheduleに使用不可, ノードと同じ扱い(ADR-0033) */
 type ScheduleBindings<M extends Performers> = { [K in keyof M]: ReqOf<M[K]>['uniqueKey'] extends true ? never : K }[keyof M];
 
 type ConcurrencyKeyOption<R extends { concurrencyKey?: boolean }> = R['concurrencyKey'] extends true
@@ -56,7 +50,7 @@ export type FlowSchedule<F extends Flows> = {
 	[K in keyof F & string]: {
 		flow: K;
 		input: Resolvable<InputOf<F[K]>>;
-		/** run全体の期限(ms), flow定義の期限より優先される(ADR-0039) */
+		/** run全体の期限(ms), flow定義の期限より優先(ADR-0039) */
 		deadlineMs?: number;
 	};
 }[keyof F & string];
@@ -64,13 +58,12 @@ export type FlowSchedule<F extends Flows> = {
 export type ScheduleTiming = (
 	{ everyMs: number; cron?: never; timeZone?: never } | { cron: string; everyMs?: never; timeZone?: string }
 ) & {
-	/** 前回が終わっていない時刻に次回が来た場合の扱い, 既定は'skip'(ADR-0040) */
+	/** 前回実行中に次回時刻到来時の扱い, 既定は'skip'(ADR-0040) */
 	overlap?: 'skip' | 'overlap';
 };
 
 export type ScheduleDefs<M extends Performers, F extends Flows> = Record<string, (JobSchedule<M> | FlowSchedule<F>) & ScheduleTiming>;
 
-/** 任意の定義を受ける型, 実行時の検証と発火はこの形で処理 */
 export type AnyScheduleDef = {
 	binding?: string;
 	flow?: string;
@@ -87,7 +80,6 @@ export type AnyScheduleDef = {
 
 export type AnySchedules = Record<string, AnyScheduleDef>;
 
-/** DOへ保存する正規形, 関数は対象外 */
 export type NormalizedSchedule = {
 	name: string;
 	kind: 'job' | 'flow';
@@ -101,17 +93,13 @@ export type NormalizedSchedule = {
 export type NormalizeContext = {
 	bindings: readonly string[];
 	flows: readonly string[];
-	/** bindingのshard数, 2以上のbindingはpartitionKeyの明示が必要 */
 	shardsOf: (binding: string) => number;
 };
 
-/** タイミング指定へ混入不可のキー, JSからの利用があり実行時にも拒否 */
+// JSからの利用考慮で実行時も検査
 const FORBIDDEN_KEYS = ['uniqueKey', 'delayMs', 'runAt'] as const;
 
-/**
- * 定義を検証して直列化可能な正規形へ変換
- * 名前順に整列し、fingerprintは定義の記述順に非依存
- */
+/** 名前順整列でfingerprintは記述順に非依存 */
 export function normalizeSchedules(
 	defs: AnySchedules,
 	context: NormalizeContext,
@@ -159,7 +147,7 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 			throw new InvalidScheduleError(`invalid timeZone in schedule ${name}: ${error.message}`);
 		}
 		try {
-			// 解析に加えて到達可能性も検査, 2月31日のような式は発火の機会が永遠に無い
+			// 到達可能性も検査, 2月31日等は発火機会なし
 			nextCronAt(parseCron(def.cron), CRON_PROBE_AT, timeZone);
 		} catch (error) {
 			if (!(error instanceof InvalidCronError)) throw error;
@@ -174,7 +162,7 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 	if (def.binding !== undefined) {
 		if (!context.bindings.includes(def.binding)) throw new InvalidScheduleError(`binding is not registered: ${name} -> ${def.binding}`);
 		if (!('payload' in def)) throw new InvalidScheduleError(`payload is required: ${name}`);
-		// shardの解決は発火ごと, 実行時のthrowを定義時に前倒し(ADR-0011)
+		// shard解決は発火時, そのエラーを定義時に検出(ADR-0011)
 		if (context.shardsOf(def.binding) > 1 && def.partitionKey === undefined) {
 			throw new InvalidScheduleError(`partitionKey is required for a sharded binding: ${name} -> ${def.binding}`);
 		}
@@ -194,10 +182,7 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 	};
 }
 
-/**
- * 次回の発火時刻を返す
- * everyMsは初回の予定から位相を維持して進め、経過済みの分は発火せず省略(ADR-0040)
- */
+/** everyMsは初回予定からの位相維持, 経過済み分は省略(ADR-0040) */
 export function nextOccurrence(
 	timing: { everyMs: number | null; cron: string | null; timeZone?: string },
 	previous: number | null,

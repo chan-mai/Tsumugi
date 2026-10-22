@@ -7,7 +7,7 @@ const decisionDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.
 
 describe('ADR索引の網羅', () => {
 	it('実在するADRが全て索引に含まれている', () => {
-		// 索引は手書きで、追加時に記載を忘れるとコードの参照先が解決不能
+		// 索引は手書き、記載漏れでコードの参照先が解決不能
 		const files = readdirSync(decisionDir)
 			.filter((name) => /^\d{4}-.+\.md$/.test(name))
 			.sort();
