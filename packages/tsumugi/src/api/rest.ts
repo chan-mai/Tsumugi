@@ -902,12 +902,12 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	/**
 	 * 拒否の理由をHTTPの意味へ変換
-	 * goneは410, 資源が在ったが失われた状態を指す, 状態違いの409とは利用者の対応が違う
+	 * goneは410, 未作成と保持期間後の削除は区別不能, 状態違いの409とは利用者の対応が違う
 	 */
 	function refusal(result: { ok: false; reason: 'invalid-state' | 'gone' }, subject: 'job' | 'run' = 'job') {
 		return result.reason === 'gone'
 			? ({
-					body: { ok: false, error: `${subject} is no longer available: removed from the coordinator after the retention period` },
+					body: { ok: false, error: `${subject} not found: it does not exist or was removed after the retention period` },
 					status: 410,
 				} as const)
 			: ({ body: { ok: false, error: 'not allowed in the current state' }, status: 409 } as const);

@@ -1160,6 +1160,7 @@ describe('予約済みジョブの実行時刻の変更', () => {
 	it('DOに無いジョブは410', async () => {
 		const res = await post('/api/jobs/REST%230:missingjob/reschedule', { runAt: T0 + 60_000 });
 		expect(res.status).toBe(410);
+		expect((await res.json<{ error: string }>()).error).toContain('does not exist');
 	});
 
 	it('検証に落ちた本文は400', async () => {
