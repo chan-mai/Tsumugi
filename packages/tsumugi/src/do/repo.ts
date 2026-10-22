@@ -361,7 +361,7 @@ export class JobRepo {
 		}
 		// 終端検出を1箇所に集約, 呼び出し側ごとの実装は漏れの原因
 		if (row.runId !== null && row.nodeId !== null && TERMINAL_STATES.includes(to)) {
-			this.appendNotify(row.runId, {
+			this.appendRunNotify(row.runId, {
 				nodeId: row.nodeId,
 				jobId: id,
 				state: to as NodeEvent['state'],
@@ -520,7 +520,7 @@ export class JobRepo {
 		return row?.c ?? 0;
 	}
 
-	appendNotify(runId: string, event: NodeEvent): void {
+	appendRunNotify(runId: string, event: NodeEvent): void {
 		this.db
 			.insert(runNotify)
 			.values({ runId, event: JSON.stringify(event) })
@@ -528,13 +528,13 @@ export class JobRepo {
 		this.writes++;
 	}
 
-	notifyBatch(limit: number): { seq: number; run_id: string; event: string }[] {
+	runNotifyBatch(limit: number): { seq: number; run_id: string; event: string }[] {
 		const rows = this.db.select().from(runNotify).orderBy(asc(runNotify.seq)).limit(limit).all();
 		return rows.map((row) => ({ seq: row.seq, run_id: row.runId, event: row.event }));
 	}
 
 	/** 送信成功後専用 */
-	deleteNotifyThrough(seq: number): void {
+	deleteRunNotifyThrough(seq: number): void {
 		this.db.delete(runNotify).where(lte(runNotify.seq, seq)).run();
 		this.writes++;
 	}

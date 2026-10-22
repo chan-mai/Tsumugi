@@ -156,7 +156,7 @@ const PROGRESS_PROJECTION_DELAY_MS = 3_000;
 // D1バッチ上限とtick時間を考慮
 const PROJECTION_LIMIT = 200;
 
-const NOTIFY_LIMIT = 200;
+const RUN_NOTIFY_LIMIT = 200;
 
 // Queuesプロデューサ側のsendBatch上限
 const SEND_BATCH_LIMIT = 100;
@@ -711,7 +711,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			}
 		};
 		const projected = await stage('project', () => this.#project(), 0);
-		const notified = await stage('notifyRuns', () => this.#notifyRuns(), 0);
+		const notifiedRuns = await stage('notifyRuns', () => this.#notifyRuns(), 0);
 		const notifiedFailures = await stage('notifyFailures', () => this.#notifyFailures(), 0);
 		const notifiedSettled = await stage('notifySettled', () => this.#notifySettled(), 0);
 		const { deleted, retryAt } = await stage('sweep', () => this.#sweep(now), { deleted: 0, retryAt: null });
@@ -726,7 +726,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			(readyCount >= TICK_LIMIT && !blockedOnTokens && progressed) ||
 			projected >= PROJECTION_LIMIT ||
 			deleted >= SWEEP_LIMIT ||
-			notified >= NOTIFY_LIMIT ||
+			notifiedRuns >= RUN_NOTIFY_LIMIT ||
 			notifiedFailures >= FAILURE_NOTIFY_LIMIT ||
 			notifiedSettled >= SETTLED_NOTIFY_LIMIT ||
 			// 失敗時は対象外, 障害中のtick反復防止
@@ -762,7 +762,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	// 失敗時は次tickで再送, Run DO側は重複通知に冪等
 	async #notifyRuns(): Promise<number> {
-		const rows = this.repo.notifyBatch(NOTIFY_LIMIT);
+		const rows = this.repo.runNotifyBatch(RUN_NOTIFY_LIMIT);
 		if (rows.length === 0) return 0;
 
 		const namespace = this.env.RUN;
@@ -781,7 +781,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		}
 
 		await Promise.all([...groups].map(([runId, events]) => namespace.get(namespace.idFromName(runId)).notify(events)));
-		this.repo.deleteNotifyThrough(rows[rows.length - 1]!.seq);
+		this.repo.deleteRunNotifyThrough(rows[rows.length - 1]!.seq);
 		return rows.length;
 	}
 
