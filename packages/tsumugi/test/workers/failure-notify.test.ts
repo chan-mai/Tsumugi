@@ -258,6 +258,47 @@ describe('失敗したジョブの通知(#30)', () => {
 		expect(await payloadOf(noticeIdOf(sent[0]!.jobId, 1))).toBeDefined();
 	});
 
+	it('D1への投影が失敗しても失敗の通知を投入し5秒後に再試行する', async () => {
+		const sent: DispatchMessage[] = [];
+		await install('FAIL7#0', sent);
+		await configure('FAIL7#0');
+		const jobId = await shard('FAIL7#0').enqueue({ binding: 'FAIL7', payload: {}, maxAttempts: 1 });
+		await runDurableObjectAlarm(shard('FAIL7#0'));
+		await shard('FAIL7#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+
+		const alarm = await runInDurableObject(shard('FAIL7#0'), async (instance) => {
+			// D1障害
+			const env = (instance as any).env;
+			const original = env.TSUMUGI_DB;
+			env.TSUMUGI_DB = {
+				batch: async () => {
+					throw new Error('D1 unavailable');
+				},
+				prepare: () => {
+					throw new Error('D1 unavailable');
+				},
+			};
+			try {
+				await (instance as any).ctx.storage.deleteAlarm();
+				await (instance as any).alarm();
+				return (await (instance as any).ctx.storage.getAlarm()) as number | null;
+			} finally {
+				env.TSUMUGI_DB = original;
+			}
+		});
+
+		expect(await payloadOf(noticeIdOf(jobId, 1))).toBeDefined();
+		// 即時の再起動では障害の間tickを反復
+		expect(alarm).toBe(T0 + 5_000);
+
+		// D1の回復後のtickで未投影の行を投影
+		await runDurableObjectAlarm(shard('FAIL7#0'));
+		const remaining = await runInDurableObject(shard('FAIL7#0'), (instance) => (instance as any).repo.countOutbox() as number);
+		expect(remaining).toBe(0);
+		const row = await env.TSUMUGI_DB.prepare('SELECT state FROM job WHERE id = ?').bind(jobId).first<{ state: string }>();
+		expect(row?.state).toBe('FAILED');
+	});
+
 	it('退避後の最初の呼び出しがresetPolicyでも宛先を保持する', async () => {
 		const sent: DispatchMessage[] = [];
 		await install('FAIL6#0', sent);
