@@ -12,12 +12,15 @@ const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)
 
 // 実キューはconsumer実行で状態変化
 async function install(name: string, sent: DispatchMessage[] = []): Promise<void> {
+	const record = (body: DispatchMessage) => {
+		if (body.jobId.startsWith(`${name}:`)) sent.push(body);
+	};
 	await runInDurableObject(shard(name), (instance) => {
 		(instance as any).clock = { now: () => T0 };
 		(instance as any).env.TSUMUGI_QUEUE = {
-			send: async (body: DispatchMessage) => void sent.push(body),
+			send: async (body: DispatchMessage) => record(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
-				for (const m of batch) sent.push(m.body);
+				for (const m of batch) record(m.body);
 			},
 		};
 	});
