@@ -826,7 +826,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			notifiedFailures >= FAILURE_NOTIFY_LIMIT ||
 			notifiedSettled >= SETTLED_NOTIFY_LIMIT ||
 			// 失敗時のoutboxの残りは即時再起動の対象外, 含めると障害の間tickを反復
-			(!failed && this.repo.countOutbox() > 0);
+			(!failed && this.repo.hasOutbox());
 		const candidates = [hasMore ? now : output.nextAlarmAt, retryAt, failed ? now + STAGE_RETRY_MS : null].filter(
 			(v): v is number => v !== null,
 		);

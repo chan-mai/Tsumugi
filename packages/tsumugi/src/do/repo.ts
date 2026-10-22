@@ -261,6 +261,13 @@ export class JobRepo {
 		return row?.c ?? 0;
 	}
 
+	/** 残りの有無のみ */
+	hasOutbox(): boolean {
+		const row = this.db.select({ seq: outbox.seq }).from(outbox).limit(1).get();
+		this.reads++;
+		return row !== undefined;
+	}
+
 	/** スケジューラに渡す稼働中ジョブ, 有界化のためlimitは必須 */
 	activeJobs(limit: number): JobView[] {
 		const rows = this.db

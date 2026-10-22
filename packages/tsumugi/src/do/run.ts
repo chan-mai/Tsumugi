@@ -380,7 +380,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				// 親への通知と削除は通常の決着と同じ手順, 省くと親ノードとDOが残存
 				const notified = await this.#notifyParent(this.repo.findRun()?.state as RunState, now);
 				if (notified && (await this.#sweep(now))) return;
-				if (projected >= PROJECTION_LIMIT || this.repo.countOutbox() > 0) await this.#armAlarm(now);
+				if (projected >= PROJECTION_LIMIT || this.repo.hasOutbox()) await this.#armAlarm(now);
 				else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
 				else await this.#armSweep(now);
 				return;
@@ -493,7 +493,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				deferred > 0 ||
 				projected >= PROJECTION_LIMIT ||
 				settled.decisions.some((decision) => !waiting.has(decision.id)) ||
-				this.repo.countOutbox() > 0;
+				this.repo.hasOutbox();
 			if (hasMore) await this.#armAlarm(now);
 			else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
 			else if (settled.state === 'RUNNING') await this.#armDeadline(now);
@@ -822,7 +822,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		async #sweep(now: number): Promise<boolean> {
 			const row = this.repo.findRun();
 			if (!row || row.state === 'RUNNING') return false;
-			if (this.repo.countOutbox() > 0) return false;
+			if (this.repo.hasOutbox()) return false;
 			const keepFor = row.state === 'FAILED' ? retention.failedMs : retention.doneMs;
 			if (row.updated_at + keepFor > now) return false;
 			// SQLiteごと削除, run 1件につき1インスタンスで残す行が無い(ADR-0029)

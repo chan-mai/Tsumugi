@@ -402,12 +402,9 @@ export class RunRepo {
 		this.db.delete(runOutbox).where(lte(runOutbox.seq, seq)).run();
 	}
 
-	countOutbox(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(runOutbox)
-			.get();
-		return row?.c ?? 0;
+	/** 残りの有無のみ */
+	hasOutbox(): boolean {
+		return this.db.select({ seq: runOutbox.seq }).from(runOutbox).limit(1).get() !== undefined;
 	}
 
 	#toRunRow(row: typeof run.$inferSelect): RunRow {
