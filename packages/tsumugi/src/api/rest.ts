@@ -304,6 +304,7 @@ export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input
 			return { error: `${name} must be a number` };
 		}
 	}
+	if (typeof raw.limit === 'number' && !Number.isInteger(raw.limit)) return { error: 'limit must be an integer' };
 	if (typeof raw.limit === 'number' && raw.limit < 1) return { error: 'limit must be at least 1' };
 
 	return {
