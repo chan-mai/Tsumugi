@@ -281,7 +281,6 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.repo.deleteSetting('settings');
 		this.policy = DEFAULT_POLICY;
 		this.retention = { doneMs: DEFAULT_SWEEP_AFTER_MS, failedMs: DEFAULT_FAILED_RETENTION_MS };
-		this.#policyLoaded = true;
 		await this.#armAlarm(this.clock.now());
 	}
 

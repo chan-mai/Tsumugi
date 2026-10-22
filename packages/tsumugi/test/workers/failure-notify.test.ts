@@ -257,4 +257,24 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		expect(await payloadOf(noticeIdOf(sent[0]!.jobId, 1))).toBeDefined();
 	});
+
+	it('退避後の最初の呼び出しがresetPolicyでも宛先を保持する', async () => {
+		const sent: DispatchMessage[] = [];
+		await install('FAIL6#0', sent);
+		await configure('FAIL6#0');
+
+		// 同じストレージで新しいインスタンスを生成し退避後の状態を再現
+		const jobId = await runInDurableObject(shard('FAIL6#0'), async (instance, state) => {
+			const fresh = new (instance.constructor as any)(state, (instance as any).env);
+			fresh.clock = (instance as any).clock;
+			await fresh.resetPolicy();
+			const id = (await fresh.enqueue({ binding: 'FAIL6', payload: {}, maxAttempts: 1 })) as string;
+			await fresh.alarm();
+			await fresh.report(sent[0]!.jobId, { ok: false, error: 'boom' });
+			await fresh.alarm();
+			return id;
+		});
+
+		expect(await payloadOf(noticeIdOf(jobId, 1))).toBeDefined();
+	});
 });
