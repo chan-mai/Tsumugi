@@ -9,6 +9,7 @@ import { normalizeTraceparent } from '../core/trace.js';
 import type { BulkFailure, MutationResult, TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 import type { Ui } from '../ui/serve.js';
+import type { RunControl, SchedulerControl, StartOptions } from '../worker.js';
 import type { AuthMiddleware } from './auth.js';
 import { MetricsQueryError, parseMetricsQuery, readMetrics, type MetricsResolver } from '../analytics/reader.js';
 import { openapiDocument } from './openapi.js';
@@ -38,7 +39,6 @@ import type {
 	StatsResponse,
 	TriggerScheduleResponse,
 } from './types.js';
-import type { ScheduleMutationResult, ScheduleTriggerResult, ScheduleView } from '../do/scheduler.js';
 
 export type RestEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };
 
@@ -72,15 +72,11 @@ export type RestOptions<Env extends RestEnv> = {
 	runFailedRetentionMs?: number;
 	/** 開始先の検証, 選択肢用 */
 	flows?: readonly string[];
-	start?: (env: Env, flow: string, input: unknown, options?: { id?: string; deadlineMs?: number }) => Promise<string>;
+	start?: (env: Env, flow: string, input: unknown, options?: StartOptions) => Promise<string>;
 	/** 取り消し, 再開はDOへ直接送信, 読み取りモデルは正でない(ADR-0015) */
-	runFor?: (env: Env, runId: string) => { cancel(): Promise<MutationResult>; retry(): Promise<MutationResult> };
+	runFor?: (env: Env, runId: string) => Pick<RunControl, 'cancel' | 'retry'>;
 	/** 定期実行の照会, 操作, Scheduler DOへ直接送信(ADR-0040), 未設定時`/api/schedules`は501 */
-	schedulerFor?: (env: Env) => {
-		list(): Promise<ScheduleView[]>;
-		setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult>;
-		trigger(name: string): Promise<ScheduleTriggerResult>;
-	};
+	schedulerFor?: (env: Env) => Pick<SchedulerControl, 'list' | 'setPaused' | 'trigger'>;
 	/** 未設定時`/api/metrics`は501 */
 	metrics?: MetricsResolver<Env>;
 };
