@@ -38,17 +38,18 @@ describe('投入内容の検証', () => {
 	});
 
 	it('数値でない指定を拒否する', () => {
-		expect(ok({ binding: 'MAIL', payload: {}, maxAttempts: '3' })).toEqual({ error: 'maxAttempts must be a number' });
-		expect(ok({ binding: 'MAIL', payload: {}, delayMs: Number.NaN })).toEqual({ error: 'delayMs must be a number' });
-		expect(ok({ binding: 'MAIL', payload: {}, priority: Number.POSITIVE_INFINITY })).toEqual({ error: 'priority must be a number' });
+		expect(ok({ binding: 'MAIL', payload: {}, maxAttempts: '3' })).toEqual({ error: 'maxAttempts must be an integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, delayMs: Number.NaN })).toEqual({ error: 'delayMs must be an integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, priority: Number.POSITIVE_INFINITY })).toEqual({ error: 'priority must be an integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, delayMs: 1.5 })).toEqual({ error: 'delayMs must be an integer' });
 	});
 
 	it('範囲外の指定を拒否する', () => {
 		expect(ok({ binding: 'MAIL', payload: {}, maxAttempts: 0 })).toEqual({ error: 'maxAttempts must be at least 1' });
 		expect(ok({ binding: 'MAIL', payload: {}, delayMs: -1 })).toEqual({ error: 'delayMs must not be negative' });
 		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: 0 })).toEqual({ error: 'expiresInMs must be a positive integer' });
-		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: 1.5 })).toEqual({ error: 'expiresInMs must be a positive integer' });
-		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: '60000' })).toEqual({ error: 'expiresInMs must be a number' });
+		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: 1.5 })).toEqual({ error: 'expiresInMs must be an integer' });
+		expect(ok({ binding: 'MAIL', payload: {}, expiresInMs: '60000' })).toEqual({ error: 'expiresInMs must be an integer' });
 	});
 
 	it('キーは文字列でなければ拒否する', () => {
@@ -131,9 +132,10 @@ describe('実行時刻の変更内容の検証', () => {
 	});
 
 	it('数値でない指定を拒否する', () => {
-		expect(check({ runAt: '2000000' })).toEqual({ error: 'runAt must be a number' });
-		expect(check({ delayMs: Number.NaN })).toEqual({ error: 'delayMs must be a number' });
-		expect(check({ runAt: 1, priority: 'high' })).toEqual({ error: 'priority must be a number' });
+		expect(check({ runAt: '2000000' })).toEqual({ error: 'runAt must be an integer' });
+		expect(check({ delayMs: Number.NaN })).toEqual({ error: 'delayMs must be an integer' });
+		expect(check({ runAt: 1, priority: 'high' })).toEqual({ error: 'priority must be an integer' });
+		expect(check({ runAt: 1.5 })).toEqual({ error: 'runAt must be an integer' });
 	});
 
 	it('オブジェクトでない本文を拒否する', () => {

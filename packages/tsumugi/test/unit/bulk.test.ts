@@ -63,7 +63,7 @@ describe('一括操作の対象の検証', () => {
 		expect(validateBulk({ binding: 1 }, 'retry')).toEqual({ error: 'binding must be a string' });
 		expect(validateBulk({ limit: 0 }, 'retry')).toEqual({ error: 'limit must be at least 1' });
 		expect(validateBulk({ limit: 1.5 }, 'retry')).toEqual({ error: 'limit must be an integer' });
-		expect(validateBulk({ created_from: 'today' }, 'retry')).toEqual({ error: 'created_from must be a number' });
+		expect(validateBulk({ created_from: 'today' }, 'retry')).toEqual({ error: 'created_from must be an integer' });
 	});
 });
 

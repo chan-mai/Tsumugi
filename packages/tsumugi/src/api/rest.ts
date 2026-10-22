@@ -104,11 +104,11 @@ export function validateCreateJob(
 		['priority', raw.priority],
 	];
 	for (const [name, value] of numbers) {
-		if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) return { error: `${name} must be a number` };
+		if (value !== undefined && !Number.isInteger(value)) return { error: `${name} must be an integer` };
 	}
 	if (typeof raw.maxAttempts === 'number' && raw.maxAttempts < 1) return { error: 'maxAttempts must be at least 1' };
 	if (typeof raw.delayMs === 'number' && raw.delayMs < 0) return { error: 'delayMs must not be negative' };
-	if (typeof raw.expiresInMs === 'number' && (!Number.isInteger(raw.expiresInMs) || raw.expiresInMs < 1)) {
+	if (typeof raw.expiresInMs === 'number' && raw.expiresInMs < 1) {
 		return { error: 'expiresInMs must be a positive integer' };
 	}
 
@@ -149,7 +149,7 @@ export function validateReschedule(body: unknown, now: number): { input: Resched
 		['priority', raw.priority],
 	];
 	for (const [name, value] of numbers) {
-		if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) return { error: `${name} must be a number` };
+		if (value !== undefined && !Number.isInteger(value)) return { error: `${name} must be an integer` };
 	}
 
 	const hasRunAt = typeof raw.runAt === 'number';
@@ -285,11 +285,8 @@ export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input
 	}
 
 	for (const name of ['created_from', 'created_to', 'limit'] as const) {
-		if (raw[name] !== undefined && (typeof raw[name] !== 'number' || !Number.isFinite(raw[name]))) {
-			return { error: `${name} must be a number` };
-		}
+		if (raw[name] !== undefined && !Number.isInteger(raw[name])) return { error: `${name} must be an integer` };
 	}
-	if (typeof raw.limit === 'number' && !Number.isInteger(raw.limit)) return { error: 'limit must be an integer' };
 	if (typeof raw.limit === 'number' && raw.limit < 1) return { error: 'limit must be at least 1' };
 
 	return {
@@ -364,7 +361,7 @@ export function parseJobFilters(url: URL): JobFilters {
 		// 空文字は指定なし扱い, Number('')は0で上限が1970年
 		if (raw === null || raw === '') return undefined;
 		const value = Number(raw);
-		return Number.isFinite(value) ? value : undefined;
+		return Number.isInteger(value) ? value : undefined;
 	};
 
 	return {

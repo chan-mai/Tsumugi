@@ -25,9 +25,10 @@ describe('集計の区間と抽出条件', () => {
 	});
 
 	it('範囲外の区間を拒否する', () => {
-		expect(parse('?hours=0')).toEqual({ error: 'hours must be at least 1' });
+		expect(parse('?hours=0')).toEqual({ error: 'hours must be an integer of at least 1' });
+		expect(parse('?hours=1.5')).toEqual({ error: 'hours must be an integer of at least 1' });
 		expect(parse('?hours=721')).toEqual({ error: 'hours must not exceed 720' });
-		expect(parse('?hours=day')).toEqual({ error: 'hours must be at least 1' });
+		expect(parse('?hours=day')).toEqual({ error: 'hours must be an integer of at least 1' });
 	});
 
 	it('binding名として成立しない値を拒否する', () => {

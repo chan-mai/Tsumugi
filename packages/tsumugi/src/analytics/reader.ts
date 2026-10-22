@@ -42,7 +42,7 @@ export class MetricsQueryError extends Error {
 export function parseMetricsQuery(url: URL): { query: MetricsQuery } | { error: string } {
 	const raw = url.searchParams.get('hours');
 	const hours = raw === null || raw === '' ? 24 : Number(raw);
-	if (!Number.isFinite(hours) || hours < 1) return { error: 'hours must be at least 1' };
+	if (!Number.isInteger(hours) || hours < 1) return { error: 'hours must be an integer of at least 1' };
 	if (hours > 720) return { error: 'hours must not exceed 720' };
 
 	const binding = url.searchParams.get('binding') || undefined;

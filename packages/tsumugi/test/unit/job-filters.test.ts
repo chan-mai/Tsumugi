@@ -23,7 +23,8 @@ describe('一覧の抽出条件', () => {
 		expect(parse('?id=&unique_key=')).toEqual({});
 	});
 
-	it('数値にならない期間を無視する', () => {
+	it('整数にならない期間を無視する', () => {
+		expect(parse('?created_from=1.5')).toEqual({});
 		// 400では入力途中で画面停止
 		expect(parse('?created_from=yesterday')).toEqual({});
 		expect(parse('?created_to=')).toEqual({});
