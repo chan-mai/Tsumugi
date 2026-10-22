@@ -29,7 +29,7 @@ import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
 import type { NodeRow } from './run-schema.js';
-import { deadlineErrorOf, RunRepo } from './run-repo.js';
+import { deadlineErrorOf, RunRepo, type NewNode } from './run-repo.js';
 
 export type RunEnv = ClientEnv & {
 	TSUMUGI_DB: D1Database;
@@ -83,6 +83,8 @@ export type StartInput = {
 export type StartResult = { id: string; created: boolean };
 
 type SubflowStart = { nodeId: string; childRunId: string; flow: string; input: unknown };
+
+type ChildSpec = { key: string; binding: string; payload: unknown; job: object; concurrencyKey: string | undefined };
 
 type BuiltJob = Omit<EnqueueInput, 'binding' | 'id' | 'runId' | 'nodeId' | 'partitionKey' | 'uniqueKey' | 'uniqueForMs'>;
 
@@ -579,32 +581,31 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			const items = this.#evaluate(row, 'over', now, () => definition.over!(runInput, this.#depsOf(definition)));
 			if (!items.ok) return [row.id];
-			if (this.repo.countNodes() + items.value.length > maxNodes) {
-				this.repo.updateNode(row.id, { state: 'FAILED', error: `node count exceeded the limit: ${maxNodes}` }, now);
+			const exceeded = this.#nodeLimitError(items.value.length);
+			if (exceeded) {
+				this.repo.updateNode(row.id, { state: 'FAILED', error: exceeded }, now);
 				return [row.id];
 			}
 
-			let seq = this.repo.nextSeq();
 			const built = this.#evaluate(row, 'fan-out', now, () =>
-				items.value.map((item, index) => {
-					const key = definition.key ? definition.key(item, index) : String(index);
-					assertNodeId(key);
-					const concurrencyKey =
-						typeof definition.childConcurrencyKey === 'function'
-							? definition.childConcurrencyKey(item, index)
-							: definition.childConcurrencyKey;
-					return {
-						id: `${row.id}:${key}`,
-						binding: definition.binding,
-						container: false,
-						parent: row.id,
-						origin: 'fanOut' as const,
-						after: [],
-						seq: seq++,
-						payload: JSON.stringify(definition.item?.(item, runInput, index) ?? null),
-						options: JSON.stringify({ ...definition.job, ...(concurrencyKey === undefined ? {} : { concurrencyKey }) }),
-					};
-				}),
+				this.#childNodes(
+					row.id,
+					'fanOut',
+					items.value.map((item, index) => {
+						const key = definition.key ? definition.key(item, index) : String(index);
+						assertNodeId(key);
+						return {
+							key,
+							binding: definition.binding,
+							payload: definition.item?.(item, runInput, index),
+							job: definition.job ?? {},
+							concurrencyKey:
+								typeof definition.childConcurrencyKey === 'function'
+									? definition.childConcurrencyKey(item, index)
+									: definition.childConcurrencyKey,
+						};
+					}),
+				),
 			);
 			if (!built.ok) return [row.id];
 			const children = built.value;
@@ -617,30 +618,41 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		// 作成不可は例外でなく理由を返却, 例外では通知滞留
 		#applySpawns(parentId: string, spawns: readonly SpawnRequest[], now: number): { ids: string[]; error: string | null } {
 			if (spawns.length === 0) return { ids: [], error: null };
-			if (this.repo.countNodes() + spawns.length > maxNodes) {
-				return { ids: [], error: `node count exceeded the limit: ${maxNodes}` };
-			}
+			const exceeded = this.#nodeLimitError(spawns.length);
+			if (exceeded) return { ids: [], error: exceeded };
 			const invalid = spawns.find((spawn) => !isNodeId(spawn.id));
 			if (invalid) return { ids: [], error: `invalid spawn id: ${JSON.stringify(invalid.id)}` };
 
-			let seq = this.repo.nextSeq();
-			const children = spawns.map((spawn) => {
-				const { concurrencyKey, ...job } = spawn.options ?? {};
-				return {
-					id: `${parentId}:${spawn.id}`,
-					binding: spawn.binding,
-					container: false,
-					parent: parentId,
-					origin: 'spawn' as const,
-					after: [],
-					seq: seq++,
-					payload: JSON.stringify(spawn.payload ?? null),
-					options: JSON.stringify({ ...job, ...(concurrencyKey === undefined ? {} : { concurrencyKey }) }),
-				};
-			});
+			const children = this.#childNodes(
+				parentId,
+				'spawn',
+				spawns.map((spawn) => {
+					const { concurrencyKey, ...job } = spawn.options ?? {};
+					return { key: spawn.id, binding: spawn.binding, payload: spawn.payload, job, concurrencyKey };
+				}),
+			);
 
 			this.repo.insertNodes(children, now);
 			return { ids: children.map((child) => child.id), error: null };
+		}
+
+		#nodeLimitError(adding: number): string | null {
+			return this.repo.countNodes() + adding > maxNodes ? `node count exceeded the limit: ${maxNodes}` : null;
+		}
+
+		#childNodes(parent: string, origin: 'fanOut' | 'spawn', specs: readonly ChildSpec[]): NewNode[] {
+			let seq = this.repo.nextSeq();
+			return specs.map((spec) => ({
+				id: `${parent}:${spec.key}`,
+				binding: spec.binding,
+				container: false,
+				parent,
+				origin,
+				after: [],
+				seq: seq++,
+				payload: JSON.stringify(spec.payload ?? null),
+				options: JSON.stringify({ ...spec.job, ...(spec.concurrencyKey === undefined ? {} : { concurrencyKey: spec.concurrencyKey }) }),
+			}));
 		}
 
 		#buildJob(row: NodeRow, definitions: Map<string, FlowNode>, runInput: unknown): BuiltJob | null {
