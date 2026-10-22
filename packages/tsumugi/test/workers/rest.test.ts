@@ -1155,8 +1155,11 @@ describe('予約済みジョブの実行時刻の変更', () => {
 	});
 
 	it('不正な形式のジョブIDは400', async () => {
-		const res = await post('/api/jobs/not-a-job-id/reschedule', { runAt: T0 });
-		expect(res.status).toBe(400);
+		for (const action of ['reschedule', 'retry', 'cancel']) {
+			const res = await post(`/api/jobs/not-a-job-id/${action}`, { runAt: T0 });
+			expect(res.status).toBe(400);
+			expect(await res.json()).toEqual({ error: 'invalid job id' });
+		}
 	});
 });
 

@@ -44,6 +44,17 @@ export type RestEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };
 
 const LIST_LIMIT_MAX = 100;
 
+const INVALID_JSON = Symbol('invalid json');
+const INVALID_JSON_BODY = { error: 'body must be valid JSON' } satisfies ErrorResponse;
+
+async function readJson(req: { json(): Promise<unknown> }): Promise<unknown> {
+	try {
+		return await req.json();
+	} catch {
+		return INVALID_JSON;
+	}
+}
+
 function stubOf(env: RestEnv, jobId: string): DurableObjectStub<TsumugiJobShard> {
 	return env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardNameOf(jobId)));
 }
@@ -555,12 +566,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.post('/api/jobs', async (c) => {
 		if (!enqueue) return c.json({ error: 'job creation is not available' } satisfies ErrorResponse, 501);
 
-		let body: unknown;
-		try {
-			body = await c.req.json();
-		} catch {
-			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
-		}
+		const body = await readJson(c.req);
+		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
 		const parsed = validateCreateJob(body, bindings, c.req.header('traceparent'));
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
@@ -670,12 +677,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	for (const action of ['retry', 'cancel'] as const) {
 		app.post(`/api/jobs/bulk-${action}`, async (c) => {
-			let body: unknown;
-			try {
-				body = await c.req.json();
-			} catch {
-				return c.json({ error: 'body must be valid JSON' }, 400);
-			}
+			const body = await readJson(c.req);
+			if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 			const { body: result, status } = await bulk(action, c.env, body);
 			return c.json(result, status);
 		});
@@ -740,12 +743,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		if (bindings !== undefined && !bindings.includes(binding))
 			return c.json({ error: `unknown binding: ${binding}` } satisfies ErrorResponse, 404);
 
-		let body: unknown;
-		try {
-			body = await c.req.json();
-		} catch {
-			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
-		}
+		const body = await readJson(c.req);
+		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
 		const parsed = validatePolicy(body);
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
@@ -850,57 +849,45 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 			: ({ body: { ok: false, error: 'not allowed in the current state' }, status: 409 } as const);
 	}
 
-	app.post('/api/jobs/:id/retry', async (c) => {
-		const id = c.req.param('id');
+	// 変更は正であるDOへ送信
+	const jobMutation = async (env: Env, id: string, apply: (stub: DurableObjectStub<TsumugiJobShard>) => Promise<MutationResult>) => {
 		try {
-			// 変更は正であるDOへ送信
-			const result = await stubOf(c.env, id).retry(id);
-			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
-			const { body, status } = refusal(result);
-			return c.json(body, status);
+			const result = await apply(stubOf(env, id));
+			if (result.ok) {
+				return { body: { ok: true, ...(result.requested ? { requested: true } : {}) } satisfies MutationResponse, status: 200 } as const;
+			}
+			return refusal(result);
 		} catch (error) {
-			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
+			if (error instanceof InvalidJobIdError) return { body: { error: 'invalid job id' } satisfies ErrorResponse, status: 400 } as const;
 			throw error;
 		}
+	};
+
+	app.post('/api/jobs/:id/retry', async (c) => {
+		const id = c.req.param('id');
+		const { body, status } = await jobMutation(c.env, id, (stub) => stub.retry(id));
+		return c.json(body, status);
 	});
 
 	app.post('/api/jobs/:id/reschedule', async (c) => {
 		const id = c.req.param('id');
 
-		let body: unknown;
-		try {
-			body = await c.req.json();
-		} catch {
-			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
-		}
+		const body = await readJson(c.req);
+		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
 		const parsed = validateReschedule(body, Date.now());
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
 
-		try {
-			// SCHEDULED以外は予定変更でも実行継続, DO側で拒否
-			const result = await stubOf(c.env, id).reschedule(id, parsed.input);
-			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
-			const { body: refused, status } = refusal(result);
-			return c.json(refused, status);
-		} catch (error) {
-			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
-			throw error;
-		}
+		// SCHEDULED以外は予定変更でも実行継続, DO側で拒否
+		const { body: result, status } = await jobMutation(c.env, id, (stub) => stub.reschedule(id, parsed.input));
+		return c.json(result, status);
 	});
 
 	app.post('/api/jobs/:id/cancel', async (c) => {
 		const id = c.req.param('id');
-		try {
-			// SCHEDULEDは即時, QUEUED / RUNNINGは要求の受理(ADR-0052)
-			const result = await stubOf(c.env, id).cancel(id);
-			if (result.ok) return c.json({ ok: true, ...(result.requested ? { requested: true } : {}) } satisfies MutationResponse, 200);
-			const { body, status } = refusal(result);
-			return c.json(body, status);
-		} catch (error) {
-			if (error instanceof InvalidJobIdError) return c.json({ error: 'invalid job id' } satisfies ErrorResponse, 400);
-			throw error;
-		}
+		// SCHEDULEDは即時, QUEUED / RUNNINGは要求の受理(ADR-0052)
+		const { body, status } = await jobMutation(c.env, id, (stub) => stub.cancel(id));
+		return c.json(body, status);
 	});
 
 	// Run DOはrun毎に独立, 横断一覧は読み取りモデルからのみ取得可能
@@ -949,12 +936,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.post('/api/runs', async (c) => {
 		if (!start) return c.json({ error: 'run creation is not available' } satisfies ErrorResponse, 501);
 
-		let body: unknown;
-		try {
-			body = await c.req.json();
-		} catch {
-			return c.json({ error: 'body must be valid JSON' } satisfies ErrorResponse, 400);
-		}
+		const body = await readJson(c.req);
+		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
 		const parsed = validateStartRun(body, flows);
 		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
