@@ -199,6 +199,21 @@ model RunNode {
 
 	created_at: integer;
 	updated_at: integer;
+
+	@doc("Enqueue time of the node's job, or start of the subflow run (epoch milliseconds). Null before either exists.")
+	queued_at: integer | null;
+
+	@doc("Earliest execution time of the node's job (epoch milliseconds)")
+	run_after: integer | null;
+
+	@doc("Dispatch time of the latest attempt, or start of the subflow run (epoch milliseconds)")
+	started_at: integer | null;
+
+	@doc("Time the job or subflow run reached a terminal state (epoch milliseconds). Null while active.")
+	finished_at: integer | null;
+
+	@doc("Attempts of the node's job, newest first. Empty when the node has no job. error is always null here; the job detail returns it.")
+	attempts_log: AttemptRecord[];
 }
 
 @doc("Either ids, or the filter fields. When ids is present the filter fields are ignored. Unknown fields are rejected with 400.")

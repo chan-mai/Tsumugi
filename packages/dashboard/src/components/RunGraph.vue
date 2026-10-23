@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { Scan, ZoomIn, ZoomOut } from '@lucide/vue';
 import { MarkerType, useVueFlow, VueFlow } from '@vue-flow/core';
 import { computed, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import RunChildNode from './graph/RunChildNode.vue';
 import RunEdge from './graph/RunEdge.vue';
 import { HANDLE_TOP, runLayout, type ChildData, type TaskData } from './graph/runLayout';
@@ -9,6 +11,7 @@ import type { RunNode } from '../api';
 
 const props = defineProps<{ nodes: RunNode[] }>();
 const emit = defineEmits<{ (event: 'select', jobId: string): void; (event: 'run', runId: string): void }>();
+const { t } = useI18n();
 
 const measured = ref(new Map<string, number>());
 const graph = computed(() => runLayout(props.nodes, measured.value));
@@ -30,6 +33,12 @@ watch(
 );
 
 const { fitView, zoomIn, zoomOut, onNodesInitialized, findNode } = useVueFlow();
+
+const controls = [
+	{ label: 'graph.zoomOut', icon: ZoomOut, action: () => void zoomOut() },
+	{ label: 'graph.zoomIn', icon: ZoomIn, action: () => void zoomIn() },
+	{ label: 'graph.fitView', icon: Scan, action: () => void fitView({ padding: 0.15, maxZoom: 1 }) },
+];
 
 const edges = computed(() =>
 	graph.value.edges.map((edge) => {
@@ -65,7 +74,7 @@ onNodesInitialized(() => {
 </script>
 
 <template>
-	<div class="relative h-[50vh] min-h-72 overflow-hidden rounded-card border border-border bg-muted/30">
+	<div class="relative h-[50vh] min-h-72 overflow-hidden rounded-2xl border border-line bg-canvas">
 		<VueFlow
 			:nodes="graph.nodes"
 			:edges="edges"
@@ -91,30 +100,17 @@ onNodesInitialized(() => {
 			</template>
 		</VueFlow>
 
-		<div class="absolute right-2 bottom-2 flex gap-1">
+		<div class="absolute right-3 bottom-3 flex overflow-hidden rounded-lg border border-line-strong bg-surface">
 			<button
+				v-for="control in controls"
+				:key="control.label"
 				type="button"
-				class="rounded-card border border-border bg-background px-2 py-1 text-xs"
-				aria-label="Zoom out"
-				@click="zoomOut()"
+				class="flex size-8 items-center justify-center border-none bg-transparent text-ink-muted transition-colors not-last:border-r not-last:border-line hover:bg-canvas hover:text-ink"
+				:aria-label="t(control.label)"
+				:title="t(control.label)"
+				@click="control.action"
 			>
-				-
-			</button>
-			<button
-				type="button"
-				class="rounded-card border border-border bg-background px-2 py-1 text-xs"
-				aria-label="Zoom in"
-				@click="zoomIn()"
-			>
-				+
-			</button>
-			<button
-				type="button"
-				class="rounded-card border border-border bg-background px-2 py-1 text-xs"
-				aria-label="Fit view"
-				@click="fitView({ padding: 0.15, maxZoom: 1 })"
-			>
-				Fit
+				<component :is="control.icon" class="size-4" aria-hidden="true" />
 			</button>
 		</div>
 	</div>

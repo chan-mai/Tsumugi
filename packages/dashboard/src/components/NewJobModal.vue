@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import ModalShell from './ModalShell.vue';
 import { ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { createJob } from '../api';
+import { button, ERROR_TEXT, INPUT as FIELD, LABEL } from '../ui';
 
 const props = defineProps<{ open: boolean; bindings: string[] }>();
 const emit = defineEmits<{ close: []; created: [id: string] }>();
+const { t } = useI18n();
 
 const binding = ref('');
 const payload = ref('{}');
@@ -42,7 +45,7 @@ async function submit() {
 	try {
 		parsed = JSON.parse(payload.value);
 	} catch {
-		error.value = 'Payload must be valid JSON';
+		error.value = t('newJob.invalidPayload');
 		return;
 	}
 
@@ -68,81 +71,65 @@ async function submit() {
 	}
 }
 
-const FIELD = 'h-9 w-full rounded-card border border-border bg-background px-3 text-sm';
-const LABEL = 'mb-1 block text-sm text-muted-foreground';
+const TEXTAREA =
+	'block w-full rounded-lg border border-line-strong bg-surface p-3 font-mono text-xs text-ink outline-none focus:border-accent-strong';
 </script>
 
 <template>
-	<ModalShell :open="open" title="New job" width="lg" @close="emit('close')">
+	<ModalShell :open="open" :title="t('newJob.title')" width="lg" @close="emit('close')">
 		<form class="space-y-4" @submit.prevent="submit">
 			<div>
-				<label :class="LABEL" for="new-job-binding">Binding</label>
+				<label :class="LABEL" for="new-job-binding">{{ t('common.binding') }}</label>
 				<select id="new-job-binding" v-model="binding" :class="FIELD">
 					<option v-for="name in bindings" :key="name" :value="name">{{ name }}</option>
 				</select>
 			</div>
 
 			<div>
-				<label :class="LABEL" for="new-job-payload">Payload (JSON)</label>
-				<textarea
-					id="new-job-payload"
-					v-model="payload"
-					rows="6"
-					spellcheck="false"
-					class="w-full rounded-card border border-border bg-background p-3 font-mono text-xs"
-				/>
+				<label :class="LABEL" for="new-job-payload">{{ t('newJob.payload') }}</label>
+				<textarea id="new-job-payload" v-model="payload" rows="6" spellcheck="false" :class="TEXTAREA" />
 			</div>
 
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div>
-					<label :class="LABEL" for="new-job-attempts">Max attempts</label>
+					<label :class="LABEL" for="new-job-attempts">{{ t('newJob.maxAttempts') }}</label>
 					<input id="new-job-attempts" v-model.number="maxAttempts" type="number" min="1" placeholder="3" :class="FIELD" />
 				</div>
 				<div>
-					<label :class="LABEL" for="new-job-priority">Priority</label>
+					<label :class="LABEL" for="new-job-priority">{{ t('newJob.priority') }}</label>
 					<input id="new-job-priority" v-model.number="priority" type="number" placeholder="0" :class="FIELD" />
 				</div>
 				<div>
-					<label :class="LABEL" for="new-job-delay">Delay (ms)</label>
+					<label :class="LABEL" for="new-job-delay">{{ t('newJob.delay') }}</label>
 					<input id="new-job-delay" v-model.number="delayMs" type="number" min="0" placeholder="0" :class="FIELD" />
 				</div>
 				<div>
-					<label :class="LABEL" for="new-job-expires">Expires in (ms)</label>
-					<input id="new-job-expires" v-model.number="expiresInMs" type="number" min="1" placeholder="none" :class="FIELD" />
+					<label :class="LABEL" for="new-job-expires">{{ t('newJob.expiresIn') }}</label>
+					<input id="new-job-expires" v-model.number="expiresInMs" type="number" min="1" :class="FIELD" />
 				</div>
 			</div>
 
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div>
-					<label :class="LABEL" for="new-job-unique">Unique key</label>
-					<input id="new-job-unique" v-model="uniqueKey" type="text" placeholder="optional" :class="FIELD" />
+					<label :class="LABEL" for="new-job-unique">{{ t('newJob.uniqueKey') }}</label>
+					<input id="new-job-unique" v-model="uniqueKey" type="text" :class="FIELD" />
 				</div>
 				<div>
-					<label :class="LABEL" for="new-job-concurrency">Concurrency key</label>
-					<input id="new-job-concurrency" v-model="concurrencyKey" type="text" placeholder="optional" :class="FIELD" />
+					<label :class="LABEL" for="new-job-concurrency">{{ t('newJob.concurrencyKey') }}</label>
+					<input id="new-job-concurrency" v-model="concurrencyKey" type="text" :class="FIELD" />
 				</div>
 				<div>
-					<label :class="LABEL" for="new-job-partition">Partition key</label>
-					<input id="new-job-partition" v-model="partitionKey" type="text" placeholder="required when sharded" :class="FIELD" />
+					<label :class="LABEL" for="new-job-partition">{{ t('newJob.partitionKey') }}</label>
+					<input id="new-job-partition" v-model="partitionKey" type="text" :placeholder="t('newJob.requiredWhenSharded')" :class="FIELD" />
 				</div>
 			</div>
 
-			<p v-if="error" class="text-sm text-destructive">{{ error }}</p>
+			<p v-if="error" :class="ERROR_TEXT">{{ error }}</p>
 
 			<div class="flex justify-end gap-2">
-				<button
-					type="button"
-					class="h-9 rounded-card border border-border bg-background px-4 text-sm hover:bg-accent"
-					@click="emit('close')"
-				>
-					Cancel
-				</button>
-				<button
-					type="submit"
-					class="h-9 rounded-card border-none bg-primary px-4 text-sm text-primary-foreground disabled:opacity-50"
-					:disabled="busy || !binding"
-				>
-					Create
+				<button type="button" :class="button('secondary')" @click="emit('close')">{{ t('common.cancel') }}</button>
+				<button type="submit" :class="button('primary')" :disabled="busy || !binding">
+					{{ t('newJob.create') }}
 				</button>
 			</div>
 		</form>

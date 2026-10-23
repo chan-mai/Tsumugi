@@ -53,7 +53,10 @@ describe('ダッシュボードの配信(ADR-0025)', () => {
 
 	it('APIは常にオリジン直下を呼ぶ', async () => {
 		const html = await (await call(handler(), '/', authorized)).text();
-		expect(html).not.toContain('"base"');
+		// 対象は注入する設定のみ, バンドル内のライブラリコードは除外
+		const config = html.match(/<script>window\.__TSUMUGI__=(.*?)<\/script>/)?.[1];
+		expect(config).toBeDefined();
+		expect(config).not.toContain('"base"');
 	});
 
 	it('注入済みHTMLを再利用する', () => {

@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { Check, ChevronDown, X } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
 import { ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { SEARCH_FIELDS as FIELDS, type SearchField } from '../search';
+import { MENU_ITEM, MENU_ITEM_HOVER, MENU_PANEL } from '../ui';
 
 const props = defineProps<{ field: SearchField; value: string }>();
 const emit = defineEmits<{ 'update:field': [value: SearchField]; 'update:value': [value: string] }>();
+const { t } = useI18n();
 
 const draft = ref(props.value);
 watch(
@@ -13,8 +17,6 @@ watch(
 		draft.value = next;
 	},
 );
-
-const labelOf = (field: SearchField) => FIELDS.find((option) => option.key === field)?.label ?? field;
 
 function commit() {
 	if (draft.value !== props.value) emit('update:value', draft.value);
@@ -27,13 +29,13 @@ function clear() {
 </script>
 
 <template>
-	<div class="flex h-8 items-center rounded-card border border-border bg-background">
+	<div class="flex h-9 items-center rounded-lg border border-line-strong bg-surface focus-within:border-accent-strong">
 		<Popover v-slot="{ open }" class="relative">
-			<PopoverButton class="flex h-8 items-center gap-1.5 rounded-l-card border-none px-3 text-sm text-muted-foreground hover:bg-accent">
-				{{ labelOf(props.field) }}
-				<svg viewBox="0 0 16 16" class="size-3" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-					<path d="M4 6.5l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
-				</svg>
+			<PopoverButton
+				class="flex h-9 items-center gap-1.5 rounded-l-lg border-none bg-transparent px-3 text-sm text-ink-muted hover:bg-canvas"
+			>
+				{{ t(`search.${props.field}`) }}
+				<ChevronDown class="size-3.5" aria-hidden="true" />
 			</PopoverButton>
 
 			<TransitionRoot
@@ -45,36 +47,21 @@ function clear() {
 				leave-from="opacity-100 translate-y-0"
 				leave-to="opacity-0 -translate-y-1"
 			>
-				<PopoverPanel
-					static
-					v-slot="{ close }"
-					class="absolute z-20 mt-1 w-48 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-background p-1 shadow-md"
-				>
+				<PopoverPanel static v-slot="{ close }" :class="MENU_PANEL" class="w-48 max-w-[calc(100vw-2rem)]">
 					<button
-						v-for="option in FIELDS"
-						:key="option.key"
+						v-for="field in FIELDS"
+						:key="field"
 						type="button"
-						class="flex w-full items-center gap-2 rounded-sm border-none px-2 py-1.5 text-left text-sm hover:bg-accent"
+						:class="[MENU_ITEM, MENU_ITEM_HOVER]"
 						@click="
-							emit('update:field', option.key);
+							emit('update:field', field);
 							close();
 						"
 					>
 						<span class="flex size-4 shrink-0 items-center justify-center">
-							<svg
-								v-if="props.field === option.key"
-								viewBox="0 0 16 16"
-								class="size-3"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							>
-								<path d="M3.5 8.5l3 3 6-6" />
-							</svg>
+							<Check v-if="props.field === field" class="size-3.5" aria-hidden="true" />
 						</span>
-						{{ option.label }}
+						{{ t(`search.${field}`) }}
 					</button>
 				</PopoverPanel>
 			</TransitionRoot>
@@ -83,8 +70,8 @@ function clear() {
 		<input
 			v-model="draft"
 			type="search"
-			:placeholder="`Search by ${labelOf(props.field).toLowerCase()}`"
-			class="h-8 w-44 border-none bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground sm:w-56"
+			:placeholder="t('search.placeholder', { field: t(`search.${props.field}`) })"
+			class="h-9 w-44 border-none bg-transparent px-2 text-sm outline-none placeholder:text-ink-subtle sm:w-56"
 			@change="commit"
 			@keyup.enter="commit"
 		/>
@@ -92,13 +79,11 @@ function clear() {
 		<button
 			v-if="props.value"
 			type="button"
-			class="flex h-8 items-center rounded-r-card border-none px-2 text-muted-foreground hover:bg-accent"
-			aria-label="Clear search"
+			class="flex h-9 items-center rounded-r-lg border-none bg-transparent px-2 text-ink-muted hover:bg-canvas"
+			:aria-label="t('search.clear')"
 			@click="clear"
 		>
-			<svg viewBox="0 0 16 16" class="size-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-				<path d="M4 4l8 8M12 4l-8 8" />
-			</svg>
+			<X class="size-3.5" aria-hidden="true" />
 		</button>
 	</div>
 </template>

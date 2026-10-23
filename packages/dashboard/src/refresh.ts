@@ -12,10 +12,13 @@ export const DEFAULT_REFRESH_MS = 3_000;
 
 export const REFRESH_KEY = 'tsumugi:refresh';
 
-export function loadRefresh(storage: Pick<Storage, 'getItem'>): number {
-	const raw = storage.getItem(REFRESH_KEY);
+export function parseRefresh(raw: string | null): number {
 	// 未設定の数値化は0, 自動更新なしと区別不能
 	if (raw === null || raw === '') return DEFAULT_REFRESH_MS;
 	const ms = Number(raw);
 	return REFRESH_OPTIONS.some((option) => option.ms === ms) ? ms : DEFAULT_REFRESH_MS;
+}
+
+export function loadRefresh(storage: Pick<Storage, 'getItem'>): number {
+	return parseRefresh(storage.getItem(REFRESH_KEY));
 }

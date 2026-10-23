@@ -16,6 +16,11 @@ const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 	position: 0,
 	created_at: 0,
 	updated_at: 0,
+	queued_at: null,
+	run_after: null,
+	started_at: null,
+	finished_at: null,
+	attempts_log: [],
 	...over,
 });
 

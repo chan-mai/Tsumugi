@@ -5,6 +5,9 @@
   "license": "MIT",
   "packageManager": "pnpm@10.33.4",
   "scripts": {
+    "dev": "pnpm build && pnpm dev:migrate && concurrently --kill-others-on-fail -n tsumugi,worker,dashboard -c blue,green,magenta \"pnpm --filter tsumugi dev\" \"pnpm dev:worker\" \"pnpm --filter @tsumugi/dashboard dev\"",
+    "dev:migrate": "wrangler d1 migrations apply TSUMUGI_DB --local -c examples/basic/wrangler.jsonc",
+    "dev:worker": "wrangler dev -c examples/basic/wrangler.jsonc -c examples/remote-performer/wrangler.jsonc --port ${TSUMUGI_DEV_PORT:-8787}",
     "build": "pnpm --filter @tsumugi/dashboard build && pnpm --filter @tsumugi/spec build && pnpm --filter tsumugi build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm typecheck && vitest run",
@@ -16,6 +19,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.23.0",
     "@types/node": "^26.6.5",
+    "concurrently": "^10.0.6",
     "drizzle-orm": "^0.45.4",
     "fast-check": "^4.10.2",
     "prettier": "^3.9.10",

@@ -15,3 +15,5 @@ docs/dec
 # publish時にルートから複写する(prepack)
 packages/tsumugi/README.md
 packages/tsumugi/LICENSE
+
+.DS_Store

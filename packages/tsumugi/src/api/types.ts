@@ -124,6 +124,14 @@ export type RunNode = {
 	position: number;
 	created_at: number;
 	updated_at: number;
+	/** ジョブ行またはsubflowの子runの値, どちらも無ければnull */
+	queued_at: number | null;
+	run_after: number | null;
+	started_at: number | null;
+	/** 終端のみ */
+	finished_at: number | null;
+	/** errorは常にnull, 本文はジョブ詳細 */
+	attempts_log: AttemptRecord[];
 };
 
 export type RunListResponse = { runs: RunSummary[]; total: number };

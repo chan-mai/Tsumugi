@@ -1,24 +1,14 @@
 <script setup lang="ts">
+import { Calendar } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { fromDateInput, toDateInput } from '../dates';
+import { button, CHIP_DASHED, CHIP_VALUE, INPUT, MENU_PANEL } from '../ui';
 
 const props = defineProps<{ from: number | null; to: number | null }>();
 const emit = defineEmits<{ 'update:from': [value: number | null]; 'update:to': [value: number | null] }>();
-
-function toDateInput(value: number | null): string {
-	if (value === null) return '';
-	const at = new Date(value);
-	const pad = (n: number) => String(n).padStart(2, '0');
-	return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-}
-
-// 上限は当日終端, 同日選択時の0件防止
-function fromDateInput(text: string, edge: 'start' | 'end'): number | null {
-	if (!text) return null;
-	const [year, month, day] = text.split('-').map(Number);
-	if (year === undefined || month === undefined || day === undefined) return null;
-	return edge === 'start' ? new Date(year, month - 1, day).getTime() : new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
-}
+const { t } = useI18n();
 
 const label = computed(() => {
 	if (props.from === null && props.to === null) return '';
@@ -28,15 +18,10 @@ const label = computed(() => {
 
 <template>
 	<Popover v-slot="{ open }" class="relative">
-		<PopoverButton
-			class="flex h-8 items-center gap-1.5 rounded-card border border-dashed border-border bg-background px-3 text-sm hover:bg-accent"
-		>
-			<svg viewBox="0 0 16 16" class="size-3.5" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
-				<rect x="2.2" y="3.2" width="11.6" height="10.6" rx="1.4" />
-				<path d="M2.2 6.4h11.6M5.5 2v2.4M10.5 2v2.4" stroke-linecap="round" />
-			</svg>
-			Created
-			<span v-if="label" class="ml-1 rounded bg-accent px-1.5 text-xs whitespace-nowrap">{{ label }}</span>
+		<PopoverButton :class="CHIP_DASHED">
+			<Calendar class="size-4 text-ink-muted" aria-hidden="true" />
+			{{ t('toolbar.created') }}
+			<span v-if="label" :class="CHIP_VALUE" class="whitespace-nowrap">{{ label }}</span>
 		</PopoverButton>
 
 		<TransitionRoot
@@ -48,38 +33,37 @@ const label = computed(() => {
 			leave-from="opacity-100 translate-y-0"
 			leave-to="opacity-0 -translate-y-1"
 		>
-			<PopoverPanel
-				static
-				class="absolute z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-background p-3 shadow-md"
-			>
-				<label class="block text-xs text-muted-foreground" for="created-from">From</label>
+			<PopoverPanel static :class="MENU_PANEL" class="w-64 max-w-[calc(100vw-2rem)] p-3">
+				<label class="block text-xs text-ink-muted" for="created-from">{{ t('toolbar.from') }}</label>
 				<input
 					id="created-from"
 					type="date"
 					:value="toDateInput(props.from)"
-					class="mt-1 h-8 w-full rounded-card border border-border bg-background px-2 text-sm"
+					:class="INPUT"
+					class="mt-1"
 					@change="emit('update:from', fromDateInput(($event.target as HTMLInputElement).value, 'start'))"
 				/>
 
-				<label class="mt-3 block text-xs text-muted-foreground" for="created-to">To</label>
+				<label class="mt-3 block text-xs text-ink-muted" for="created-to">{{ t('toolbar.to') }}</label>
 				<input
 					id="created-to"
 					type="date"
 					:value="toDateInput(props.to)"
-					class="mt-1 h-8 w-full rounded-card border border-border bg-background px-2 text-sm"
+					:class="INPUT"
+					class="mt-1"
 					@change="emit('update:to', fromDateInput(($event.target as HTMLInputElement).value, 'end'))"
 				/>
 
 				<div class="mt-3 flex justify-end">
 					<button
 						type="button"
-						class="h-8 rounded-card border-none bg-accent px-3 text-sm text-muted-foreground hover:bg-border"
+						:class="button('ghost', 'sm')"
 						@click="
 							emit('update:from', null);
 							emit('update:to', null);
 						"
 					>
-						Clear
+						{{ t('toolbar.clear') }}
 					</button>
 				</div>
 			</PopoverPanel>

@@ -1234,6 +1234,70 @@ describe('runの開始', () => {
 		expect(await detail('GREETINGS:retention-fresh')).toBe(true);
 	});
 
+	it('詳細のノードがジョブ行の時刻と試行履歴を返す', async () => {
+		const runId = 'GREETINGS:timing';
+		await env.TSUMUGI_DB.batch([
+			env.TSUMUGI_DB.prepare(
+				`INSERT OR REPLACE INTO run (id, seq, flow, state, input, node_total, node_done, node_failed, created_at, updated_at)
+				 VALUES (?, 1, 'GREETINGS', 'RUNNING', '{}', 3, 1, 0, 100, 900)`,
+			).bind(runId),
+			env.TSUMUGI_DB.prepare(
+				`INSERT OR REPLACE INTO run_node (run_id, node_id, seq, binding, state, container, origin, after, job_id, position, created_at, updated_at)
+				 VALUES (?, 'done', 1, 'REST', 'COMPLETED', 0, 'static', '[]', 'REST#0:timing-done', 0, 100, 500),
+				        (?, 'active', 1, 'REST', 'RUNNING', 0, 'static', '[]', 'REST#0:timing-active', 1, 100, 600),
+				        (?, 'pending', 1, 'REST', 'PENDING', 0, 'static', '[]', NULL, 2, 100, 100)`,
+			).bind(runId, runId, runId),
+			env.TSUMUGI_DB.prepare(
+				`INSERT OR REPLACE INTO run_node (run_id, node_id, seq, binding, state, container, origin, after, child_run_id, position, created_at, updated_at)
+				 VALUES (?, 'sub', 1, 'GREETINGS', 'COMPLETED', 0, 'static', '[]', 'GREETINGS:timing-sub', 3, 100, 800)`,
+			).bind(runId),
+			env.TSUMUGI_DB.prepare(
+				`INSERT OR REPLACE INTO run (id, seq, flow, state, input, node_total, node_done, node_failed, created_at, updated_at)
+				 VALUES ('GREETINGS:timing-sub', 1, 'GREETINGS', 'COMPLETED', '{}', 1, 1, 0, 400, 750)`,
+			),
+			env.TSUMUGI_DB.prepare(
+				`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, payload, created_at, updated_at, dispatched_at, run_id, node_id, attempts_log)
+				 VALUES ('REST#0:timing-done', 1, 'REST', 'COMPLETED', 0, 1, 3, 'at-least-once', '{}', 110, 500, 200, ?, 'done', NULL),
+				        ('REST#0:timing-active', 1, 'REST', 'RUNNING', 0, 1, 3, 'at-least-once', '{}', 120, 600, 300, ?, 'active', ?)`,
+			).bind(runId, runId, JSON.stringify([{ attempt: 1, state: 'FAILED', started_at: 150, finished_at: 200, error: 'boom' }])),
+		]);
+
+		const res = await withFlows.fetch!(
+			new Request(`https://example.com/api/runs/${encodeURIComponent(runId)}`, { headers: { authorization: `Bearer ${TOKEN}` } }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		const { nodes } = await res.json<{ nodes: Record<string, unknown>[] }>();
+		const pick = ({ id, queued_at, started_at, finished_at, attempts_log }: Record<string, unknown>) => ({
+			id,
+			queued_at,
+			started_at,
+			finished_at,
+			attempts_log,
+		});
+		expect(nodes.map(pick)).toEqual([
+			// 初回成功の試行はジョブ行から導出
+			{
+				id: 'done',
+				queued_at: 110,
+				started_at: 200,
+				finished_at: 500,
+				attempts_log: [{ attempt: 1, state: 'COMPLETED', started_at: 200, finished_at: 500, error: null }],
+			},
+			// エラー本文はジョブ詳細のみ
+			{
+				id: 'active',
+				queued_at: 120,
+				started_at: 300,
+				finished_at: null,
+				attempts_log: [{ attempt: 1, state: 'FAILED', started_at: 150, finished_at: 200, error: null }],
+			},
+			{ id: 'pending', queued_at: null, started_at: null, finished_at: null, attempts_log: [] },
+			// subflowは子runの作成から終端まで
+			{ id: 'sub', queued_at: 400, started_at: 400, finished_at: 750, attempts_log: [] },
+		]);
+	});
+
 	it('Object.prototypeの名前を登録済みとして扱わない', async () => {
 		await expect(withFlows.start(env as never, 'constructor' as never, {} as never)).rejects.toThrow(/flow is not registered/);
 		await expect(withFlows.start(env as never, 'toString' as never, {} as never)).rejects.toThrow(/flow is not registered/);

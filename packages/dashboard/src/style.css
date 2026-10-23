@@ -7,32 +7,55 @@
 @import 'tailwindcss/utilities.css' layer(utilities);
 
 @theme {
-	--color-background: hsl(0 0% 100%);
-	--color-foreground: hsl(0 0% 3.9%);
-	--color-muted: hsl(0 0% 96.1%);
-	--color-muted-foreground: hsl(0 0% 45.1%);
-	--color-accent: hsl(0 0% 96.1%);
-	--color-border: hsl(0 0% 89.8%);
-	--color-primary: hsl(0 0% 9%);
-	--color-primary-foreground: hsl(0 0% 98%);
-	--color-destructive: hsl(0 84.2% 60.2%);
-	--radius-card: 0.375rem;
+	--font-sans: 'Noto Sans JP', system-ui, sans-serif;
+
+	/* 無彩色 */
+	--color-canvas: #f6f8fa;
+	--color-surface: #ffffff;
+	--color-line: #eceef2;
+	--color-line-strong: #d9dee5;
+	--color-ink: #26272e;
+	--color-ink-muted: #676d78;
+	--color-ink-subtle: #9aa0ab;
+	--color-neutral-soft: #f1f3f6;
+
+	/* ドキュメントサイトのテーマ(site/.vitepress/theme/custom.css)と共通 */
+	--color-accent: #f7a1b2;
+	--color-accent-hover: color-mix(in srgb, #f7a1b2 62%, #fff);
+	--color-accent-soft: color-mix(in srgb, #f7a1b2 22%, #fff);
+	--color-accent-strong: #ff3e65;
+	--color-on-accent: #fff;
+
+	/* 状態色 */
+	--color-positive: #1f9b6b;
+	--color-positive-soft: #e6f6ef;
+	--color-caution: #9a5b06;
+	--color-caution-soft: #fff0d6;
+	/* ブランドのピンクと区別する赤 */
+	--color-critical: #d92d20;
+	--color-critical-hover: #b42318;
+	--color-critical-soft: #fee4e2;
+	--color-info: #6ac7e6;
+	--color-info-soft: #e4f4fb;
+	--color-info-strong: #1f7ea1;
 }
 
 @layer base {
 	body {
-		background-color: var(--color-background);
-		color: var(--color-foreground);
+		font-family: var(--font-sans);
+		background-color: var(--color-canvas);
+		color: var(--color-ink);
+		-webkit-font-smoothing: antialiased;
 	}
 
 	.vue-flow__edge-path {
-		stroke: var(--color-border);
+		stroke: var(--color-line-strong);
 		stroke-width: 1.5;
 	}
 
 	.vue-flow__arrowhead * {
-		stroke: var(--color-border);
-		fill: var(--color-border);
+		stroke: var(--color-line-strong);
+		fill: var(--color-line-strong);
 	}
 
 	/* 接続はさせない, 端に置いた点がドラッグを吸わないよう当たり判定も外す */

@@ -1,18 +1,24 @@
 <script setup lang="ts">
+import { Check } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { REFRESH_OPTIONS } from '../refresh';
+import { CHIP, MENU_ITEM, MENU_ITEM_HOVER, MENU_PANEL } from '../ui';
 
 const props = defineProps<{ interval: number }>();
 const emit = defineEmits<{ 'update:interval': [value: number] }>();
+const { t } = useI18n();
 
-const label = computed(() => REFRESH_OPTIONS.find((option) => option.ms === props.interval)?.label ?? 'Off');
+const labelOf = (ms: number) =>
+	ms === 0 ? t('toolbar.off') : (REFRESH_OPTIONS.find((option) => option.ms === ms)?.label ?? t('toolbar.off'));
+const label = computed(() => labelOf(props.interval));
 </script>
 
 <template>
 	<Popover v-slot="{ open }" class="relative">
-		<PopoverButton class="flex h-8 items-center gap-2 rounded-card border border-border bg-background px-3 text-sm hover:bg-accent">
-			<span class="size-2 rounded-full" :class="props.interval > 0 ? 'animate-pulse bg-green-500' : 'bg-gray-300'" aria-hidden="true" />
+		<PopoverButton :class="CHIP" :aria-label="`${t('toolbar.refreshInterval')}: ${label}`">
+			<span class="size-2 rounded-full" :class="props.interval > 0 ? 'animate-pulse bg-positive' : 'bg-line-strong'" aria-hidden="true" />
 			{{ label }}
 		</PopoverButton>
 
@@ -25,37 +31,21 @@ const label = computed(() => REFRESH_OPTIONS.find((option) => option.ms === prop
 			leave-from="opacity-100 translate-y-0"
 			leave-to="opacity-0 -translate-y-1"
 		>
-			<PopoverPanel
-				static
-				v-slot="{ close }"
-				class="absolute right-0 z-20 mt-1 w-44 rounded-card border border-border bg-background p-1 shadow-md"
-			>
-				<p class="px-2 py-1.5 text-xs text-muted-foreground">Refresh interval</p>
+			<PopoverPanel static v-slot="{ close }" :class="MENU_PANEL" class="right-0 w-36">
 				<button
 					v-for="option in REFRESH_OPTIONS"
 					:key="option.ms"
 					type="button"
-					class="flex w-full items-center gap-2 rounded-sm border-none px-2 py-1.5 text-left text-sm hover:bg-accent"
+					:class="[MENU_ITEM, MENU_ITEM_HOVER]"
 					@click="
 						emit('update:interval', option.ms);
 						close();
 					"
 				>
 					<span class="flex size-4 shrink-0 items-center justify-center">
-						<svg
-							v-if="props.interval === option.ms"
-							viewBox="0 0 16 16"
-							class="size-3"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<path d="M3.5 8.5l3 3 6-6" />
-						</svg>
+						<Check v-if="props.interval === option.ms" class="size-3.5" aria-hidden="true" />
 					</span>
-					{{ option.label }}
+					{{ labelOf(option.ms) }}
 				</button>
 			</PopoverPanel>
 		</TransitionRoot>

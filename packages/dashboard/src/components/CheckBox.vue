@@ -1,20 +1,13 @@
 <script setup lang="ts">
+import { Check } from '@lucide/vue';
 defineProps<{ checked: boolean }>();
 </script>
 
 <template>
-	<span class="flex size-4 shrink-0 items-center justify-center rounded-sm border border-border">
-		<svg
-			v-if="checked"
-			viewBox="0 0 16 16"
-			class="size-3"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-		>
-			<path d="M3.5 8.5l3 3 6-6" />
-		</svg>
+	<span
+		class="flex size-4 shrink-0 items-center justify-center rounded border"
+		:class="checked ? 'border-accent bg-accent text-on-accent' : 'border-line-strong bg-surface'"
+	>
+		<Check v-if="checked" class="size-3" :stroke-width="3" aria-hidden="true" />
 	</span>
 </template>

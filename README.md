@@ -138,7 +138,7 @@ The dashboard is served at `/` and the REST API under `/api`, both behind the to
 |                                                               |                                                               |
 | ------------------------------------------------------------- | ------------------------------------------------------------- |
 | ![Runs](https://tsumugi.mq1.dev/dashboard-run.jpg)            | ![Job detail](https://tsumugi.mq1.dev/dashboard-attempts.jpg) |
-| `Runs`: Flowの実行状況と依存関係                              | `Job detail`: 試行ごとのエラーと再実行                        |
+| `Runs`: ノードごとのキュー待ちと実行時間                      | `Job detail`: 試行ごとのエラーと再実行                        |
 | ![Schedules](https://tsumugi.mq1.dev/dashboard-schedules.jpg) | ![Bindings](https://tsumugi.mq1.dev/dashboard-bindings.jpg)   |
 | `Schedules`: 定期実行の予定と直近の発火                       | `Bindings`: 同時実行数の変更と一時停止                        |
 

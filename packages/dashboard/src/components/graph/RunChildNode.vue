@@ -6,11 +6,10 @@ defineProps<{ data: ChildData }>();
 </script>
 
 <template>
-	<!-- 子は依存を持たず接続点なし(ADR-0032) -->
-	<div class="flex size-full items-center justify-between gap-2 overflow-hidden rounded-card border border-border bg-muted px-2 text-xs">
-		<span class="truncate text-muted-foreground">{{ data.label }}</span>
+	<div class="flex size-full items-center justify-between gap-2 overflow-hidden rounded-lg border border-line bg-canvas px-2 text-xs">
+		<span class="truncate text-ink-subtle">{{ data.label }}</span>
 		<span class="flex shrink-0 items-center gap-1">
-			<span v-if="data.nested > 0" class="tabular-nums text-muted-foreground">+{{ data.nested }}</span>
+			<span v-if="data.nested > 0" class="tabular-nums text-ink-subtle">+{{ data.nested }}</span>
 			<StatusCell :state="data.node.state" class="scale-90" />
 		</span>
 	</div>
