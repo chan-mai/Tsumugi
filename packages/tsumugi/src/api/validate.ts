@@ -1,8 +1,7 @@
 import { CANCELLABLE_STATES, RETRYABLE_STATES } from '../core/transitions.js';
 import { normalizeTraceparent } from '../core/trace.js';
-import type { JobFilters } from '../repository/job.repository.js';
-import type { BulkTarget } from '../service/jobs.service.js';
-import type { CreateJobInput, StartRunInput } from '../service/types.js';
+import type { BulkTarget, JobFilters } from '../service/jobs.service.js';
+import type { CreateJobInput, StartRunInput } from '../service/inputs.js';
 import type { UpdatePolicyRequest } from './types.js';
 
 export type { CreateJobInput, StartRunInput };

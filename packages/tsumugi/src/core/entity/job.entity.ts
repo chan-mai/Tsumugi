@@ -39,6 +39,6 @@ export type JobListItem = Pick<
 	'id' | 'binding' | 'state' | 'priority' | 'attempts' | 'maxAttempts' | 'createdAt' | 'updatedAt' | 'dispatchedAt'
 >;
 
-export const JOB_SORT_KEYS = ['updatedAt', 'createdAt', 'binding', 'state', 'priority', 'attempts'] as const;
+const JOB_SORT_KEYS = ['updatedAt', 'createdAt', 'binding', 'state', 'priority', 'attempts'] as const;
 
 export type JobSortKey = (typeof JOB_SORT_KEYS)[number];

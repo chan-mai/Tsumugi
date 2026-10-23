@@ -1,6 +1,6 @@
 import type { Attempt, Job, JobListItem, JobSortKey } from '../core/entity/job.entity.js';
 import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
-import type { Retryable } from '../service/jobs.service.js';
+import type { Retryable } from '../service/types.js';
 import type { SortColumn } from './sort.js';
 import type { AttemptRecord, JobDetail, JobSummary, RunDetail, RunNode as RunNodeResponse, RunSummary } from './types.js';
 
@@ -13,7 +13,7 @@ export const SORT_KEYS = {
 	attempts: 'attempts',
 } as const satisfies Record<SortColumn, JobSortKey>;
 
-export const toAttemptRecord = (attempt: Attempt): AttemptRecord => ({
+const toAttemptRecord = (attempt: Attempt): AttemptRecord => ({
 	attempt: attempt.attempt,
 	state: attempt.state,
 	started_at: attempt.startedAt,

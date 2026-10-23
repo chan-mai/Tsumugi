@@ -4,7 +4,7 @@ import { alias } from 'drizzle-orm/sqlite-core';
 import { attemptsOf } from '../core/attempts.js';
 import { nodeTiming } from '../core/node-timing.js';
 import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
-import { parseAttempts } from './job.repository.js';
+import { parseAttempts, parseJson } from './job.repository.js';
 import { job as readModel } from '../projection/tables.js';
 import { run as runModel, runNode } from '../projection/run-tables.js';
 
@@ -13,17 +13,6 @@ export type RunListQuery = { state: string | null; flow: string | null; limit: n
 export interface RunRepository {
 	list(query: RunListQuery): Promise<{ runs: RunListItem[]; total: number }>;
 	find(id: string): Promise<{ run: Run; nodes: RunNode[] } | null>;
-}
-
-// 破損行も詳細画面表示
-function parseAfter(raw: unknown): string[] {
-	if (typeof raw !== 'string' || raw.length === 0) return [];
-	try {
-		const parsed = JSON.parse(raw) as string[];
-		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
-	}
 }
 
 export class RunReadRepository implements RunRepository {
@@ -124,7 +113,7 @@ export class RunReadRepository implements RunRepository {
 					container: node.container === 1,
 					parent: node.parent,
 					origin: node.origin,
-					after: parseAfter(node.after),
+					after: parseJson<string>(node.after),
 					jobId: node.jobId,
 					childRunId: node.childRunId,
 					result: node.result,

@@ -1,5 +1,7 @@
 import { shardName, shardNameOf } from '../core/ids.js';
 import type { BulkFailure, MutationResult, TsumugiJobShard } from './job-shard.js';
+import type { StartResult } from './run.js';
+import type { ScheduleMutationResult, ScheduleTriggerResult, ScheduleView } from './scheduler.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
 
 type ShardEnv = Pick<ConsumerEnv, 'JOB_SHARD'>;
@@ -77,4 +79,20 @@ export async function eachShard<T>(
 	}
 	const applied = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
 	return { failed, applied };
+}
+
+export interface RunControlStub extends Rpc.DurableObjectBranded {
+	start(input: { flow: string; input: unknown; deadlineMs?: number }): Promise<StartResult>;
+	cancel(): Promise<MutationResult>;
+	retry(): Promise<MutationResult>;
+}
+
+/** deadlineMsはflow定義の期限より優先(ADR-0039) */
+export type StartOptions = { id?: string; deadlineMs?: number };
+
+export interface SchedulerControl extends Rpc.DurableObjectBranded {
+	sync(): Promise<void>;
+	list(): Promise<ScheduleView[]>;
+	setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult>;
+	trigger(name: string): Promise<ScheduleTriggerResult>;
 }

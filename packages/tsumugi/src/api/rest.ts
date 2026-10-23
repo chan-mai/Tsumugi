@@ -64,10 +64,10 @@ function mutationResponse(outcome: MutationOutcome, subject: 'job' | 'run') {
 	switch (outcome.reason) {
 		case 'gone':
 			return { body: error(`${subject} not found: it does not exist or was removed after the retention period`), status: 410 } as const;
-		case 'invalid-state':
-			return { body: error('not allowed in the current state'), status: 409 } as const;
 		case 'invalid-id':
 			return { body: error(`invalid ${subject} id`), status: 400 } as const;
+		default:
+			return { body: error('not allowed in the current state'), status: 409 } as const;
 	}
 }
 
@@ -125,7 +125,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.get('/api/bindings', async (c) => c.json({ bindings: await bindingService.list(c.env) } satisfies BindingsResponse));
 
 	app.post('/api/jobs', async (c) => {
-		if (!options.enqueue) return c.json(error('job creation is not available'), 501);
+		const create = jobs.create;
+		if (!create) return c.json(error('job creation is not available'), 501);
 
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
@@ -133,21 +134,20 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const parsed = validateCreateJob(body, bindings, c.req.header('traceparent'));
 		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
-		const created = await jobs.create(c.env, parsed.input);
+		const created = await create(c.env, parsed.input);
 		if (created.ok) return c.json({ id: created.id } satisfies CreateJobResponse, 201);
-		if (created.reason === 'unavailable') return c.json(error('job creation is not available'), 501);
 		return c.json(error(created.message), 400);
 	});
 
 	app.get('/api/metrics', async (c) => {
-		if (!options.metrics?.(c.env)) return c.json(error('metrics is not configured'), 501);
+		const config = metrics.configOf(c.env);
+		if (!config) return c.json(error('metrics is not configured'), 501);
 
 		const parsed = parseMetricsQuery(new URL(c.req.url));
 		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
-		const result = await metrics.read(c.env, parsed.query);
+		const result = await metrics.read(config, parsed.query);
 		if (result.ok) return c.json(result.metrics);
-		if (result.reason === 'unavailable') return c.json(error('metrics is not configured'), 501);
 		// 上流失敗は502, 500では設定誤りと区別不能
 		return c.json(error(result.message), 502);
 	});
@@ -169,7 +169,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	app.post('/api/bindings/:binding/policy', async (c) => {
 		const binding = c.req.param('binding');
-		if (bindings !== undefined && !bindings.includes(binding)) return c.json(error(`unknown binding: ${binding}`), 404);
+		if (!bindingService.isKnown(binding)) return c.json(error(`unknown binding: ${binding}`), 404);
 
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
@@ -179,15 +179,15 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 		const result = await bindingService.updatePolicy(c.env, binding, parsed.input);
 		if (result.ok) return c.json({ binding, shards: result.shards, policy: result.policy } satisfies UpdatePolicyResponse);
-		if (result.reason === 'unknown-binding') return c.json(error(`unknown binding: ${binding}`), 404);
 		return c.json(partial(binding, result.shards, result.failed), 500);
 	});
 
 	app.post('/api/bindings/:binding/policy/reset', async (c) => {
 		const binding = c.req.param('binding');
+		if (!bindingService.isKnown(binding)) return c.json(error(`unknown binding: ${binding}`), 404);
+
 		const result = await bindingService.resetPolicy(c.env, binding);
 		if (result.ok) return c.json({ ok: true } satisfies MutationResponse);
-		if (result.reason === 'unknown-binding') return c.json(error(`unknown binding: ${binding}`), 404);
 		return c.json(partial(binding, result.shards, result.failed), 500);
 	});
 
@@ -260,7 +260,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.get('/api/flows', (c) => c.json({ flows: runs.flows() } satisfies FlowsResponse));
 
 	app.post('/api/runs', async (c) => {
-		if (!options.start) return c.json(error('run creation is not available'), 501);
+		const start = runs.start;
+		if (!start) return c.json(error('run creation is not available'), 501);
 
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
@@ -268,9 +269,8 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const parsed = validateStartRun(body, flows);
 		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
-		const started = await runs.start(c.env, parsed.input);
+		const started = await start(c.env, parsed.input);
 		if (started.ok) return c.json({ id: started.id } satisfies StartRunResponse, 201);
-		if (started.reason === 'unavailable') return c.json(error('run creation is not available'), 501);
 		return c.json(error('invalid run id'), 400);
 	});
 

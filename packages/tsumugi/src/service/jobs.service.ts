@@ -10,16 +10,17 @@ import {
 	type JobRepository,
 	type RetainedFailures,
 } from '../repository/job.repository.js';
-import type { CreateJobInput, MutationOutcome, ServiceEnv, ServiceOptions, Unavailable } from './types.js';
+import type { CreateJobInput } from './inputs.js';
+import type { MutationOutcome, Retryable, ServiceEnv, ServiceOptions } from './types.js';
 
-export type JobAction = { kind: 'retry' } | { kind: 'cancel' } | { kind: 'reschedule'; runAfter: number; priority?: number };
+export type { JobFilters } from '../repository/job.repository.js';
+
+type JobAction = { kind: 'retry' } | { kind: 'cancel' } | { kind: 'reschedule'; runAfter: number; priority?: number };
 
 // 画面はID列挙, 一覧外の件数を扱う利用者は条件指定
 export type BulkTarget = { kind: 'ids'; ids: string[] } | ({ kind: 'filter' } & BulkFilter);
 
-export type Retryable<T> = T & { retryable: boolean };
-
-export type JobStats = { byState: Record<string, number>; oldestScheduledMs: number | null };
+type JobStats = { byState: Record<string, number>; oldestScheduledMs: number | null };
 
 export function createJobService<Env extends ServiceEnv>(
 	{ bindings, enqueue, failedRetentionMs }: ServiceOptions<Env>,
@@ -57,18 +58,16 @@ export function createJobService<Env extends ServiceEnv>(
 		},
 
 		// 分割構成のpartitionKey欠落, binding名の不正は`invalid`
-		async create(
-			env: Env,
-			input: CreateJobInput,
-		): Promise<{ ok: true; id: string } | Unavailable | { ok: false; reason: 'invalid'; message: string }> {
-			if (!enqueue) return { ok: false, reason: 'unavailable' };
-			try {
-				return { ok: true, id: await enqueue(env, input) };
-			} catch (error) {
-				if (error instanceof InvalidJobIdError) return { ok: false, reason: 'invalid', message: error.message };
-				throw error;
-			}
-		},
+		create: enqueue
+			? async (env: Env, input: CreateJobInput): Promise<{ ok: true; id: string } | { ok: false; reason: 'invalid'; message: string }> => {
+					try {
+						return { ok: true, id: await enqueue(env, input) };
+					} catch (error) {
+						if (error instanceof InvalidJobIdError) return { ok: false, reason: 'invalid', message: error.message };
+						throw error;
+					}
+				}
+			: null,
 
 		async mutate(env: Env, id: string, action: JobAction): Promise<MutationOutcome> {
 			let result: MutationResult;

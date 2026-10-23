@@ -3,17 +3,10 @@ import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
 import { configOf, createClient, type BindingConfig, type ClientEnv, type EnqueueHook } from './client/enqueue.js';
 import { TERMINAL_STATES } from './core/transitions.js';
 import type { SettledState } from './core/types.js';
-import type { DispatchMessage, EnqueueInput, MutationResult, TsumugiJobShard } from './do/job-shard.js';
-import { createRunClass, type RunClass, type RunSettings, type StartResult } from './do/run.js';
+import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from './do/job-shard.js';
+import { createRunClass, type RunClass, type RunSettings } from './do/run.js';
 import { DEFAULT_FAILED_RETENTION_MS } from './core/retention.js';
-import {
-	createSchedulerClass,
-	SCHEDULER_DO_NAME,
-	type SchedulerClass,
-	type ScheduleMutationResult,
-	type ScheduleTriggerResult,
-	type ScheduleView,
-} from './do/scheduler.js';
+import { createSchedulerClass, SCHEDULER_DO_NAME, type SchedulerClass } from './do/scheduler.js';
 import type { AnySchedules, ScheduleDefs } from './core/recurring.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry, type PerformerSource } from './queue/consumer.js';
 import type { EnvOf, FailurePerformer, JobQueue, Performers, PerformersOf, SettledPerformer, TypedEnqueueInput } from './core/api.js';
@@ -26,33 +19,19 @@ import type { MetricsResolver } from './analytics/reader.js';
 import { cachedValidate } from './config/validate.js';
 import { configErrorMessage } from './config/fragment.js';
 
-export type { BindingConfig, ClientEnv };
+import type { RunControlStub, SchedulerControl, StartOptions } from './do/control.js';
+
+export type { BindingConfig, ClientEnv, RunControlStub, SchedulerControl, StartOptions };
 
 /** flows利用時のみ必要, 未設定時は開始時エラー(ADR-0013) */
 export type RunNamespaceEnv = {
 	RUN?: DurableObjectNamespace<RunControlStub>;
 };
 
-export interface RunControlStub extends Rpc.DurableObjectBranded {
-	start(input: { flow: string; input: unknown; deadlineMs?: number }): Promise<StartResult>;
-	cancel(): Promise<MutationResult>;
-	retry(): Promise<MutationResult>;
-}
-
-/** deadlineMsはflow定義の期限より優先(ADR-0039) */
-export type StartOptions = { id?: string; deadlineMs?: number };
-
 /** schedules利用時のみ必要, 未設定時は起動時検証で報告(ADR-0013) */
 export type SchedulerNamespaceEnv = {
 	SCHEDULER?: DurableObjectNamespace<SchedulerControl>;
 };
-
-export interface SchedulerControl extends Rpc.DurableObjectBranded {
-	sync(): Promise<void>;
-	list(): Promise<ScheduleView[]>;
-	setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult>;
-	trigger(name: string): Promise<ScheduleTriggerResult>;
-}
 
 export type TsumugiConfig<Env extends ConsumerEnv> = {
 	/**

@@ -49,7 +49,7 @@ export type RetainedFailures = {
 	bindings: readonly string[] | undefined;
 };
 
-export type JobStatsRow = { byState: Record<string, number>; oldestScheduledAt: number | null };
+type JobStatsRow = { byState: Record<string, number>; oldestScheduledAt: number | null };
 
 export interface JobRepository {
 	list(query: JobListQuery): Promise<{ jobs: JobListItem[]; total: number }>;
@@ -66,7 +66,7 @@ export interface JobRepository {
 }
 
 // 破損時も詳細画面は表示
-function parseJson<T>(raw: unknown): T[] {
+export function parseJson<T>(raw: unknown): T[] {
 	if (typeof raw !== 'string' || raw.length === 0) return [];
 	try {
 		const parsed: unknown = JSON.parse(raw);

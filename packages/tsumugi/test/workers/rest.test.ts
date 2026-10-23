@@ -759,6 +759,13 @@ describe('試行履歴(ADR-0028)', () => {
 		expect(job.attempts_log[0]?.error).toContain('boom');
 	});
 
+	it('仕様外のフィールドを返さない', async () => {
+		// 保存形式はDOの試行行と同じでjob_idを含む
+		const jobId = await runFailing('LOG7#0', 'LOG7', 1);
+		const { job } = await detail(jobId);
+		expect(Object.keys(job.attempts_log[0] ?? {}).sort()).toEqual(['attempt', 'error', 'finished_at', 'started_at', 'state']);
+	});
+
 	it('試行回数の数値を上書きしない', async () => {
 		// 履歴を`attempts`で返すと画面のn/m表示が不整合
 		const jobId = await runFailing('LOG2#0', 'LOG2', 1);

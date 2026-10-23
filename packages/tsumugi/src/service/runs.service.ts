@@ -2,14 +2,15 @@ import { InvalidRunIdError, parseRunId } from '../core/ids.js';
 import { runRetryable } from '../core/retention.js';
 import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
 import { RunReadRepository, type RunListQuery, type RunRepository } from '../repository/run.repository.js';
-import type { Retryable } from './jobs.service.js';
-import type { MutationOutcome, ServiceEnv, ServiceOptions, StartRunInput, Unavailable } from './types.js';
+import type { StartRunInput } from './inputs.js';
+import type { MutationOutcome, Retryable, ServiceEnv, ServiceOptions, Unavailable } from './types.js';
 
 export function createRunService<Env extends ServiceEnv>(
 	{ flows, start, runFor, runFailedRetentionMs }: ServiceOptions<Env>,
 	repositoryOf: (env: Env) => RunRepository = (env) => new RunReadRepository(env.TSUMUGI_DB),
 ) {
 	return {
+		// Run DOはrun毎に独立, 横断一覧は読み取りモデルからのみ取得可能
 		list(env: Env, query: RunListQuery): Promise<{ runs: RunListItem[]; total: number }> {
 			return repositoryOf(env).list(query);
 		},
@@ -26,20 +27,21 @@ export function createRunService<Env extends ServiceEnv>(
 			return { run: { ...run, retryable: runRetryable(run, Date.now(), runFailedRetentionMs) }, nodes };
 		},
 
-		async start(env: Env, input: StartRunInput): Promise<{ ok: true; id: string } | Unavailable | { ok: false; reason: 'invalid-id' }> {
-			if (!start) return { ok: false, reason: 'unavailable' };
-			const { flow, input: runInput, id, deadlineMs } = input;
-			try {
-				const started = await start(env, flow, runInput, {
-					...(id !== undefined ? { id } : {}),
-					...(deadlineMs !== undefined ? { deadlineMs } : {}),
-				});
-				return { ok: true, id: started };
-			} catch (error) {
-				if (error instanceof InvalidRunIdError) return { ok: false, reason: 'invalid-id' };
-				throw error;
-			}
-		},
+		start: start
+			? async (env: Env, input: StartRunInput): Promise<{ ok: true; id: string } | { ok: false; reason: 'invalid-id' }> => {
+					const { flow, input: runInput, id, deadlineMs } = input;
+					try {
+						const started = await start(env, flow, runInput, {
+							...(id !== undefined ? { id } : {}),
+							...(deadlineMs !== undefined ? { deadlineMs } : {}),
+						});
+						return { ok: true, id: started };
+					} catch (error) {
+						if (error instanceof InvalidRunIdError) return { ok: false, reason: 'invalid-id' };
+						throw error;
+					}
+				}
+			: null,
 
 		// 取り消し, 再開は正であるRun DOへ送信
 		async mutate(env: Env, id: string, action: 'cancel' | 'retry'): Promise<MutationOutcome | Unavailable> {

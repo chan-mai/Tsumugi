@@ -1,6 +1,7 @@
 import type { MetricsResolver } from '../analytics/reader.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
-import type { RunControlStub, SchedulerControl, StartOptions } from '../worker.js';
+import type { RunControlStub, SchedulerControl, StartOptions } from '../do/control.js';
+import type { CreateJobInput } from './inputs.js';
 
 export type ServiceEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };
 
@@ -19,8 +20,9 @@ export type ServiceOptions<Env extends ServiceEnv> = {
 	start?: (env: Env, flow: string, input: unknown, options?: StartOptions) => Promise<string>;
 	// 取り消し, 再開はDOへ直接送信, 読み取りモデルは正でない(ADR-0015)
 	runFor?: (env: Env, runId: string) => Pick<RunControlStub, 'cancel' | 'retry'>;
-	// 定期実行の照会, 操作, Scheduler DOへ直接送信(ADR-0040)
+	// 定期実行の照会, 操作, Scheduler DOへ直接送信(ADR-0040), 未設定時`/api/schedules`は501
 	schedulerFor?: (env: Env) => Pick<SchedulerControl, 'list' | 'setPaused' | 'trigger'>;
+	// 未設定時`/api/metrics`は501
 	metrics?: MetricsResolver<Env>;
 };
 
@@ -28,25 +30,4 @@ export type Unavailable = { ok: false; reason: 'unavailable' };
 
 export type MutationOutcome = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' | 'invalid-id' };
 
-export type CreateJobInput = {
-	binding: string;
-	payload: unknown;
-	maxAttempts?: number;
-	delayMs?: number;
-	/** 投入時刻からの相対期限, 経過後は未実行でCANCELLED */
-	expiresInMs?: number;
-	priority?: number;
-	concurrencyKey?: string;
-	uniqueKey?: string;
-	/** 分割bindingの投入先shard決定用, shards>=2で必須(ADR-0011) */
-	partitionKey?: string;
-	traceparent?: string;
-};
-
-export type StartRunInput = {
-	flow: string;
-	input: unknown;
-	id?: string;
-	/** run全体の期限(ms), flow定義の期限より優先(ADR-0039) */
-	deadlineMs?: number;
-};
+export type Retryable<T> = T & { retryable: boolean };
