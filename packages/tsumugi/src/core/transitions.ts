@@ -8,7 +8,7 @@ import type { ActiveState, JobState } from './types.js';
 export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
 	// dispatch, cancel, 期限切れ
 	SCHEDULED: ['QUEUED', 'CANCELLED'],
-	// claim(at-most-onceのみ), 完了報告, reaper, 期限切れ
+	// claim, 開始通知, 完了報告, reaper, 期限切れ
 	QUEUED: ['RUNNING', 'COMPLETED', 'FAILED', 'SCHEDULED', 'STALLED', 'CANCELLED'],
 	// 完了報告, reaper, 期限超過再試行の中止
 	RUNNING: ['COMPLETED', 'FAILED', 'SCHEDULED', 'STALLED', 'CANCELLED'],

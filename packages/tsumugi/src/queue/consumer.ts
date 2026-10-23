@@ -170,6 +170,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 	let result: unknown;
 	const spawns: SpawnRequest[] = [];
 	let fail: FailOptions | undefined;
+	let starting: Promise<void> = Promise.resolve();
 
 	try {
 		// 分割代入もtry内, 本文null等の例外でのack欠落防止(ADR-0004)
@@ -212,19 +213,30 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		};
 		const stableId = jobId;
 		const stub = shardStub(env, stableId);
+		// 応答待たず実行, 後続の報告は通知後に送信(ADR-0054)
+		if (!claimRequired) {
+			// 同期例外も捕捉, 実行を継続
+			starting = Promise.resolve()
+				.then(() => stub.start(stableId, attempt))
+				.catch((error: unknown) => {
+					console.error(`tsumugi: start failed (${stableId})`, error);
+				});
+		}
 
 		result = await withTimeout(stableId, timeoutMs, (touch) => {
 			// DO受理の報告のみ期限再計測, timeoutMsを報告間隔として利用
 			const heartbeat = createHeartbeat(
 				(progress) =>
-					stub.heartbeat(stableId, progress).then((ack) => {
-						if (ack.accepted) touch();
-						return ack;
-					}),
+					starting
+						.then(() => stub.heartbeat(stableId, progress))
+						.then((ack) => {
+							if (ack.accepted) touch();
+							return ack;
+						}),
 				() => Date.now(),
 			);
 			const log = createLog(
-				(message) => stub.log(stableId, attempt, message),
+				(message) => starting.then(() => stub.log(stableId, attempt, message)),
 				() => Date.now(),
 			);
 			const ctx: JobContext = {
@@ -261,9 +273,10 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		const outcome = ok
 			? { ok: true, result, ...(spawns.length > 0 ? { spawns } : {}) }
 			: { ok: false, ...(failure === undefined ? {} : { error: failure }), ...(fail ? { fail } : {}) };
+		await starting;
 		await shardStub(env, jobId).report(jobId, outcome);
 	} catch (error) {
-		// 報告喪失時はQUEUEDのまま, reaperが無応答として処理
+		// 報告喪失時はQUEUED / RUNNINGのまま, reaperが無応答として処理
 		console.error(`tsumugi: report failed (${jobId})`, error);
 	}
 }

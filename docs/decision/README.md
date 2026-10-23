@@ -56,3 +56,4 @@
 - [ADR-0051](0051-enqueue-hook-as-defaults.md) - 投入時のフックは既定値の付与として持つ
 - [ADR-0052](0052-cooperative-cancellation.md) - 実行中のジョブの取り消しは協調的な要求として扱う
 - [ADR-0053](0053-performer-fail-options.md) - 失敗した試行の再試行の扱いをperformerが`ctx.fail`で指定する
+- [ADR-0054](0054-start-notice-for-at-least-once.md) - at-least-onceのジョブも実行開始時にRUNNINGへ遷移させる
