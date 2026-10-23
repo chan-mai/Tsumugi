@@ -1032,7 +1032,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 						? attemptsOf(
 								{ state: job.state, attempts: job.attempts, dispatched_at: job.dispatchedAt, updated_at: job.updatedAt },
 								parseAttempts(job.attemptsLog),
-							)
+							).map((attempt) => ({ ...attempt, error: null }))
 						: [],
 				};
 			}),

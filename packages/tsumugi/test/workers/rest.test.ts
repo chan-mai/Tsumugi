@@ -1256,10 +1256,10 @@ describe('runの開始', () => {
 				 VALUES ('GREETINGS:timing-sub', 1, 'GREETINGS', 'COMPLETED', '{}', 1, 1, 0, 400, 750)`,
 			),
 			env.TSUMUGI_DB.prepare(
-				`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, payload, created_at, updated_at, dispatched_at, run_id, node_id)
-				 VALUES ('REST#0:timing-done', 1, 'REST', 'COMPLETED', 0, 1, 3, 'at-least-once', '{}', 110, 500, 200, ?, 'done'),
-				        ('REST#0:timing-active', 1, 'REST', 'RUNNING', 0, 0, 3, 'at-least-once', '{}', 120, 600, 300, ?, 'active')`,
-			).bind(runId, runId),
+				`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, payload, created_at, updated_at, dispatched_at, run_id, node_id, attempts_log)
+				 VALUES ('REST#0:timing-done', 1, 'REST', 'COMPLETED', 0, 1, 3, 'at-least-once', '{}', 110, 500, 200, ?, 'done', NULL),
+				        ('REST#0:timing-active', 1, 'REST', 'RUNNING', 0, 1, 3, 'at-least-once', '{}', 120, 600, 300, ?, 'active', ?)`,
+			).bind(runId, runId, JSON.stringify([{ attempt: 1, state: 'FAILED', started_at: 150, finished_at: 200, error: 'boom' }])),
 		]);
 
 		const res = await withFlows.fetch!(
@@ -1284,7 +1284,14 @@ describe('runの開始', () => {
 				finished_at: 500,
 				attempts_log: [{ attempt: 1, state: 'COMPLETED', started_at: 200, finished_at: 500, error: null }],
 			},
-			{ id: 'active', queued_at: 120, started_at: 300, finished_at: null, attempts_log: [] },
+			// エラー本文はジョブ詳細のみ
+			{
+				id: 'active',
+				queued_at: 120,
+				started_at: 300,
+				finished_at: null,
+				attempts_log: [{ attempt: 1, state: 'FAILED', started_at: 150, finished_at: 200, error: null }],
+			},
 			{ id: 'pending', queued_at: null, started_at: null, finished_at: null, attempts_log: [] },
 			// subflowは子runの作成から終端まで
 			{ id: 'sub', queued_at: 400, started_at: 400, finished_at: 750, attempts_log: [] },

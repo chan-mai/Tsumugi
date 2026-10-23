@@ -36,6 +36,7 @@ async function load() {
 		error.value = null;
 	} catch (e) {
 		if (requested !== generation) return;
+		if (pending.value) metrics.value = null;
 		pending.value = false;
 		if (isUnauthorized(e)) return;
 		error.value = e instanceof Error ? e.message : String(e);

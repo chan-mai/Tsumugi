@@ -17,8 +17,9 @@ const { t } = useI18n();
 const busy = ref(false);
 
 async function run(action: 'retry' | 'cancel') {
+	const ids = [...props.ids];
 	const confirmed = await confirmAction({
-		title: t(action === 'retry' ? 'bulk.retryTitle' : 'bulk.cancelTitle', { count: props.ids.length }),
+		title: t(action === 'retry' ? 'bulk.retryTitle' : 'bulk.cancelTitle', { count: ids.length }),
 		message: t('bulk.appliesTo', { states: states(action) }),
 		confirmLabel: t(action === 'retry' ? 'common.retry' : 'common.cancel'),
 		danger: action === 'cancel',
@@ -26,7 +27,7 @@ async function run(action: 'retry' | 'cancel') {
 	if (!confirmed) return;
 	busy.value = true;
 	try {
-		const result = await bulkAction(action, { ids: props.ids });
+		const result = await bulkAction(action, { ids });
 		const parts = [t('bulk.accepted', { count: result.ok.length })];
 		if (result.failed.length > 0) parts.push(t('bulk.refused', { count: result.failed.length }));
 		emit('message', parts.join(', '));

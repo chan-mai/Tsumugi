@@ -130,6 +130,7 @@ export type RunNode = {
 	started_at: number | null;
 	/** 終端のみ */
 	finished_at: number | null;
+	/** errorは常にnull, 本文はジョブ詳細 */
 	attempts_log: AttemptRecord[];
 };
 

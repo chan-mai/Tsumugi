@@ -212,7 +212,7 @@ model RunNode {
 	@doc("Time the job or subflow run reached a terminal state (epoch milliseconds). Null while active.")
 	finished_at: integer | null;
 
-	@doc("Attempts of the node's job, newest first. Empty when the node has no job.")
+	@doc("Attempts of the node's job, newest first. Empty when the node has no job. error is always null here; the job detail returns it.")
 	attempts_log: AttemptRecord[];
 }
 

@@ -58,12 +58,17 @@ watch(
 );
 
 async function run(kind: 'retry' | 'cancel') {
-	if (!props.jobId) return;
-	const outcome = await act(kind, props.jobId);
+	const id = props.jobId;
+	if (!id) return;
+	const outcome = await act(kind, id);
 	if (outcome === null) return;
-	message.value = outcome;
-	// 投影の数秒遅延で未反映の場合あり
-	await load(props.jobId);
+	if (props.jobId === id) {
+		message.value = outcome;
+		await load(id);
+	} else {
+		// 応答前に別Jobへ移動
+		reset();
+	}
 	emit('changed');
 }
 
