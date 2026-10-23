@@ -216,6 +216,7 @@ shard数を2以上にすると`partitionKey`の指定が必須になり、`concu
 | `COMPLETED` / `CANCELLED` | `sweepAfterMs`      | 5分  |
 | `FAILED` / `STALLED`      | `failedRetentionMs` | 7日  |
 
+保持期間を過ぎたジョブは、最大60秒遅れて削除されます。
 どちらも`bindings`のbinding単位で指定します。
 
 ```ts
