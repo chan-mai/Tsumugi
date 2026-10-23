@@ -164,9 +164,9 @@ describe('DOの書き込み回数', () => {
 		const after = await runInDurableObject(stub, (instance) => (instance as any).repo.writes as number);
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
-		// insert, QUEUED遷移, COMPLETED遷移と各アウトボックス追記で6回
+		// insert, QUEUED遷移, RUNNING遷移(ADR-0054), COMPLETED遷移と各アウトボックス追記で8回
 		// 残り1回は投影後アウトボックス削除, バッチ単位で償却
-		// 6回はスパイク実測値と一致, 増加時は課金影響を確認
-		expect(after - before).toBe(7);
+		// 増加時は課金影響を確認
+		expect(after - before).toBe(9);
 	});
 });
