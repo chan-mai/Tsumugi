@@ -14,6 +14,7 @@ export const EXPECTED_MIGRATIONS = [
 	'0010_add_job_logs.sql',
 	'0011_add_cancel_requested_at.sql',
 	'0012_adjust_list_indexes.sql',
+	'0013_partial_key_indexes.sql',
 ] as const;
 
 /**

@@ -1,4 +1,6 @@
+import { sql } from 'drizzle-orm';
 import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { TERMINAL_INDEX_WHERE } from './schema.js';
 
 /**
  * 稼働中ジョブの正データ(ADR-0002)
@@ -39,7 +41,7 @@ export const job = sqliteTable(
 		// tickの実行可能ジョブ抽出, ORDER BYもインデックスで解決(#104)
 		index('job_due').on(t.state, t.runAfter, t.id),
 		// sweep次回時刻の状態別MIN取得用
-		index('job_terminal').on(t.state, t.updatedAt),
+		index('job_terminal').on(t.state, t.updatedAt).where(sql.raw(TERMINAL_INDEX_WHERE)),
 	],
 );
 

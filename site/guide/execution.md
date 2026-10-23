@@ -93,8 +93,6 @@ const tsumugi = defineTsumugi({
 `perKeyRate`はすべてのキーに同じ値が適用され、キーごとに異なる値は指定できません。
 `concurrencyKey`がnullのジョブに`perKeyConcurrency`と`perKeyRate`は適用されません。
 
-`concurrency` / `rate` / `perKeyConcurrency`の3つを有効にした場合のスループット低下は実測で約17%です。
-
 ### 実行されない原因の確認 {#diagnostics}
 
 投入したジョブが実行されない場合、[GET /api/diagnostics](/reference/rest-api#get-api-diagnostics)で、どの設定によって滞留しているかを確認できます。
@@ -216,6 +214,7 @@ shard数を2以上にすると`partitionKey`の指定が必須になり、`concu
 | `COMPLETED` / `CANCELLED` | `sweepAfterMs`      | 5分  |
 | `FAILED` / `STALLED`      | `failedRetentionMs` | 7日  |
 
+保持期間を過ぎたジョブは、最大60秒遅れて削除されます。
 どちらも`bindings`のbinding単位で指定します。
 
 ```ts

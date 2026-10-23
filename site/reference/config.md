@@ -153,6 +153,8 @@ const tsumugi = defineTsumugi({
 | `sweepAfterMs`      | 5分  | `COMPLETED`と`CANCELLED`を保持する時間                      |
 | `failedRetentionMs` | 7日  | `FAILED`と`STALLED`を保持する時間。リトライを受け付ける期間 |
 
+保持期間を過ぎたジョブは、最大60秒遅れて削除されます。
+
 ## Policy
 
 | 名前                | 既定    | 内容                                                                    |
