@@ -1,7 +1,8 @@
 import type { BlockedBy, Policy } from '../core/types.js';
+import type { AttemptRecord } from '../core/attempts.js';
 import type { JobLogEntry } from '../core/log.js';
 
-export type { JobLogEntry };
+export type { AttemptRecord, JobLogEntry };
 
 // パッケージ非公開, 外部利用者向け仕様は`api/openapi.ts`
 
@@ -17,14 +18,6 @@ export type JobSummary = {
 	dispatched_at: number | null;
 	/** 保持期間からの近似, 最終可否はretry応答で確定(ADR-0027) */
 	retryable: boolean;
-};
-
-export type AttemptRecord = {
-	attempt: number;
-	state: string;
-	started_at: number | null;
-	finished_at: number;
-	error: string | null;
 };
 
 export type JobDetail = JobSummary & {

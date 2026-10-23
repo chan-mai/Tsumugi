@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { attemptsOf, resolveSort, SORTABLE_COLUMNS } from '../../src/api/rest.js';
+import { attemptsOf } from '../../src/core/attempts.js';
+import { resolveSort, SORTABLE_COLUMNS } from '../../src/api/sort.js';
 import { describeError } from '../../src/queue/consumer.js';
 
 describe('一覧の並べ替え', () => {

@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
-import { createRest, SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
+import { createRest, type RestEnv } from '../../src/api/rest.js';
+import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
 import { hashToShard } from '../../src/core/shard.js';
 import type { ScheduleView } from '../../src/do/scheduler.js';
@@ -1296,6 +1297,36 @@ describe('runの開始', () => {
 			// subflowは子runの作成から終端まで
 			{ id: 'sub', queued_at: 400, started_at: 400, finished_at: 750, attempts_log: [] },
 		]);
+	});
+
+	it('runの取り消しと再開をRun DOへ送信する', async () => {
+		const control = (id: string, action: 'cancel' | 'retry') =>
+			withFlows.fetch!(
+				new Request(`https://example.com/api/runs/${encodeURIComponent(id)}/${action}`, {
+					method: 'POST',
+					headers: { authorization: `Bearer ${TOKEN}` },
+				}),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+
+		expect((await post({ flow: 'GREETINGS', input: { prefix: 'rest' }, id: 'rest-control' })).status).toBe(201);
+		// 再開は失敗runのみ
+		const retry = await control('GREETINGS:rest-control', 'retry');
+		expect(retry.status).toBe(409);
+		expect(await retry.json()).toEqual({ error: 'not allowed in the current state' });
+
+		const cancel = await control('GREETINGS:rest-control', 'cancel');
+		expect(cancel.status).toBe(200);
+		expect(await cancel.json()).toEqual({ ok: true });
+
+		// 未作成と保持期間後の削除は区別不能
+		const missing = await control('GREETINGS:rest-control-missing', 'cancel');
+		expect(missing.status).toBe(410);
+
+		const invalid = await control('not-a-run-id', 'retry');
+		expect(invalid.status).toBe(400);
+		expect(await invalid.json()).toEqual({ error: 'invalid run id' });
 	});
 
 	it('Object.prototypeの名前を登録済みとして扱わない', async () => {

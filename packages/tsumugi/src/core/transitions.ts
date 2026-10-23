@@ -21,10 +21,10 @@ export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
 } as const;
 
 export const ACTIVE_STATES: readonly ActiveState[] = ['SCHEDULED', 'QUEUED', 'RUNNING'];
-
 export const TERMINAL_STATES: readonly JobState[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
-
 export const FAILURE_STATES: readonly JobState[] = ['FAILED', 'STALLED'];
+export const RETRYABLE_STATES = ['FAILED', 'STALLED'] as const satisfies readonly JobState[];
+export const CANCELLABLE_STATES = ['SCHEDULED', 'QUEUED', 'RUNNING'] as const satisfies readonly JobState[];
 
 export function isActive(state: JobState): state is ActiveState {
 	return state === 'SCHEDULED' || state === 'QUEUED' || state === 'RUNNING';

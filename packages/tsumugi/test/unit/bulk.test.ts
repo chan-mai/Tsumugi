@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BULK_LIMIT_MAX, groupByShard, validateBulk } from '../../src/api/rest.js';
+import { groupByShard } from '../../src/api/control.js';
+import { BULK_LIMIT_MAX, validateBulk } from '../../src/api/validate.js';
 
 describe('一括操作の対象の検証', () => {
 	it('IDの列挙をそのまま対象にする', () => {
