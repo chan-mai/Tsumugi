@@ -1,18 +1,14 @@
 import { shardName, shardNameOf } from '../core/ids.js';
-import type { BulkFailure, MutationResult, TsumugiJobShard } from '../do/job-shard.js';
+import type { BulkFailure, MutationResult, TsumugiJobShard } from './job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
-
-// 変更は正であるDOへ送信, 読み取りモデルは正でない(ADR-0008)
 
 type ShardEnv = Pick<ConsumerEnv, 'JOB_SHARD'>;
 type ShardStub = DurableObjectStub<TsumugiJobShard>;
 
-/** ジョブID不正時はInvalidJobIdError */
 export function mutateJob(env: ShardEnv, jobId: string, apply: (stub: ShardStub) => Promise<MutationResult>): Promise<MutationResult> {
 	return apply(env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardNameOf(jobId))));
 }
 
-/** 1件ずつの送信はDOへの往復が件数分増加 */
 export function groupByShard(jobIds: readonly string[]): { groups: Map<string, string[]>; invalid: string[] } {
 	const groups = new Map<string, string[]>();
 	const invalid: string[] = [];

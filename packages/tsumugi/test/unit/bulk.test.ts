@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupByShard } from '../../src/api/control.js';
+import { groupByShard } from '../../src/do/control.js';
 import { BULK_LIMIT_MAX, validateBulk } from '../../src/api/validate.js';
 
 describe('一括操作の対象の検証', () => {

@@ -1,8 +1,11 @@
 import { CANCELLABLE_STATES, RETRYABLE_STATES } from '../core/transitions.js';
 import { normalizeTraceparent } from '../core/trace.js';
-import type { CreateJobRequest, StartRunRequest, UpdatePolicyRequest } from './types.js';
+import type { JobFilters } from '../repository/job.repository.js';
+import type { BulkTarget } from '../service/jobs.service.js';
+import type { CreateJobInput, StartRunInput } from '../service/types.js';
+import type { UpdatePolicyRequest } from './types.js';
 
-export type CreateJobInput = CreateJobRequest;
+export type { CreateJobInput, StartRunInput };
 
 export function validateCreateJob(
 	body: unknown,
@@ -83,8 +86,6 @@ export function validateReschedule(body: unknown, now: number): { input: Resched
 	return { input: { runAfter, ...(typeof raw.priority === 'number' ? { priority: raw.priority } : {}) } };
 }
 
-export type StartRunInput = StartRunRequest;
-
 export function validateStartRun(body: unknown, flows: readonly string[] | undefined): { input: StartRunInput } | { error: string } {
 	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
 	const raw = body as Record<string, unknown>;
@@ -161,21 +162,6 @@ export const BULK_LIMIT_MAX = 200;
 
 const BULK_STATES = { retry: RETRYABLE_STATES, cancel: CANCELLABLE_STATES } as const;
 
-// 画面はID列挙, 一覧外の件数を扱う利用者は条件指定
-export type BulkTarget =
-	| { kind: 'ids'; ids: string[] }
-	| {
-			kind: 'filter';
-			binding?: string;
-			/** 未指定時は操作の受理状態すべて */
-			states: readonly string[];
-			uniqueKey?: string;
-			concurrencyKey?: string;
-			createdFrom?: number;
-			createdTo?: number;
-			limit: number;
-	  };
-
 /**
  * `ids`指定時はidsのみ対象, 条件併用は対象の解釈が二通り
  * 条件指定時の状態は操作の受理状態に限定, 非限定では対象が減らず繰り返しが終了不能
@@ -235,22 +221,13 @@ function boundedInt(raw: string | null, fallback: number, min: number, max: numb
 	return Math.min(value, max);
 }
 
-/** 上限変更漏れ防止で両一覧共通 */
+// 上限変更漏れ防止で両一覧共通
 export function parsePaging(url: URL): { limit: number; offset: number } {
 	return {
 		limit: boundedInt(url.searchParams.get('limit'), LIST_LIMIT_DEFAULT, 1, LIST_LIMIT_MAX),
 		offset: boundedInt(url.searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER),
 	};
 }
-
-export type JobFilters = {
-	id?: string;
-	uniqueKey?: string;
-	concurrencyKey?: string;
-	/** created_atの下限, 上限, 両端含む */
-	createdFrom?: number;
-	createdTo?: number;
-};
 
 /**
  * 数値以外の指定は無視, 400では入力途中で画面停止

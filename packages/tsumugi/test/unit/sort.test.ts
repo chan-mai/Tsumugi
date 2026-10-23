@@ -36,24 +36,24 @@ describe('一覧の並べ替え', () => {
 });
 
 describe('1回目で成功した試行の構築(ADR-0028)', () => {
-	const done = { state: 'COMPLETED', attempts: 1, dispatched_at: 1_000, updated_at: 1_500 };
+	const done = { state: 'COMPLETED', attempts: 1, dispatchedAt: 1_000, updatedAt: 1_500 };
 
 	it('ジョブ行から1件を構築する', () => {
-		expect(attemptsOf(done, [])).toEqual([{ attempt: 1, state: 'COMPLETED', started_at: 1_000, finished_at: 1_500, error: null }]);
+		expect(attemptsOf(done, [])).toEqual([{ attempt: 1, state: 'COMPLETED', startedAt: 1_000, finishedAt: 1_500, error: null }]);
 	});
 
 	it('保存された履歴があればそちらを使う', () => {
 		// 構築した1件での上書きは失敗理由が消失
-		const stored = [{ attempt: 2, state: 'COMPLETED', started_at: 5, finished_at: 6, error: null }];
+		const stored = [{ attempt: 2, state: 'COMPLETED', startedAt: 5, finishedAt: 6, error: null }];
 		expect(attemptsOf(done, stored)).toBe(stored);
 	});
 
 	it('実行に至っていないジョブは構築しない', () => {
 		for (const job of [
-			{ state: 'QUEUED', attempts: 0, dispatched_at: 1_000, updated_at: 1_500 },
-			{ state: 'CANCELLED', attempts: 0, dispatched_at: null, updated_at: 1_500 },
-			{ state: 'STALLED', attempts: 1, dispatched_at: 1_000, updated_at: 1_500 },
-			{ state: 'FAILED', attempts: 1, dispatched_at: 1_000, updated_at: 1_500 },
+			{ state: 'QUEUED', attempts: 0, dispatchedAt: 1_000, updatedAt: 1_500 },
+			{ state: 'CANCELLED', attempts: 0, dispatchedAt: null, updatedAt: 1_500 },
+			{ state: 'STALLED', attempts: 1, dispatchedAt: 1_000, updatedAt: 1_500 },
+			{ state: 'FAILED', attempts: 1, dispatchedAt: 1_000, updatedAt: 1_500 },
 		]) {
 			expect(attemptsOf(job, []), job.state).toEqual([]);
 		}
