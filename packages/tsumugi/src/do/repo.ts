@@ -16,7 +16,7 @@ import type {
 	SettledTarget,
 } from '../core/types.js';
 import { chunk } from './bind.js';
-import { applySchema, type AttemptRow, type JobRow } from './schema.js';
+import { applySchema, TERMINAL_INDEX_WHERE, type AttemptRow, type JobRow } from './schema.js';
 import { attempt, failureNotify, job, jobLog, keyBucket, outbox, runNotify, setting, settledNotify, uniqueKey } from './tables.js';
 
 /** HTMLページ全体等によるDOとD1の圧迫防止 */
@@ -69,11 +69,11 @@ const toView = (row: JobRow): JobView => ({
 	cancelRequestedAt: row.cancel_requested_at,
 });
 
-// sweepStateのSQLと同条件を維持
+// sweepStateのSQLと同条件を維持, 部分索引条件は各分岐内でMULTI-INDEX OR維持
 const sweepable = (now: number, retention: Retention) =>
 	or(
-		and(inArray(job.state, ['COMPLETED', 'CANCELLED']), lt(job.updatedAt, now - retention.sweepAfterMs)),
-		and(inArray(job.state, ['FAILED', 'STALLED']), lt(job.updatedAt, now - retention.failedRetentionMs)),
+		and(inArray(job.state, ['COMPLETED', 'CANCELLED']), lt(job.updatedAt, now - retention.sweepAfterMs), sql.raw(TERMINAL_INDEX_WHERE)),
+		and(inArray(job.state, ['FAILED', 'STALLED']), lt(job.updatedAt, now - retention.failedRetentionMs), sql.raw(TERMINAL_INDEX_WHERE)),
 	);
 
 /** 状態遷移は条件付きUPDATEの`returning`で成否判定, 読んでから書く方式は不使用 */
@@ -85,6 +85,8 @@ export class JobRepo {
 	writes = 0;
 	// undefinedは未読込
 	#settledTarget: SettledTarget | null | undefined;
+	// ジョブIDから未投影outbox行のseq, DO退避で消失時は挿入
+	#pendingOutbox = new Map<string, number>();
 
 	constructor(storage: DurableObjectStorage) {
 		this.sql = storage.sql;
@@ -131,11 +133,17 @@ export class JobRepo {
 		if (!row) return null;
 		const attempts = this.attemptsOf(id);
 		// 試行履歴も同梱, 別経路は冪等性判定が別途必要(ADR-0028)
-		this.db
-			.insert(outbox)
-			.values({ jobId: id, snapshot: JSON.stringify({ ...row, attempts_log: attempts, logs: this.logsOf(id) }) })
-			.run();
+		const snapshot = JSON.stringify({ ...row, attempts_log: attempts, logs: this.logsOf(id) });
+		// 未投影行は上書き, 挿入とsqlite_sequence更新と削除の書き込み削減
+		const pending = this.#pendingOutbox.get(id);
+		if (pending !== undefined) {
+			const updated = this.db.update(outbox).set({ snapshot }).where(eq(outbox.seq, pending)).returning({ seq: outbox.seq }).all();
+			this.writes++;
+			if (updated.length > 0) return { row, attempts };
+		}
+		const [inserted] = this.db.insert(outbox).values({ jobId: id, snapshot }).returning({ seq: outbox.seq }).all();
 		this.writes++;
+		if (inserted) this.#pendingOutbox.set(id, inserted.seq);
 		return { row, attempts };
 	}
 
@@ -209,6 +217,8 @@ export class JobRepo {
 
 	outboxBatch(limit: number): { seq: number; job_id: string; snapshot: string }[] {
 		const rows = this.db.select().from(outbox).orderBy(asc(outbox.seq)).limit(limit).all();
+		// 投影中の行は上書き対象外, D1書き込み待機中の遷移が削除で消失
+		for (const r of rows) if (this.#pendingOutbox.get(r.jobId) === r.seq) this.#pendingOutbox.delete(r.jobId);
 		return rows.map((r) => ({ seq: r.seq, job_id: r.jobId, snapshot: r.snapshot }));
 	}
 
@@ -373,9 +383,12 @@ export class JobRepo {
 		return true;
 	}
 
-	heartbeat(id: string, now: number, progress: number | null): { accepted: boolean; cancelRequested: boolean } {
+	/** `projected`: outbox追記の有無, 進捗不変の場合省略 */
+	heartbeat(id: string, now: number, progress: number | null): { accepted: boolean; cancelRequested: boolean; projected: boolean } {
 		const set: Record<string, unknown> = { heartbeatAt: now };
 		if (progress !== null) set.progress = progress;
+		const previous =
+			progress === null ? undefined : this.db.select({ progress: job.progress }).from(job).where(eq(job.id, id)).get()?.progress;
 
 		const updated = this.db
 			.update(job)
@@ -385,10 +398,11 @@ export class JobRepo {
 			.all();
 		this.writes++;
 		const row = updated[0];
-		if (!row) return { accepted: false, cancelRequested: false };
-		// 進捗表示用の投影, 書き込み数は報告側の間隔制限で削減
-		this.#appendOutbox(id);
-		return { accepted: true, cancelRequested: row.cancelRequestedAt !== null };
+		if (!row) return { accepted: false, cancelRequested: false, projected: false };
+		// 進捗表示用の投影, heartbeat_atはD1に無く進捗変化時のみ
+		const projected = progress !== null && progress !== previous;
+		if (projected) this.#appendOutbox(id);
+		return { accepted: true, cancelRequested: row.cancelRequestedAt !== null, projected };
 	}
 
 	requestCancel(id: string, now: number): boolean {
@@ -574,14 +588,14 @@ export class JobRepo {
 			.exec<{ jobs: number; unique_keys: number; next_due: number | null }>(
 				`SELECT
 					EXISTS(SELECT 1 FROM job WHERE
-						(state IN ('COMPLETED', 'CANCELLED') AND updated_at < ?1)
-						OR (state IN ('FAILED', 'STALLED') AND updated_at < ?2)) AS jobs,
+						(state IN ('COMPLETED', 'CANCELLED') AND updated_at < ?1 AND ${TERMINAL_INDEX_WHERE})
+						OR (state IN ('FAILED', 'STALLED') AND updated_at < ?2 AND ${TERMINAL_INDEX_WHERE})) AS jobs,
 					EXISTS(SELECT 1 FROM unique_key WHERE expires_at <= ?3) AS unique_keys,
 					(SELECT MIN(due) FROM (
-						SELECT MIN(updated_at) + ?4 AS due FROM job WHERE state = 'COMPLETED'
-						UNION ALL SELECT MIN(updated_at) + ?4 FROM job WHERE state = 'CANCELLED'
-						UNION ALL SELECT MIN(updated_at) + ?5 FROM job WHERE state = 'FAILED'
-						UNION ALL SELECT MIN(updated_at) + ?5 FROM job WHERE state = 'STALLED')) AS next_due`,
+						SELECT MIN(updated_at) + ?4 AS due FROM job WHERE state = 'COMPLETED' AND ${TERMINAL_INDEX_WHERE}
+						UNION ALL SELECT MIN(updated_at) + ?4 FROM job WHERE state = 'CANCELLED' AND ${TERMINAL_INDEX_WHERE}
+						UNION ALL SELECT MIN(updated_at) + ?5 FROM job WHERE state = 'FAILED' AND ${TERMINAL_INDEX_WHERE}
+						UNION ALL SELECT MIN(updated_at) + ?5 FROM job WHERE state = 'STALLED' AND ${TERMINAL_INDEX_WHERE})) AS next_due`,
 				now - retention.sweepAfterMs,
 				now - retention.failedRetentionMs,
 				now,

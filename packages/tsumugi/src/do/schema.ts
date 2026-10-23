@@ -1,5 +1,8 @@
 import { ensureColumns } from './columns.js';
 
+/** job_terminal部分索引条件 */
+export const TERMINAL_INDEX_WHERE = `state IN ('COMPLETED', 'CANCELLED', 'FAILED', 'STALLED')`;
+
 /**
  * 稼働中ジョブの正データ(ADR-0002)
  * 終端ジョブも保持期間経過まで残存, sweepで削除
@@ -37,8 +40,8 @@ export const SCHEMA = [
 	)`,
 	// tickの実行可能ジョブ抽出, ORDER BYもインデックスで解決(#104)
 	`CREATE INDEX IF NOT EXISTS job_due ON job (state, run_after, id)`,
-	// sweep次回時刻の状態別MIN取得用
-	`CREATE INDEX IF NOT EXISTS job_terminal ON job (state, updated_at)`,
+	// sweep次回時刻の状態別MIN取得用, 稼働中の遷移で更新不要
+	`CREATE INDEX IF NOT EXISTS job_terminal ON job (state, updated_at) WHERE ${TERMINAL_INDEX_WHERE}`,
 	// 重複排除キー(ADR-0021 / ADR-0022), KVに条件付き書き込み無くDO内配置
 	`CREATE TABLE IF NOT EXISTS unique_key (
 		key TEXT PRIMARY KEY,
@@ -107,6 +110,9 @@ export const SCHEMA = [
 ] as const;
 
 export function applySchema(sql: SqlStorage): void {
+	// 既存DOの全状態対象の旧索引, 直後のCREATEで部分索引へ
+	const terminal = sql.exec<{ sql: string }>(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'job_terminal'`).toArray()[0];
+	if (terminal && !/\bWHERE\b/i.test(terminal.sql)) sql.exec(`DROP INDEX job_terminal`);
 	for (const statement of SCHEMA) sql.exec(statement);
 	// 既存DOへの追加列反映(#9)
 	ensureColumns(sql, 'job', [

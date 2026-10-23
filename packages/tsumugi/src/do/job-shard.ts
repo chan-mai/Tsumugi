@@ -163,6 +163,9 @@ const SEND_BATCH_LIMIT = 100;
 
 const SWEEP_LIMIT = 200;
 
+// 複数ジョブの削除を1回のalarmへ集約
+const SWEEP_ALIGN_MS = 60_000;
+
 const FAILURE_NOTIFY_LIMIT = 200;
 
 const SETTLED_NOTIFY_LIMIT = 200;
@@ -503,11 +506,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const now = this.clock.now();
 		// 画面の進捗100%超過防止
 		const clamped = typeof progress === 'number' && Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : null;
-		const result = this.repo.heartbeat(jobId, now, clamped);
-		if (!result.accepted) return result;
+		const { accepted, cancelRequested, projected } = this.repo.heartbeat(jobId, now, clamped);
 		// 投影用alarm, 無いと進捗表示がreaper期限まで遅延
-		await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
-		return result;
+		if (projected) await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
+		return { accepted, cancelRequested };
 	}
 
 	async log(jobId: string, attempt: number, message: string): Promise<boolean> {
@@ -865,7 +867,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 次の削除対象の時刻を返却, 稼働中ジョブが無いとalarm未設定で削除不能
 		// 一定間隔起動は失敗ジョブのみ残存時に無駄な書き込み増
 		const next = deleted > 0 ? this.repo.sweepState(now, this.retention).nextDueAt : state.nextDueAt;
-		return { deleted, retryAt: next === null ? null : Math.max(next, now + 1_000) };
+		if (next === null) return { deleted, retryAt: null };
+		// 削除条件は厳密な不等号, 期限ちょうど未削除で+1ms
+		const aligned = Math.ceil((next + 1) / SWEEP_ALIGN_MS) * SWEEP_ALIGN_MS;
+		return { deleted, retryAt: Math.max(aligned, now + 1_000) };
 	}
 
 	// 遷移前に記録, 同じ投影でD1へ反映
