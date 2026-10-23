@@ -1,7 +1,6 @@
 import { ref } from 'vue';
 import { getBindings, getFlows, getMetrics, isMetricsUnavailable, isUnauthorized, listSchedules } from '../api';
 
-
 export const bindings = ref<string[]>([]);
 export const flows = ref<string[]>([]);
 export const definitionsReady = ref(false);

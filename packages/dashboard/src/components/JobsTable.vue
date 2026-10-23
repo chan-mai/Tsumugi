@@ -88,7 +88,9 @@ const durationOf = (job: Job) =>
 					<td :class="TD" class="font-medium whitespace-nowrap">
 						{{ job.binding }}
 						<!-- ID列非表示の幅での行識別用 -->
-						<span v-if="visible.id" class="block font-mono text-xs font-normal whitespace-normal break-all text-ink-subtle lg:hidden">{{ job.id }}</span>
+						<span v-if="visible.id" class="block font-mono text-xs font-normal whitespace-normal break-all text-ink-subtle lg:hidden">{{
+							job.id
+						}}</span>
 					</td>
 					<td :class="[TD, columnClass('id')]" class="font-mono text-xs whitespace-nowrap text-ink-muted">{{ job.id }}</td>
 					<td :class="TD"><StatusCell :state="job.state" /></td>
