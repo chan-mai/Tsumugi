@@ -158,8 +158,7 @@ describe('目盛り', () => {
 		expect(result.ticks.map((tick) => tick.offset)).toEqual([0, 200, 400, 600, 800, 1_000]);
 	});
 
-	// Node 22はIntl.DurationFormat未実装, 対象はブラウザ
-	it.skipIf(!('DurationFormat' in Intl))('所要時間を単位付きで表示する', () => {
+	it('所要時間を単位付きで表示する', () => {
 		expect(formatDuration(0, 'en')).toBe('0ms');
 		expect(formatDuration(450, 'en')).toBe('450ms');
 		expect(formatDuration(1_234, 'en')).toBe('1s 234ms');
