@@ -93,8 +93,6 @@ const tsumugi = defineTsumugi({
 `perKeyRate`はすべてのキーに同じ値が適用され、キーごとに異なる値は指定できません。
 `concurrencyKey`がnullのジョブに`perKeyConcurrency`と`perKeyRate`は適用されません。
 
-`concurrency` / `rate` / `perKeyConcurrency`の3つを有効にした場合のスループット低下は実測で約17%です。
-
 ### 実行されない原因の確認 {#diagnostics}
 
 投入したジョブが実行されない場合、[GET /api/diagnostics](/reference/rest-api#get-api-diagnostics)で、どの設定によって滞留しているかを確認できます。
