@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BULK_LIMIT_MAX, groupByShard, validateBulk } from '../../src/api/rest.js';
+import { eachShard, groupByShard, mutateJobs } from '../../src/do/control.js';
+import { BULK_LIMIT_MAX, validateBulk } from '../../src/api/validate.js';
 
 describe('一括操作の対象の検証', () => {
 	it('IDの列挙をそのまま対象にする', () => {
@@ -89,5 +90,38 @@ describe('shardごとのまとめ', () => {
 
 		expect([...groups.keys()]).toEqual(['MAIL#0']);
 		expect(invalid).toEqual(['broken']);
+	});
+});
+
+// shard名毎の応答を差し替え, 未定義のshardは到達不能
+const namespace = (handlers: Record<string, (ids?: readonly string[]) => Promise<unknown>>) =>
+	({
+		JOB_SHARD: {
+			idFromName: (name: string) => name,
+			get: (name: string) => {
+				const handler = handlers[name] ?? (() => Promise.reject(new Error('unreachable')));
+				return { mutateMany: (_action: string, ids: readonly string[]) => handler(ids), resetPolicy: () => handler() };
+			},
+		},
+	}) as never;
+
+describe('DOへの一括送信', () => {
+	it('shard毎の結果を集約し到達不能と不正なIDを理由付きで返す', async () => {
+		const env = namespace({
+			'MAIL#0': async (ids) => ({ ok: [ids?.[0]], failed: [{ id: ids?.[1], reason: 'gone' }] }),
+		});
+		const result = await mutateJobs(env, 'retry', ['MAIL#0:a', 'MAIL#0:b', 'MAIL#1:c', 'broken']);
+
+		expect(result.ok).toEqual(['MAIL#0:a']);
+		expect(result.failed).toEqual([
+			{ id: 'MAIL#0:b', reason: 'gone' },
+			{ id: 'broken', reason: 'invalid-id' },
+			{ id: 'MAIL#1:c', reason: 'unreachable' },
+		]);
+	});
+
+	it('全shardへ送信し未到達のshard番号を返す', async () => {
+		const env = namespace({ 'MAIL#0': async () => 'ok0', 'MAIL#2': async () => 'ok2' });
+		expect(await eachShard(env, 'MAIL', 3, (stub) => stub.resetPolicy())).toEqual({ failed: [1], applied: ['ok0', 'ok2'] });
 	});
 });

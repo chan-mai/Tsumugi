@@ -148,9 +148,9 @@ Flow, 定期実行, 流量制御, 実行保証, 別Workerへの配置につい�
 
 ## Development
 
-Node.js 22 and pnpm are required.
+Node.js 26 and pnpm are required.
 
-Node.js 22とpnpmが必要です。
+Node.js 26とpnpmが必要です。
 
 ```bash
 pnpm install

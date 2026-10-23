@@ -4,6 +4,7 @@ import { embedJobId, formatJobId, shardName } from '../core/ids.js';
 import type { FailOptions } from '../core/api.js';
 import { nextAttempt } from '../core/backoff.js';
 import { retentionOf } from '../core/retention.js';
+import { RETRYABLE_STATES } from '../core/transitions.js';
 import { planDispatch } from '../core/dispatch.js';
 import { normalizeTraceparent } from '../core/trace.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
@@ -563,7 +564,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	#retryOne(jobId: string, now: number): MutationResult {
 		// 取り消し要求クリア, 残すと再投入直後にCANCELLED(#95)
-		const ok = this.repo.compareAndSet(jobId, ['FAILED', 'STALLED'], 'SCHEDULED', {
+		const ok = this.repo.compareAndSet(jobId, RETRYABLE_STATES, 'SCHEDULED', {
 			now,
 			runAfter: now,
 			dispatchedAt: null,

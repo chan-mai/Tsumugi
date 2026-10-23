@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePaging } from '../../src/api/rest.js';
+import { parsePaging } from '../../src/api/validate.js';
 
 const parse = (query: string) => parsePaging(new URL(`https://example.com/api/jobs${query}`));
 

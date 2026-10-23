@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
-import { createRest, SORTABLE_COLUMNS, type RestEnv } from '../../src/api/rest.js';
+import { createRest, type RestEnv } from '../../src/api/rest.js';
+import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
 import { hashToShard } from '../../src/core/shard.js';
 import type { ScheduleView } from '../../src/do/scheduler.js';
@@ -758,6 +759,13 @@ describe('試行履歴(ADR-0028)', () => {
 		expect(job.attempts_log[0]?.error).toContain('boom');
 	});
 
+	it('仕様外のフィールドを返さない', async () => {
+		// 保存形式はDOの試行行と同じでjob_idを含む
+		const jobId = await runFailing('LOG7#0', 'LOG7', 1);
+		const { job } = await detail(jobId);
+		expect(Object.keys(job.attempts_log[0] ?? {}).sort()).toEqual(['attempt', 'error', 'finished_at', 'started_at', 'state']);
+	});
+
 	it('試行回数の数値を上書きしない', async () => {
 		// 履歴を`attempts`で返すと画面のn/m表示が不整合
 		const jobId = await runFailing('LOG2#0', 'LOG2', 1);
@@ -1296,6 +1304,36 @@ describe('runの開始', () => {
 			// subflowは子runの作成から終端まで
 			{ id: 'sub', queued_at: 400, started_at: 400, finished_at: 750, attempts_log: [] },
 		]);
+	});
+
+	it('runの取り消しと再開をRun DOへ送信する', async () => {
+		const control = (id: string, action: 'cancel' | 'retry') =>
+			withFlows.fetch!(
+				new Request(`https://example.com/api/runs/${encodeURIComponent(id)}/${action}`, {
+					method: 'POST',
+					headers: { authorization: `Bearer ${TOKEN}` },
+				}),
+				env as RestEnv,
+				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+			);
+
+		expect((await post({ flow: 'GREETINGS', input: { prefix: 'rest' }, id: 'rest-control' })).status).toBe(201);
+		// 再開は失敗runのみ
+		const retry = await control('GREETINGS:rest-control', 'retry');
+		expect(retry.status).toBe(409);
+		expect(await retry.json()).toEqual({ error: 'not allowed in the current state' });
+
+		const cancel = await control('GREETINGS:rest-control', 'cancel');
+		expect(cancel.status).toBe(200);
+		expect(await cancel.json()).toEqual({ ok: true });
+
+		// 未作成と保持期間後の削除は区別不能
+		const missing = await control('GREETINGS:rest-control-missing', 'cancel');
+		expect(missing.status).toBe(410);
+
+		const invalid = await control('not-a-run-id', 'retry');
+		expect(invalid.status).toBe(400);
+		expect(await invalid.json()).toEqual({ error: 'invalid run id' });
 	});
 
 	it('Object.prototypeの名前を登録済みとして扱わない', async () => {

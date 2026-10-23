@@ -1,51 +1,48 @@
-import { and, asc, desc as sqlDesc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import { alias } from 'drizzle-orm/sqlite-core';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
-import { job as readModel } from '../projection/tables.js';
-import { run as runModel, runNode } from '../projection/run-tables.js';
-import { InvalidJobIdError, InvalidRunIdError, parseRunId, shardName, shardNameOf } from '../core/ids.js';
-import { isActive } from '../core/transitions.js';
-import type { JobState } from '../core/types.js';
-import { normalizeTraceparent } from '../core/trace.js';
-import type { BulkFailure, MutationResult, TsumugiJobShard } from '../do/job-shard.js';
-import type { ConsumerEnv } from '../queue/consumer.js';
+import { parseMetricsQuery } from '../analytics/reader.js';
+import { createBindingService } from '../service/bindings.service.js';
+import { createJobService } from '../service/jobs.service.js';
+import { createMetricsService } from '../service/metrics.service.js';
+import { createRunService } from '../service/runs.service.js';
+import { createScheduleService } from '../service/schedules.service.js';
+import type { MutationOutcome, ServiceEnv, ServiceOptions } from '../service/types.js';
 import type { Ui } from '../ui/serve.js';
-import type { RunControlStub, SchedulerControl, StartOptions } from '../worker.js';
 import type { AuthMiddleware } from './auth.js';
-import { MetricsQueryError, parseMetricsQuery, readMetrics, type MetricsResolver } from '../analytics/reader.js';
+import { SORT_KEYS, toJobDetail, toJobSummary, toRunDetail, toRunNode, toRunSummary } from './mapper.js';
 import { openapiDocument } from './openapi.js';
-import { resolveSort, SORTABLE_COLUMNS, type SortColumn } from './sort.js';
+import { resolveSort } from './sort.js';
+import {
+	parseJobFilters,
+	parsePaging,
+	validateBulk,
+	validateCreateJob,
+	validatePolicy,
+	validateReschedule,
+	validateStartRun,
+} from './validate.js';
 import type {
-	AttemptRecord,
 	BindingsResponse,
-	CreateJobRequest,
 	CreateJobResponse,
 	DiagnosticsResponse,
 	ErrorResponse,
 	FlowsResponse,
-	JobDetail,
 	JobDetailResponse,
 	JobListResponse,
-	JobLogEntry,
-	JobSummary,
 	MutationResponse,
+	PartialPolicyResponse,
 	RunDetailResponse,
 	RunListResponse,
-	StartRunRequest,
-	StartRunResponse,
-	PartialPolicyResponse,
-	UpdatePolicyRequest,
-	UpdatePolicyResponse,
 	SchedulesResponse,
+	StartRunResponse,
 	StatsResponse,
 	TriggerScheduleResponse,
+	UpdatePolicyResponse,
 } from './types.js';
 
-export type RestEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };
+export type RestEnv = ServiceEnv;
 
-const LIST_LIMIT_MAX = 100;
+export type RestOptions<Env extends RestEnv> = ServiceOptions<Env> & { dashboard?: Ui };
 
 const INVALID_JSON = Symbol('invalid json');
 const INVALID_JSON_BODY = { error: 'body must be valid JSON' } satisfies ErrorResponse;
@@ -58,419 +55,39 @@ async function readJson(req: { json(): Promise<unknown> }): Promise<unknown> {
 	}
 }
 
-function stubOf(env: RestEnv, jobId: string): DurableObjectStub<TsumugiJobShard> {
-	return env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardNameOf(jobId)));
-}
+const error = (message: string) => ({ error: message }) satisfies ErrorResponse;
 
-export type RestOptions<Env extends RestEnv> = {
-	dashboard?: Ui;
-	/** 投入先の検証, 選択肢用, 省略時は検証なし */
-	bindings?: readonly string[];
-	/** 流量設定変更は全shardへ送信(#27) */
-	shardsOf?: (binding: string) => number;
-	enqueue?: (env: Env, input: CreateJobInput) => Promise<string>;
-	/** binding毎の失敗ジョブ保持期間, 一覧`retryable`の事前判定用(ADR-0027) */
-	failedRetentionMs?: (binding: string) => number;
-	/** 失敗runの保持期間, 詳細`retryable`判定用(ADR-0034) */
-	runFailedRetentionMs?: number;
-	/** 開始先の検証, 選択肢用, 省略時は検証なし */
-	flows?: readonly string[];
-	start?: (env: Env, flow: string, input: unknown, options?: StartOptions) => Promise<string>;
-	/** 取り消し, 再開はDOへ直接送信, 読み取りモデルは正でない(ADR-0015) */
-	runFor?: (env: Env, runId: string) => Pick<RunControlStub, 'cancel' | 'retry'>;
-	/** 定期実行の照会, 操作, Scheduler DOへ直接送信(ADR-0040), 未設定時`/api/schedules`は501 */
-	schedulerFor?: (env: Env) => Pick<SchedulerControl, 'list' | 'setPaused' | 'trigger'>;
-	/** 未設定時`/api/metrics`は501 */
-	metrics?: MetricsResolver<Env>;
-};
-
-export type CreateJobInput = CreateJobRequest;
-
-export function validateCreateJob(
-	body: unknown,
-	bindings: readonly string[] | undefined,
-	traceparentHeader?: string,
-): { input: CreateJobInput } | { error: string } {
-	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
-	const raw = body as Record<string, unknown>;
-
-	if (typeof raw.binding !== 'string' || raw.binding.length === 0) return { error: 'binding is required' };
-	// 未登録bindingは実行時に必ず失敗, 投入時に拒否
-	// 空配列は登録0件, 省略時のみ検証なし
-	if (bindings !== undefined && !bindings.includes(raw.binding)) return { error: `unknown binding: ${raw.binding}` };
-	if (!('payload' in raw)) return { error: 'payload is required' };
-
-	const numbers: [keyof CreateJobInput, unknown][] = [
-		['maxAttempts', raw.maxAttempts],
-		['delayMs', raw.delayMs],
-		['expiresInMs', raw.expiresInMs],
-		['priority', raw.priority],
-	];
-	for (const [name, value] of numbers) {
-		if (value !== undefined && !Number.isInteger(value)) return { error: `${name} must be an integer` };
-	}
-	if (typeof raw.maxAttempts === 'number' && raw.maxAttempts < 1) return { error: 'maxAttempts must be at least 1' };
-	if (typeof raw.delayMs === 'number' && raw.delayMs < 0) return { error: 'delayMs must not be negative' };
-	if (typeof raw.expiresInMs === 'number' && raw.expiresInMs < 1) {
-		return { error: 'expiresInMs must be a positive integer' };
-	}
-
-	for (const name of ['concurrencyKey', 'uniqueKey', 'partitionKey'] as const) {
-		if (raw[name] !== undefined && typeof raw[name] !== 'string') return { error: `${name} must be a string` };
-	}
-
-	const input: CreateJobInput = { binding: raw.binding, payload: raw.payload };
-	const traceparent = raw.traceparent !== undefined ? raw.traceparent : traceparentHeader;
-	if (traceparent !== undefined) {
-		if (typeof traceparent !== 'string') return { error: 'traceparent must be a string' };
-		try {
-			const normalized = normalizeTraceparent(traceparent);
-			if (normalized !== null) input.traceparent = normalized;
-		} catch (error) {
-			return { error: error instanceof Error ? error.message : 'invalid traceparent' };
-		}
-	}
-	if (typeof raw.maxAttempts === 'number') input.maxAttempts = raw.maxAttempts;
-	if (typeof raw.delayMs === 'number') input.delayMs = raw.delayMs;
-	if (typeof raw.expiresInMs === 'number') input.expiresInMs = raw.expiresInMs;
-	if (typeof raw.priority === 'number') input.priority = raw.priority;
-	if (typeof raw.concurrencyKey === 'string' && raw.concurrencyKey) input.concurrencyKey = raw.concurrencyKey;
-	if (typeof raw.uniqueKey === 'string' && raw.uniqueKey) input.uniqueKey = raw.uniqueKey;
-	if (typeof raw.partitionKey === 'string' && raw.partitionKey) input.partitionKey = raw.partitionKey;
-	return { input };
-}
-
-type RescheduleInput = { runAfter: number; priority?: number };
-
-export function validateReschedule(body: unknown, now: number): { input: RescheduleInput } | { error: string } {
-	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
-	const raw = body as Record<string, unknown>;
-
-	const numbers: [string, unknown][] = [
-		['runAt', raw.runAt],
-		['delayMs', raw.delayMs],
-		['priority', raw.priority],
-	];
-	for (const [name, value] of numbers) {
-		if (value !== undefined && !Number.isInteger(value)) return { error: `${name} must be an integer` };
-	}
-
-	const hasRunAt = typeof raw.runAt === 'number';
-	const hasDelay = typeof raw.delayMs === 'number';
-	if (hasRunAt && hasDelay) return { error: 'runAt and delayMs are mutually exclusive' };
-	if (!hasRunAt && !hasDelay) return { error: 'runAt or delayMs is required' };
-	if (hasDelay && (raw.delayMs as number) < 0) return { error: 'delayMs must not be negative' };
-
-	const runAfter = hasRunAt ? (raw.runAt as number) : now + (raw.delayMs as number);
-	return { input: { runAfter, ...(typeof raw.priority === 'number' ? { priority: raw.priority } : {}) } };
-}
-
-export type StartRunInput = StartRunRequest;
-
-export function validateStartRun(body: unknown, flows: readonly string[] | undefined): { input: StartRunInput } | { error: string } {
-	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
-	const raw = body as Record<string, unknown>;
-
-	if (typeof raw.flow !== 'string' || raw.flow.length === 0) return { error: 'flow is required' };
-	// 未登録flowは開始後に必ず失敗, 開始時に拒否
-	if (flows !== undefined && !flows.includes(raw.flow)) return { error: `unknown flow: ${raw.flow}` };
-	if (!('input' in raw)) return { error: 'input is required' };
-	if (raw.id !== undefined && typeof raw.id !== 'string') return { error: 'id must be a string' };
-	if (raw.deadlineMs !== undefined && (typeof raw.deadlineMs !== 'number' || !Number.isInteger(raw.deadlineMs) || raw.deadlineMs <= 0)) {
-		return { error: 'deadlineMs must be a positive integer' };
-	}
-
-	const input: StartRunInput = { flow: raw.flow, input: raw.input };
-	if (typeof raw.id === 'string' && raw.id) input.id = raw.id;
-	if (typeof raw.deadlineMs === 'number') input.deadlineMs = raw.deadlineMs;
-	return { input };
-}
-
-type UpdatePolicyInput = UpdatePolicyRequest;
-
-// 省略と明示的nullを区別
-function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { error: string } {
-	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
-	const raw = body as Record<string, unknown>;
-
-	const input: UpdatePolicyInput = {};
-
-	if ('paused' in raw) {
-		if (typeof raw.paused !== 'boolean') return { error: 'paused must be a boolean' };
-		input.paused = raw.paused;
-	}
-
-	// 0は投入停止指定として有効, 負数, 小数のみ拒否
-	for (const name of ['concurrency', 'perKeyConcurrency', 'reaperGraceMs'] as const) {
-		if (!(name in raw)) continue;
-		const value = raw[name];
-		if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return { error: `${name} must be a non-negative integer` };
-		input[name] = value;
-	}
-
-	// エージングはnullで無効, 有効時は正の整数(ADR-0020)
-	if ('agingIntervalMs' in raw) {
-		const value = raw.agingIntervalMs;
-		if (value !== null && (typeof value !== 'number' || !Number.isInteger(value) || value <= 0)) {
-			return { error: 'agingIntervalMs must be a positive integer or null' };
-		}
-		input.agingIntervalMs = value as number | null;
-	}
-
-	for (const name of ['rate', 'perKeyRate'] as const) {
-		if (!(name in raw)) continue;
-		const value = raw[name];
-		if (value === null) input[name] = null;
-		else {
-			if (typeof value !== 'object') return { error: `${name} must be an object or null` };
-			const { tokens, intervalMs } = value as Record<string, unknown>;
-			if (typeof tokens !== 'number' || !Number.isInteger(tokens) || tokens < 0) {
-				return { error: `${name}.tokens must be a non-negative integer` };
-			}
-			if (typeof intervalMs !== 'number' || !Number.isInteger(intervalMs) || intervalMs <= 0) {
-				return { error: `${name}.intervalMs must be a positive integer` };
-			}
-			input[name] = { tokens, intervalMs };
-		}
-	}
-
-	if (Object.keys(input).length === 0) return { error: 'no policy field to update' };
-	return { input };
-}
-
-// DOのtick1回の上限と同一, 超過分は呼び出し側で繰り返し処理
-export const BULK_LIMIT_MAX = 200;
-
-// 個別retry / cancelの受理状態と同一, 拡大時はDO側で拒否される要求のみ増加
-const BULK_STATES = {
-	retry: ['FAILED', 'STALLED'],
-	// QUEUED / RUNNINGは協調的な要求として受理(ADR-0052)
-	cancel: ['SCHEDULED', 'QUEUED', 'RUNNING'],
-} as const;
-
-// 画面はID列挙, 一覧外の件数を扱う利用者は条件指定
-type BulkTarget =
-	| { kind: 'ids'; ids: string[] }
-	| {
-			kind: 'filter';
-			binding?: string;
-			/** 未指定時は操作の受理状態すべて */
-			states: readonly string[];
-			uniqueKey?: string;
-			concurrencyKey?: string;
-			createdFrom?: number;
-			createdTo?: number;
-			limit: number;
-	  };
-
-/**
- * `ids`指定時はidsのみ対象, 条件併用は対象の解釈が二通り
- * 条件指定時の状態は操作の受理状態に限定, 非限定では対象が減らず繰り返しが終了不能
- */
-const BULK_KEYS = ['ids', 'binding', 'state', 'unique_key', 'concurrency_key', 'created_from', 'created_to', 'limit'];
-
-export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input: BulkTarget } | { error: string } {
-	if (typeof body !== 'object' || body === null) return { error: 'body must be an object' };
-	const raw = body as Record<string, unknown>;
-	const allowed: readonly string[] = BULK_STATES[action];
-
-	// 綴り違いの無視で全件対象化
-	const unknown = Object.keys(raw).find((key) => !BULK_KEYS.includes(key));
-	if (unknown !== undefined) return { error: `unknown field: ${unknown}` };
-
-	if (raw.ids !== undefined) {
-		if (!Array.isArray(raw.ids)) return { error: 'ids must be an array' };
-		if (raw.ids.length === 0) return { error: 'ids must not be empty' };
-		if (raw.ids.length > BULK_LIMIT_MAX) return { error: `ids must not exceed ${BULK_LIMIT_MAX} entries` };
-		if (raw.ids.some((id) => typeof id !== 'string' || id.length === 0)) return { error: 'ids must be non-empty strings' };
-		return { input: { kind: 'ids', ids: raw.ids as string[] } };
-	}
-
-	for (const name of ['binding', 'state', 'unique_key', 'concurrency_key'] as const) {
-		if (raw[name] !== undefined && typeof raw[name] !== 'string') return { error: `${name} must be a string` };
-	}
-	if (typeof raw.state === 'string' && !allowed.includes(raw.state)) {
-		return { error: `state must be one of ${allowed.join(', ')} for ${action}` };
-	}
-
-	for (const name of ['created_from', 'created_to', 'limit'] as const) {
-		if (raw[name] !== undefined && !Number.isInteger(raw[name])) return { error: `${name} must be an integer` };
-	}
-	if (typeof raw.limit === 'number' && raw.limit < 1) return { error: 'limit must be at least 1' };
-
-	return {
-		input: {
-			kind: 'filter',
-			states: typeof raw.state === 'string' ? [raw.state] : allowed,
-			limit: Math.min(typeof raw.limit === 'number' ? raw.limit : BULK_LIMIT_MAX, BULK_LIMIT_MAX),
-			...(typeof raw.binding === 'string' && raw.binding ? { binding: raw.binding } : {}),
-			...(typeof raw.unique_key === 'string' && raw.unique_key ? { uniqueKey: raw.unique_key } : {}),
-			...(typeof raw.concurrency_key === 'string' && raw.concurrency_key ? { concurrencyKey: raw.concurrency_key } : {}),
-			...(typeof raw.created_from === 'number' ? { createdFrom: raw.created_from } : {}),
-			...(typeof raw.created_to === 'number' ? { createdTo: raw.created_to } : {}),
-		},
-	};
-}
-
-/** 1件ずつの送信はDOへの往復が件数分増加 */
-export function groupByShard(jobIds: readonly string[]): { groups: Map<string, string[]>; invalid: string[] } {
-	const groups = new Map<string, string[]>();
-	const invalid: string[] = [];
-
-	for (const jobId of jobIds) {
-		let name: string;
-		try {
-			name = shardNameOf(jobId);
-		} catch {
-			// 読み取りモデル行の破損時は中断せずinvalidへ記録
-			invalid.push(jobId);
-			continue;
-		}
-		const bucket = groups.get(name);
-		if (bucket) bucket.push(jobId);
-		else groups.set(name, [jobId]);
-	}
-	return { groups, invalid };
-}
-
-const LIST_LIMIT_DEFAULT = 20;
-
-// 負のlimitはSQLiteで無制限
-function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
-	const value = Number(raw);
-	if (raw === null || raw === '' || !Number.isSafeInteger(value) || value < min) return fallback;
-	return Math.min(value, max);
-}
-
-/** 上限変更漏れ防止で両一覧共通 */
-export function parsePaging(url: URL): { limit: number; offset: number } {
-	return {
-		limit: boundedInt(url.searchParams.get('limit'), LIST_LIMIT_DEFAULT, 1, LIST_LIMIT_MAX),
-		offset: boundedInt(url.searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER),
-	};
-}
-
-type JobFilters = {
-	id?: string;
-	uniqueKey?: string;
-	concurrencyKey?: string;
-	/** created_atの下限, 上限, 両端含む */
-	createdFrom?: number;
-	createdTo?: number;
-};
-
-/**
- * 数値以外の指定は無視, 400では入力途中で画面停止
- * 完全一致のみ, 部分一致はインデックス不使用で件数増加時に全表走査
- */
-export function parseJobFilters(url: URL): JobFilters {
-	const text = (name: string) => url.searchParams.get(name) || undefined;
-	const time = (name: string) => {
-		const raw = url.searchParams.get(name);
-		// 空文字は指定なし扱い, Number('')は0で上限が1970年
-		if (raw === null || raw === '') return undefined;
-		const value = Number(raw);
-		return Number.isInteger(value) ? value : undefined;
-	};
-
-	return {
-		...(text('id') ? { id: text('id') as string } : {}),
-		...(text('unique_key') ? { uniqueKey: text('unique_key') as string } : {}),
-		...(text('concurrency_key') ? { concurrencyKey: text('concurrency_key') as string } : {}),
-		...(time('created_from') !== undefined ? { createdFrom: time('created_from') as number } : {}),
-		...(time('created_to') !== undefined ? { createdTo: time('created_to') as number } : {}),
-	};
-}
-
-/** 破損行でも詳細画面は表示 */
-function parseAfter(raw: unknown): string[] {
-	if (typeof raw !== 'string' || raw.length === 0) return [];
-	try {
-		const parsed = JSON.parse(raw) as string[];
-		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
+// goneは410, 未作成と保持期間後の削除は区別不能, 状態違いの409とは利用者の対応が異なる
+function mutationResponse(outcome: MutationOutcome, subject: 'job' | 'run') {
+	if (outcome.ok)
+		return { body: { ok: true, ...(outcome.requested ? { requested: true } : {}) } satisfies MutationResponse, status: 200 } as const;
+	switch (outcome.reason) {
+		case 'gone':
+			return { body: error(`${subject} not found: it does not exist or was removed after the retention period`), status: 410 } as const;
+		case 'invalid-id':
+			return { body: error(`invalid ${subject} id`), status: 400 } as const;
+		default:
+			return { body: error('not allowed in the current state'), status: 409 } as const;
 	}
 }
 
-/** 破損時も詳細画面は表示 */
-function parseAttempts(raw: unknown): AttemptRecord[] {
-	if (typeof raw !== 'string' || raw.length === 0) return [];
-	try {
-		const parsed = JSON.parse(raw) as AttemptRecord[];
-		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
-	}
-}
+// 一部shardのみ反映時の応答, 成功扱いでは未停止の投入を停止済みと誤認(#27)
+const partial = (binding: string, shards: number, failed: number[]) =>
+	({
+		error: `the change reached ${shards - failed.length} of ${shards} shards, send the same request again`,
+		binding,
+		shards,
+		failed,
+	}) satisfies PartialPolicyResponse;
 
-function parseJobLogs(raw: unknown): JobLogEntry[] {
-	if (typeof raw !== 'string' || raw.length === 0) return [];
-	try {
-		const parsed: unknown = JSON.parse(raw);
-		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
-	}
-}
-
-/**
- * 1回目成功時の履歴はジョブ行から導出可能で未保存(ADR-0028)
- * 表示用の保存は1ジョブ当たりDO書き込みが常時1回増加
- */
-export function attemptsOf(
-	job: { state: string; attempts: number; dispatched_at: number | null; updated_at: number },
-	stored: AttemptRecord[],
-): AttemptRecord[] {
-	if (stored.length > 0) return stored;
-	if (job.state !== 'COMPLETED' || job.dispatched_at === null) return [];
-	return [
-		{
-			attempt: job.attempts || 1,
-			state: 'COMPLETED',
-			started_at: job.dispatched_at,
-			finished_at: job.updated_at,
-			error: null,
-		},
-	];
-}
-
-export type { AttemptRecord };
-
-// ソート許可列の対応, 列オブジェクトへ解決し許可リスト外の文字列はSQLへ未到達
-// `satisfies`で全列網羅, 対応漏れは型検査で失敗
-const SORT_COLUMNS = {
-	updated_at: readModel.updatedAt,
-	created_at: readModel.createdAt,
-	binding: readModel.binding,
-	state: readModel.state,
-	priority: readModel.priority,
-	attempts: readModel.attempts,
-} satisfies Record<SortColumn, unknown>;
-
-export { resolveSort, SORTABLE_COLUMNS };
-export type { SortColumn };
-
-/**
- * 一覧, 詳細はD1の読み取りモデルから取得(ADR-0008)
- * 稼働中も投影済み, ページング, ソートは通常のSQL
- */
 export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
-	const { dashboard, bindings, shardsOf, enqueue, failedRetentionMs, runFailedRetentionMs, flows, start, runFor, schedulerFor, metrics } =
-		options;
+	const { dashboard, bindings, flows } = options;
+	const jobs = createJobService(options);
+	const runs = createRunService(options);
+	const bindingService = createBindingService(options);
+	const schedules = createScheduleService(options);
+	const metrics = createMetricsService(options);
 
-	// 読み取りモデルはDO行の有無を持たず保持期間から近似
-	// 実際の可否はDOが判定し410が最終回答, ここは操作前の目安
-	const withRetryable = <T extends { state: string; binding: string; updated_at: number }>(
-		row: T,
-		now: number,
-	): T & { retryable: boolean } => {
-		const retryableState = row.state === 'FAILED' || row.state === 'STALLED';
-		if (!retryableState) return { ...row, retryable: false };
-		if (!failedRetentionMs) return { ...row, retryable: true };
-		const keepFor = failedRetentionMs(row.binding);
-		return { ...row, retryable: row.updated_at > now - keepFor };
-	};
 	const app = new Hono<{ Bindings: Env }>();
 	// HTMLはデータを含まず, 未認証で返却しSPAでトークン入力欄を表示(ADR-0013)
 	app.use('/api/*', auth);
@@ -485,284 +102,99 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		const status = await checkSchema(c.env.TSUMUGI_DB);
 		if (!status.ok) {
 			// 適用漏れ時のみ復旧コマンド案内, 一時障害で適用済み環境への誤案内回避(#8)
-			const error = 'missing' in status ? migrationErrorMessage(status.missing) : 'database temporarily unavailable';
-			return c.json({ error }, 503);
+			const message = 'missing' in status ? migrationErrorMessage(status.missing) : 'database temporarily unavailable';
+			return c.json({ error: message }, 503);
 		}
 		await next();
 	});
 
 	app.get('/api/jobs', async (c) => {
 		const url = new URL(c.req.url);
-		const state = url.searchParams.get('state');
-		const binding = url.searchParams.get('binding');
-		const { limit, offset } = parsePaging(url);
 		const { column, desc } = resolveSort(url.searchParams.get('sort'), url.searchParams.get('order'));
-		const { id, uniqueKey, concurrencyKey, createdFrom, createdTo } = parseJobFilters(url);
-
-		const d = drizzle(c.env.TSUMUGI_DB);
-		const filters = [
-			state ? eq(readModel.state, state) : undefined,
-			binding ? eq(readModel.binding, binding) : undefined,
-			id ? eq(readModel.id, id) : undefined,
-			uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
-			concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
-			createdFrom !== undefined ? gte(readModel.createdAt, createdFrom) : undefined,
-			createdTo !== undefined ? lte(readModel.createdAt, createdTo) : undefined,
-		].filter((f) => f !== undefined);
-		const clause = filters.length > 0 ? and(...filters) : undefined;
-		const sortBy = SORT_COLUMNS[column];
-
-		const [page, total] = await d.batch([
-			d
-				.select({
-					id: readModel.id,
-					binding: readModel.binding,
-					state: readModel.state,
-					priority: readModel.priority,
-					attempts: readModel.attempts,
-					max_attempts: readModel.maxAttempts,
-					created_at: readModel.createdAt,
-					updated_at: readModel.updatedAt,
-					dispatched_at: readModel.dispatchedAt,
-				})
-				.from(readModel)
-				.where(clause)
-				.orderBy(desc ? sqlDesc(sortBy) : asc(sortBy), sqlDesc(readModel.id))
-				.limit(limit)
-				.offset(offset),
-			d
-				.select({ total: sql<number>`count(*)` })
-				.from(readModel)
-				.where(clause),
-		]);
-
-		const now = Date.now();
-		const body: JobListResponse = {
-			jobs: page.map((row) => withRetryable(row, now) satisfies JobSummary),
-			total: total[0]?.total ?? 0,
-		};
-		return c.json(body);
+		const { jobs: found, total } = await jobs.list(c.env, {
+			state: url.searchParams.get('state'),
+			binding: url.searchParams.get('binding'),
+			...parsePaging(url),
+			sort: SORT_KEYS[column],
+			desc,
+			...parseJobFilters(url),
+		});
+		return c.json({ jobs: found.map(toJobSummary), total } satisfies JobListResponse);
 	});
 
-	// 登録済みperformerを返却, 投影済みbindingのみでは未実行のものを選択不能
-	app.get('/api/bindings', async (c) => {
-		if (bindings !== undefined) return c.json({ bindings: [...bindings].sort() } satisfies BindingsResponse);
-		const rows = await drizzle(c.env.TSUMUGI_DB)
-			.selectDistinct({ binding: readModel.binding })
-			.from(readModel)
-			.orderBy(asc(readModel.binding));
-		return c.json({ bindings: rows.map((row) => row.binding) } satisfies BindingsResponse);
-	});
+	app.get('/api/bindings', async (c) => c.json({ bindings: await bindingService.list(c.env) } satisfies BindingsResponse));
 
 	app.post('/api/jobs', async (c) => {
-		if (!enqueue) return c.json({ error: 'job creation is not available' } satisfies ErrorResponse, 501);
+		const create = jobs.create;
+		if (!create) return c.json(error('job creation is not available'), 501);
 
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
 		const parsed = validateCreateJob(body, bindings, c.req.header('traceparent'));
-		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
+		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
-		let id: string;
-		try {
-			id = await enqueue(c.env, parsed.input);
-		} catch (error) {
-			// 分割構成のpartitionKey欠落, binding名の不正は入力の誤り
-			if (error instanceof InvalidJobIdError) return c.json({ error: error.message } satisfies ErrorResponse, 400);
-			throw error;
-		}
-		return c.json({ id } satisfies CreateJobResponse, 201);
+		const created = await create(c.env, parsed.input);
+		if (created.ok) return c.json({ id: created.id } satisfies CreateJobResponse, 201);
+		return c.json(error(created.message), 400);
 	});
 
-	// D1明細はsweepで削除, ここは保持期間の長い時系列から取得
 	app.get('/api/metrics', async (c) => {
-		const config = metrics?.(c.env);
-		if (!config) return c.json({ error: 'metrics is not configured' }, 501);
+		const config = metrics.configOf(c.env);
+		if (!config) return c.json(error('metrics is not configured'), 501);
 
 		const parsed = parseMetricsQuery(new URL(c.req.url));
-		if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
-		try {
-			return c.json(await readMetrics(config, parsed.query));
-		} catch (error) {
-			// 上流失敗は502, 500では設定誤りと区別不能
-			if (error instanceof MetricsQueryError) return c.json({ error: error.message }, 502);
-			throw error;
-		}
+		const result = await metrics.read(config, parsed.query);
+		if (result.ok) return c.json(result.metrics);
+		// 上流失敗は502, 500では設定誤りと区別不能
+		return c.json(error(result.message), 502);
 	});
-
-	// DOに残る失敗ジョブの条件, retryableと同じ保持期間から近似
-	// 未除外では削除済み行がcreatedAt順の先頭に残り, 繰り返しても後続へ未到達
-	// binding未指定時は登録binding毎の条件, 登録一覧なしは近似不能で条件なし
-	const retainedClause = (binding: string | undefined, now: number) => {
-		if (!failedRetentionMs) return undefined;
-		const retained = (name: string) => gt(readModel.updatedAt, now - failedRetentionMs(name));
-		if (binding) return retained(binding);
-		if (!bindings || bindings.length === 0) return undefined;
-		return or(...bindings.map((name) => and(eq(readModel.binding, name), retained(name))));
-	};
-
-	// 対象は読み取りモデルから取得, 横断的な抽出はDOへ問い合わせ不能(ADR-0008)
-	// 数秒の遅延考慮で状態判定はDO側で再実施, 不一致分は理由付きで返却
-	// 一部拒否でも全体は成功扱い, 全体失敗では成功分も再送発生
-	const bulk = async (action: 'retry' | 'cancel', env: Env, body: unknown) => {
-		const parsed = validateBulk(body, action);
-		if ('error' in parsed) return { body: { error: parsed.error }, status: 400 } as const;
-		const target = parsed.input;
-
-		let targets: string[];
-		let remaining = 0;
-		if (target.kind === 'ids') {
-			targets = target.ids;
-		} else {
-			const { states, limit, binding, uniqueKey, concurrencyKey, createdFrom, createdTo } = target;
-			const d = drizzle(env.TSUMUGI_DB);
-			const clause = and(
-				...[
-					inArray(readModel.state, [...states]),
-					action === 'cancel' ? isNull(readModel.cancelRequestedAt) : undefined,
-					action === 'retry' ? retainedClause(binding, Date.now()) : undefined,
-					binding ? eq(readModel.binding, binding) : undefined,
-					uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
-					concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
-					createdFrom !== undefined ? gte(readModel.createdAt, createdFrom) : undefined,
-					createdTo !== undefined ? lte(readModel.createdAt, createdTo) : undefined,
-				].filter((f) => f !== undefined),
-			);
-
-			// 古い順に処理, 繰り返し呼び出しで対象が減少
-			const [page, total] = await d.batch([
-				d.select({ id: readModel.id }).from(readModel).where(clause).orderBy(asc(readModel.createdAt), asc(readModel.id)).limit(limit),
-				d
-					.select({ total: sql<number>`count(*)` })
-					.from(readModel)
-					.where(clause),
-			]);
-			targets = page.map((row) => row.id);
-			// 上限超過の残件数, 読み取りモデル遅延を含む見積り
-			remaining = Math.max(0, (total[0]?.total ?? 0) - targets.length);
-		}
-
-		const { groups, invalid } = groupByShard(targets);
-		const entries = [...groups];
-		// 到達不能shardも個別失敗として返却, 全体500では成功分も再送発生
-		const settled = await Promise.allSettled(
-			entries.map(([name, ids]) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)).mutateMany(action, ids)),
-		);
-		for (const [index, result] of settled.entries()) {
-			if (result.status === 'rejected') console.error(`tsumugi: bulk ${action} failed on ${entries[index]?.[0]}`, result.reason);
-		}
-
-		const applied = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
-		const unreachable = settled.flatMap((result, index) =>
-			result.status === 'rejected' ? (entries[index]?.[1] ?? []).map((id) => ({ id, reason: 'unreachable' as const })) : [],
-		);
-
-		const failed: (BulkFailure | { id: string; reason: 'invalid-id' | 'unreachable' })[] = [
-			...applied.flatMap((result) => result.failed),
-			...invalid.map((id) => ({ id, reason: 'invalid-id' as const })),
-			...unreachable,
-		];
-		return { body: { ok: applied.flatMap((result) => result.ok), failed, remaining }, status: 200 } as const;
-	};
 
 	for (const action of ['retry', 'cancel'] as const) {
 		app.post(`/api/jobs/bulk-${action}`, async (c) => {
 			const body = await readJson(c.req);
 			if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
-			const { body: result, status } = await bulk(action, c.env, body);
-			return c.json(result, status);
+
+			const parsed = validateBulk(body, action);
+			if ('error' in parsed) return c.json(error(parsed.error), 400);
+			return c.json(await jobs.bulk(c.env, action, parsed.input), 200);
 		});
 	}
 
-	app.get('/api/stats', async (c) => {
-		const db = drizzle(c.env.TSUMUGI_DB);
-		const rows = await db
-			.select({ state: readModel.state, count: sql<number>`count(*)` })
-			.from(readModel)
-			.groupBy(readModel.state);
-		// 読み取りモデル経由で数秒遅延, 傾向把握用
-		const oldest = await db
-			.select({ createdAt: sql<number | null>`min(${readModel.createdAt})` })
-			.from(readModel)
-			.where(eq(readModel.state, 'SCHEDULED'));
-		const oldestCreatedAt = oldest[0]?.createdAt ?? null;
-		const body: StatsResponse = {
-			byState: Object.fromEntries(rows.map((r) => [r.state, r.count])),
-			oldestScheduledMs: oldestCreatedAt === null ? null : Math.max(0, Date.now() - oldestCreatedAt),
-		};
-		return c.json(body);
-	});
+	app.get('/api/stats', async (c) => c.json((await jobs.stats(c.env)) satisfies StatsResponse));
 
-	// 既定のshards=1でshard 0を照会, 分割時もshard 0のみ(ADR-0011)
-	app.get('/api/diagnostics', async (c) => {
-		const perBinding = await Promise.all(
-			(bindings ?? []).map(async (binding) => {
-				const stub = c.env.JOB_SHARD.get(c.env.JOB_SHARD.idFromName(shardName(binding, 0)));
-				return [binding, await stub.diagnostics()] as const;
-			}),
-		);
-		const body: DiagnosticsResponse = { shard: 0, bindings: Object.fromEntries(perBinding) };
-		return c.json(body);
-	});
-
-	// 分割時は全shardへ同一設定を送信, 1shardでも未反映なら投入継続(ADR-0011)
-	// 中断せず全shardへ試行, 未到達shardは呼び出し側へ返却し再試行
-	const eachShard = async <T>(env: RestEnv, binding: string, run: (stub: DurableObjectStub<TsumugiJobShard>) => Promise<T>) => {
-		const shards = Math.max(1, shardsOf?.(binding) ?? 1);
-		const stubs = Array.from({ length: shards }, (_, shard) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardName(binding, shard))));
-		const settled = await Promise.allSettled(stubs.map(run));
-		const failed = settled.flatMap((result, shard) => (result.status === 'rejected' ? [shard] : []));
-		for (const [shard, result] of settled.entries()) {
-			if (result.status === 'rejected') console.error(`tsumugi: policy update failed on ${shardName(binding, shard)}`, result.reason);
-		}
-		const applied = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
-		return { shards, failed, applied };
-	};
-
-	// 一部shardのみ反映時の応答, 成功扱いでは未停止の投入を停止済みと誤認(#27)
-	const partial = (binding: string, shards: number, failed: number[]) =>
-		({
-			error: `the change reached ${shards - failed.length} of ${shards} shards, send the same request again`,
-			binding,
-			shards,
-			failed,
-		}) satisfies PartialPolicyResponse;
+	app.get('/api/diagnostics', async (c) => c.json((await bindingService.diagnostics(c.env)) satisfies DiagnosticsResponse));
 
 	app.post('/api/bindings/:binding/policy', async (c) => {
 		const binding = c.req.param('binding');
-		if (bindings !== undefined && !bindings.includes(binding))
-			return c.json({ error: `unknown binding: ${binding}` } satisfies ErrorResponse, 404);
+		if (!bindingService.isKnown(binding)) return c.json(error(`unknown binding: ${binding}`), 404);
 
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
 		const parsed = validatePolicy(body);
-		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
+		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
-		const { shards, failed, applied } = await eachShard(c.env, binding, (stub) => stub.updatePolicy(parsed.input));
-		if (failed.length > 0) return c.json(partial(binding, shards, failed), 500);
-		// 全shard同一内容, 先頭の結果を代表として返却
-		const policy = applied[0] as UpdatePolicyResponse['policy'];
-		return c.json({ binding, shards, policy } satisfies UpdatePolicyResponse);
+		const result = await bindingService.updatePolicy(c.env, binding, parsed.input);
+		if (result.ok) return c.json({ binding, shards: result.shards, policy: result.policy } satisfies UpdatePolicyResponse);
+		return c.json(partial(binding, result.shards, result.failed), 500);
 	});
 
-	// 実行時設定を破棄し静的設定へ復帰(#27), 次回投入の同梱設定で再度有効化(#6)
 	app.post('/api/bindings/:binding/policy/reset', async (c) => {
 		const binding = c.req.param('binding');
-		if (bindings !== undefined && !bindings.includes(binding))
-			return c.json({ error: `unknown binding: ${binding}` } satisfies ErrorResponse, 404);
+		if (!bindingService.isKnown(binding)) return c.json(error(`unknown binding: ${binding}`), 404);
 
-		const { shards, failed } = await eachShard(c.env, binding, (stub) => stub.resetPolicy());
-		if (failed.length > 0) return c.json(partial(binding, shards, failed), 500);
-		return c.json({ ok: true } satisfies MutationResponse);
+		const result = await bindingService.resetPolicy(c.env, binding);
+		if (result.ok) return c.json({ ok: true } satisfies MutationResponse);
+		return c.json(partial(binding, result.shards, result.failed), 500);
 	});
 
-	// 定義と状態はScheduler DOが正で直接照会(ADR-0040)
 	app.get('/api/schedules', async (c) => {
-		if (!schedulerFor) return c.json({ error: 'schedules are not available' } satisfies ErrorResponse, 501);
-		const schedules = await schedulerFor(c.env).list();
-		return c.json({ schedules } satisfies SchedulesResponse);
+		const result = await schedules.list(c.env);
+		if (!result.ok) return c.json(error('schedules are not available'), 501);
+		return c.json({ schedules: result.schedules } satisfies SchedulesResponse);
 	});
 
 	for (const [action, paused] of [
@@ -770,301 +202,92 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		['resume', false],
 	] as const) {
 		app.post(`/api/schedules/:name/${action}`, async (c) => {
-			if (!schedulerFor) return c.json({ error: 'schedules are not available' } satisfies ErrorResponse, 501);
 			const name = c.req.param('name');
-			const result = await schedulerFor(c.env).setPaused(name, paused);
+			const result = await schedules.setPaused(c.env, name, paused);
 			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
-			return c.json({ error: `unknown schedule: ${name}` } satisfies ErrorResponse, 404);
+			if (result.reason === 'unavailable') return c.json(error('schedules are not available'), 501);
+			return c.json(error(`unknown schedule: ${name}`), 404);
 		});
 	}
 
-	// 一時停止中も実行可, 次回予定は不変
 	app.post('/api/schedules/:name/trigger', async (c) => {
-		if (!schedulerFor) return c.json({ error: 'schedules are not available' } satisfies ErrorResponse, 501);
 		const name = c.req.param('name');
-		const result = await schedulerFor(c.env).trigger(name);
+		const result = await schedules.trigger(c.env, name);
 		if (result.ok) return c.json({ id: result.id, kind: result.kind } satisfies TriggerScheduleResponse, 201);
-		if (result.reason === 'unknown') return c.json({ error: `unknown schedule: ${name}` } satisfies ErrorResponse, 404);
+		if (result.reason === 'unavailable') return c.json(error('schedules are not available'), 501);
+		if (result.reason === 'unknown') return c.json(error(`unknown schedule: ${name}`), 404);
 		// 写像関数, 投入の失敗, 理由は一覧のlast_errorにも記録
-		return c.json({ error: result.error } satisfies ErrorResponse, 500);
+		return c.json(error(result.error), 500);
 	});
 
 	app.get('/api/jobs/:id', async (c) => {
-		const rows = await drizzle(c.env.TSUMUGI_DB)
-			.select()
-			.from(readModel)
-			.where(eq(readModel.id, c.req.param('id')))
-			.limit(1);
-		const found = rows[0];
-		if (!found) return c.json({ error: 'not found' } satisfies ErrorResponse, 404);
-
-		// 返却列を明示, スプレッドでは内部列(seq), camelCase重複も露出
-		const job: Omit<JobDetail, 'retryable' | 'attempts_log'> = {
-			id: found.id,
-			binding: found.binding,
-			state: found.state,
-			priority: found.priority,
-			attempts: found.attempts,
-			max_attempts: found.maxAttempts,
-			concurrency_key: found.concurrencyKey,
-			unique_key: found.uniqueKey,
-			guarantee: found.guarantee,
-			created_at: found.createdAt,
-			updated_at: found.updatedAt,
-			dispatched_at: found.dispatchedAt,
-			run_after: found.runAfter,
-			expires_at: found.expiresAt,
-			cancel_requested_at: found.cancelRequestedAt,
-			progress: found.progress,
-			traceparent: found.traceparent,
-			logs: parseJobLogs(found.logs),
-			payload: found.payload,
-			// payload同様JSON文字列のまま返却
-			result: found.result,
-			run_id: found.runId,
-			node_id: found.nodeId,
-		};
-		// 履歴は詳細のみ, 一覧では1画面数百KBの可能性(ADR-0028)
-		// `attempts`は試行回数で別名使用, 上書きで画面のn/m表示が破損
-		const detail: JobDetail = { ...withRetryable(job, Date.now()), attempts_log: attemptsOf(job, parseAttempts(found.attemptsLog)) };
-		return c.json({ job: detail } satisfies JobDetailResponse);
+		const job = await jobs.detail(c.env, c.req.param('id'));
+		if (!job) return c.json(error('not found'), 404);
+		return c.json({ job: toJobDetail(job) } satisfies JobDetailResponse);
 	});
 
-	// goneは410, 未作成と保持期間後の削除は区別不能, 状態違いの409とは利用者の対応が異なる
-	function refusal(result: { ok: false; reason: 'invalid-state' | 'gone' }, subject: 'job' | 'run' = 'job') {
-		return result.reason === 'gone'
-			? ({
-					body: { error: `${subject} not found: it does not exist or was removed after the retention period` } satisfies ErrorResponse,
-					status: 410,
-				} as const)
-			: ({ body: { error: 'not allowed in the current state' } satisfies ErrorResponse, status: 409 } as const);
+	for (const action of ['retry', 'cancel'] as const) {
+		app.post(`/api/jobs/:id/${action}`, async (c) => {
+			const { body, status } = mutationResponse(await jobs.mutate(c.env, c.req.param('id'), { kind: action }), 'job');
+			return c.json(body, status);
+		});
 	}
 
-	// 変更は正であるDOへ送信
-	const jobMutation = async (env: Env, id: string, apply: (stub: DurableObjectStub<TsumugiJobShard>) => Promise<MutationResult>) => {
-		try {
-			const result = await apply(stubOf(env, id));
-			if (result.ok) {
-				return { body: { ok: true, ...(result.requested ? { requested: true } : {}) } satisfies MutationResponse, status: 200 } as const;
-			}
-			return refusal(result);
-		} catch (error) {
-			if (error instanceof InvalidJobIdError) return { body: { error: 'invalid job id' } satisfies ErrorResponse, status: 400 } as const;
-			throw error;
-		}
-	};
-
-	app.post('/api/jobs/:id/retry', async (c) => {
-		const id = c.req.param('id');
-		const { body, status } = await jobMutation(c.env, id, (stub) => stub.retry(id));
-		return c.json(body, status);
-	});
-
 	app.post('/api/jobs/:id/reschedule', async (c) => {
-		const id = c.req.param('id');
-
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
 		const parsed = validateReschedule(body, Date.now());
-		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
+		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
-		// SCHEDULED以外は予定変更でも実行継続, DO側で拒否
-		const { body: result, status } = await jobMutation(c.env, id, (stub) => stub.reschedule(id, parsed.input));
+		const { body: result, status } = mutationResponse(
+			await jobs.mutate(c.env, c.req.param('id'), { kind: 'reschedule', ...parsed.input }),
+			'job',
+		);
 		return c.json(result, status);
 	});
 
-	app.post('/api/jobs/:id/cancel', async (c) => {
-		const id = c.req.param('id');
-		// SCHEDULEDは即時, QUEUED / RUNNINGは要求の受理(ADR-0052)
-		const { body, status } = await jobMutation(c.env, id, (stub) => stub.cancel(id));
-		return c.json(body, status);
-	});
-
-	// Run DOはrun毎に独立, 横断一覧は読み取りモデルからのみ取得可能
 	app.get('/api/runs', async (c) => {
 		const url = new URL(c.req.url);
-		const state = url.searchParams.get('state');
-		const flow = url.searchParams.get('flow');
-		const { limit, offset } = parsePaging(url);
-
-		const d = drizzle(c.env.TSUMUGI_DB);
-		const filters = [state ? eq(runModel.state, state) : undefined, flow ? eq(runModel.flow, flow) : undefined].filter(
-			(f) => f !== undefined,
-		);
-		const clause = filters.length > 0 ? and(...filters) : undefined;
-
-		const [page, total] = await d.batch([
-			d
-				.select({
-					id: runModel.id,
-					flow: runModel.flow,
-					state: runModel.state,
-					node_total: runModel.nodeTotal,
-					node_done: runModel.nodeDone,
-					node_failed: runModel.nodeFailed,
-					created_at: runModel.createdAt,
-					updated_at: runModel.updatedAt,
-				})
-				.from(runModel)
-				.where(clause)
-				.orderBy(sqlDesc(runModel.updatedAt), sqlDesc(runModel.id))
-				.limit(limit)
-				.offset(offset),
-			d
-				.select({ total: sql<number>`count(*)` })
-				.from(runModel)
-				.where(clause),
-		]);
-
-		const body: RunListResponse = { runs: page, total: total[0]?.total ?? 0 };
-		return c.json(body);
+		const { runs: found, total } = await runs.list(c.env, {
+			state: url.searchParams.get('state'),
+			flow: url.searchParams.get('flow'),
+			...parsePaging(url),
+		});
+		return c.json({ runs: found.map(toRunSummary), total } satisfies RunListResponse);
 	});
 
-	// 未実行flowも含め`flows`から返却
-	app.get('/api/flows', (c) => c.json({ flows: [...(flows ?? [])].sort() } satisfies FlowsResponse));
+	app.get('/api/flows', (c) => c.json({ flows: runs.flows() } satisfies FlowsResponse));
 
 	app.post('/api/runs', async (c) => {
-		if (!start) return c.json({ error: 'run creation is not available' } satisfies ErrorResponse, 501);
+		const start = runs.start;
+		if (!start) return c.json(error('run creation is not available'), 501);
 
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
 		const parsed = validateStartRun(body, flows);
-		if ('error' in parsed) return c.json({ error: parsed.error } satisfies ErrorResponse, 400);
+		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
-		const { flow, input, id, deadlineMs } = parsed.input;
-		try {
-			const started = await start(c.env, flow, input, {
-				...(id !== undefined ? { id } : {}),
-				...(deadlineMs !== undefined ? { deadlineMs } : {}),
-			});
-			return c.json({ id: started } satisfies StartRunResponse, 201);
-		} catch (error) {
-			// runIdのローカル部に使えないidは要求側の誤り, ジョブ側と同じ扱い
-			if (error instanceof InvalidRunIdError) return c.json({ error: 'invalid run id' } satisfies ErrorResponse, 400);
-			throw error;
-		}
+		const started = await start(c.env, parsed.input);
+		if (started.ok) return c.json({ id: started.id } satisfies StartRunResponse, 201);
+		return c.json(error('invalid run id'), 400);
 	});
 
-	// グラフは1クエリで返却, 段組み描画に全ノード必要
 	app.get('/api/runs/:id', async (c) => {
-		const id = c.req.param('id');
-		const d = drizzle(c.env.TSUMUGI_DB);
-		const childRun = alias(runModel, 'child_run');
-		const [runs, nodes] = await d.batch([
-			d.select().from(runModel).where(eq(runModel.id, id)).limit(1),
-
-			d
-				.select({
-					node: runNode,
-					job: {
-						state: sql<string>`${readModel.state}`.as('job_state'),
-						attempts: sql<number>`${readModel.attempts}`.as('job_attempts'),
-						createdAt: sql<number>`${readModel.createdAt}`.as('job_created_at'),
-						updatedAt: sql<number>`${readModel.updatedAt}`.as('job_updated_at'),
-						dispatchedAt: sql<number | null>`${readModel.dispatchedAt}`.as('job_dispatched_at'),
-						runAfter: sql<number | null>`${readModel.runAfter}`.as('job_run_after'),
-						attemptsLog: sql<string | null>`${readModel.attemptsLog}`.as('job_attempts_log'),
-					},
-					// subflowの期間は子runの作成から終端まで
-					child: {
-						state: sql<string>`${childRun.state}`.as('child_state'),
-						createdAt: sql<number>`${childRun.createdAt}`.as('child_created_at'),
-						updatedAt: sql<number>`${childRun.updatedAt}`.as('child_updated_at'),
-					},
-				})
-				.from(runNode)
-				.leftJoin(readModel, eq(readModel.id, runNode.jobId))
-				.leftJoin(childRun, eq(childRun.id, runNode.childRunId))
-				.where(eq(runNode.runId, id))
-				.orderBy(asc(runNode.position)),
-		]);
-
-		const found = runs[0];
-		if (!found) return c.json({ error: 'not found' } satisfies ErrorResponse, 404);
-		const body: RunDetailResponse = {
-			run: {
-				id: found.id,
-				flow: found.flow,
-				state: found.state,
-				input: found.input,
-				node_total: found.nodeTotal,
-				node_done: found.nodeDone,
-				node_failed: found.nodeFailed,
-				created_at: found.createdAt,
-				updated_at: found.updatedAt,
-				parent_run_id: found.parentRunId,
-				parent_node_id: found.parentNodeId,
-				// 失敗のみ再開可, 保持期間後はDO削除済み, ジョブのretryableと同じ近似(ADR-0034)
-				retryable: found.state === 'FAILED' && (runFailedRetentionMs === undefined || found.updatedAt > Date.now() - runFailedRetentionMs),
-			},
-			nodes: nodes.map(({ node, job: joined, child: joinedChild }) => {
-				// 結合先なしは全列null
-				const job = joined?.state != null ? joined : null;
-				const child = joinedChild?.state != null ? joinedChild : null;
-				return {
-					id: node.nodeId,
-					binding: node.binding,
-					state: node.state,
-					container: node.container === 1,
-					parent: node.parent,
-					origin: node.origin,
-					after: parseAfter(node.after),
-					job_id: node.jobId,
-					child_run_id: node.childRunId,
-					result: node.result,
-					error: node.error,
-					position: node.position,
-					created_at: node.createdAt,
-					updated_at: node.updatedAt,
-					queued_at: job?.createdAt ?? child?.createdAt ?? null,
-					run_after: job?.runAfter ?? null,
-					started_at: job?.dispatchedAt ?? child?.createdAt ?? null,
-					finished_at: job
-						? isActive(job.state as JobState)
-							? null
-							: job.updatedAt
-						: child && child.state !== 'RUNNING'
-							? child.updatedAt
-							: null,
-					attempts_log: job
-						? attemptsOf(
-								{ state: job.state, attempts: job.attempts, dispatched_at: job.dispatchedAt, updated_at: job.updatedAt },
-								parseAttempts(job.attemptsLog),
-							).map((attempt) => ({ ...attempt, error: null }))
-						: [],
-				};
-			}),
-		};
-		return c.json(body);
+		const detail = await runs.detail(c.env, c.req.param('id'));
+		if (!detail) return c.json(error('not found'), 404);
+		return c.json({ run: toRunDetail(detail.run), nodes: detail.nodes.map(toRunNode) } satisfies RunDetailResponse);
 	});
 
-	// 取り消し, 再開は正であるRun DOへ送信
-	// Honoのコンテキスト型非依存, 必要な値のみ引数で受け取り
-	const runMutation = async (action: 'cancel' | 'retry', env: Env, id: string) => {
-		if (!runFor) return { body: { error: 'run control is not available' } satisfies ErrorResponse, status: 501 } as const;
-		try {
-			parseRunId(id);
-			const stub = runFor(env, id);
-			const result = action === 'cancel' ? await stub.cancel() : await stub.retry();
-			if (result.ok) return { body: { ok: true } satisfies MutationResponse, status: 200 } as const;
-			return refusal(result, 'run');
-		} catch (error) {
-			if (error instanceof InvalidRunIdError) return { body: { error: 'invalid run id' } satisfies ErrorResponse, status: 400 } as const;
-			throw error;
-		}
-	};
-
-	app.post('/api/runs/:id/cancel', async (c) => {
-		const { body, status } = await runMutation('cancel', c.env, c.req.param('id'));
-		return c.json(body, status);
-	});
-
-	app.post('/api/runs/:id/retry', async (c) => {
-		const { body, status } = await runMutation('retry', c.env, c.req.param('id'));
-		return c.json(body, status);
-	});
+	for (const action of ['cancel', 'retry'] as const) {
+		app.post(`/api/runs/:id/${action}`, async (c) => {
+			const outcome = await runs.mutate(c.env, c.req.param('id'), action);
+			if (!outcome.ok && outcome.reason === 'unavailable') return c.json(error('run control is not available'), 501);
+			const { body, status } = mutationResponse(outcome, 'run');
+			return c.json(body, status);
+		});
+	}
 
 	// API以外のGETはSPAのHTMLを返却, ルーティングはクライアント側
 	if (dashboard) {

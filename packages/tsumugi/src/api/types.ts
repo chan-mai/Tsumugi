@@ -1,5 +1,6 @@
 import type { BlockedBy, Policy } from '../core/types.js';
 import type { JobLogEntry } from '../core/log.js';
+import type { CreateJobInput, StartRunInput } from '../service/inputs.js';
 
 export type { JobLogEntry };
 
@@ -53,20 +54,7 @@ export type JobDetail = JobSummary & {
 export type JobListResponse = { jobs: JobSummary[]; total: number };
 export type JobDetailResponse = { job: JobDetail };
 
-export type CreateJobRequest = {
-	binding: string;
-	payload: unknown;
-	maxAttempts?: number;
-	delayMs?: number;
-	/** 投入時刻からの相対期限, 経過後は未実行でCANCELLED */
-	expiresInMs?: number;
-	priority?: number;
-	concurrencyKey?: string;
-	uniqueKey?: string;
-	/** 分割bindingの投入先shard決定用, shards>=2で必須(ADR-0011) */
-	partitionKey?: string;
-	traceparent?: string;
-};
+export type CreateJobRequest = CreateJobInput;
 
 export type CreateJobResponse = { id: string };
 
@@ -138,13 +126,7 @@ export type RunListResponse = { runs: RunSummary[]; total: number };
 export type RunDetailResponse = { run: RunDetail; nodes: RunNode[] };
 export type FlowsResponse = { flows: string[] };
 
-export type StartRunRequest = {
-	flow: string;
-	input: unknown;
-	id?: string;
-	/** run全体の期限(ms), flow定義の期限より優先(ADR-0039) */
-	deadlineMs?: number;
-};
+export type StartRunRequest = StartRunInput;
 export type StartRunResponse = { id: string };
 
 export type Schedule = {

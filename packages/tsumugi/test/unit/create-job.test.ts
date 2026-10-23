@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateCreateJob, validateReschedule } from '../../src/api/rest.js';
+import { validateCreateJob, validateReschedule } from '../../src/api/validate.js';
 
 const BINDINGS = ['MAIL', 'CHARGE'];
 

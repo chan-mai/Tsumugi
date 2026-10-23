@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateStartRun } from '../../src/api/rest.js';
+import { validateStartRun } from '../../src/api/validate.js';
 
 describe('開始内容の検証', () => {
 	it('登録一覧が無ければ開始先を検証しない', () => {
