@@ -7,14 +7,12 @@
 | 状態        | 意味                                                   |
 | ----------- | ------------------------------------------------------ |
 | `SCHEDULED` | 実行待ち。初回待ちもリトライ待ちも含む                 |
-| `QUEUED`    | Queuesに投入済み。実行中の場合も含む                   |
-| `RUNNING`   | performerが実行中。`at-most-once`のみ                  |
+| `QUEUED`    | Queuesに投入済み/未実行                       |
+| `RUNNING`   | performerが実行中                                      |
 | `COMPLETED` | 成功                                                   |
 | `FAILED`    | 試行回数を使い切って失敗                               |
 | `CANCELLED` | 取り消された                                           |
 | `STALLED`   | 結果が報告されないまま停止し、手動での判断を待っている |
-
-`RUNNING`へ遷移するのは`at-most-once`のジョブのみであり、`at-least-once`のジョブは`QUEUED`のまま実行されるため、`QUEUED`は未開始と実行中の両方を含みます。
 
 初回待ちとリトライ待ちはどちらも`SCHEDULED`です。判別には`attempts`を参照してください。
 
@@ -22,7 +20,7 @@
 
 ```text
 SCHEDULED → QUEUED, CANCELLED
-QUEUED    → RUNNING(at-most-onceのみ), COMPLETED, FAILED, SCHEDULED, STALLED, CANCELLED
+QUEUED    → RUNNING, COMPLETED, FAILED, SCHEDULED, STALLED, CANCELLED
 RUNNING   → COMPLETED, FAILED, SCHEDULED, STALLED, CANCELLED
 COMPLETED → なし
 CANCELLED → なし

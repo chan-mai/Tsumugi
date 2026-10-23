@@ -45,7 +45,7 @@ export type DispatchMessage = {
 	attempt: number;
 	payload: unknown;
 	timeoutMs: number;
-	/** at-most-onceは実行前にclaim必須(ADR-0007) */
+	/** at-most-onceは実行前にclaim必須(ADR-0007), 偽はstartで開始通知(ADR-0054) */
 	claimRequired: boolean;
 	/** 実行開始期限, consumerが実行直前に判定 */
 	expiresAt: number | null;
@@ -532,6 +532,18 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			return false;
 		}
 		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now });
+	}
+
+	/**
+	 * at-least-onceの実行開始通知, claimと異なり非排他(ADR-0054)
+	 * 重複配送や前試行の遅延した通知は遷移なしで無視
+	 */
+	async start(jobId: string, attempt: number): Promise<void> {
+		const now = this.clock.now();
+		const row = this.repo.find(jobId);
+		if (!row || row.state !== 'QUEUED' || row.attempts + 1 !== attempt) return;
+		// 投影用alarm, 無いと表示がreaper期限まで遅延
+		if (this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now })) await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
 	}
 
 	/** consumerからの実行開始前の期限切れ報告(ADR-0047), Queues滞留分も対象 */
