@@ -1,4 +1,4 @@
-import { ref } from 'vue';
+import { useStorage } from '@vueuse/core';
 import { formatTimestamp } from './time';
 
 export const at = (value: number | null) => (value === null ? '' : formatTimestamp(value));
@@ -11,36 +11,19 @@ const COLUMN = {
 	attempts: 'hidden sm:table-cell',
 	processingTime: 'hidden xl:table-cell',
 };
-export const HEAD = 'h-12 px-4 text-left align-middle font-medium text-muted-foreground whitespace-nowrap';
 
-// Binding, Statusは行識別用に固定
-export const TOGGLEABLE = [
-	{ key: 'id', label: 'ID' },
-	{ key: 'startedAt', label: 'Started at' },
-	{ key: 'updatedAt', label: 'Updated at' },
-	{ key: 'attempts', label: 'Attempts' },
-	{ key: 'processingTime', label: 'Processing time' },
-];
-const VIEW_KEY = 'tsumugi:columns';
+// Binding/Statusは行識別用に固定, 表示名はcolumns.<key>
+export const TOGGLEABLE = Object.keys(COLUMN) as (keyof typeof COLUMN)[];
 
-function loadVisible(): Record<string, boolean> {
-	const all = Object.fromEntries(TOGGLEABLE.map((c) => [c.key, true]));
-	try {
-		return { ...all, ...(JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as Record<string, boolean>) };
-	} catch {
-		return all;
-	}
-}
-
-export const visible = ref(loadVisible());
+export const visible = useStorage<Record<string, boolean>>(
+	'tsumugi:columns',
+	Object.fromEntries(TOGGLEABLE.map((key) => [key, true])),
+	undefined,
+	{ mergeDefaults: true },
+);
 
 export function toggleColumn(key: string) {
 	visible.value = { ...visible.value, [key]: !visible.value[key] };
-	try {
-		localStorage.setItem(VIEW_KEY, JSON.stringify(visible.value));
-	} catch {
-		// プライベートモード等の書き込み不可, 表示自体は継続
-	}
 }
 
 export const columnClass = (key: keyof typeof COLUMN) => (visible.value[key] ? COLUMN[key] : 'hidden');

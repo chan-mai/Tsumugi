@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import StatusCell from './StatusCell.vue';
+import { useI18n } from 'vue-i18n';
 import type { Attempt } from '../api';
 import { formatTimestamp } from '../time';
+import { CODE } from '../ui';
+import StatusCell from './StatusCell.vue';
 
 const props = defineProps<{ attempts: Attempt[] }>();
+const { t } = useI18n();
 
 const at = (value: number | null) => (value === null ? '-' : formatTimestamp(value));
 
@@ -13,29 +16,24 @@ const ordered = () => [...props.attempts].sort((x, y) => x.attempt - y.attempt);
 </script>
 
 <template>
-	<!-- 1回で成功時は履歴なし, 欠落誤認防止に節ごと非表示 -->
-	<div v-if="attempts.length > 0">
-		<p class="mb-1 text-muted-foreground">Result</p>
+	<section v-if="attempts.length > 0">
+		<h3 class="mb-2 text-base font-semibold">{{ t('attempts.title') }}</h3>
 		<div class="space-y-3">
-			<div v-for="a in ordered()" :key="a.attempt" class="rounded-card border border-border p-3">
-				<p class="mb-2 font-medium">#{{ a.attempt }}</p>
+			<div v-for="a in ordered()" :key="a.attempt" class="rounded-xl border border-line p-4">
+				<div class="mb-2 flex items-center gap-2">
+					<span class="font-medium tabular-nums">#{{ a.attempt }}</span>
+					<StatusCell :state="a.state" />
+				</div>
 				<dl class="grid gap-y-1 sm:grid-cols-[9rem_1fr]">
-					<dt class="text-muted-foreground">Status</dt>
-					<dd><StatusCell :state="a.state" /></dd>
-					<dt class="text-muted-foreground">StartedAt</dt>
+					<dt class="text-ink-muted">{{ t('attempts.startedAt') }}</dt>
 					<dd>{{ at(a.started_at) }}</dd>
-					<dt class="text-muted-foreground">FinishedAt</dt>
+					<dt class="text-ink-muted">{{ t('attempts.finishedAt') }}</dt>
 					<dd>{{ at(a.finished_at) }}</dd>
-					<dt class="text-muted-foreground">Processing Time</dt>
+					<dt class="text-ink-muted">{{ t('attempts.processingTime') }}</dt>
 					<dd class="tabular-nums">{{ durationOf(a) }}</dd>
-					<template v-if="a.error">
-						<dt class="text-muted-foreground">Error</dt>
-						<dd>
-							<pre class="overflow-auto rounded-card bg-muted p-2 text-xs whitespace-pre-wrap">{{ a.error }}</pre>
-						</dd>
-					</template>
 				</dl>
+				<pre v-if="a.error" :class="CODE" class="mt-2 whitespace-pre-wrap text-critical">{{ a.error }}</pre>
 			</div>
 		</div>
-	</div>
+	</section>
 </template>

@@ -1,48 +1,53 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 import type { Run } from '../api';
-import { at, columnClass, HEAD } from '../columns';
+import { at, columnClass } from '../columns';
+import LoadingState from './LoadingState.vue';
+import { EMPTY_ROW, TABLE, TABLE_WRAP, TBODY, TD, TH, THEAD } from '../ui';
 import StatusCell from './StatusCell.vue';
 
-defineProps<{ runs: Run[] }>();
+defineProps<{ runs: Run[]; loading: boolean }>();
 const emit = defineEmits<{ select: [id: string] }>();
+const { t } = useI18n();
 
 const progressOf = (run: Run) => `${run.node_done} / ${run.node_total}`;
 </script>
 
 <template>
-	<div class="relative w-full overflow-x-auto rounded-card border border-border">
-		<table class="w-full caption-bottom text-sm">
-			<thead class="[&_tr]:border-b [&_tr]:border-border">
+	<div :class="TABLE_WRAP">
+		<LoadingState v-if="loading" />
+		<table v-else :class="TABLE">
+			<thead :class="THEAD">
 				<tr>
-					<th :class="HEAD">Flow</th>
-					<th :class="[HEAD, columnClass('id')]">ID</th>
-					<th :class="HEAD">Status</th>
-					<th :class="HEAD">Nodes</th>
-					<th :class="[HEAD, columnClass('updatedAt')]">Updated at</th>
+					<th :class="TH">{{ t('common.flow') }}</th>
+					<th :class="[TH, columnClass('id')]">{{ t('common.id') }}</th>
+					<th :class="TH">{{ t('common.status') }}</th>
+					<th :class="TH">{{ t('run.nodes') }}</th>
+					<th :class="[TH, columnClass('updatedAt')]">{{ t('common.updatedAt') }}</th>
 				</tr>
 			</thead>
-			<tbody class="[&_tr:last-child]:border-0">
+			<tbody :class="TBODY">
 				<tr
 					v-for="run in runs"
 					:key="run.id"
-					class="cursor-pointer border-b border-border transition-colors hover:bg-muted"
+					class="cursor-pointer transition-colors hover:bg-neutral-soft"
 					@click="emit('select', run.id)"
 				>
-					<td class="p-4 align-middle">
+					<td :class="TD" class="font-medium whitespace-nowrap">
 						{{ run.flow }}
 						<!-- ID列非表示の幅での行識別用 -->
-						<span class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ run.id }}</span>
+						<span class="block font-mono text-xs font-normal whitespace-normal break-all text-ink-subtle lg:hidden">{{ run.id }}</span>
 					</td>
-					<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ run.id }}</td>
-					<td class="p-4 align-middle"><StatusCell :state="run.state" /></td>
-					<td class="p-4 align-middle tabular-nums">
+					<td :class="[TD, columnClass('id')]" class="font-mono text-xs text-ink-muted">{{ run.id }}</td>
+					<td :class="TD"><StatusCell :state="run.state" /></td>
+					<td :class="TD" class="text-ink-muted tabular-nums">
 						{{ progressOf(run) }}
-						<span v-if="run.node_failed > 0" class="text-destructive">({{ run.node_failed }})</span>
+						<span v-if="run.node_failed > 0" class="text-critical">({{ run.node_failed }})</span>
 					</td>
-					<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('updatedAt')">{{ at(run.updated_at) }}</td>
+					<td :class="[TD, columnClass('updatedAt')]" class="whitespace-nowrap text-ink-muted">{{ at(run.updated_at) }}</td>
 				</tr>
 				<tr v-if="runs.length === 0">
-					<td colspan="5" class="h-24 text-center text-muted-foreground">No results.</td>
+					<td colspan="5" :class="EMPTY_ROW">{{ t('common.noResults') }}</td>
 				</tr>
 			</tbody>
 		</table>

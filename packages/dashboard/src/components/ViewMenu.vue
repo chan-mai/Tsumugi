@@ -1,26 +1,20 @@
 <script setup lang="ts">
+import { Columns3 } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import { useI18n } from 'vue-i18n';
+import { CHIP, MENU_ITEM, MENU_ITEM_HOVER, MENU_PANEL } from '../ui';
 import CheckBox from './CheckBox.vue';
 
-defineProps<{ options: { key: string; label: string }[]; visible: Record<string, boolean> }>();
+defineProps<{ options: string[]; visible: Record<string, boolean> }>();
 const emit = defineEmits<{ toggle: [key: string] }>();
+const { t } = useI18n();
 </script>
 
 <template>
 	<Popover v-slot="{ open }" class="relative">
-		<PopoverButton class="flex h-8 items-center gap-1.5 rounded-card border border-border bg-background px-3 text-sm hover:bg-accent">
-			<svg
-				viewBox="0 0 16 16"
-				class="size-3.5"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.3"
-				stroke-linecap="round"
-				aria-hidden="true"
-			>
-				<path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
-			</svg>
-			View
+		<PopoverButton :class="CHIP">
+			<Columns3 class="size-4 text-ink-muted" aria-hidden="true" />
+			{{ t('toolbar.view') }}
 		</PopoverButton>
 
 		<TransitionRoot
@@ -32,20 +26,10 @@ const emit = defineEmits<{ toggle: [key: string] }>();
 			leave-from="opacity-100 translate-y-0"
 			leave-to="opacity-0 -translate-y-1"
 		>
-			<PopoverPanel
-				static
-				class="absolute right-0 z-20 mt-1 w-56 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-background p-1 shadow-md"
-			>
-				<p class="px-2 py-1.5 text-xs text-muted-foreground">Toggle columns</p>
-				<button
-					v-for="option in options"
-					:key="option.key"
-					type="button"
-					class="flex w-full items-center gap-2 rounded-sm border-none px-2 py-1.5 text-left text-sm hover:bg-accent"
-					@click="emit('toggle', option.key)"
-				>
-					<CheckBox :checked="visible[option.key] === true" />
-					{{ option.label }}
+			<PopoverPanel static :class="MENU_PANEL" class="right-0 w-56 max-w-[calc(100vw-2rem)]">
+				<button v-for="key in options" :key="key" type="button" :class="[MENU_ITEM, MENU_ITEM_HOVER]" @click="emit('toggle', key)">
+					<CheckBox :checked="visible[key] === true" />
+					{{ t(`columns.${key}`) }}
 				</button>
 			</PopoverPanel>
 		</TransitionRoot>

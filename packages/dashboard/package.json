@@ -12,10 +12,16 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
+    "@floating-ui/vue": "^2.0.1",
     "@headlessui/vue": "^1.7.23",
+    "@lucide/vue": "^1.61.0",
     "@vue-flow/core": "^1.48.2",
+    "@vueuse/core": "^15.0.0",
+    "@vueuse/router": "^15.0.0",
     "kiso.css": "^1.2.4",
-    "vue": "^3.5.44"
+    "vue": "^3.5.44",
+    "vue-i18n": "^11.4.16",
+    "vue-router": "^5.4.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

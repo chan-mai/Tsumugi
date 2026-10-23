@@ -47,6 +47,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.cli.json",
     "build": "tsdown",
+    "dev": "tsdown --watch --no-clean",
     "prepare": "pnpm build",
     "prepack": "cp ../../README.md ../../LICENSE .",
     "postpack": "rm -f README.md LICENSE",

@@ -1,10 +1,13 @@
 import { and, asc, desc as sqlDesc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
 import { job as readModel } from '../projection/tables.js';
 import { run as runModel, runNode } from '../projection/run-tables.js';
 import { InvalidJobIdError, InvalidRunIdError, parseRunId, shardName, shardNameOf } from '../core/ids.js';
+import { isActive } from '../core/transitions.js';
+import type { JobState } from '../core/types.js';
 import { normalizeTraceparent } from '../core/trace.js';
 import type { BulkFailure, MutationResult, TsumugiJobShard } from '../do/job-shard.js';
 import type { ConsumerEnv } from '../queue/consumer.js';
@@ -948,9 +951,34 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	app.get('/api/runs/:id', async (c) => {
 		const id = c.req.param('id');
 		const d = drizzle(c.env.TSUMUGI_DB);
+		const childRun = alias(runModel, 'child_run');
 		const [runs, nodes] = await d.batch([
 			d.select().from(runModel).where(eq(runModel.id, id)).limit(1),
-			d.select().from(runNode).where(eq(runNode.runId, id)).orderBy(asc(runNode.position)),
+
+			d
+				.select({
+					node: runNode,
+					job: {
+						state: sql<string>`${readModel.state}`.as('job_state'),
+						attempts: sql<number>`${readModel.attempts}`.as('job_attempts'),
+						createdAt: sql<number>`${readModel.createdAt}`.as('job_created_at'),
+						updatedAt: sql<number>`${readModel.updatedAt}`.as('job_updated_at'),
+						dispatchedAt: sql<number | null>`${readModel.dispatchedAt}`.as('job_dispatched_at'),
+						runAfter: sql<number | null>`${readModel.runAfter}`.as('job_run_after'),
+						attemptsLog: sql<string | null>`${readModel.attemptsLog}`.as('job_attempts_log'),
+					},
+					// subflowの期間は子runの作成から終端まで
+					child: {
+						state: sql<string>`${childRun.state}`.as('child_state'),
+						createdAt: sql<number>`${childRun.createdAt}`.as('child_created_at'),
+						updatedAt: sql<number>`${childRun.updatedAt}`.as('child_updated_at'),
+					},
+				})
+				.from(runNode)
+				.leftJoin(readModel, eq(readModel.id, runNode.jobId))
+				.leftJoin(childRun, eq(childRun.id, runNode.childRunId))
+				.where(eq(runNode.runId, id))
+				.orderBy(asc(runNode.position)),
 		]);
 
 		const found = runs[0];
@@ -971,22 +999,43 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 				// 失敗のみ再開可, 保持期間後はDO削除済み, ジョブのretryableと同じ近似(ADR-0034)
 				retryable: found.state === 'FAILED' && (runFailedRetentionMs === undefined || found.updatedAt > Date.now() - runFailedRetentionMs),
 			},
-			nodes: nodes.map((node) => ({
-				id: node.nodeId,
-				binding: node.binding,
-				state: node.state,
-				container: node.container === 1,
-				parent: node.parent,
-				origin: node.origin,
-				after: parseAfter(node.after),
-				job_id: node.jobId,
-				child_run_id: node.childRunId,
-				result: node.result,
-				error: node.error,
-				position: node.position,
-				created_at: node.createdAt,
-				updated_at: node.updatedAt,
-			})),
+			nodes: nodes.map(({ node, job: joined, child: joinedChild }) => {
+				// 結合先なしは全列null
+				const job = joined?.state != null ? joined : null;
+				const child = joinedChild?.state != null ? joinedChild : null;
+				return {
+					id: node.nodeId,
+					binding: node.binding,
+					state: node.state,
+					container: node.container === 1,
+					parent: node.parent,
+					origin: node.origin,
+					after: parseAfter(node.after),
+					job_id: node.jobId,
+					child_run_id: node.childRunId,
+					result: node.result,
+					error: node.error,
+					position: node.position,
+					created_at: node.createdAt,
+					updated_at: node.updatedAt,
+					queued_at: job?.createdAt ?? child?.createdAt ?? null,
+					run_after: job?.runAfter ?? null,
+					started_at: job?.dispatchedAt ?? child?.createdAt ?? null,
+					finished_at: job
+						? isActive(job.state as JobState)
+							? null
+							: job.updatedAt
+						: child && child.state !== 'RUNNING'
+							? child.updatedAt
+							: null,
+					attempts_log: job
+						? attemptsOf(
+								{ state: job.state, attempts: job.attempts, dispatched_at: job.dispatchedAt, updated_at: job.updatedAt },
+								parseAttempts(job.attemptsLog),
+							)
+						: [],
+				};
+			}),
 		};
 		return c.json(body);
 	});

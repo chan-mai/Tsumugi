@@ -1,4 +1,8 @@
+import { ref } from 'vue';
+
 const BROWSER_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+export const timeLocale = ref<string | undefined>(undefined);
 
 type ZonedFormatters = {
 	local: Intl.DateTimeFormat;
@@ -11,10 +15,12 @@ const formatters = new Map<string, ZonedFormatters>();
 export const browserTimeZone = (): string => BROWSER_TIME_ZONE;
 
 function formattersFor(timeZone: string): ZonedFormatters {
-	const cached = formatters.get(timeZone);
+	const locale = timeLocale.value;
+	const key = `${locale ?? ''}|${timeZone}`;
+	const cached = formatters.get(key);
 	if (cached) return cached;
 
-	const local = new Intl.DateTimeFormat(undefined, {
+	const local = new Intl.DateTimeFormat(locale, {
 		timeZone,
 		year: 'numeric',
 		month: 'numeric',
@@ -29,7 +35,7 @@ function formattersFor(timeZone: string): ZonedFormatters {
 		offset: new Intl.DateTimeFormat('en-US', { timeZone: resolved, timeZoneName: 'longOffset' }),
 		timeZone: resolved,
 	};
-	formatters.set(timeZone, created);
+	formatters.set(key, created);
 	return created;
 }
 

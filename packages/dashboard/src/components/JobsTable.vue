@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { Job } from '../api';
-import { at, columnClass, HEAD, visible } from '../columns';
+import { at, columnClass, visible } from '../columns';
+import LoadingState from './LoadingState.vue';
+import { EMPTY_ROW, TABLE, TABLE_WRAP, TBODY, TD, TH, THEAD } from '../ui';
 import CheckBox from './CheckBox.vue';
 import RowActions from './RowActions.vue';
 import SortHeader from './SortHeader.vue';
 import StatusCell from './StatusCell.vue';
 
-const props = defineProps<{ jobs: Job[]; picked: string[]; sort: string; desc: boolean }>();
+const props = defineProps<{ jobs: Job[]; picked: string[]; sort: string; desc: boolean; loading: boolean }>();
 const emit = defineEmits<{
 	select: [id: string];
 	sort: [column: string];
@@ -15,6 +18,7 @@ const emit = defineEmits<{
 	message: [text: string];
 	'update:picked': [ids: string[]];
 }>();
+const { t } = useI18n();
 
 const allPicked = computed(() => props.jobs.length > 0 && props.jobs.every((job) => props.picked.includes(job.id)));
 
@@ -31,67 +35,68 @@ const durationOf = (job: Job) =>
 </script>
 
 <template>
-	<div class="relative w-full overflow-x-auto rounded-card border border-border">
-		<table class="w-full caption-bottom text-sm">
-			<thead class="[&_tr]:border-b [&_tr]:border-border">
+	<div :class="TABLE_WRAP">
+		<LoadingState v-if="loading" />
+		<table v-else :class="TABLE">
+			<thead :class="THEAD">
 				<tr>
-					<th class="h-12 w-10 pl-4">
+					<th class="h-11 w-10 pl-4">
 						<button
 							type="button"
-							class="flex size-6 items-center justify-center rounded-sm border-none hover:bg-accent"
-							aria-label="Select all rows"
+							class="flex size-6 items-center justify-center rounded border-none bg-transparent"
+							:aria-label="t('jobs.selectAll')"
 							@click="toggleAll"
 						>
 							<CheckBox :checked="allPicked" />
 						</button>
 					</th>
-					<th :class="HEAD">
-						<SortHeader label="Binding" column="binding" :sort="sort" :desc="desc" @sort="emit('sort', $event)" />
+					<th :class="TH">
+						<SortHeader :label="t('common.binding')" column="binding" :sort="sort" :desc="desc" @sort="emit('sort', $event)" />
 					</th>
-					<th :class="[HEAD, columnClass('id')]">ID</th>
-					<th :class="HEAD">
-						<SortHeader label="Status" column="state" :sort="sort" :desc="desc" @sort="emit('sort', $event)" />
+					<th :class="[TH, columnClass('id')]">{{ t('columns.id') }}</th>
+					<th :class="TH">
+						<SortHeader :label="t('common.status')" column="state" :sort="sort" :desc="desc" @sort="emit('sort', $event)" />
 					</th>
-					<th :class="[HEAD, columnClass('startedAt')]">Started at</th>
-					<th :class="[HEAD, columnClass('updatedAt')]">
-						<SortHeader label="Updated at" column="updated_at" :sort="sort" :desc="desc" @sort="emit('sort', $event)" />
+					<th :class="[TH, columnClass('startedAt')]">{{ t('columns.startedAt') }}</th>
+					<th :class="[TH, columnClass('updatedAt')]">
+						<SortHeader :label="t('columns.updatedAt')" column="updated_at" :sort="sort" :desc="desc" @sort="emit('sort', $event)" />
 					</th>
-					<th :class="[HEAD, columnClass('attempts')]">
-						<SortHeader label="Attempts" column="attempts" :sort="sort" :desc="desc" @sort="emit('sort', $event)" />
+					<th :class="[TH, columnClass('attempts')]">
+						<SortHeader :label="t('columns.attempts')" column="attempts" :sort="sort" :desc="desc" @sort="emit('sort', $event)" />
 					</th>
-					<th :class="[HEAD, columnClass('processingTime')]">Processing time</th>
-					<th class="h-12 w-12 px-4" />
+					<th :class="[TH, columnClass('processingTime')]">{{ t('columns.processingTime') }}</th>
+					<th class="h-11 w-12 px-4" />
 				</tr>
 			</thead>
-			<tbody class="[&_tr:last-child]:border-0">
+			<tbody :class="TBODY">
 				<tr
 					v-for="job in jobs"
 					:key="job.id"
-					class="cursor-pointer border-b border-border transition-colors hover:bg-muted"
+					class="cursor-pointer transition-colors hover:bg-neutral-soft"
 					@click="emit('select', job.id)"
 				>
 					<td class="pl-4 align-middle" @click.stop>
 						<button
 							type="button"
-							class="flex size-6 items-center justify-center rounded-sm border-none hover:bg-accent"
-							:aria-label="`Select ${job.id}`"
+							class="flex size-6 items-center justify-center rounded border-none bg-transparent"
+							:aria-label="t('jobs.selectRow', { id: job.id })"
 							@click="togglePick(job.id)"
 						>
 							<CheckBox :checked="props.picked.includes(job.id)" />
 						</button>
 					</td>
-					<td class="p-4 align-middle">
+					<td :class="TD" class="font-medium whitespace-nowrap">
 						{{ job.binding }}
 						<!-- ID列非表示の幅での行識別用 -->
-						<span v-if="visible.id" class="block font-mono text-xs break-all text-muted-foreground lg:hidden">{{ job.id }}</span>
+						<span v-if="visible.id" class="block font-mono text-xs font-normal whitespace-normal break-all text-ink-subtle lg:hidden">{{ job.id }}</span>
 					</td>
-					<td class="p-4 align-middle font-mono text-xs text-muted-foreground" :class="columnClass('id')">{{ job.id }}</td>
-					<td class="p-4 align-middle"><StatusCell :state="job.state" /></td>
-					<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('startedAt')">{{ at(job.dispatched_at) }}</td>
-					<td class="p-4 align-middle whitespace-nowrap" :class="columnClass('updatedAt')">{{ at(job.updated_at) }}</td>
-					<td class="p-4 align-middle tabular-nums" :class="columnClass('attempts')">{{ job.attempts }} / {{ job.max_attempts }}</td>
-					<td class="p-4 align-middle tabular-nums" :class="columnClass('processingTime')">{{ durationOf(job) }}</td>
-					<td class="p-4 align-middle" @click.stop>
+					<td :class="[TD, columnClass('id')]" class="font-mono text-xs whitespace-nowrap text-ink-muted">{{ job.id }}</td>
+					<td :class="TD"><StatusCell :state="job.state" /></td>
+					<td :class="[TD, columnClass('startedAt')]" class="whitespace-nowrap text-ink-muted">{{ at(job.dispatched_at) }}</td>
+					<td :class="[TD, columnClass('updatedAt')]" class="whitespace-nowrap text-ink-muted">{{ at(job.updated_at) }}</td>
+					<td :class="[TD, columnClass('attempts')]" class="text-ink-muted tabular-nums">{{ job.attempts }} / {{ job.max_attempts }}</td>
+					<td :class="[TD, columnClass('processingTime')]" class="whitespace-nowrap text-ink-muted tabular-nums">{{ durationOf(job) }}</td>
+					<td :class="TD" @click.stop>
 						<RowActions
 							:job-id="job.id"
 							:state="job.state"
@@ -102,7 +107,7 @@ const durationOf = (job: Job) =>
 					</td>
 				</tr>
 				<tr v-if="jobs.length === 0">
-					<td colspan="9" class="h-24 text-center text-muted-foreground">No results.</td>
+					<td colspan="9" :class="EMPTY_ROW">{{ t('common.noResults') }}</td>
 				</tr>
 			</tbody>
 		</table>
