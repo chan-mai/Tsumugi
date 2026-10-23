@@ -136,14 +136,20 @@ export class JobRepo {
 		const snapshot = JSON.stringify({ ...row, attempts_log: attempts, logs: this.logsOf(id) });
 		// 未投影行は上書き, 挿入とsqlite_sequence更新と削除の書き込み削減
 		const pending = this.#pendingOutbox.get(id);
+		// 終端の行は上書き対象外, 再試行時のメトリクス欠落防止
+		const terminal = TERMINAL_STATES.includes(row.state as JobState);
 		if (pending !== undefined) {
 			const updated = this.db.update(outbox).set({ snapshot }).where(eq(outbox.seq, pending)).returning({ seq: outbox.seq }).all();
 			this.writes++;
-			if (updated.length > 0) return { row, attempts };
+			if (updated.length > 0) {
+				if (terminal) this.#pendingOutbox.delete(id);
+				return { row, attempts };
+			}
 		}
 		const [inserted] = this.db.insert(outbox).values({ jobId: id, snapshot }).returning({ seq: outbox.seq }).all();
 		this.writes++;
-		if (inserted) this.#pendingOutbox.set(id, inserted.seq);
+		if (inserted && !terminal) this.#pendingOutbox.set(id, inserted.seq);
+		else this.#pendingOutbox.delete(id);
 		return { row, attempts };
 	}
 
