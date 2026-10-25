@@ -1,0 +1,132 @@
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'kiso.css' layer(base);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme static {
+	--color-*: initial;
+
+	--color-bg: #ffffff;
+	--color-bg-alt: #f6f6f7;
+	--color-bg-elv: #ffffff;
+	--color-bg-soft: #f6f6f7;
+
+	--color-border: #c2c2c4;
+	--color-divider: #e2e2e3;
+	--color-gutter: #e2e2e3;
+
+	--color-text-1: #3c3c43;
+	--color-text-2: #67676c;
+	--color-text-3: #929295;
+
+	--color-default-1: #dddde3;
+	--color-default-2: #e4e4e9;
+	--color-default-3: #ebebef;
+	--color-default-soft: rgba(142, 150, 170, 0.14);
+
+	--color-brand-1: #ff3e65;
+	--color-brand-2: color-mix(in srgb, #ff3e65 70%, #fff);
+	--color-brand-3: #f7a1b2;
+	--color-brand-soft: color-mix(in srgb, #f7a1b2 32%, transparent);
+
+	--color-info-1: #3451b2;
+	--color-info-soft: rgba(100, 108, 255, 0.14);
+	--color-tip-1: #ff3e65;
+	--color-tip-soft: color-mix(in srgb, #f7a1b2 32%, transparent);
+	--color-warning-1: #915930;
+	--color-warning-soft: rgba(234, 179, 8, 0.14);
+	--color-danger-1: #b8272c;
+	--color-danger-soft: rgba(244, 63, 94, 0.14);
+
+	--color-button-brand-bg: #f7a1b2;
+	--color-button-brand-hover-bg: color-mix(in srgb, #f7a1b2 62%, #fff);
+	--color-button-brand-text: #ffffff;
+
+	--color-hero-gradient-1: color-mix(in srgb, #f7a1b2 55%, #fff);
+	--color-hero-gradient-2: #cbbfe6;
+	--color-hero-gradient-3: #b4dcdf;
+	--color-hero-gradient-4: #f6e6df;
+	--color-hero-bg: #cbbfe6;
+	--color-hero-tone-0: #f7a1b2;
+	--color-hero-tone-1: #b8a9e0;
+	--color-hero-tone-2: #ffffff;
+	--color-hero-text: #ffffff;
+
+	/* 半透明のカード */
+	--color-glass-bg: rgb(255 255 255 / 0.6);
+	--color-glass-border: rgb(255 255 255 / 0.85);
+	--color-backdrop: rgba(0, 0, 0, 0.6);
+
+	--font-sans: 'LINE Seed JP', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', Meiryo, system-ui, sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root {
+	--header-h: 4rem;
+	color-scheme: light;
+}
+
+:root.dark {
+	--color-bg: #1b1b1f;
+	--color-bg-alt: #161618;
+	--color-bg-elv: #202127;
+	--color-bg-soft: #202127;
+
+	--color-border: #3c3f44;
+	--color-divider: #2e2e32;
+	--color-gutter: #000000;
+
+	--color-text-1: #dfdfd6;
+	--color-text-2: #98989f;
+	--color-text-3: #6a6a71;
+
+	--color-default-1: #515c67;
+	--color-default-2: #414853;
+	--color-default-3: #32363f;
+	--color-default-soft: rgba(101, 117, 133, 0.16);
+
+	--color-brand-1: #f7a1b2;
+	--color-brand-2: color-mix(in srgb, #f7a1b2 62%, #fff);
+	--color-brand-3: #f7a1b2;
+	--color-brand-soft: color-mix(in srgb, #f7a1b2 22%, transparent);
+
+	--color-info-1: #a8b1ff;
+	--color-info-soft: rgba(100, 108, 255, 0.16);
+	--color-tip-1: #f7a1b2;
+	--color-tip-soft: color-mix(in srgb, #f7a1b2 22%, transparent);
+	--color-warning-1: #f9b44e;
+	--color-warning-soft: rgba(234, 179, 8, 0.16);
+	--color-danger-1: #f66f81;
+	--color-danger-soft: rgba(244, 63, 94, 0.16);
+
+	--color-hero-gradient-1: #4a3242;
+	--color-hero-gradient-2: #33304f;
+	--color-hero-gradient-3: #22404a;
+	--color-hero-gradient-4: #2b2733;
+	--color-hero-bg: #33304f;
+
+	--color-glass-bg: rgb(32 33 39 / 0.6);
+	--color-glass-border: rgb(255 255 255 / 0.08);
+
+	color-scheme: dark;
+}
+
+@layer base {
+	html {
+		scroll-padding-top: calc(var(--header-h) + 1.5rem);
+	}
+
+	body {
+		background-color: var(--color-bg);
+		color: var(--color-text-1);
+		font-family: var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+	}
+
+	::selection {
+		background-color: var(--color-brand-soft);
+	}
+}

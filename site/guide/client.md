@@ -1,9 +1,16 @@
+---
+title: 別Workerからの投入
+description: performerを持たないWorkerから、tsumugi/clientのcreateClientを使用してジョブを投入する方法について
+publishedAt: 2026-07-22
+updatedAt: 2026-10-25
+---
+
 # 別Workerからの投入
 
-ジョブの投入のみを行うWorkerでは、`tsumugi/client`を使用します。
+performerを持たないWorkerからジョブを投入する場合、`tsumugi/client`の`createClient`を使用してください。
+performerを定義したWorkerでは、`defineTsumugi`の戻り値から投入します。
 
-
-## 使用方法
+## 使い方
 
 ```ts
 import { createClient } from 'tsumugi/client';
@@ -23,7 +30,8 @@ export default {
 
 ## 必要なbinding
 
-必要なbindingは`JOB_SHARD`のみで、ジョブ管理Workerと同じDurable Objectを指定する必要があります。
+投入するWorkerに設定するbindingは、`JOB_SHARD`に限定されます。
+`script_name`には、Tsumugiを設定したWorkerの名前を指定してください。
 
 ```jsonc
 {
@@ -39,9 +47,9 @@ export default {
 }
 ```
 
-## 設定を揃える
+## 設定の一致
 
-`shards`を2以上に設定している場合、投入側にも同じ設定が必要になります。
+`shards`を2以上に設定したbindingでは、`createClient`にも同じ`shards`を指定してください。
 
 ```ts
 const jobs = createClient<Env>({
@@ -49,13 +57,12 @@ const jobs = createClient<Env>({
 });
 ```
 
-`policy`と保持期間もここで指定可能です。本体側と同じ値を指定してください。
+`policy`と保持期間は、bindingごとにTsumugiを設定したWorkerと同じ値を指定してください。
 
 ## 投入時の既定値
 
-第3引数に`onEnqueue`を含めることにより、投入のたびに実行オプションの既定値を付与できます。
-本体の`defineTsumugi`に指定したフックは別Workerからの投入には適用されないため、必要な場合は同じフックを指定してください
-
+`defineTsumugi`に指定した`onEnqueue`は、別Workerからの投入には適用されません。
+別Workerからの投入にも同じ既定値を使う場合は、`createClient`の第3引数に同じ関数を指定してください。
 
 ```ts
 const jobs = createClient<Env>(
@@ -65,30 +72,28 @@ const jobs = createClient<Env>(
 );
 ```
 
-動作の詳細は[投入時の既定値](/guide/execution#enqueue-hook)を参照してください。
+既定値の決まり方は、[投入時の既定値](/guide/execution#投入時の既定値)で説明しています。
 
 ## API
 
-| メソッド                                | 内容                                     |
-| --------------------------------------- | ---------------------------------------- |
-| `enqueue(env, input)`                   | 1件投入してジョブIDを返す                |
-| `enqueueMany(env, inputs)`              | 複数件をまとめて投入する                 |
-| `shardFor(env, binding, partitionKey?)` | 対象のDurable Objectのstubを直接取得する |
-
-`enqueueMany`は件数が増えても所要時間がほとんど変わりません。
-`enqueue`を逐次で呼び出すと件数に比例して遅くなります。
+| メソッド | 内容 |
+| --- | --- |
+| `enqueue(env, input)` | 1件のジョブの投入。戻り値はジョブID |
+| `enqueueMany(env, inputs)` | 複数のジョブの一括投入 |
+| `shardFor(env, binding, partitionKey?)` | 投入先のshardのstubの取得 |
 
 ## 型
 
-`tsumugi/client`からは`EnqueueInput` `EnqueueOptions` `EnqueueItem` `JobQueue` `Performers` `BindingConfig` `TsumugiClient`などの型を参照可能です。
+`tsumugi/client`は、`EnqueueInput`, `EnqueueOptions`, `EnqueueItem`, `JobQueue`, `Performers`, `BindingConfig`, `TsumugiClient`などの型を提供します。
 
-`createClient`が受け取るのは`EnqueueInput`で、`binding`は`string`、`payload`は`unknown`のみが許容されます。
-bindingごとの型と必須キーの強制は適用されません。詳細は[投入経路](/guide/enqueue#paths)を参照してください。
-performerの型を共有できる場合、`JobQueue<M>`に適合するラッパーを利用側で用意すると同じ強制を適用することができます。
+`createClient`の`enqueue`が受け取る`EnqueueInput`では、`binding`は`string`型, `payload`は`unknown`型です。
+そのため、bindingごとの型検査とキーの必須化は適用されません。
+performerの型を共有している場合は、`JobQueue<M>`に適合するラッパーを作成すると、`defineTsumugi`と同じ型検査が適用されます。
+両者の違いは、[投入方法](/guide/enqueue#投入方法)にまとめています。
 
 ## REST APIからの投入
 
-Workerを追加しない(できない)場合、ジョブ管理Worker本体のREST APIを呼び出すことでジョブを投入することができます。
+Workerを追加せずにジョブを投入する場合は、Tsumugiを設定したWorkerのREST APIにリクエストを送信してください。
 
 ```bash
 curl -X POST https://my-jobs.example.workers.dev/api/jobs \
@@ -97,4 +102,4 @@ curl -X POST https://my-jobs.example.workers.dev/api/jobs \
   -d '{"binding":"MAIL","payload":{"to":"a@example.com","subject":"hi"}}'
 ```
 
-詳細は[REST API](/reference/rest-api)を参照してください。
+リクエストの形式は、[REST API](/reference/rest-api#post-apijobs)を参照してください。

@@ -32,6 +32,13 @@
       "esbuild",
       "sharp",
       "workerd"
-    ]
+    ],
+    "packageExtensions": {
+      "@nuxtjs/mdc@0.23.2": {
+        "dependencies": {
+          "hast-util-to-html": "^9.0.5"
+        }
+      }
+    }
   }
 }

@@ -1,56 +1,62 @@
+---
+title: 概要
+description: Cloudflare Workers向けのジョブマネジメントシステムTsumugiが解決する課題, 利用者が記述するコード, 前提条件
+publishedAt: 2026-07-22
+updatedAt: 2026-10-25
+---
+
 # 概要
 
-TsumugiはCloudflareスタック向けに設計されたジョブ管理システムです。
+Tsumugiは、Cloudflare Workers向けに設計されたジョブマネジメントシステムです。
+利用者は、ジョブの処理をperformerとして定義し、enqueueでジョブを投入します。
+ジョブの配送, 実行, 状態の記録はTsumugiが担います。
+管理用のダッシュボードとREST APIも提供します。
 
-## 何を解決するか
+## 何を解決するの
 
-Cloudflare Queuesをそのままジョブキューとして使う場合、いくつか困ることがあります。
+Cloudflare Queuesをジョブキューとして直接使うといくつかの問題が生じます。
 
-### ステータスが管理しづらく、成功したジョブは揮発する
+### ジョブの状態を管理しづらく、成功したジョブが残らない
 
-投入したメッセージの現在の状態を問い合わせるAPIがなく、成功したメッセージは残らないため、過去の実行を後から参照することが困難です。
+Queuesは、投入したメッセージの状態を問い合わせるAPIを提供していません。
+成功したメッセージも保持されず、過去の実行を後から確認する手段が用意されていません。
 
-この問題を解決するため、Tsumugiはすべてのジョブの状態をD1の読み取りモデルへ反映しています。
+TsumugiのダッシュボードとREST APIは、実行中のジョブと終了したジョブの両方について、一覧表示, 検索, 集計を提供します。
+`TSUMUGI_METRICS`のbindingを設定すると、失敗率と実行時間がメトリクスとして記録されます。
 
-実行中のジョブと終了したジョブが同じテーブルにあるため、一覧も検索も集計も通常のSQLとして記述可能です。
-失敗率や実行時間のような時系列のデータはAnalytics Engineへ記録するため、D1側の削除設定とは独立して保持されます。
+### 排他制御と重複排除を実装しづらい
 
-### 排他制御や重複抑制がやりにくい
+Queuesは、メッセージ間の依存関係や関連性を管理しません。
+そのため、同一顧客に対する同時実行の防止や、重複投入の排除は、利用者が個別に実装する必要があります。
 
-メッセージから他のメッセージを参照できないため、「同じ顧客のジョブを同時に実行しない」も「同じ内容を二重に投入しない」のような処理も自分で実装する必要があります。
-
-Tsumugiはbinding単位で実行中のジョブの状態を管理しています。
-`concurrencyKey`を明示することでキー単位で順次実行され、`uniqueKey`を明示することで同じキー単位での排他が保証されます。
+Tsumugiでは、`concurrencyKey`を指定したジョブは、同じキーのものから1件ずつ順に実行されます。
+`uniqueKey`を指定すると、一定期間内に同じキーで投入されたジョブは重複とみなされ、新しいジョブを作らずに既存のジョブIDを戻り値とします。
 
 ### ジョブの種類が増えるほど分岐が増える
 
-consumerはキューに対して1つしか指定できないため、ジョブの種類が増えるほど、キューを増やすかconsumer側の分岐が増えるかのどちらかになってしまいます。
+Queuesでは、1つのキューに対してconsumerを1つしか設定できません。
+そのため、ジョブの種類が増えると、キューの数を増やすか、consumer内での分岐処理が複雑になっていきます。
 
-Tsumugiではキューを1本のまま使い、種類をbinding名で区別しています。
-binding名はperformerのexport名がそのまま使われ、payloadの型も同じ場所から決定されるため、分岐のための冗長な実装は不要です。
+Tsumugiは、performerのexport名をbinding名としてジョブの種類を区別するため、consumerに分岐を書く必要がありません。
+binding名とpayloadの型の関係は、[binding名](/guide/performer#binding名)で説明しています。
 
-### 希にキューが消失する
+### まれにメッセージが失われる
 
-Queuesに投入したまま処理されなかった・消失してしまった場合に、それを検知する手段がありません。
+Queuesは、処理されずに失われたメッセージを検出する手段を提供していません。
 
-Tsumugiは、実行を開始したまま結果が報告されないジョブを検知します。
-事前定義に基づき、`at-least-once`のジョブは再投入、`at-most-once`のジョブは`STALLED`にして手動での判断を待つようにもできます。
+Tsumugiは、実行を開始したジョブから結果が報告されない場合、そのジョブを無応答と判定します。
+`at-least-once`セマンティクスの場合、無応答のジョブは再投入されます。
+`at-most-once`セマンティクスの場合、無応答のジョブは`STALLED`状態に遷移し、手動でリトライされるまで実行されません。
 
-## Tsumugiがやること
+## 利用者が記述するコード
 
-上記課題は、Queuesの上にDurable ObjectやD1、Analytics Engineを組み合わせることで解決可能ですが、その複雑な組み合わせ自体を実装する必要があります。
-
-どのDurable Objectへ投入するか、consumerで何を実行するか、状態をいつD1へ書き込むか、リトライを誰が決めるか。
-
-Tsumugiはこれらを内部でいい感じに処理します。
-
-あなたが書くのは2箇所だけです。
+記述するのはジョブの処理の定義と投入のたった2箇所だけです。
 
 ```ts
 import { defineTsumugi } from 'tsumugi';
 import { Performer } from 'tsumugi/performer';
 
-// 1. ジョブの中身をperformerとして定義してexportする
+// 1. ジョブの処理をperformerとして定義してexportする
 export class SendMail extends Performer<{ to: string }, void, {}, Env> {
   async perform(payload: { to: string }): Promise<void> {
     await this.env.MAILER.send(payload.to);
@@ -63,33 +69,19 @@ const tsumugi = defineTsumugi({ performers: { SendMail } });
 const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
 ```
 
-キューの構成もconsumerの分岐も一覧への反映も、意識する必要はありません。
-リトライ、バックオフ、予約実行、優先度、実行量の制限、重複排除、管理画面は最初から利用できます。
+キューの構成, consumerの分岐, 状態の記録を書く必要はありません。
+各機能は、[ジョブの投入](/guide/enqueue), [実行の制御](/guide/execution), [定期実行](/guide/schedule), [ダッシュボードと認証](/guide/dashboard)で説明しています。
 
-## 構成要素
+## 前提条件
 
-![Tsumugiの構成](/architecture.png)
-
-| リソース         | 役割                               |
-| ---------------- | ---------------------------------- |
-| Durable Object   | ジョブの状態管理と実行順序の決定   |
-| Queues           | performerの実行                    |
-| D1               | 一覧と検索と集計に使用するテーブル |
-| Analytics Engine | 時系列メトリクス                   |
-
-## 必要なもの
-
-- Workers Paidプラン
-- `compatibility_date` 2025-11-17以降
-- D1データベースへのマイグレーション適用が必要です
-- Analytics Engine(時系列メトリクスを記録する場合のみ)
+Workers Paidプランと、2025-11-17以降の`compatibility_date`が必要です。
+必要なリソースと設定は`npx tsumugi init`で作成します。
+手順は[Getting Started](/guide/getting-started)を参照してください。
 
 ## 着想
 
-Cloudflareスタックだけでジョブキューを構成し、ダッシュボードを同梱するという形は[Kiribi](https://kiribi.pages.dev/)からインスパイアを受けています。
-少ない手順で導入でき、手軽にブラックボックスとして利用できるという考え方は、Tsumugiでも引き継いでいます。
+Cloudflareのサービスで完結するジョブキューに、ダッシュボードを同梱するという構成は、[Kiribi](https://kiribi.pages.dev/)から着想を得ました。
+導入の手順を最小限にし、利用者に内部構成を意識させない方針も、Kiribiと共通しています。
 
-Tsumugiはそこに、Durable Objectによる状態の一元管理を加えました。
-実行量の制限、ジョブごとの実行保証、リトライの制御、Flowによる多段の実行、定期実行は、いずれもこの一元管理を前提としています。
-
-用意するリソースと設定は少しだけ多いですが、より安定したジョブキューを構成でき、より多くの、大規模なユースケースに対応できます。
+Tsumugiは、実行量の制限, ジョブごとの実行保証, リトライの制御, Flowによる多段の実行, 定期実行を備えています。
+これらの機能により、利用者が用意するリソースと設定は、Kiribiに比べて多くなります。

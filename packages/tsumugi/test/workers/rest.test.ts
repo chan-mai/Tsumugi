@@ -1,5 +1,5 @@
-import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it, vi } from 'vitest';
+import { env, listDurableObjectIds, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 // 公開エントリ経由で再エクスポート欠落も検出
 import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
@@ -1175,6 +1175,31 @@ describe('予約済みジョブの実行時刻の変更', () => {
 });
 
 describe('runの開始', () => {
+	const runs = env.RUN as unknown as DurableObjectNamespace;
+	const alarms = new Set<Promise<void>>();
+	let restoreAlarm = () => {};
+	beforeAll(async () => {
+		await runInDurableObject(runs.get(runs.idFromName('rest-alarm-probe')), (instance) => {
+			const proto = Object.getPrototypeOf(instance) as { alarm(): Promise<void> };
+			const alarm = proto.alarm;
+			proto.alarm = function (this: unknown) {
+				const pending = alarm.call(this).finally(() => alarms.delete(pending));
+				alarms.add(pending);
+				return pending;
+			};
+			restoreAlarm = () => void (proto.alarm = alarm);
+		});
+	});
+	afterEach(async () => {
+		do {
+			for (const id of await listDurableObjectIds(runs)) {
+				await runInDurableObject(runs.get(id), (_instance, state) => state.storage.deleteAlarm());
+			}
+			await Promise.allSettled(alarms);
+		} while (alarms.size > 0);
+	});
+	afterAll(() => restoreAlarm());
+
 	// Run DOはexamples/basicの定義を使用、開始可能なのはその名前のみ
 	const flow = createFlow({ REST: Noop });
 	const withFlows = defineTsumugi({

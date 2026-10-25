@@ -8,7 +8,11 @@ dist/
 packages/tsumugi/src/entries/dashboard.gen.ts
 
 #ドキュメントサイト
-site/.vitepress/cache/
+site/.nuxt/
+site/.output/
+site/.data/
+site/dist
+site/design/*.blend1
 
 docs/dec
 

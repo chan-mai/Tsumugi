@@ -1,0 +1,97 @@
+name: Translate docs
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'site/guide/**'
+      - 'site/reference/**'
+  workflow_dispatch:
+
+concurrency:
+  group: translate-docs
+  cancel-in-progress: false
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Translate
+        env:
+          ANTHROPIC_IDENTITY_TOKEN_FILE: ${{ runner.temp }}/gha-jwt
+          BEFORE: ${{ github.event.before }}
+        run: |
+          fetch_token() {
+            curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
+              | jq -r .value > "$ANTHROPIC_IDENTITY_TOKEN_FILE.tmp"
+            mv "$ANTHROPIC_IDENTITY_TOKEN_FILE.tmp" "$ANTHROPIC_IDENTITY_TOKEN_FILE"
+          }
+          fetch_token
+          while sleep 120; do fetch_token; done &
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            node site/scripts/translate-docs.ts --all
+          else
+            git diff --name-only --no-renames "$BEFORE" "$GITHUB_SHA" -- 'site/guide/*.md' 'site/reference/*.md' \
+              | xargs -r node site/scripts/translate-docs.ts
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: translations
+          path: |
+            site/en
+            site/ko
+          if-no-files-found: ignore
+
+  pull-request:
+    needs: translate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: rm -rf site/en site/ko
+      - uses: actions/download-artifact@v8
+        with:
+          name: translations
+          path: site
+        continue-on-error: true
+
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git add -A site/en site/ko
+          if git diff --cached --quiet; then
+            echo 'no translation changes'
+            exit 0
+          fi
+          branch="docs/translate-$GITHUB_RUN_ID"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git commit -m 'docs: ドキュメント原稿(日本語外)更新'
+          git push origin "$branch"
+          gh pr create --base develop --head "$branch" \
+            --title 'docs: ドキュメント原稿(日本語外)更新' \
+            --body "$GITHUB_SHA のドキュメント原稿から翻訳を生成しました。"
