@@ -69,7 +69,9 @@ onMounted(async () => {
 
 	const scene = new THREE.Scene();
 	const pmrem = new THREE.PMREMGenerator(renderer);
-	const environment = pmrem.fromScene(new RoomEnvironment(), 0.04);
+	const room = new RoomEnvironment();
+	const environment = pmrem.fromScene(room, 0.04);
+	room.dispose();
 	scene.environment = environment.texture;
 
 	function disposeBase() {

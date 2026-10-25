@@ -16,8 +16,7 @@ jobs:
   translate:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       id-token: write
     env:
       ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
@@ -27,6 +26,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -54,6 +54,29 @@ jobs:
               | xargs -r node site/scripts/translate-docs.ts
           fi
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: translations
+          path: |
+            site/en
+            site/ko
+          if-no-files-found: ignore
+
+  pull-request:
+    needs: translate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: rm -rf site/en site/ko
+      - uses: actions/download-artifact@v8
+        with:
+          name: translations
+          path: site
+        continue-on-error: true
+
       - name: Create pull request
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,5 +93,5 @@ jobs:
           git commit -m 'docs: ドキュメント原稿(日本語外)更新'
           git push origin "$branch"
           gh pr create --base develop --head "$branch" \
-            --title 'docs: ドキュメント原稿(日本語外)更新新' \
+            --title 'docs: ドキュメント原稿(日本語外)更新' \
             --body "$GITHUB_SHA のドキュメント原稿から翻訳を生成しました。"

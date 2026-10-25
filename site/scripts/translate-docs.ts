@@ -91,6 +91,37 @@ function localizeLinks(markdown: string, language: Language): string {
 		.join('\n');
 }
 
+const translatedKeys = new Set(['title', 'description']);
+
+// フロントマターの1行1キーの値を取得
+function readFrontmatter(markdown: string): Map<string, string> | undefined {
+	if (!markdown.startsWith('---\n')) return undefined;
+	const end = markdown.indexOf('\n---\n', 3);
+	if (end < 0) return undefined;
+	const entries = markdown
+		.slice(4, end)
+		.split('\n')
+		.flatMap((line) => {
+			const match = line.match(/^([\w-]+):\s*(.*)$/);
+			return match ? [[match[1]!, match[2]!.trim()] as const] : [];
+		});
+	return new Map(entries);
+}
+
+// 原稿の全キーの存在と、翻訳対象外の値の一致を確認
+function verifyFrontmatter(source: string, translated: string, output: string): void {
+	const expected = readFrontmatter(source);
+	const actual = readFrontmatter(translated);
+	if (!expected || !actual) throw new Error(`Translation of ${output} lost the frontmatter`);
+	for (const [key, value] of expected) {
+		const translatedValue = actual.get(key);
+		if (!translatedValue) throw new Error(`Translation of ${output} lost frontmatter key: ${key}`);
+		if (!translatedKeys.has(key) && translatedValue !== value) {
+			throw new Error(`Translation of ${output} changed frontmatter ${key}: ${value} -> ${translatedValue}`);
+		}
+	}
+}
+
 async function translate(client: Anthropic, markdown: string, { source, language }: Target): Promise<string> {
 	const stream = client.beta.messages.stream({
 		model: 'claude-opus-5-5',
@@ -125,7 +156,7 @@ async function processTarget(client: Anthropic, target: Target): Promise<void> {
 
 	const { text, ids } = annotateHeadingIds(markdown);
 	const translated = localizeLinks(await translate(client, text, target), language);
-	if (!translated.startsWith('---\n')) throw new Error(`Translation of ${output} lost the frontmatter`);
+	verifyFrontmatter(markdown, translated, output);
 	const missing = ids.filter((id) => !translated.includes(` id="${id}">`));
 	if (missing.length) throw new Error(`Translation of ${output} lost heading ids: ${missing.join(', ')}`);
 

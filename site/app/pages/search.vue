@@ -18,7 +18,7 @@ const router = useRouter();
 
 const q = computed(() => String(route.query.q ?? '').trim());
 const scope = computed(() => scopes.value.find((item) => item.value === route.query.scope) ?? scopes.value[0]!);
-const requestedPage = computed(() => Math.max(1, Number(route.query.page) || 1));
+const requestedPage = computed(() => Math.max(1, Math.trunc(Number(route.query.page)) || 1));
 
 const draft = ref(q.value);
 const draftScope = ref<SearchScope>(scope.value);

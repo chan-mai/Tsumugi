@@ -1,11 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 
+const siteUrl = 'https://tsumugi.mq1.dev';
+
 export default defineNuxtConfig({
 	compatibilityDate: '2026-07-01',
 	modules: ['@nuxt/content', '@nuxtjs/i18n', '@nuxtjs/color-mode', '@nuxt/fonts', 'nuxt-og-image'],
 	site: {
-		url: 'https://tsumugi.mq1.dev',
+		url: siteUrl,
 		name: 'Tsumugi Docs',
 		description: 'A job management system designed for the Cloudflare stack.',
 	},
@@ -23,6 +25,7 @@ export default defineNuxtConfig({
 			{ code: 'en', language: 'en-US', name: 'English', file: 'en.json' },
 			{ code: 'ko', language: 'ko-KR', name: '한국어', file: 'ko.json' },
 		],
+		baseUrl: siteUrl,
 		defaultLocale: 'ja',
 		strategy: 'prefix_except_default',
 		detectBrowserLanguage: false,
