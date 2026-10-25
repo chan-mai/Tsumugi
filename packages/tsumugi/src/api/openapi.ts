@@ -3,7 +3,7 @@ import { OPENAPI_DOCUMENT } from '@tsumugi/spec';
 // 定義原本は`packages/spec`のTypeSpec, ビルドで`@tsumugi/spec`へ出力(ADR-0038)
 
 // package.jsonは実行時読込不可で写しを保持, 差異は単体テストで検査
-export const API_VERSION = '0.11.0';
+export const API_VERSION = '0.12.0';
 
 type OpenApiDocument = typeof OPENAPI_DOCUMENT;
 
