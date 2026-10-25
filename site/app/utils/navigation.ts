@@ -1,31 +1,31 @@
-export const sidebar: NavGroup[] = [
+export const sidebar: NavEntryGroup[] = [
 	{
-		text: 'ガイド',
+		key: 'guide',
 		items: [
-			{ text: '概要', link: '/guide/overview' },
-			{ text: 'Getting Started', link: '/guide/getting-started' },
-			{ text: 'Performer', link: '/guide/performer' },
-			{ text: 'ジョブの投入', link: '/guide/enqueue' },
-			{ text: '実行の制御', link: '/guide/execution' },
-			{ text: 'Flow', link: '/guide/flow' },
-			{ text: '定期実行', link: '/guide/schedule' },
-			{ text: 'ダッシュボードと認証', link: '/guide/dashboard' },
-			{ text: '別Workerからの投入', link: '/guide/client' },
+			{ key: 'overview', link: '/guide/overview' },
+			{ key: 'gettingStarted', link: '/guide/getting-started' },
+			{ key: 'performer', link: '/guide/performer' },
+			{ key: 'enqueue', link: '/guide/enqueue' },
+			{ key: 'execution', link: '/guide/execution' },
+			{ key: 'flow', link: '/guide/flow' },
+			{ key: 'schedule', link: '/guide/schedule' },
+			{ key: 'dashboard', link: '/guide/dashboard' },
+			{ key: 'client', link: '/guide/client' },
 		],
 	},
 	{
-		text: 'リファレンス',
+		key: 'reference',
 		items: [
-			{ text: 'REST API', link: '/reference/rest-api' },
-			{ text: '設定', link: '/reference/config' },
-			{ text: 'CLI', link: '/reference/cli' },
+			{ key: 'restApi', link: '/reference/rest-api' },
+			{ key: 'config', link: '/reference/config' },
+			{ key: 'cli', link: '/reference/cli' },
 		],
 	},
 ];
 
-export const topNav: NavItem[] = [
-	{ text: 'ガイド', link: '/guide/overview' },
-	{ text: 'リファレンス', link: '/reference/rest-api' },
+export const topNav: { key: NavSectionKey; link: string }[] = [
+	{ key: 'guide', link: '/guide/overview' },
+	{ key: 'reference', link: '/reference/rest-api' },
 ];
 
 export const socialLinks: SocialLink[] = [
@@ -35,16 +35,4 @@ export const socialLinks: SocialLink[] = [
 
 export function normalizePath(path: string): string {
 	return path.replace(/\.html$/, '').replace(/\/+$/, '') || '/';
-}
-
-export function surroundings(path: string): { prev?: NavItem; next?: NavItem } {
-	const items = sidebar.flatMap((group) => group.items);
-	const index = items.findIndex((item) => item.link === normalizePath(path));
-	if (index < 0) return {};
-	return { prev: items[index - 1], next: items[index + 1] };
-}
-
-export function breadcrumbs(path: string, title: string): BreadcrumbItem[] {
-	const group = sidebar.find((g) => g.items.some((item) => item.link === normalizePath(path)));
-	return [{ text: 'ホーム', link: '/' }, ...(group ? [{ text: group.text, link: group.items[0]!.link }] : []), { text: title }];
 }

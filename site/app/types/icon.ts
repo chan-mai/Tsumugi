@@ -9,6 +9,7 @@ export type IconName =
 	| 'sun'
 	| 'moon'
 	| 'monitor'
+	| 'languages'
 	| 'chevron-left'
 	| 'chevron-down'
 	| 'chevron-right'

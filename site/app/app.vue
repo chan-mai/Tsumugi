@@ -7,6 +7,7 @@ useSeoMeta({
 	ogType: 'website',
 	twitterCard: 'summary_large_image',
 });
+useLocaleHtmlAttrs();
 </script>
 
 <template>

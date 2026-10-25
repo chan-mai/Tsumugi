@@ -27,8 +27,8 @@ onBeforeUnmount(() => observer?.disconnect());
 </script>
 
 <template>
-	<nav v-if="flat.length" aria-label="このページの内容">
-		<p class="mb-3 text-sm font-bold text-text-1">このページの内容</p>
+	<nav v-if="flat.length" :aria-label="$t('toc')">
+		<p class="mb-3 text-sm font-bold text-text-1">{{ $t('toc') }}</p>
 		<ul class="text-sm">
 			<li v-for="link in flat" :key="link.id">
 				<a

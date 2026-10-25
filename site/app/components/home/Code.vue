@@ -1,7 +1,6 @@
 <script setup lang="ts">
 const steps = [
 	{
-		title: 'ジョブの処理をperformerとして定義',
 		filename: 'src/performers/send-mail.ts',
 		source: [
 			"import { Performer } from 'tsumugi/performer';",
@@ -14,7 +13,6 @@ const steps = [
 		].join('\n'),
 	},
 	{
-		title: 'ジョブの投入',
 		filename: 'src/index.ts',
 		source: [
 			"import { defineTsumugi } from 'tsumugi';",
@@ -45,12 +43,12 @@ const { data: highlighted } = await useAsyncData('home-code', async () => {
 </script>
 
 <template>
-	<HomeSection heading="利用者が記述するコード" lead="記述するのはジョブの処理の定義と投入のたった2箇所だけです。">
+	<HomeSection :heading="$t('home.code.heading')" :lead="$t('home.code.lead')">
 		<ol class="grid gap-6 lg:grid-cols-2">
-			<li v-for="(step, index) in steps" :key="step.title" data-reveal class="min-w-0">
+			<li v-for="(step, index) in steps" :key="step.filename" data-reveal class="min-w-0">
 				<p class="flex items-center gap-3 text-lg font-semibold text-text-1">
 					<span class="grid size-8 place-items-center rounded-full bg-brand-soft font-mono text-sm text-brand-1">{{ index + 1 }}</span>
-					{{ step.title }}
+					{{ $t(`home.code.steps.${index}`) }}
 				</p>
 				<ProsePre :filename="step.filename" class="shiki">
 					<code v-html="highlighted?.[index]" />

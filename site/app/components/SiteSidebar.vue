@@ -2,12 +2,13 @@
 defineEmits<{ navigate: [] }>();
 
 const route = useRoute();
+const { groups } = useNavigation();
 const current = computed(() => normalizePath(route.path));
 </script>
 
 <template>
-	<nav aria-label="サイドバー">
-		<div v-for="group in sidebar" :key="group.text" class="mb-6">
+	<nav :aria-label="$t('nav.sidebar')">
+		<div v-for="group in groups" :key="group.text" class="mb-6">
 			<p class="mb-2 text-sm font-bold text-text-1">{{ group.text }}</p>
 			<ul>
 				<li v-for="item in group.items" :key="item.link">

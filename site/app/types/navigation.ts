@@ -1,3 +1,29 @@
+export type NavPageKey =
+	| 'overview'
+	| 'gettingStarted'
+	| 'performer'
+	| 'enqueue'
+	| 'execution'
+	| 'flow'
+	| 'schedule'
+	| 'dashboard'
+	| 'client'
+	| 'restApi'
+	| 'config'
+	| 'cli';
+
+export type NavSectionKey = 'guide' | 'reference';
+
+export type NavEntry = {
+	key: NavPageKey;
+	link: string;
+};
+
+export type NavEntryGroup = {
+	key: NavSectionKey;
+	items: NavEntry[];
+};
+
 export type NavItem = {
 	text: string;
 	link: string;

@@ -32,7 +32,7 @@ onBeforeUnmount(() => observer?.disconnect());
 			<span class="filename">{{ props.filename }}</span>
 		</div>
 		<div class="code-body">
-			<div v-if="showScrollIndicator && !scrollIndicatorDismissed" class="scroll-indicator">スクロール可能です→</div>
+			<div v-if="showScrollIndicator && !scrollIndicatorDismissed" class="scroll-indicator">{{ $t('code.scrollable') }}</div>
 			<pre ref="scrollContainer" :class="props.class" tabindex="0" @scroll="scrollIndicatorDismissed = true"><slot /></pre>
 		</div>
 	</div>

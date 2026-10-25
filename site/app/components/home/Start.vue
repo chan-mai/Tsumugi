@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const localePath = useLocalePath();
 const commands = ['pnpm add tsumugi', 'npx tsumugi init'];
 const copied = ref<string | null>(null);
 
@@ -26,7 +27,7 @@ async function copy(command: string) {
 					<button
 						type="button"
 						class="grid size-8 place-items-center rounded-lg border-none text-text-2 transition hover:bg-default-soft hover:text-text-1"
-						:aria-label="`${command}をコピー`"
+						:aria-label="$t('home.start.copy', { command })"
 						@click="copy(command)"
 					>
 						<AppIcon :name="copied === command ? 'check' : 'copy'" class="size-4" />
@@ -35,16 +36,16 @@ async function copy(command: string) {
 			</ol>
 			<div class="mt-10 flex flex-wrap gap-3">
 				<NuxtLink
-					to="/guide/getting-started"
+					:to="localePath('/guide/getting-started')"
 					class="rounded-full bg-button-brand-bg px-6 py-2.5 text-sm font-semibold text-button-brand-text transition hover:bg-button-brand-hover-bg"
 				>
 					Getting Started
 				</NuxtLink>
 				<NuxtLink
-					to="/guide/overview"
+					:to="localePath('/guide/overview')"
 					class="rounded-full bg-default-3 px-6 py-2.5 text-sm font-semibold text-text-1 transition hover:bg-default-2"
 				>
-					概要
+					{{ $t('home.overview') }}
 				</NuxtLink>
 			</div>
 		</div>

@@ -1,0 +1,151 @@
+{
+  "nav": {
+    "global": "Global",
+    "sidebar": "Sidebar",
+    "breadcrumb": "Breadcrumb",
+    "home": "Home",
+    "guide": "Guide",
+    "reference": "Reference",
+    "allMenus": "All menus",
+    "menu": "Menu",
+    "close": "Close",
+    "search": "Search",
+    "language": "Language",
+    "pages": {
+      "overview": "Overview",
+      "gettingStarted": "Getting Started",
+      "performer": "Performer",
+      "enqueue": "Enqueueing Jobs",
+      "execution": "Execution Control",
+      "flow": "Flow",
+      "schedule": "Scheduled Jobs",
+      "dashboard": "Dashboard and Authentication",
+      "client": "Enqueueing from Another Worker",
+      "restApi": "REST API",
+      "config": "Configuration",
+      "cli": "CLI"
+    }
+  },
+  "theme": {
+    "label": "Appearance",
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "toc": "On this page",
+  "code": {
+    "scrollable": "Scroll →"
+  },
+  "doc": {
+    "edit": "Edit this page",
+    "publishedAt": "Published",
+    "updatedAt": "Last updated",
+    "pager": "Previous and next pages",
+    "prev": "Previous",
+    "next": "Next",
+    "untranslated": "This page has not been translated into English yet."
+  },
+  "search": {
+    "title": "Search",
+    "scope": "Search in",
+    "all": "All",
+    "keyword": "Search keywords",
+    "submit": "Search",
+    "results": "Results for {q}",
+    "summary": "Showing {from}–{to} of {total} results.",
+    "empty": "No pages match \"{q}\".",
+    "pagination": "Pagination"
+  },
+  "error": {
+    "notFound": "Page not found",
+    "title": "Error",
+    "heading": "An error occurred",
+    "back": "Back to home"
+  },
+  "home": {
+    "overview": "Overview",
+    "problems": {
+      "heading": "What Tsumugi solves",
+      "lead": "Using Cloudflare Queues directly as a job queue causes several problems.",
+      "more": "Read the overview",
+      "items": [
+        {
+          "title": "Job state is hard to track, and succeeded jobs are not kept",
+          "queues": "Queues provides no API to query the state of an enqueued message.",
+          "tsumugi": "The Tsumugi dashboard and REST API list, search, and aggregate both running and finished jobs."
+        },
+        {
+          "title": "Mutual exclusion and deduplication are hard to implement",
+          "queues": "Queues does not manage dependencies or relationships between messages.",
+          "tsumugi": "In Tsumugi, jobs with the same `concurrencyKey` run one at a time, in order."
+        },
+        {
+          "title": "More job types mean more branching",
+          "queues": "Queues allows only one consumer per queue.",
+          "tsumugi": "Tsumugi distinguishes job types by binding name, which is the export name of the performer, so the consumer needs no branching."
+        },
+        {
+          "title": "Messages are occasionally lost",
+          "queues": "Queues provides no way to detect messages that were lost without being processed.",
+          "tsumugi": "Tsumugi marks a job as unresponsive when a job that has started does not report its result."
+        }
+      ]
+    },
+    "code": {
+      "heading": "The code you write",
+      "lead": "You write code in only two places: the job handler and the enqueue call.",
+      "steps": ["Define the job handler as a performer", "Enqueue a job"]
+    },
+    "features": {
+      "heading": "Features",
+      "builtin": [
+        "Retries",
+        "Backoff",
+        "Delayed jobs",
+        "Scheduled jobs",
+        "Priority",
+        "Concurrency",
+        "Rate limits",
+        "Deduplication",
+        "Dashboard"
+      ],
+      "compose": {
+        "title": "Built from performers and enqueue",
+        "body": "You define the job handler as a performer and call enqueue where you submit the job. Tsumugi handles delivery, execution, and state tracking."
+      },
+      "builtinCard": {
+        "title": "Job management built in",
+        "body": "Retries, backoff, delayed jobs, scheduled jobs, priority, concurrency and rate limits, deduplication, and a dashboard are standard features of Tsumugi."
+      },
+      "history": {
+        "title": "Finished jobs stay visible",
+        "body": "The dashboard and REST API list and search every job, including succeeded and failed ones. With the `TSUMUGI_METRICS` binding configured, Tsumugi also records failure rate and duration metrics.",
+        "alt": "Job list page"
+      },
+      "flow": {
+        "title": "Workflows with dependencies",
+        "body": "Declare nodes and their dependencies, and each node's return value is passed to the next node as its payload. With fan-out, a child node is created for each element of an array and runs in parallel."
+      },
+      "async": {
+        "title": "Asynchronous work with a method call",
+        "body": "Calling `enqueue(env, {'{'} binding, payload {'}'})` enqueues a job. The call returns the job ID and completes immediately."
+      },
+      "guarantee": {
+        "title": "Per-job execution guarantees",
+        "body": "A job with `guarantee` set to `at-most-once` never runs twice. The default `guarantee` is `at-least-once`."
+      },
+      "remote": {
+        "title": "Performers in another Worker",
+        "body": "Tsumugi runs performers even when they live in another Worker connected through a Service Binding."
+      }
+    },
+    "showcase": {
+      "heading": "Dashboard",
+      "jobsAlt": "Job list page",
+      "runAlt": "Run waterfall"
+    },
+    "start": {
+      "copy": "Copy {command}"
+    }
+  }
+}

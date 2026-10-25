@@ -3,7 +3,7 @@ defineProps<{ items: BreadcrumbItem[] }>();
 </script>
 
 <template>
-	<nav aria-label="パンくずリスト">
+	<nav :aria-label="$t('nav.breadcrumb')">
 		<ol class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-2">
 			<li v-for="(item, index) in items" :key="index" class="flex items-center gap-2">
 				<AppIcon v-if="index > 0" name="chevron-right" class="size-3.5 text-text-3" />

@@ -1,0 +1,141 @@
+{
+  "nav": {
+    "global": "글로벌",
+    "sidebar": "사이드바",
+    "breadcrumb": "이동 경로",
+    "home": "홈",
+    "guide": "가이드",
+    "reference": "레퍼런스",
+    "allMenus": "전체 메뉴",
+    "menu": "메뉴",
+    "close": "닫기",
+    "search": "검색",
+    "language": "언어",
+    "pages": {
+      "overview": "개요",
+      "gettingStarted": "Getting Started",
+      "performer": "Performer",
+      "enqueue": "잡 등록",
+      "execution": "실행 제어",
+      "flow": "Flow",
+      "schedule": "정기 실행",
+      "dashboard": "대시보드와 인증",
+      "client": "다른 Worker에서 등록",
+      "restApi": "REST API",
+      "config": "설정",
+      "cli": "CLI"
+    }
+  },
+  "theme": {
+    "label": "외관",
+    "system": "시스템",
+    "light": "라이트",
+    "dark": "다크"
+  },
+  "toc": "이 페이지의 내용",
+  "code": {
+    "scrollable": "스크롤할 수 있습니다→"
+  },
+  "doc": {
+    "edit": "이 페이지 편집",
+    "publishedAt": "게시일",
+    "updatedAt": "최종 수정",
+    "pager": "이전 페이지와 다음 페이지",
+    "prev": "이전 페이지",
+    "next": "다음 페이지",
+    "untranslated": "이 페이지는 아직 한국어로 번역되지 않았습니다."
+  },
+  "search": {
+    "title": "사이트 내 검색",
+    "scope": "검색 대상",
+    "all": "전체",
+    "keyword": "검색어",
+    "submit": "검색",
+    "results": "{q} 검색 결과",
+    "summary": "{total}건 중 {from}~{to}건을 표시합니다.",
+    "empty": "「{q}」와 일치하는 페이지가 없습니다.",
+    "pagination": "페이지 이동"
+  },
+  "error": {
+    "notFound": "페이지를 찾을 수 없습니다",
+    "title": "오류",
+    "heading": "오류가 발생했습니다",
+    "back": "홈으로 돌아가기"
+  },
+  "home": {
+    "overview": "개요",
+    "problems": {
+      "heading": "Tsumugi가 해결하는 문제",
+      "lead": "Cloudflare Queues를 잡 큐로 직접 사용하면 몇 가지 문제가 생깁니다.",
+      "more": "개요 보기",
+      "items": [
+        {
+          "title": "잡 상태를 관리하기 어렵고, 성공한 잡이 남지 않는다",
+          "queues": "Queues는 등록한 메시지의 상태를 조회하는 API를 제공하지 않습니다.",
+          "tsumugi": "Tsumugi의 대시보드와 REST API는 실행 중인 잡과 종료된 잡 모두에 대해 목록 표시, 검색, 집계를 제공합니다."
+        },
+        {
+          "title": "배타 제어와 중복 제거를 구현하기 어렵다",
+          "queues": "Queues는 메시지 간의 의존 관계나 연관성을 관리하지 않습니다.",
+          "tsumugi": "Tsumugi에서는 같은 `concurrencyKey`를 지정한 잡이 한 건씩 순서대로 실행됩니다."
+        },
+        {
+          "title": "잡 종류가 늘어날수록 분기가 늘어난다",
+          "queues": "Queues에서는 하나의 큐에 consumer를 하나만 설정할 수 있습니다.",
+          "tsumugi": "Tsumugi는 performer의 export 이름을 binding 이름으로 사용해 잡 종류를 구분하므로, consumer에 분기를 작성할 필요가 없습니다."
+        },
+        {
+          "title": "드물게 메시지가 유실된다",
+          "queues": "Queues는 처리되지 않고 유실된 메시지를 감지하는 수단을 제공하지 않습니다.",
+          "tsumugi": "Tsumugi는 실행을 시작한 잡에서 결과가 보고되지 않으면 그 잡을 무응답으로 판정합니다."
+        }
+      ]
+    },
+    "code": {
+      "heading": "사용자가 작성하는 코드",
+      "lead": "작성하는 곳은 잡 처리의 정의와 등록, 단 두 곳뿐입니다.",
+      "steps": ["잡 처리를 performer로 정의", "잡 등록"]
+    },
+    "features": {
+      "heading": "기능",
+      "builtin": ["재시도", "백오프", "예약 실행", "정기 실행", "우선순위", "동시 실행 수", "속도 제한", "중복 제거", "대시보드"],
+      "compose": {
+        "title": "performer와 enqueue로 구성",
+        "body": "사용자는 잡 처리를 performer로 정의하고, 등록하는 곳에서 enqueue를 호출합니다. 잡의 전달, 실행, 상태 기록은 Tsumugi가 처리합니다."
+      },
+      "builtinCard": {
+        "title": "잡 관리 기능을 기본 탑재",
+        "body": "재시도, 백오프, 예약 실행, 정기 실행, 우선순위, 동시 실행 수와 속도 제한, 중복 제거, 대시보드를 Tsumugi의 기본 기능으로 제공합니다."
+      },
+      "history": {
+        "title": "종료된 잡 조회",
+        "body": "대시보드와 REST API는 성공과 실패를 포함한 모든 잡에 대해 상태 목록 표시와 검색을 제공합니다. `TSUMUGI_METRICS` binding을 설정하면 실패율과 실행 시간 메트릭도 기록합니다.",
+        "alt": "잡 목록 페이지"
+      },
+      "flow": {
+        "title": "의존 관계가 있는 처리",
+        "body": "노드와 의존 관계를 선언하면, 앞 노드의 반환값이 다음 노드의 payload로 전달됩니다. fan-out을 정의하면 배열 요소마다 자식 노드가 만들어져 병렬로 실행됩니다."
+      },
+      "async": {
+        "title": "메서드 호출을 통한 비동기 처리",
+        "body": "`enqueue(env, {'{'} binding, payload {'}'})`를 호출하면 Tsumugi가 잡을 등록합니다. 반환값은 잡 ID이며, 호출은 즉시 완료됩니다."
+      },
+      "guarantee": {
+        "title": "잡 단위의 실행 보장",
+        "body": "`guarantee`에 `at-most-once`를 지정한 잡은 두 번 실행되지 않습니다. `guarantee`의 기본값은 `at-least-once`입니다."
+      },
+      "remote": {
+        "title": "performer를 다른 Worker에 배치",
+        "body": "performer를 Service Binding으로 연결한 다른 Worker에 배치한 경우에도 Tsumugi는 performer를 실행합니다."
+      }
+    },
+    "showcase": {
+      "heading": "대시보드",
+      "jobsAlt": "잡 목록 페이지",
+      "runAlt": "Run 워터폴"
+    },
+    "start": {
+      "copy": "{command} 복사"
+    }
+  }
+}

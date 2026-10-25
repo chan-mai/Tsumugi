@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineNuxtConfig({
 	compatibilityDate: '2026-07-01',
-	modules: ['@nuxt/content', '@nuxtjs/color-mode', '@nuxt/fonts', 'nuxt-og-image'],
+	modules: ['@nuxt/content', '@nuxtjs/i18n', '@nuxtjs/color-mode', '@nuxt/fonts', 'nuxt-og-image'],
 	site: {
 		url: 'https://tsumugi.mq1.dev',
 		name: 'Tsumugi Docs',
@@ -17,9 +17,18 @@ export default defineNuxtConfig({
 	imports: { dirs: ['types'] },
 	css: ['~/assets/css/main.css', '~/assets/css/shiki.css'],
 	vite: { plugins: [tailwindcss()] },
+	i18n: {
+		locales: [
+			{ code: 'ja', language: 'ja-JP', name: '日本語', file: 'ja.json' },
+			{ code: 'en', language: 'en-US', name: 'English', file: 'en.json' },
+			{ code: 'ko', language: 'ko-KR', name: '한국어', file: 'ko.json' },
+		],
+		defaultLocale: 'ja',
+		strategy: 'prefix_except_default',
+		detectBrowserLanguage: false,
+	},
 	app: {
 		head: {
-			htmlAttrs: { lang: 'ja-JP' },
 			meta: [{ name: 'theme-color', content: '#f7a1b2' }],
 		},
 	},
@@ -48,6 +57,14 @@ export default defineNuxtConfig({
 		'/guide/**': { prerender: true },
 		'/reference/**': { prerender: true },
 		'/search': { prerender: false },
+		'/en': { prerender: true },
+		'/en/guide/**': { prerender: true },
+		'/en/reference/**': { prerender: true },
+		'/en/search': { prerender: false },
+		'/ko': { prerender: true },
+		'/ko/guide/**': { prerender: true },
+		'/ko/reference/**': { prerender: true },
+		'/ko/search': { prerender: false },
 	},
 	nitro: {
 		preset: 'cloudflare-module',

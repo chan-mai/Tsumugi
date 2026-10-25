@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/vue';
 
-const scopes: SearchScope[] = [
-	{ value: 'all', label: '全て', prefix: '/' },
-	{ value: 'guide', label: 'ガイド', prefix: '/guide/' },
-	{ value: 'reference', label: 'リファレンス', prefix: '/reference/' },
-];
+const { t, locale } = useI18n();
+const localePath = useLocalePath();
+const scopes = computed<SearchScope[]>(() => [
+	{ value: 'all', label: t('search.all'), prefix: '/' },
+	{ value: 'guide', label: t('nav.guide'), prefix: `${localePath('/guide')}/` },
+	{ value: 'reference', label: t('nav.reference'), prefix: `${localePath('/reference')}/` },
+]);
 const perPage = 50;
 
-usePageTitle('サイト内検索');
-defineOgImage('Page', { title: 'サイト内検索' });
+usePageTitle(() => t('search.title'));
+defineOgImage('Page', { title: t('search.title') });
 
 const route = useRoute();
 const router = useRouter();
 
 const q = computed(() => String(route.query.q ?? '').trim());
-const scope = computed(() => scopes.find((item) => item.value === route.query.scope) ?? scopes[0]!);
+const scope = computed(() => scopes.value.find((item) => item.value === route.query.scope) ?? scopes.value[0]!);
 const requestedPage = computed(() => Math.max(1, Number(route.query.page) || 1));
 
 const draft = ref(q.value);
@@ -30,7 +32,7 @@ const resultHeading = ref<HTMLElement | null>(null);
 
 onMounted(async () => {
 	if (route.query.focus) input.value?.focus();
-	sections.value = mergePageSections(await queryCollectionSearchSections('docs'));
+	sections.value = mergePageSections(await queryCollectionSearchSections(docsCollections[toSiteLocale(locale.value)]));
 	loaded.value = true;
 });
 
@@ -131,11 +133,11 @@ watch(page, () => nextTick(() => resultHeading.value?.scrollIntoView({ block: 's
 
 <template>
 	<div class="mx-auto max-w-4xl px-6 pb-24 pt-14">
-		<SiteBreadcrumb :items="[{ text: 'ホーム', link: '/' }, { text: 'サイト内検索' }]" class="mb-10" />
-		<h1 class="text-4xl font-bold tracking-tight">サイト内検索</h1>
+		<SiteBreadcrumb :items="[{ text: $t('nav.home'), link: localePath('/') }, { text: $t('search.title') }]" class="mb-10" />
+		<h1 class="text-4xl font-bold tracking-tight">{{ $t('search.title') }}</h1>
 
 		<form class="mt-8" role="search" @submit.prevent="submit">
-			<p id="search-scope-label" class="mb-2 text-sm font-bold">検索対象</p>
+			<p id="search-scope-label" class="mb-2 text-sm font-bold">{{ $t('search.scope') }}</p>
 			<div class="flex gap-3">
 				<div class="flex min-w-0 flex-1 rounded-lg has-[input:focus]:ring-4 has-[input:focus]:ring-brand-soft">
 					<Listbox v-model="draftScope" by="value" as="div" class="relative">
@@ -163,7 +165,7 @@ watch(page, () => nextTick(() => resultHeading.value?.scrollIntoView({ block: 's
 						ref="input"
 						v-model="draft"
 						type="search"
-						aria-label="検索キーワード"
+						:aria-label="$t('search.keyword')"
 						autocomplete="off"
 						class="h-12 min-w-0 flex-1 rounded-r-lg border border-l-0 border-border bg-bg px-4 text-text-1 outline-none placeholder:text-text-3"
 					/>
@@ -173,19 +175,19 @@ watch(page, () => nextTick(() => resultHeading.value?.scrollIntoView({ block: 's
 					class="flex h-12 shrink-0 items-center gap-2 rounded-lg border-none bg-button-brand-bg px-6 font-bold text-button-brand-text transition hover:bg-button-brand-hover-bg"
 				>
 					<AppIcon name="search" class="size-4" />
-					検索
+					{{ $t('search.submit') }}
 				</button>
 			</div>
 		</form>
 
 		<section v-if="q" class="mt-16" aria-live="polite">
-			<h2 ref="resultHeading" class="scroll-mt-24 text-3xl font-bold tracking-tight">{{ q }} の検索結果</h2>
+			<h2 ref="resultHeading" class="scroll-mt-24 text-3xl font-bold tracking-tight">{{ $t('search.results', { q }) }}</h2>
 			<template v-if="loaded">
 				<p class="mt-4 text-text-2">
 					<template v-if="matches.length">
-						{{ matches.length }}件中、{{ from + 1 }}〜{{ from + results.length }}件を表示しています。
+						{{ $t('search.summary', { total: matches.length, from: from + 1, to: from + results.length }) }}
 					</template>
-					<template v-else>「{{ q }}」に一致するページはありません。</template>
+					<template v-else>{{ $t('search.empty', { q }) }}</template>
 				</p>
 
 				<ul class="mt-6">
@@ -208,12 +210,12 @@ watch(page, () => nextTick(() => resultHeading.value?.scrollIntoView({ block: 's
 					</li>
 				</ul>
 
-				<nav v-if="pageCount > 1" class="mt-10 flex flex-wrap items-center justify-center gap-2" aria-label="ページ送り">
+				<nav v-if="pageCount > 1" class="mt-10 flex flex-wrap items-center justify-center gap-2" :aria-label="$t('search.pagination')">
 					<NuxtLink
 						v-if="page > 1"
 						:to="pageLink(page - 1)"
 						class="grid size-10 place-items-center rounded-lg text-text-2 hover:bg-default-soft"
-						aria-label="前のページ"
+						:aria-label="$t('doc.prev')"
 					>
 						<AppIcon name="chevron-left" class="size-4" />
 					</NuxtLink>
@@ -231,7 +233,7 @@ watch(page, () => nextTick(() => resultHeading.value?.scrollIntoView({ block: 's
 						v-if="page < pageCount"
 						:to="pageLink(page + 1)"
 						class="grid size-10 place-items-center rounded-lg text-text-2 hover:bg-default-soft"
-						aria-label="次のページ"
+						:aria-label="$t('doc.next')"
 					>
 						<AppIcon name="chevron-right" class="size-4" />
 					</NuxtLink>

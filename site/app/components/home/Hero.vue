@@ -1,10 +1,12 @@
 <script setup lang="ts">
-const actions = [
-	{ text: 'Getting Started', link: '/guide/getting-started', primary: true },
-	{ text: '概要', link: '/guide/overview' },
+const { t } = useI18n();
+const localePath = useLocalePath();
+const actions = computed(() => [
+	{ text: 'Getting Started', link: localePath('/guide/getting-started'), primary: true },
+	{ text: t('home.overview'), link: localePath('/guide/overview') },
 	{ text: 'GitHub', link: 'https://github.com/chan-mai/Tsumugi' },
 	{ text: 'npm', link: 'https://www.npmjs.com/package/tsumugi' },
-];
+]);
 
 const sceneReady = ref(false);
 const root = ref<HTMLElement | null>(null);

@@ -4,9 +4,9 @@ import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue';
 const colorMode = useColorMode();
 
 const options = [
-	{ value: 'system', label: 'システム', icon: 'monitor' },
-	{ value: 'light', label: 'ライト', icon: 'sun' },
-	{ value: 'dark', label: 'ダーク', icon: 'moon' },
+	{ value: 'system', icon: 'monitor' },
+	{ value: 'light', icon: 'sun' },
+	{ value: 'dark', icon: 'moon' },
 ] as const;
 </script>
 
@@ -17,7 +17,7 @@ const options = [
 				<AppIcon :name="colorMode.value === 'dark' ? 'moon' : 'sun'" class="size-4" />
 				<template #fallback><AppIcon name="sun" class="size-4" /></template>
 			</ClientOnly>
-			外観
+			{{ $t('theme.label') }}
 			<AppIcon name="chevron-down" class="size-4" />
 		</MenuButton>
 		<transition
@@ -37,7 +37,7 @@ const options = [
 						@click="colorMode.preference = option.value"
 					>
 						<AppIcon :name="option.icon" class="size-4" />
-						{{ option.label }}
+						{{ $t(`theme.${option.value}`) }}
 					</button>
 				</MenuItem>
 			</MenuItems>
