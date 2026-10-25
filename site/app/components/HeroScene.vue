@@ -134,8 +134,8 @@ onMounted(async () => {
 	// _toneの値ごとに透過色を設定
 	function applyPalette() {
 		const uniforms = backgroundMaterial.uniforms;
-		for (const index of [1, 2, 3, 4]) uniforms[`uColor${index}`]!.value.copy(readColor(probe, `--c-hero-gradient-${index}`));
-		const tones = [0, 1, 2].map((index) => readColor(probe, `--c-hero-tone-${index}`).lerp(new THREE.Color(1, 1, 1), 0.55));
+		for (const index of [1, 2, 3, 4]) uniforms[`uColor${index}`]!.value.copy(readColor(probe, `--color-hero-gradient-${index}`));
+		const tones = [0, 1, 2].map((index) => readColor(probe, `--color-hero-tone-${index}`).lerp(new THREE.Color(1, 1, 1), 0.55));
 		gltf.scene.traverse((object) => {
 			if (!(object instanceof THREE.Mesh)) return;
 			const geometry = object.geometry as THREE.BufferGeometry;

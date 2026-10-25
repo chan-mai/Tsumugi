@@ -8,7 +8,8 @@ const scopes: SearchScope[] = [
 ];
 const perPage = 50;
 
-useSeoMeta({ title: 'サイト内検索' });
+usePageTitle('サイト内検索');
+defineOgImage('Page', { title: 'サイト内検索' });
 
 const route = useRoute();
 const router = useRouter();

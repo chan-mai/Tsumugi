@@ -1,5 +1,6 @@
 ---
 title: Flow
+description: 依存関係を持つ複数のジョブを有向非巡回グラフ(DAG)で定義するFlowの定義, fan-out, 条件分岐, 失敗時の動作について
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

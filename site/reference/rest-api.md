@@ -1,5 +1,6 @@
 ---
 title: REST API
+description: ジョブ, Run, 定期実行, 実行量の設定を操作するREST APIのエンドポイントと、リクエストとレスポンスの形式について
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

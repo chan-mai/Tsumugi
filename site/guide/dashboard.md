@@ -1,5 +1,6 @@
 ---
 title: ダッシュボードと認証
+description: REST APIとダッシュボードの認証の設定と、ダッシュボードでのジョブとRunの参照, 検索, 一括操作について
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

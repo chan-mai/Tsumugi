@@ -2,7 +2,7 @@
 import type { NuxtError } from '#app';
 
 const props = defineProps<{ error: NuxtError }>();
-useSeoMeta({ title: props.error.statusCode === 404 ? 'ページが見つかりません' : 'エラー' });
+usePageTitle(props.error.statusCode === 404 ? 'ページが見つかりません' : 'エラー');
 </script>
 
 <template>

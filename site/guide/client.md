@@ -1,5 +1,6 @@
 ---
 title: 別Workerからの投入
+description: performerを持たないWorkerから、tsumugi/clientのcreateClientを使用してジョブを投入する方法について
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

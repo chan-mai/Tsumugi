@@ -1,5 +1,6 @@
 ---
 title: Getting Started
+description: Tsumugiのインストールから、performerを定義したWorkerの動作確認まで
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

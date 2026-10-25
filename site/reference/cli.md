@@ -1,5 +1,6 @@
 ---
 title: CLI
+description: tsumugiパッケージに含まれるCLIのコマンド, tsumugi initとtsumugi add-performerのオプションと動作について
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

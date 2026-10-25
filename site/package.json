@@ -12,7 +12,9 @@
   },
   "devDependencies": {
     "@nuxt/fonts": "^1.2.0",
+    "@takumi-rs/core": "^2.18.1",
     "@types/three": "^0.186.0",
+    "nuxt-og-image": "^7.0.7",
     "wrangler": "^4.151.2"
   },
   "dependencies": {

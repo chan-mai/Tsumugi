@@ -1,5 +1,6 @@
 ---
 title: 概要
+description: Cloudflare Workers向けのジョブマネジメントシステムTsumugiが解決する課題, 利用者が記述するコード, 前提条件
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

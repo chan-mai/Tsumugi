@@ -1,5 +1,6 @@
 ---
 title: ジョブの投入
+description: enqueue, enqueueMany, jobsによるジョブの投入方法と、予約実行, 有効期限, 重複排除, 直列化などの投入時のオプションについて
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

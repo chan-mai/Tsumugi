@@ -1,10 +1,16 @@
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
-
-const repo = 'https://github.com/chan-mai/Tsumugi';
 
 export default defineNuxtConfig({
 	compatibilityDate: '2026-07-01',
-	modules: ['@nuxt/content', '@nuxtjs/color-mode', '@nuxt/fonts'],
+	modules: ['@nuxt/content', '@nuxtjs/color-mode', '@nuxt/fonts', 'nuxt-og-image'],
+	site: {
+		url: 'https://tsumugi.mq1.dev',
+		name: 'Tsumugi Docs',
+		description: 'A job management system designed for the Cloudflare stack.',
+	},
+	ogImage: { zeroRuntime: true },
+	alias: { '#tailwindcss': fileURLToPath(new URL('./app/assets/css/main.css', import.meta.url)) },
 	fonts: {
 		families: [{ name: 'LINE Seed JP', provider: 'google', weights: [100, 400, 700, 800] }],
 	},
@@ -15,7 +21,6 @@ export default defineNuxtConfig({
 		head: {
 			htmlAttrs: { lang: 'ja-JP' },
 			meta: [
-				{ name: 'description', content: 'Cloudflare Workers向けに設計されたジョブマネジメントシステム' },
 				{ name: 'theme-color', content: '#f7a1b2' },
 			],
 		},
@@ -34,7 +39,11 @@ export default defineNuxtConfig({
 			},
 		},
 	},
-	runtimeConfig: { public: { repo } },
+	runtimeConfig: {
+		public: {
+			repo: 'https://github.com/chan-mai/Tsumugi'
+		},
+	},
 	nitro: {
 		prerender: { autoSubfolderIndex: false, crawlLinks: true, routes: ['/'] },
 	},

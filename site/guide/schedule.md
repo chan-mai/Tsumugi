@@ -1,5 +1,6 @@
 ---
 title: 定期実行
+description: ジョブとFlowを一定間隔またはcron式で指定した時刻に実行する方法と、一時停止, 再開, 手動実行の操作について
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

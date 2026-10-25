@@ -1,5 +1,6 @@
 ---
 title: Performer
+description: ジョブの処理を定義するPerformerの実行コンテキスト, 失敗とリトライ, 別Workerへの配置, テストについて
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

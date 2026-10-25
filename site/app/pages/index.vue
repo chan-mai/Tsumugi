@@ -1,5 +1,7 @@
 <script setup lang="ts">
-useSeoMeta({ title: 'Tsumugi Docs', description: 'Cloudflare Workers向けに設計されたジョブマネジメントシステム' });
+const site = useSiteConfig();
+usePageTitle();
+defineOgImage('Page', { title: 'Tsumugi', description: site.description });
 </script>
 
 <template>

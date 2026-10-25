@@ -2,6 +2,7 @@
 import { Dialog, DialogPanel, TransitionChild, TransitionRoot } from '@headlessui/vue';
 
 const route = useRoute();
+const site = useSiteConfig();
 const menuOpen = ref(false);
 watch(
 	() => route.fullPath,
@@ -16,7 +17,7 @@ function isActive(link: string) {
 <template>
 	<header class="fixed inset-x-0 top-0 z-40 h-(--header-h) border-b border-divider bg-bg/90 backdrop-blur">
 		<div class="mx-auto flex h-full max-w-[1440px] items-center gap-6 px-4 sm:px-6">
-			<NuxtLink to="/" class="text-xl font-bold tracking-tight text-text-1">Tsumugi Docs</NuxtLink>
+			<NuxtLink to="/" class="text-xl font-bold tracking-tight text-text-1">{{ site.name }}</NuxtLink>
 
 			<nav class="ml-auto hidden items-center gap-8 text-sm lg:flex" aria-label="グローバル">
 				<NuxtLink
@@ -72,7 +73,7 @@ function isActive(link: string) {
 			>
 				<DialogPanel class="fixed inset-y-0 right-0 flex w-96 max-w-[90vw] flex-col overflow-y-auto bg-bg-elv px-6 py-5 shadow-xl">
 					<div class="mb-6 flex items-center justify-between">
-						<NuxtLink to="/" class="text-xl font-bold text-text-1">Tsumugi Docs</NuxtLink>
+						<NuxtLink to="/" class="text-xl font-bold text-text-1">{{ site.name }}</NuxtLink>
 						<button
 							type="button"
 							class="flex items-center gap-1.5 border-none text-sm text-text-1 hover:text-brand-1"

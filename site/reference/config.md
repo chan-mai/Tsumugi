@@ -1,5 +1,6 @@
 ---
 title: 設定
+description: defineTsumugiに指定する設定項目の型と既定値, wranglerのbindingの設定について
 publishedAt: 2026-07-22
 updatedAt: 2026-10-25
 ---

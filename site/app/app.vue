@@ -1,5 +1,12 @@
 <script setup lang="ts">
-useHead({ titleTemplate: (title) => (title && title !== 'Tsumugi Docs' ? `${title} | Tsumugi Docs` : 'Tsumugi Docs') });
+const site = useSiteConfig();
+useSeoMeta({
+	description: site.description,
+	ogDescription: site.description,
+	ogSiteName: site.name,
+	ogType: 'website',
+	twitterCard: 'summary_large_image',
+});
 </script>
 
 <template>

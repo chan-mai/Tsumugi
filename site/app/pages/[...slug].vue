@@ -11,7 +11,17 @@ const { data: page } = await useAsyncData(
 );
 if (!page.value) throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true });
 
-useSeoMeta({ title: () => page.value?.title, description: () => page.value?.description });
+const description = computed(() => page.value?.description?.replaceAll('\n', ''));
+usePageTitle(() => page.value?.title);
+useSeoMeta({
+	description,
+	ogDescription: description,
+});
+defineOgImage('Page', {
+	title: page.value.title,
+	section: sidebar.find((group) => group.items.some((item) => item.link === path.value))?.text,
+	description: description.value,
+});
 
 const pager = computed(() => surroundings(path.value));
 const editLink = computed(() => `${config.public.repo}/edit/main/site/${page.value?.stem}.md`);
