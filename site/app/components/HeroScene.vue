@@ -69,13 +69,25 @@ onMounted(async () => {
 
 	const scene = new THREE.Scene();
 	const pmrem = new THREE.PMREMGenerator(renderer);
-	scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+	const environment = pmrem.fromScene(new RoomEnvironment(), 0.04);
+	scene.environment = environment.texture;
 
-	const gltf = await new GLTFLoader().loadAsync('/models/hero.glb');
-	if (disposed) {
+	function disposeBase() {
+		environment.dispose();
 		pmrem.dispose();
 		renderer.dispose();
 		renderer.domElement.remove();
+	}
+
+	let gltf: Awaited<ReturnType<GLTFLoader['loadAsync']>>;
+	try {
+		gltf = await new GLTFLoader().loadAsync('/models/hero.glb');
+	} catch {
+		disposeBase();
+		return;
+	}
+	if (disposed) {
+		disposeBase();
 		return;
 	}
 
@@ -167,7 +179,8 @@ onMounted(async () => {
 		pointer.set((event.clientX / window.innerWidth) * 2 - 1, (event.clientY / window.innerHeight) * 2 - 1);
 	}
 
-	const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+	let reduceMotion = motionQuery.matches;
 	const clock = new THREE.Clock();
 	let visible = true;
 	let frame = 0;
@@ -188,6 +201,12 @@ onMounted(async () => {
 		frame = reduceMotion ? 0 : requestAnimationFrame(loop);
 	}
 
+	function onMotionChange(event: MediaQueryListEvent) {
+		reduceMotion = event.matches;
+		cancelAnimationFrame(frame);
+		loop();
+	}
+
 	const stopColorWatch = watch(
 		() => colorMode.value,
 		() =>
@@ -204,6 +223,7 @@ onMounted(async () => {
 	const intersectionObserver = new IntersectionObserver(([entry]) => (visible = Boolean(entry?.isIntersecting)));
 	intersectionObserver.observe(element);
 	window.addEventListener('pointermove', onPointerMove, { passive: true });
+	motionQuery.addEventListener('change', onMotionChange);
 
 	applyPalette();
 	resize();
@@ -216,16 +236,14 @@ onMounted(async () => {
 		resizeObserver.disconnect();
 		intersectionObserver.disconnect();
 		window.removeEventListener('pointermove', onPointerMove);
+		motionQuery.removeEventListener('change', onMotionChange);
 		gltf.scene.traverse((object) => {
 			if (object instanceof THREE.Mesh) object.geometry.dispose();
 		});
 		glass.dispose();
 		backgroundMaterial.dispose();
 		backgroundPlane.geometry.dispose();
-		scene.environment?.dispose();
-		pmrem.dispose();
-		renderer.dispose();
-		renderer.domElement.remove();
+		disposeBase();
 		probe.remove();
 	};
 });

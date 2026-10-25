@@ -16,7 +16,7 @@ const router = useRouter();
 
 const q = computed(() => String(route.query.q ?? '').trim());
 const scope = computed(() => scopes.find((item) => item.value === route.query.scope) ?? scopes[0]!);
-const page = computed(() => Math.max(1, Number(route.query.page) || 1));
+const requestedPage = computed(() => Math.max(1, Number(route.query.page) || 1));
 
 const draft = ref(q.value);
 const draftScope = ref<SearchScope>(scope.value);
@@ -64,6 +64,7 @@ const matches = computed(() => {
 });
 
 const pageCount = computed(() => Math.max(1, Math.ceil(matches.value.length / perPage)));
+const page = computed(() => Math.min(requestedPage.value, pageCount.value));
 const from = computed(() => (page.value - 1) * perPage);
 const results = computed(() =>
 	matches.value.slice(from.value, from.value + perPage).map((section) => {
