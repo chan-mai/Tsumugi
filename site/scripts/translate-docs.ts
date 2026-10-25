@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const siteDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDirs = ['guide', 'reference'];
-const concurrency = 4;
+const concurrency = 24;
 
 const languages = { en: 'English', ko: 'Korean' } as const;
 type Language = keyof typeof languages;
@@ -124,11 +124,11 @@ function verifyFrontmatter(source: string, translated: string, output: string): 
 
 async function translate(client: Anthropic, markdown: string, { source, language }: Target): Promise<string> {
 	const stream = client.beta.messages.stream({
-		model: 'claude-opus-5-5',
-		max_tokens: 64000,
+		model: 'claude-sonnet-5-5',
+		max_tokens: 128000,
 		betas: ['server-side-fallback-2026-07-01'],
 		fallbacks: 'default',
-		output_config: { effort: 'max' },
+		output_config: { effort: 'high' },
 		system: systemPrompt(languages[language]),
 		messages: [{ role: 'user', content: markdown }],
 	});
@@ -177,18 +177,13 @@ if (!targets.length) {
 
 const client = new Anthropic();
 const queue = [...targets];
-const failures: string[] = [];
 await Promise.all(
 	Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
 		for (let target = queue.shift(); target; target = queue.shift()) {
 			await processTarget(client, target).catch((error: unknown) => {
-				failures.push(target!.output);
-				console.error(error);
+				console.error(`failed: ${target!.output}`, error);
+				process.exit(1);
 			});
 		}
 	}),
 );
-if (failures.length) {
-	console.error(`failed: ${failures.join(', ')}`);
-	process.exit(1);
-}
