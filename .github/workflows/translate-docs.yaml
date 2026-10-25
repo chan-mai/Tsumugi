@@ -19,9 +19,10 @@ jobs:
       contents: read
       id-token: write
     env:
-      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
-      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      ANTHROPIC_FEDERATION_RULE_ID: fdrl_01DTXu3obPLqRBroWePib9tF
+      ANTHROPIC_ORGANIZATION_ID: e0dff1cf-fac5-4631-b4dc-776da9c8ae6a
+      ANTHROPIC_SERVICE_ACCOUNT_ID: svac_01DJZof3uqryVLaS3QfcHFAz
+      ANTHROPIC_WORKSPACE_ID: wrkspc_01K5Pj4uKshsA8eSRDfEuYJ7
     steps:
       - uses: actions/checkout@v7
         with:
