@@ -1,0 +1,8 @@
+/* Shikiの2テーマをカラーモードで切り替え */
+html .shiki span {
+	color: var(--shiki-default);
+}
+
+html.dark .shiki span {
+	color: var(--shiki-dark);
+}

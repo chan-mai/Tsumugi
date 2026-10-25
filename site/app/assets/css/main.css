@@ -1,0 +1,178 @@
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'kiso.css' layer(base);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--color-*: initial;
+
+	--color-bg: var(--c-bg);
+	--color-bg-alt: var(--c-bg-alt);
+	--color-bg-elv: var(--c-bg-elv);
+	--color-bg-soft: var(--c-bg-soft);
+
+	--color-border: var(--c-border);
+	--color-divider: var(--c-divider);
+	--color-gutter: var(--c-gutter);
+
+	--color-text-1: var(--c-text-1);
+	--color-text-2: var(--c-text-2);
+	--color-text-3: var(--c-text-3);
+
+	--color-default-1: var(--c-default-1);
+	--color-default-2: var(--c-default-2);
+	--color-default-3: var(--c-default-3);
+	--color-default-soft: var(--c-default-soft);
+
+	--color-brand-1: var(--c-brand-1);
+	--color-brand-2: var(--c-brand-2);
+	--color-brand-3: var(--c-brand-3);
+	--color-brand-soft: var(--c-brand-soft);
+
+	--color-info-1: var(--c-info-1);
+	--color-info-soft: var(--c-info-soft);
+	--color-tip-1: var(--c-brand-1);
+	--color-tip-soft: var(--c-brand-soft);
+	--color-warning-1: var(--c-warning-1);
+	--color-warning-soft: var(--c-warning-soft);
+	--color-danger-1: var(--c-danger-1);
+	--color-danger-soft: var(--c-danger-soft);
+
+	--color-button-brand-bg: var(--c-button-brand-bg);
+	--color-button-brand-hover-bg: var(--c-button-brand-hover-bg);
+	--color-button-brand-text: var(--c-button-brand-text);
+
+	--color-hero-bg: var(--c-hero-gradient-2);
+	--color-hero-gradient-1: var(--c-hero-gradient-1);
+	--color-hero-gradient-2: var(--c-hero-gradient-2);
+	--color-hero-gradient-3: var(--c-hero-gradient-3);
+	--color-hero-gradient-4: var(--c-hero-gradient-4);
+	--color-glass-bg: var(--c-glass-bg);
+	--color-glass-border: var(--c-glass-border);
+	--color-hero-text: var(--c-hero-text);
+	--color-backdrop: var(--c-backdrop);
+
+	--font-sans: 'LINE Seed JP', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', Meiryo, system-ui, sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root {
+	/* ブランドの基準色 #f7a1b2, ライトモードの文字用 #ff3e65 */
+	--tsumugi-pink: #f7a1b2;
+	--tsumugi-pink-hover: color-mix(in srgb, var(--tsumugi-pink) 62%, #fff);
+	--tsumugi-red: #ff3e65;
+
+	--c-bg: #ffffff;
+	--c-bg-alt: #f6f6f7;
+	--c-bg-elv: #ffffff;
+	--c-bg-soft: #f6f6f7;
+
+	--c-border: #c2c2c4;
+	--c-divider: #e2e2e3;
+	--c-gutter: #e2e2e3;
+
+	--c-text-1: #3c3c43;
+	--c-text-2: #67676c;
+	--c-text-3: #929295;
+
+	--c-default-1: #dddde3;
+	--c-default-2: #e4e4e9;
+	--c-default-3: #ebebef;
+	--c-default-soft: rgba(142, 150, 170, 0.14);
+
+	--c-brand-1: var(--tsumugi-red);
+	--c-brand-2: color-mix(in srgb, var(--tsumugi-red) 70%, #fff);
+	--c-brand-3: var(--tsumugi-pink);
+	--c-brand-soft: color-mix(in srgb, var(--tsumugi-pink) 32%, transparent);
+
+	--c-info-1: #3451b2;
+	--c-info-soft: rgba(100, 108, 255, 0.14);
+	--c-warning-1: #915930;
+	--c-warning-soft: rgba(234, 179, 8, 0.14);
+	--c-danger-1: #b8272c;
+	--c-danger-soft: rgba(244, 63, 94, 0.14);
+
+	--c-button-brand-bg: var(--tsumugi-pink);
+	--c-button-brand-hover-bg: var(--tsumugi-pink-hover);
+	--c-button-brand-text: #fff;
+
+	/* トップページのヒーロー, 背景のグラデーション4色とガラスの色味3種 */
+	--c-hero-gradient-1: color-mix(in srgb, var(--tsumugi-pink) 55%, #fff);
+	--c-hero-gradient-2: #cbbfe6;
+	--c-hero-gradient-3: #b4dcdf;
+	--c-hero-gradient-4: #f6e6df;
+	--c-hero-tone-0: var(--tsumugi-pink);
+	--c-hero-tone-1: #b8a9e0;
+	--c-hero-tone-2: #ffffff;
+	--c-hero-text: #ffffff;
+
+	/* 半透明のカード */
+	--c-glass-bg: rgb(255 255 255 / 0.6);
+	--c-glass-border: rgb(255 255 255 / 0.85);
+	--c-backdrop: rgba(0, 0, 0, 0.6);
+
+	--header-h: 4rem;
+	color-scheme: light;
+}
+
+:root.dark {
+	--c-bg: #1b1b1f;
+	--c-bg-alt: #161618;
+	--c-bg-elv: #202127;
+	--c-bg-soft: #202127;
+
+	--c-border: #3c3f44;
+	--c-divider: #2e2e32;
+	--c-gutter: #000000;
+
+	--c-text-1: #dfdfd6;
+	--c-text-2: #98989f;
+	--c-text-3: #6a6a71;
+
+	--c-default-1: #515c67;
+	--c-default-2: #414853;
+	--c-default-3: #32363f;
+	--c-default-soft: rgba(101, 117, 133, 0.16);
+
+	--c-brand-1: var(--tsumugi-pink);
+	--c-brand-2: var(--tsumugi-pink-hover);
+	--c-brand-3: var(--tsumugi-pink);
+	--c-brand-soft: color-mix(in srgb, var(--tsumugi-pink) 22%, transparent);
+
+	--c-info-1: #a8b1ff;
+	--c-info-soft: rgba(100, 108, 255, 0.16);
+	--c-warning-1: #f9b44e;
+	--c-warning-soft: rgba(234, 179, 8, 0.16);
+	--c-danger-1: #f66f81;
+	--c-danger-soft: rgba(244, 63, 94, 0.16);
+
+	--c-hero-gradient-1: #4a3242;
+	--c-hero-gradient-2: #33304f;
+	--c-hero-gradient-3: #22404a;
+	--c-hero-gradient-4: #2b2733;
+
+	--c-glass-bg: rgb(32 33 39 / 0.6);
+	--c-glass-border: rgb(255 255 255 / 0.08);
+
+	color-scheme: dark;
+}
+
+@layer base {
+	html {
+		scroll-padding-top: calc(var(--header-h) + 1.5rem);
+	}
+
+	body {
+		background-color: var(--color-bg);
+		color: var(--color-text-1);
+		font-family: var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+	}
+
+	::selection {
+		background-color: var(--color-brand-soft);
+	}
+}

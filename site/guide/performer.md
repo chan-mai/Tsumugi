@@ -1,6 +1,12 @@
+---
+title: Performer
+publishedAt: 2026-07-22
+updatedAt: 2026-10-25
+---
+
 # Performer
 
-ジョブの処理内容は`Performer`を継承したクラスとして記述します。
+ジョブの処理は、`Performer`を継承したクラスとして定義します。
 
 ## 基本形
 
@@ -13,20 +19,20 @@ export class SendMail extends Performer<{ to: string; subject: string }, void, {
     await fetch('https://api.example.com/mail', {
       method: 'POST',
       body: JSON.stringify(payload),
-      // AbortSignal.timeoutは負の値を受け付けないため、期限を過ぎていれば即座に中断する
+      // 期限超過時は即中断
       signal: remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort(),
     });
   }
 }
 ```
 
-型引数は順に、ペイロード、戻り値、必須キーの宣言、`Env`です。
-
-bindingは`WorkerEntrypoint`と同様にコンストラクタで受け取るため、`this.env`から参照可能です。
+型引数は、順にpayload, 戻り値, 必須キーの宣言, `Env`です。
+performer内では、`this.env`でWorkerのbindingを参照します。
 
 ## binding名
 
-binding名はWorkerのエントリからexportした名前で解決され、`export class SendMail`と書けばbinding名は`SendMail`になり、別途の登録は不要です。
+binding名は、Workerのエントリからexportした名前です。
+`export class SendMail`の場合、binding名は`SendMail`となり、別途登録する必要はありません。
 
 ```ts
 // src/index.ts
@@ -34,7 +40,8 @@ export { SendMail } from './performers/send-mail.js';
 ```
 
 `defineTsumugi`の`performers`には、performerをまとめたモジュールをそのまま渡します。
-これはペイロードと必須キーの型を導出するためのものであり、実行時の解決には利用されません。
+bindingごとのpayloadと必須キーの型は、この`performers`から導出されます。
+`performers`のキーは、Workerのエントリからexportした名前と一致させてください。
 
 ```ts
 import * as performers from './performers/index.js';
@@ -44,60 +51,60 @@ export * from './performers/index.js';
 const tsumugi = defineTsumugi({ performers, /* ... */ });
 ```
 
-別名を付ける場合はバレルのexportで変更してください。
-実行時の解決先と`performers`のキーが同じ1箇所から決定されるため、両者が一致します。
+binding名を別名にする場合は、performerをまとめてexportするファイルで別名を付けてください。
 
 ```ts
 // src/performers/index.ts
 export { SendMail as MAIL } from './send-mail.js';
 ```
 
-Workerのエントリでのみ別名を付けると、実行時は`MAIL`で解決される一方で`performers`のキーは`SendMail`のまま残り、型の上のbinding名と一致しなくなります。
+Workerのエントリで別名を付けると、実行時のbinding名は`MAIL`になります。
+このとき、`performers`のキーは`SendMail`のままなので、両者が一致しません。
+別名はWorkerのエントリでは付けないでください。
 
 ```ts
 // src/index.ts
-// 実行時のexportだけが変わるので、これだけでは足りない
+// 実行時のexportのみ変更, 型の上のbinding名は不一致
 export { SendMail as MAIL } from './performers/send-mail.js';
 ```
 
-## 実行文脈
+## 実行コンテキスト
 
-`perform`の第2引数に`JobContext`が渡されます。
+`perform`の第2引数には、`JobContext`が渡されます。
 
-| フィールド       | 内容                                             |
-| ---------------- | ------------------------------------------------ |
-| `jobId`          | `<binding>#<shard>:<localId>`形式のジョブID      |
-| `attempt`        | 1始まりの試行回数                                |
-| `idempotencyKey` | ジョブ単位で一定の値、再実行でも同じ値           |
-| `deadlineAt`     | タイムアウトが切れる時刻、epochミリ秒            |
-| `heartbeat`      | 実行中であることを報告する関数                   |
-| `log`            | 処理途中のメッセージを保存する非同期関数         |
-| `traceparent`    | 投入時のトレース情報。未指定の場合は`null`       |
-| `spawn`          | Flowのノードとして実行中に子ノードを追加する関数 |
-| `fail`           | 失敗した試行の再試行の扱いを指定する関数         |
+| フィールド | 内容 |
+| --- | --- |
+| `jobId` | ジョブID |
+| `attempt` | 試行回数。初回は1 |
+| `idempotencyKey` | ジョブごとに一定の値。再実行でも同じ値 |
+| `deadlineAt` | タイムアウトの時刻。epochミリ秒 |
+| `heartbeat` | 実行中であることを報告する関数 |
+| `log` | 処理途中のメッセージを保存する非同期関数 |
+| `traceparent` | 投入時に指定したトレース情報。未指定の場合は`null` |
+| `spawn` | 実行中のFlowのノードに子ノードを追加する関数 |
+| `fail` | 失敗した試行の再試行可否を指定する関数(使い方は「再試行の指定」) |
 
-at-least-onceでは同じジョブが2回実行される場合があるため、外部への副作用は`idempotencyKey`を使って冪等にしてください。
+`at-least-once`では、同じジョブが複数回実行されることを前提にしてください。
+外部への副作用は、`idempotencyKey`を利用して冪等性を担保します。
 
-中断が必要なケースでは`deadlineAt`から`AbortSignal`を組み立てて渡します。
-`AbortSignal`はRPCの引数として渡せない制約があるため、Tsumugiは時刻のみを渡します。
+### タイムアウトによる中断
 
-`AbortSignal.timeout`は負の値を受け付けないため、期限を過ぎている場合は`AbortSignal.abort()`を利用してください。
+処理をタイムアウトで中断する場合は、`deadlineAt`から`AbortSignal`を作成し、処理に渡します。
+期限を過ぎている場合は、`AbortSignal.abort()`を使用してください。
 
 ```ts
 const remaining = ctx.deadlineAt - Date.now();
 const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort();
 ```
 
-中断は協調的な要求であり、応じないperformerは期限を過ぎても実行を継続する可能性があります。
-
-`spawn`の使用方法は[Flow](/guide/flow)を参照してください。
+Tsumugiは、期限を過ぎたperformerの実行を自動的に停止しません。
+`deadlineAt`を用いて中断を実装しないperformerは、期限経過後も実行を継続することがあります。
 
 ### heartbeat
 
-所要時間が入力によって大きく変わる処理では、`timeoutMs`を最長の場合に合わせる必要があります。
-
-`ctx.heartbeat()`を実行すると、無応答の判定が最後の報告時刻を起点として行われます。
-`timeoutMs`は1回の報告間隔に対して設定してください。
+所要時間が入力によって大きく変わる処理では、`timeoutMs`を最長の所要時間に合わせて設定する必要があります。
+`ctx.heartbeat()`を呼び出すと、タイムアウトの起点が最後の報告された時刻に更新されます。
+そのため、`timeoutMs`は報告の間隔を基準にした値で設定してください。
 
 ```ts
 class Import extends Performer<{ rows: string[] }, void, {}, Env> {
@@ -110,19 +117,19 @@ class Import extends Performer<{ rows: string[] }, void, {}, Env> {
 }
 ```
 
-引数の進捗は0以上1以下です。範囲外の値は0以上1以下へ丸められ、数値以外は進捗なしの報告として扱われます。
-報告した進捗はジョブの詳細画面に表示されます。
-
-実行間隔には5秒の下限があります。これより短い間隔で実行しても、報告は5秒に1回までに制限されます。
-
-戻り値は`{ cancelRequested: boolean }`で、取り消し要求の有無が含まれます。
-一度`true`になった後は、間隔の下限で送信されなかった場合も含めて以後も`true`のままです。
-動作の詳細は[実行中の取り消し](/guide/execution#cancellation)を参照してください。
-報告に失敗しても例外にはならず、報告が無いジョブと同様に扱われます。
+引数の進捗は、0以上1以下の数値です。
+範囲外の値は丸められ、数値以外の値は進捗なしの報告として扱われます。
+報告した進捗は、ダッシュボードのジョブの詳細に表示されます。
+前回の報告から5秒以内の呼び出しでは、報告が送信されません。
+報告の失敗は、例外として通知されません。
+戻り値は`{ cancelRequested: boolean }`で、取り消しが要求されているかどうかを示す値です。
+一度`true`になった後は、以降の呼び出しの戻り値も`true`です。
+取り消しの動作の詳細は、[実行中の取り消し](/guide/execution#実行中の取り消し)の節にあります。
 
 ### ログ
 
-`ctx.log(message)`で処理途中のメッセージを保存できます。呼び出しには`await`が必要です。
+`ctx.log(message)`は、処理途中のメッセージを保存します。
+呼び出しには`await`が必要です。
 
 ```ts
 await ctx.log('Import started');
@@ -130,29 +137,25 @@ await importRows(payload.rows);
 await ctx.log('Import completed');
 ```
 
-ログは呼び出し時に保存され、ジョブの詳細画面に試行回数、記録時刻、本文が取得できます。
-保存に成功した記録は、performerが異常終了した場合も残ります。
-
-1ジョブあたり最新の20件まで保存され、超過した古い記録は削除されます。
-本文はJavaScriptの文字列長で2,000文字まで制限され、超過分は切り捨てられます。
-リトライした場合においても、保存済みのログは引き継がれ、件数はジョブ全体で制限されます。
-
-保存間隔の下限/送信待機の上限は1,000msです。
-保存に失敗した場合、`console.error`へ出力され、ジョブの処理は継続します。
-古い試行や終了したジョブからの呼び出しは保存されません。
+ダッシュボードは、保存したログをジョブの詳細に試行回数、記録時刻、本文とともに表示します。
+performerがその後に異常終了した場合も、保存したログは削除されません。
+保存されるログは、1ジョブあたり最新の20件です。
+本文は、JavaScriptの文字列長で2,000文字までです。
+超過した部分は切り捨てられます。
+前回の保存から1秒以内の呼び出しでは、ログは保存されません。
+保存に失敗した場合は、`console.error`へ出力され、ジョブの処理は続行します。
 
 ### トレース情報
 
-直接のジョブ投入で指定した`traceparent`は`ctx.traceparent`から取得可能です。未指定の場合は`null`になります。
-リトライ時も投入時と同値が参照されます。
+`ctx.traceparent`は、投入時に指定した`traceparent`の値で、未指定の場合は`null`です。
+リトライ時も、投入時と同一の値です。
+トレースのSDKを使用する場合は、`ctx.traceparent`を親のコンテキストとして、spanを作成する必要があります。
+投入時に指定する形式と`spawn`の使用方法は、それぞれ[ジョブの投入](/guide/enqueue#トレース情報)と[Flow](/guide/flow#perform内からのノード追加)を参照してください。
 
-トレースSDKを使用する場合は、この値を親のコンテキストとしてspanを作成してください。
-投入時の形式は[ジョブの投入](/guide/enqueue#traceparent)を参照してください。
+## 失敗とリトライ
 
-## 失敗の通知
-
-例外をthrowすると失敗として扱われ、試行回数が残っている場合に限りリトライされます。
-8,192文字を超える戻り値と直列化できない値は保存されません。Flowのノードでの扱いは[Flow](/guide/flow)を参照してください。
+ジョブが失敗した場合、例外が送出されます。
+試行回数が上限に達していないときは、リトライが実行されます。
 
 ```ts
 class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, void, { concurrencyKey: true }, Env> {
@@ -163,14 +166,16 @@ class ChargeCard extends Performer<{ customerId: string; amountJpy: number }, vo
 }
 ```
 
-発生した例外のメッセージは試行履歴に保存され、ダッシュボードの詳細画面に表示されます。
-本文は2,000文字で打ち切られ、1ジョブあたり20件まで保持されます。
+例外のメッセージは試行履歴に保存され、ダッシュボードはジョブの詳細に試行履歴を表示します。
+保存の上限は、メッセージが2,000文字、試行履歴が1ジョブあたり20件です。
+戻り値が8,192文字を超える場合や、直列化できない場合、戻り値は保存されません。
+Flowのノードでの扱いは、[Flow](/guide/flow#制約)を参照してください。
 
-### 再試行の扱いを指定する {#fail}
+### 再試行の指定
 
-`ctx.fail()`を実行してからthrowすると、その試行の再試行の扱いを指定できます。
-
-再試行しても結果が変わらない失敗には`{ retry: false }`を指定します。試行回数が残っていても再試行せず`FAILED`になります。
+`ctx.fail()`を呼び出した後に例外を送出すると、その試行の後続リトライに`ctx.fail()`で指定した内容が適用されます。
+`{ retry: false }`を指定した場合、試行回数が上限に達していなくてもジョブはリトライされず、`FAILED`へ遷移します。
+この指定は、再試行しても結果が変わらない失敗に対して使用してください。
 
 ```ts
 class SyncUser extends Performer<{ userId: string }, void, {}, Env> {
@@ -184,15 +189,14 @@ class SyncUser extends Performer<{ userId: string }, void, {}, Env> {
 }
 ```
 
-次回の実行時刻を指定する場合は`{ retryAt }`にepochミリ秒を渡します。この試行に限り、`backoff`による間隔の代わりに指定した時刻で再試行されます。
-
-`Retry-After`の値は秒数またはHTTP-dateであるため、それぞれを時刻へ変換します。
+`{ retryAt }`にepochミリ秒を指定すると、その試行に限り、`backoff`で算出した間隔ではなく、指定した時刻に再試行されます。
+次の例は、`Retry-After`ヘッダの値(秒数またはHTTP-date)を時刻に変換します。
 
 ```ts
 if (res.status === 429) {
   const header = res.headers.get('Retry-After') ?? '';
   const date = Date.parse(header);
-  // 解釈できない場合は60秒後
+  // 解釈不能時は60秒後
   const retryAt = /^\d+$/.test(header)
     ? Date.now() + Number(header) * 1_000
     : Number.isNaN(date)
@@ -203,40 +207,43 @@ if (res.status === 429) {
 }
 ```
 
-`retryAt`を指定した場合も試行回数として数えられ、`maxAttempts`に達していれば`FAILED`になります。
-指定した時刻が期限(`expiresAt`)を越える場合は`CANCELLED`になり、過去の時刻を指定した場合は直ちに再試行の対象になります。
+`retryAt`を指定しても、その試行は試行回数に含まれます。
+`maxAttempts`に達している場合、ジョブは`FAILED`へ遷移します。
+指定した時刻が期限(`expiresAt`)より後の場合、ジョブは`CANCELLED`へ遷移します。
+過去の時刻を指定した場合は、直ちに再試行の対象となります。
+`ctx.fail()`の指定は、throwで終了した試行にのみ適用されます。
+throwせずに`perform`が終了した場合、`ctx.fail()`を呼んでいてもジョブは完了します。
+1回の試行で`ctx.fail()`を複数回呼び出した場合、最後の指定が有効です。
+不正な形式の値を`ctx.fail()`に渡すと、その呼び出しで例外が発生します。
 
-指定はthrowで終えた試行にのみ適用され、`perform`が正常に終了した場合は完了として扱われます。
-複数回実行した場合は最後の指定が有効になります。形式が不正な値を渡すと`ctx.fail()`が例外を投げます。
+## キーの必須化
 
-## キーを必須にする {#required-keys}
-
-第3型引数に`{ concurrencyKey: true }`または`{ uniqueKey: true }`を指定すると、そのperformerへの投入時にキーの指定が必須になります。
+第3型引数に`{ concurrencyKey: true }`または`{ uniqueKey: true }`を指定したperformerでは、ジョブの投入時にキーの指定が必須となります。
 
 ```ts
 class ChargeCard extends Performer<Payload, void, { concurrencyKey: true }, Env> {}
 ```
 
-キーは投入時に文字列として渡します。performer側の関数で導出することはできません。
-
-必須化は`tsumugi.enqueue`と`tsumugi.jobs(env)`で適用され、キーの渡し忘れはコンパイルエラーになります。
+キーは、ジョブの投入時に文字列として渡します。
+Tsumugiは、performer側でキーを導出する関数を定義する仕組みを提供していません。
+`tsumugi.enqueue`および`tsumugi.jobs(env)`では、キーを指定しない場合、コンパイル時にエラーが発生します。
 
 ```ts
 await tsumugi.enqueue(env, { binding: 'CHARGE', payload, concurrencyKey: 'customer:c1' });
 await tsumugi.jobs(env).enqueue('CHARGE', payload, { concurrencyKey: 'customer:c1' });
 ```
 
-::: warning
-`createClient()`では必須化が適用されません。
-[投入経路](/guide/enqueue#paths)を参照してください。
-:::
+::callout{type="warning"}
+`createClient()`には、キーの必須化が適用されません。
+詳細は[投入方法](/guide/enqueue#投入方法)を参照してください。
+::
 
 ## 別Workerへの配置
 
-performerはservice binding越しに別のWorkerへの配置が可能です。
+performerは、Service Bindingで接続した別のWorkerに配置した場合でも、Tsumugiから実行されます。
 
 ```ts
-// 相手側のWorker
+// performerを配置するWorker
 import { Performer, type JobContext } from 'tsumugi/performer';
 
 export class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env> {
@@ -253,7 +260,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-wrangler.jsoncのservice bindingで、binding名とentrypointを対応させます。
+呼び出し側のwrangler.jsoncには、binding名とentrypointを対応させるService Bindingを設定する必要があります。
 
 ```jsonc
 "services": [
@@ -261,7 +268,8 @@ wrangler.jsoncのservice bindingで、binding名とentrypointを対応させま�
 ],
 ```
 
-呼び出し側の`performers`には、クラスの代わりに`remote()`を置きます。
+呼び出し側の`performers`には、クラスの代わりに`remote()`を指定してください。
+同じWorkerのperformerと別Workerのperformerは、1つの`performers`に混在させる構成にも対応しています。
 
 ```ts
 import { remote } from 'tsumugi';
@@ -270,24 +278,23 @@ import type { SendMail } from 'my-mailer';
 const performers = { ...local, MAIL: remote<SendMail>() };
 ```
 
-同一Workerのperformerと別Workerのperformerは混在可能です。
+### 別Workerに配置した場合の制約
 
-### 別Worker時の制約 {#remote-constraints}
-
-`spawn`で要求した子ノードは`perform`が完了してから作成されます。呼び出した時点では実行されません。
-
-別Workerでは`ctx.spawn`が非同期の呼び出しになるため、`await`が必要になります。`await`せずに`perform`が終わると、その要求は失われます。
+別Workerに配置されたperformerでは、`ctx.spawn`と`ctx.fail`の呼び出しに`await`が必要です。
+`ctx.spawn`を`await`せずに`perform`が終了すると、子ノードの追加は反映されません。
+`ctx.fail`を`await`せずに例外をthrowした場合も、指定は反映されない可能性があります。
 
 ```ts
 await ctx.spawn('child', 'MAIL', payload);
 ```
 
-`ctx.fail`も同様に`await`が必要です。`await`せずにthrowすると、指定が反映されない場合があります。
-
+`spawn`で追加した子ノードは、`perform`の完了後に作成されます。
+`spawn`の呼び出し時点では、子ノードは実行されません。
 
 ## テスト
 
-`tsumugi/testing`はDurable ObjectとQueuesを起動せずにperformerを呼び出します。
+`tsumugi/testing`の`runPerformer`は、ジョブを投入せずにperformerを直接呼び出します。
+`Performer`のコンストラクタは、`WorkerEntrypoint`と同じ`(ctx, env)`の2引数を取ります。
 
 ```ts
 import { createTestContext, runPerformer } from 'tsumugi/testing';
@@ -301,41 +308,28 @@ if (result.ok) console.log(result.value);
 else console.error(result.error);
 ```
 
-`Performer`のコンストラクタは`WorkerEntrypoint`と同じ`(ctx, env)`の2引数です。
-`runPerformer`が要求するのは`perform`のみのため、`this.env`を使わないperformerは`perform`を持つ通常のオブジェクトでも検証できます。
+`this.env`を使用しないperformerでは、`runPerformer`は`perform`を持つ通常のオブジェクトも受け付けます。
+`runPerformer`は例外を再送出せず、成功と失敗のどちらも同じ形式の結果を戻り値とします。
+`createTestContext()`の戻り値であるコンテキストは、`ctx.fail()`に渡された指定を、呼び出し順に`fails`へ記録します。
 
-`runPerformer`は例外を再送出せず、成功と失敗を同じ形式で返します。
-`ctx.fail()`へ渡した指定は`createTestContext()`が返す文脈の`fails`に、実行した順で記録されます。
+### 実行コンテキストの差し替え
 
-### 実行文脈を差し替える
+`createTestContext`に値を指定すると、`runPerformer`に渡す実行コンテキストの項目を差し替えられます。
+次の例は、試行回数を3回目に設定します。
 
 ```ts
 const ctx = createTestContext({ attempt: 3 });
 await runPerformer(performer, payload, ctx);
 ```
 
-`deadlineAt`を過去や近い将来に置くと、期限に対する振る舞いを検証できます。
+期限に対するperformerの動作を検証する場合は、`deadlineAt`に過去の時刻または近い将来の時刻を指定します。
 
 ```ts
 const ctx = createTestContext({ deadlineAt: Date.now() + 50 });
 await runPerformer(performer, payload, ctx);
 ```
 
-### 投入判定(スケジューラ)とバックオフ
+### 投入から実行までのテスト
 
-時刻と乱数は引数で渡すため、fake timersは不要です。
-
-```ts
-import { fixedClock, nextAttempt, planDispatch } from 'tsumugi/testing';
-
-// 3回目の再試行の時刻
-nextAttempt({ attempts: 3, maxAttempts: 5, backoff, now: Date.now() });
-
-// このポリシーで投入される件数
-planDispatch({ now, jobs, policy, bucket });
-```
-
-### Durable Objectを経由するテスト
-
-Durable ObjectとQueuesを経由した動作を検証する場合は`@cloudflare/vitest-pool-workers`が必要です。
-`tsumugi/testing`はこの範囲を扱いません。
+ジョブの投入から実行までの一連の流れを検証する場合は、`@cloudflare/vitest-pool-workers`を利用してください。
+`tsumugi/testing`は、この範囲のテストを対象としていません。

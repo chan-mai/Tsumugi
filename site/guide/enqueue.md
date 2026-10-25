@@ -1,17 +1,26 @@
+---
+title: ジョブの投入
+publishedAt: 2026-07-22
+updatedAt: 2026-10-25
+---
+
 # ジョブの投入
 
-## 投入経路 {#paths}
+## 投入方法
 
-投入には2つの経路があります。
+| 方法 | 型 | shard数と実行量の設定の取得元 |
+| --- | --- | --- |
+| `tsumugi.enqueue` / `tsumugi.jobs(env)` | bindingごとに導出されるpayloadと必須キーの型 | `defineTsumugi`の`bindings` |
+| `createClient(bindings)` | `binding`は`string`, `payload`は`unknown` | `createClient`の第1引数 |
 
-| 経路                                    | 型                                        | `bindings`の設定       |
-| --------------------------------------- | ----------------------------------------- | ---------------------- |
-| `tsumugi.enqueue` / `tsumugi.jobs(env)` | bindingごとにpayloadと必須キーが決まる    | 反映される             |
-| `createClient(bindings)`                | `binding`は`string`、`payload`は`unknown` | 引数の内容が反映される |
+performerと同じWorkerからは、`defineTsumugi`の戻り値を使ってジョブを投入します。
+`createClient`は、performerを持たないWorkerからジョブを投入するためのクライアントです。
 
-通常、performerと同じWorkerからは、`defineTsumugi`の戻り値を利用します。
-`createClient`は投入のみを限定的に行うWorker向けに提供されています。
-また、wranglerのbindingが不足している場合、`tsumugi.enqueue`と`tsumugi.jobs`では不足の一覧を含む例外が発生することがあります。
+必要なbindingが不足していると、`tsumugi.enqueue`, `tsumugi.enqueueMany`, `tsumugi.jobs(env)`は例外を発生させます。
+例外には、不足しているbindingの一覧が含まれます。
+`JOB_SHARD`, `TSUMUGI_DB`, `TSUMUGI_QUEUE`は、常に必須です。
+`flows`を使う場合は`RUN`を、`schedules`を使う場合は`SCHEDULER`を追加します。
+`remote()`のperformerには、対応するService Bindingを用意します。
 
 ## enqueue
 
@@ -23,11 +32,12 @@ const id = await tsumugi.enqueue(env, {
 ```
 
 戻り値はジョブIDです。
-bindingからpayloadの型が決まり、必須キーの渡し忘れはコンパイルエラーになります。
+payloadの型は、指定した`binding`の値から導出されます。
+必須キーを指定しない場合、コンパイルエラーが発生します。
 
 ## enqueueMany
 
-複数件をまとめて投入する場合は`enqueueMany`を使用します。
+`tsumugi.enqueueMany`は、複数のジョブを一括で投入します。
 
 ```ts
 const ids = await tsumugi.enqueueMany(env, [
@@ -36,13 +46,12 @@ const ids = await tsumugi.enqueueMany(env, [
 ]);
 ```
 
-件数が増えた場合も所要時間の増加は限定的です。
+件数が増えても、所要時間はほとんど変わりません。
+戻り値の配列では、i番目の要素が入力のi番目のジョブに対応するIDです。
 
-戻り値は入力と同じ並び順になります。
+## jobs
 
-## jobs {#jobs}
-
-`tsumugi.jobs(env)`は、envを渡して作る型付きの投入用オブジェクトです。
+`tsumugi.jobs(env)`の戻り値は、`env`を事前に指定した型付きジョブ投入用オブジェクトです。
 
 ```ts
 const jobs = tsumugi.jobs(env);
@@ -51,48 +60,32 @@ const id = await jobs.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' });
 await jobs.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { concurrencyKey: 'customer:c1' });
 ```
 
-投入の内容は`tsumugi.enqueue`と同様で、引数の形式のみ異なります。
-[キーを必須にしたperformer](/guide/performer#required-keys)では、`options`の省略とキー漏れがコンパイルエラーになります。
+投入される内容は、`tsumugi.enqueue`と同一です。
+違いは引数の形式に限られます。
+[キーを必須にしたperformer](/guide/performer#キーの必須化)では、`options`を省略した場合と、キーを指定しなかった場合に、コンパイルエラーが発生します。
 
 ## オプション
 
-| 名前             | 既定                                        | 内容                                   |
-| ---------------- | ------------------------------------------- | -------------------------------------- |
-| `priority`       | `0`                                         | 数値の優先度、大きいほど先に投入される |
-| `maxAttempts`    | `3`                                         | 試行回数の上限                         |
-| `backoff`        | 指数、1秒起点、係数2、上限1時間、ジッタあり | リトライ間隔                           |
-| `timeoutMs`      | `60000`                                     | 結果を待つ時間の上限                   |
-| `delayMs`        | なし                                        | 実行開始を遅らせる                     |
-| `runAt`          | なし                                        | 絶対時刻での予約、`delayMs`とは排他    |
-| `expiresInMs`    | なし                                        | 投入時刻からの相対の期限               |
-| `expiresAt`      | なし                                        | 絶対時刻での期限、`expiresInMs`より優先 |
-| `guarantee`      | `at-least-once`                             | 実行保証                               |
-| `concurrencyKey` | なし                                        | キー単位の直列化に使う                 |
-| `uniqueKey`      | なし                                        | 重複排除に使う                         |
-| `uniqueForMs`    | 24時間                                      | `uniqueKey`の予約を保持する期間        |
-| `partitionKey`   | なし                                        | 分割している場合の投入先の決定に使う   |
-| `traceparent`    | なし                                        | 投入元のW3C Trace Context             |
+| 名前 | 既定 | 内容 |
+| --- | --- | --- |
+| `priority` | `0` | 数値の優先度。大きいほど先に実行 |
+| `maxAttempts` | `3` | 試行回数の上限。1以上の整数 |
+| `backoff` | 指数, 1秒から開始, 係数2, 上限1時間, ジッタあり | リトライの間隔 |
+| `timeoutMs` | `60000` | タイムアウトまでの時間 |
+| `delayMs` | なし | 実行開始までの遅延。`runAt`と同時に指定不可 |
+| `runAt` | なし | 実行開始の時刻。`delayMs`と同時に指定不可 |
+| `expiresInMs` | なし | 投入時刻から数えた期限 |
+| `expiresAt` | なし | 期限の時刻。`expiresInMs`より優先 |
+| `guarantee` | `at-least-once` | 実行保証。重複実行を避ける場合は`at-most-once` |
+| `concurrencyKey` | なし | 同じキーのジョブを順に実行するためのキー |
+| `uniqueKey` | なし | 重複排除のキー |
+| `uniqueForMs` | 24時間 | `uniqueKey`で重複を判定する期間 |
+| `partitionKey` | なし | shardを分割している場合に投入先を決めるキー |
+| `traceparent` | なし | 投入元のW3C Trace Context |
 
-`partitionKey`が有効なのは`bindings`の設定を参照する経路のみです。詳細は[投入経路](#paths)を参照してください。
-
-## トレース情報 {#traceparent}
-
-直接のジョブ投入で`traceparent`を指定すると、performerの`ctx.traceparent`へ同じ値が渡されます。
-
-```ts
-await tsumugi.enqueue(env, {
-  binding: 'MAIL',
-  payload: { to: 'a@example.com', subject: 'hi' },
-  traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
-});
-```
-
-W3C Trace Contextのversion `00`に対応する55文字の形式を受け付けます。
-各項目には小文字の16進数を使用し、trace-idとparent-idには全桁が0の値を指定できません。不正な値は投入時に検証エラーになります。
-未指定の場合は`ctx.traceparent`が`null`になります。
-
-リトライでも同値を引き継ぎ、ジョブの詳細画面に表示されます。
-`enqueueMany`ではジョブ単位で指定可能です。
+shard数が2以上のbindingでは、`partitionKey`を省略すると例外が発生します。
+`partitionKey`で投入先のshardを選択するのは、`bindings`の`shards`を適用する投入方法に限られます。
+詳細は[投入方法](#投入方法)を参照してください。
 
 ## 予約実行
 
@@ -106,23 +99,22 @@ await tsumugi.enqueue(env, { binding: 'MAIL', payload, runAt: Date.parse('2026-0
 
 ## 有効期限
 
-`expiresInMs`または`expiresAt`を指定すると、期限を過ぎたジョブは実行されずCANCELLEDになります。
-これにより、一時停止や滞留からの復帰時に、既に意味の無くなった通知などがまとめて実行されるのを防ぎます。
+`expiresInMs`または`expiresAt`を指定すると、期限を過ぎたジョブは実行されずに`CANCELLED`へ遷移します。
+一時停止や実行の遅れの後でも、期限切れの通知がまとめて実行されることはありません。
 
 ```ts
 // 5分以内に開始できなければ実行しない
 await tsumugi.enqueue(env, { binding: 'NOTIFY', payload, expiresInMs: 5 * 60 * 1000 });
 ```
 
-判定は実行開始の直前に行われ、実行中のジョブは期限が過ぎても中断されることはありません。
-リトライの予定が期限を越える場合、失敗した時点でCANCELLEDになります。
-FAILEDやSTALLEDからの手動リトライも期限の対象です。
-
-なお、実行の抑止は開始前のジョブに対するものです。at-least-onceの重複配送が期限をまたいだ場合、実行されたジョブがCANCELLEDと記録されることがあります。
+実行中のジョブは、期限を過ぎても中断されません。
+次のリトライ予定時刻が期限より後の場合、ジョブは失敗時に`CANCELLED`へ遷移します。
+`FAILED`および`STALLED`のジョブを手動でリトライする際も、期限が適用されます。
 
 ## 重複排除
 
-`uniqueKey`を指定すると、同じキーのジョブが既に存在する場合は新規作成せず、既存のジョブIDを返すようになります。
+`uniqueKey`を指定すると、同じキーのジョブがすでに存在するときは新しいジョブを作成しません。
+このときの戻り値は、既存のジョブのIDです。
 
 ```ts
 const id = await tsumugi.enqueue(env, {
@@ -132,14 +124,15 @@ const id = await tsumugi.enqueue(env, {
 });
 ```
 
-重複した投入は異常として扱わないため、原則として例外は発生しません。
-
-予約は`uniqueForMs`の経過後に削除され、それ以降は同一キーであっても新しいジョブとして扱われます
+重複した投入はエラーになりません。
+例外も発生しません。
+`uniqueForMs`の期間が経過すると、重複の判定は解除されます。
+同じキーで再度投入すれば、新しいジョブが作成されます。
 
 ## 直列化
 
-`concurrencyKey`が同じジョブは、`perKeyConcurrency`の上限まで同時に実行されます。
-既定値は1であり、同一キーのジョブは1件ずつ順次実行されます。
+`concurrencyKey`が同じジョブは、`perKeyConcurrency`の件数まで同時に実行されます。
+既定値は1なので、同じキーのジョブは1件ずつ順に実行されます。
 
 ```ts
 await tsumugi.enqueue(env, {
@@ -149,7 +142,27 @@ await tsumugi.enqueue(env, {
 });
 ```
 
-また、この保証が成立するのはshard数が1の場合に限り、2以上に設定した場合、shardを同じキーで決定しない限り、エラーにならないまま保証が無効になります。詳細は[shard](/guide/execution#shard)を参照してください。
+shard数が2以上のbindingでは、この直列化は`partitionKey`が同じshardの中に限られます。
+詳細は[shard](/guide/execution#shard)を参照してください。
+
+## トレース情報
+
+投入時に`traceparent`を指定すると、performerの`ctx.traceparent`に同じ値が渡されます。
+リトライ時も同じ値が渡され、ダッシュボードはジョブの詳細にこの値を表示します。
+`enqueueMany`は、ジョブごとの`traceparent`を受け付けます。
+
+```ts
+await tsumugi.enqueue(env, {
+  binding: 'MAIL',
+  payload: { to: 'a@example.com', subject: 'hi' },
+  traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+});
+```
+
+形式はW3C Trace Contextのversion `00`(55文字)です。
+各項目は小文字の16進数で記述します。
+形式が正しくない値を指定すると、投入時に検証エラーが発生します。
+trace-idまたはparent-idのすべての桁が0の値を指定した場合も、検証エラーが発生します。
 
 ## ジョブID
 
@@ -159,10 +172,12 @@ await tsumugi.enqueue(env, {
 
 例: `MAIL#0:xxxxxxxxxxxxxxxxxxxxxxxx`
 
-shard数を後から変えると既存のIDの参照先が変更されます。後方互換性のため、古いshardは残すことを推奨します。
+shard数を変更しても、既存のジョブIDは同一のジョブを識別します。
+ただし、変更の前後で、`partitionKey`の値が同じジョブの投入先shardは変わる可能性があります。
+`concurrencyKey`と`uniqueKey`による制御はshardごとに実行されるので、投入先のshardが異なるジョブの間には適用されません。
+shard数を減らすと、範囲外になったshardには[実行時の設定変更](/guide/execution#実行時の変更)が適用されません。
+shardの詳細は、[shard](/guide/execution#shard)を参照してください。
 
 ## 別Workerからの投入
 
-投入だけを行うWorkerからは`tsumugi/client`が利用可能です。`createClient`でbindingを指定し、`enqueue`や`enqueueMany`を呼び出すことができます。
-
-詳細は[別Workerからの投入](/guide/client)を参照してください。
+performerを持たないWorkerからの投入については、[別Workerからの投入](/guide/client)を参照してください。

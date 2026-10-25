@@ -1,0 +1,15 @@
+export type IconName =
+	| 'github'
+	| 'npm'
+	| 'search'
+	| 'menu'
+	| 'close'
+	| 'check'
+	| 'copy'
+	| 'sun'
+	| 'moon'
+	| 'monitor'
+	| 'chevron-left'
+	| 'chevron-down'
+	| 'chevron-right'
+	| 'edit';

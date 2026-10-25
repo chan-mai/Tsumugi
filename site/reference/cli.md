@@ -1,17 +1,20 @@
+---
+title: CLI
+publishedAt: 2026-07-22
+updatedAt: 2026-10-25
+---
+
 # CLI
 
-`tsumugi`パッケージにはセットアップ用のCLIが含まれます。
-インストールは不要で、パッケージを追加したプロジェクトで`npx tsumugi`を実行します。
-
-## 対話モード
-
-引数なしで起動すると対話モードになります。
+`tsumugi`パッケージは、セットアップ用のCLIを含みます。
+別途インストールする必要はありません。
+パッケージを追加したプロジェクトで、`npx tsumugi`を実行します。
+引数なしで実行すると、対話モードで起動します。
+パイプやCIなどTTYでない環境では、対話モードにならず、使用方法を出力して終了します。
 
 ```bash
 npx tsumugi
 ```
-
-パイプやCIなどTTYでない環境では対話モードに入らず、usageを出力し終了されます。
 
 ## tsumugi init
 
@@ -21,25 +24,23 @@ npx tsumugi
 npx tsumugi init [--name <name>] [--format jsonc|toml]
 ```
 
-実行される内容は次の通りです。
-
-1. `wrangler queues create <name>`と`wrangler d1 create <name>`でリソースを作成
-2. wrangler設定が無ければ生成。`wrangler d1 create`が出力した`database_id`書き込み
-3. `src/index.ts`と`src/performers/`と`.dev.vars`の生成
-4. `wrangler d1 migrations apply`(`--local`と`--remote`)と`wrangler types`を実行
+`init`は、`wrangler queues create <name>`と`wrangler d1 create <name>`でリソースを作成します。
+wranglerの設定ファイルが存在しない場合、新たに生成し、`wrangler d1 create`が出力した`database_id`を書き込みます。
+次に、`src/index.ts`, `src/performers/`, `.dev.vars`を生成します。
+最後に、`wrangler d1 migrations apply`(`--local`と`--remote`)と`wrangler types`を実行します。
 
 ### オプション
 
-| オプション                | 内容                                                                                              |
-| ------------------------- | ------------------------------------------------------------------------------------------------- |
-| `--name <name>`           | Workerの名前。省略時は既存設定の`name`、`package.json`の`name`、ディレクトリ名の順で決まります |
-| `--format <jsonc\|toml>`  | 生成する設定の形式。既定は`jsonc`                                                                 |
+| オプション | 内容 |
+| --- | --- |
+| `--name <name>` | Workerの名前。省略した場合は、既存の設定ファイルの`name`, `package.json`の`name`, ディレクトリ名の順に使用 |
+| `--format <jsonc\|toml>` | 生成する設定ファイルの形式。既定は`jsonc` |
 
 ### 既存ファイルの扱い
 
-意図しない上書きを避けるため、既存のファイルを書き換えることはありません。
-wrangler設定(`wrangler.json` / `wrangler.jsonc` / `wrangler.toml`)が既にある場合は、その形式に合わせた追記するべき値を出力します。
-`src/index.ts`などの雛形も、既にあるものはスキップされます。
+`init`は、既存のファイルを変更しません。
+wranglerの設定ファイル(`wrangler.json`, `wrangler.jsonc`, `wrangler.toml`)が既に存在する場合は、追記する内容をそのファイルの形式で出力します。
+`src/index.ts`などの雛形のうち、既存のファイルは再生成しません。
 
 ## tsumugi add-performer
 
@@ -49,14 +50,14 @@ performerを追加します。
 npx tsumugi add-performer <NAME>
 ```
 
-1. `src/performers/<name>.ts`にperformerのクラスを生成
-2. `src/performers/index.ts`へexport行を1行追記
+`add-performer`は、`src/performers/<name>.ts`にperformerのクラスを生成します。
+`src/performers/index.ts`には、export行を1行追記します。
+名前は、kebab-case, camelCase, PascalCase, SNAKE_CASEのいずれの形式も受け付けます。
+クラス名はPascalCaseに、ファイル名はkebab-caseに変換します。
+たとえば`send-mail`は、クラス`SendMail`とファイル`send-mail.ts`として生成されます。
 
-名前はkebab-case / camelCase / PascalCase / SNAKE_CASEのいずれも指定可能です。
-クラス名はPascalCase、ファイル名はkebab-caseへ変換されます(例: `send-mail`はクラス`SendMail`とファイル`send-mail.ts`になります)。
+### Service Bindingの設定
 
-
-### service bindingの追記
-
-実行すると、別のWorkerからこのperformerを使う場合に呼び出し側の設定へ追記する`services`の値が出力されます。
-同じWorkerで実行する分には、設定への追記は不要です。
+別のWorkerからこのperformerを呼び出す場合は、呼び出し側の設定ファイルに`services`の値を追加してください。
+`add-performer`は、追加すべき値を出力します。
+同じWorker内でperformerを実行する場合は、追加は不要です。
