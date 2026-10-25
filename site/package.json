@@ -12,13 +12,13 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
+    "@golar/vue": "^0.1.11",
     "@nuxt/fonts": "^1.2.0",
     "@takumi-rs/core": "^2.18.1",
     "@types/three": "^0.186.0",
     "github-slugger": "^2.0.0",
+    "golar": "^0.1.11",
     "nuxt-og-image": "^7.0.7",
-    "typescript": "^6.0.3",
-    "vue-tsc": "^3.3.13",
     "wrangler": "^4.151.2"
   },
   "dependencies": {
