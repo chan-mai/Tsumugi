@@ -14,15 +14,16 @@ const { data } = await useAsyncData(
 	async () => {
 		if (siteLocale.value !== 'ja') {
 			const translated = await queryCollection(docsCollections[siteLocale.value]).path(path.value).first();
-			if (translated) return { page: translated, untranslated: false };
+			if (translated) return { page: translated, untranslated: false, translated: true };
 		}
 		const page = await queryCollection('docs_ja').path(sourcePath.value).first();
-		return page ? { page, untranslated: siteLocale.value !== 'ja' } : null;
+		return page ? { page, untranslated: siteLocale.value !== 'ja', translated: false } : null;
 	},
 );
 if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true });
 const page = computed(() => data.value?.page);
 const untranslated = computed(() => data.value?.untranslated ?? false);
+const translated = computed(() => data.value?.translated ?? false);
 
 const description = computed(() => page.value?.description?.replaceAll('\n', ''));
 usePageTitle(() => page.value?.title);
@@ -61,6 +62,9 @@ useMotion(({ gsap }) => {
 			<SiteBreadcrumb :items="crumbs" class="mb-8" />
 			<Callout v-if="untranslated" type="info"
 				><p>{{ $t('doc.untranslated') }}</p></Callout
+			>
+			<Callout v-if="translated" type="info"
+				><p>{{ $t('doc.machineTranslated') }}</p></Callout
 			>
 			<ContentRenderer :value="page" class="leading-[1.9] wrap-anywhere" />
 

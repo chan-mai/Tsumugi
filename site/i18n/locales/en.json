@@ -43,7 +43,8 @@
     "pager": "Previous and next pages",
     "prev": "Previous",
     "next": "Next",
-    "untranslated": "This page has not been translated into English yet."
+    "untranslated": "This page has not been translated into English yet.",
+    "machineTranslated": "This page was translated by an LLM. Some details and nuances may differ from the original."
   },
   "search": {
     "title": "Search",
