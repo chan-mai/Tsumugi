@@ -20,9 +20,7 @@ export default defineNuxtConfig({
 	app: {
 		head: {
 			htmlAttrs: { lang: 'ja-JP' },
-			meta: [
-				{ name: 'theme-color', content: '#f7a1b2' },
-			],
+			meta: [{ name: 'theme-color', content: '#f7a1b2' }],
 		},
 	},
 	colorMode: { classSuffix: '', storageKey: 'tsumugi-color-mode' },
@@ -41,7 +39,7 @@ export default defineNuxtConfig({
 	},
 	runtimeConfig: {
 		public: {
-			repo: 'https://github.com/chan-mai/Tsumugi'
+			repo: 'https://github.com/chan-mai/Tsumugi',
 		},
 	},
 	nitro: {

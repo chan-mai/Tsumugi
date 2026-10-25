@@ -6,7 +6,6 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-
 @theme static {
 	--color-*: initial;
 
@@ -45,7 +44,6 @@
 	--color-button-brand-bg: #f7a1b2;
 	--color-button-brand-hover-bg: color-mix(in srgb, #f7a1b2 62%, #fff);
 	--color-button-brand-text: #ffffff;
-
 
 	--color-hero-gradient-1: color-mix(in srgb, #f7a1b2 55%, #fff);
 	--color-hero-gradient-2: #cbbfe6;
