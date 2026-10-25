@@ -25,6 +25,7 @@ export default defineNuxtConfig({
 	},
 	colorMode: { classSuffix: '', storageKey: 'tsumugi-color-mode' },
 	content: {
+		database: { type: 'd1', bindingName: 'DB' },
 		experimental: { sqliteConnector: 'native' },
 		build: {
 			markdown: {
@@ -42,7 +43,15 @@ export default defineNuxtConfig({
 			repo: 'https://github.com/chan-mai/Tsumugi',
 		},
 	},
+	routeRules: {
+		'/': { prerender: true },
+		'/guide/**': { prerender: true },
+		'/reference/**': { prerender: true },
+		'/search': { prerender: false },
+	},
 	nitro: {
-		prerender: { autoSubfolderIndex: false, crawlLinks: true, routes: ['/'] },
+		preset: 'cloudflare-module',
+		cloudflare: { deployConfig: true, nodeCompat: true },
+		prerender: { autoSubfolderIndex: false, crawlLinks: true },
 	},
 });

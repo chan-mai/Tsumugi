@@ -4,11 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "nuxt dev",
-    "build": "nuxt generate",
-    "preview": "nuxt preview",
+    "build": "nuxt build",
+    "preview": "nuxt build && wrangler dev",
     "postinstall": "nuxt prepare",
     "typecheck": "nuxt typecheck",
-    "deploy": "nuxt generate && wrangler deploy"
+    "deploy": "nuxt build && wrangler deploy"
   },
   "devDependencies": {
     "@nuxt/fonts": "^1.2.0",
