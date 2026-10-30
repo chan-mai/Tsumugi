@@ -1,5 +1,5 @@
 // ジョブID形式`<binding>#<shard>:<localId>`, IDからDO stubをO(1)で解決(ADR-0005)
-// 乱数を使うlocalId生成(cuid2)は対象外, core純粋性維持(ADR-0018)
+// 乱数を使うlocalId生成は対象外, core純粋性維持(ADR-0018)
 
 export type JobAddress = {
 	binding: string;
@@ -9,7 +9,7 @@ export type JobAddress = {
 
 // env.NAME参照用にJS識別子へ限定, #と:の混入防止兼用
 const BINDING_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-// cuid2は英数字, 往復不能な区切り文字は拒否
+// 生成IDは英数字, 往復不能な区切り文字は拒否
 const LOCAL_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export class InvalidJobIdError extends Error {

@@ -13,11 +13,8 @@ const packageJson = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'p
 const toTemplate = (path: string) => path.replace(/:([A-Za-z0-9_]+)/g, '{$1}');
 
 function registeredRoutes(): string[] {
-	const noop = async (_c: unknown, next: () => Promise<void>) => {
-		await next();
-	};
 	// 未指定時は501を返す経路が未登録
-	const app = createRest(noop as never, {
+	const app = createRest(() => undefined, {
 		bindings: ['MAIL'],
 		enqueue: async () => 'MAIL#0:x',
 		flows: ['report'],
@@ -31,11 +28,7 @@ function registeredRoutes(): string[] {
 		shardsOf: () => 1,
 	});
 
-	// ALLはミドルウェアとSPAのフォールバック
-	return app.routes
-		.filter((route) => route.method !== 'ALL')
-		.map((route) => `${route.method} ${toTemplate(route.path)}`)
-		.sort();
+	return app.routes.map((route) => `${route.method} ${toTemplate(route.path)}`).sort();
 }
 
 function documentedRoutes(): string[] {

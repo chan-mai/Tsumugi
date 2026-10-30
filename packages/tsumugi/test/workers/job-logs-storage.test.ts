@@ -1,11 +1,9 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { getTableConfig } from 'drizzle-orm/sqlite-core';
 import { describe, expect, it } from 'vitest';
 import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../../src/core/log.js';
 import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from '../../src/do/job-shard.js';
 import type { JobRepo } from '../../src/do/repo.js';
-import { applySchema, SCHEMA } from '../../src/do/schema.js';
-import { jobLog } from '../../src/do/tables.js';
+import { applySchema, COLUMNS, SCHEMA } from '../../src/do/schema.js';
 import { project } from '../../src/projection/projector.js';
 
 const T0 = 2_400_000_000_000;
@@ -160,11 +158,7 @@ describe('ジョブログの保存と投影', () => {
 		expect(actual.before.map((column) => column.name)).not.toContain('traceparent');
 		expect(actual.job.map((column) => column.name)).toContain('traceparent');
 		expect(actual.row).toEqual({ id: 'legacy', traceparent: null });
-		expect(actual.log.map((column) => column.name).sort()).toEqual(
-			getTableConfig(jobLog)
-				.columns.map((column) => column.name)
-				.sort(),
-		);
+		expect(actual.log.map((column) => column.name).sort()).toEqual([...COLUMNS.job_log].sort());
 	});
 
 	it('旧スナップショットの投影で追加列をnullにする', async () => {

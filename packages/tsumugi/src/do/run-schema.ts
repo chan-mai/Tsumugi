@@ -55,6 +55,48 @@ const RUN_SCHEMA = [
 	)`,
 ] as const;
 
+// 取得列の明示, 既存DOの残存列除外
+export const RUN_COLUMNS = {
+	run: [
+		'id',
+		'flow',
+		'state',
+		'input',
+		'shape',
+		'cancelling',
+		'parent_run_id',
+		'parent_node_id',
+		'depth',
+		'parent_notified',
+		'deadline_ms',
+		'deadline_at',
+		'expired',
+		'created_at',
+		'updated_at',
+	] satisfies readonly (keyof RunRow)[],
+	node: [
+		'id',
+		'binding',
+		'state',
+		'container',
+		'parent',
+		'origin',
+		'after',
+		'trigger',
+		'payload',
+		'options',
+		'subflow',
+		'job_id',
+		'child_run_id',
+		'result',
+		'error',
+		'seq',
+		'created_at',
+		'updated_at',
+	] satisfies readonly (keyof NodeRow)[],
+	run_outbox: ['seq', 'kind', 'target', 'snapshot'],
+} as const;
+
 export function applyRunSchema(sql: SqlStorage): void {
 	for (const statement of RUN_SCHEMA) sql.exec(statement);
 	// 既存DOに残る未使用索引, 書き込みごとに更新

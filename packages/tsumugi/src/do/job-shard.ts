@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createId } from '@paralleldrive/cuid2';
+import { createLocalId } from './local-id.js';
 import { embedJobId, formatJobId, shardName } from '../core/ids.js';
 import type { FailOptions } from '../core/api.js';
 import { nextAttempt } from '../core/backoff.js';
@@ -363,7 +363,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const ids: string[] = [];
 
 		for (const [index, input] of inputs.entries()) {
-			const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createId() });
+			const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createLocalId() });
 
 			// ID指定の再投入は既存ID返却, Run DO再送での重複防止
 			if (input.id !== undefined && this.repo.find(id)) {

@@ -2,7 +2,6 @@ import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { SettledNotice, SettledTarget } from '../../src/core/types.js';
-import { settledNotify } from '../../src/do/tables.js';
 import { embedJobId } from '../../src/core/ids.js';
 
 const T0 = 2_600_000_000_000;
@@ -184,10 +183,11 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		// 送信後中断を再現, カーソル未更新で同じ通知を再送
 		await runInDurableObject(shard('SET6#0'), (instance) => {
-			(instance as any).repo.db
-				.insert(settledNotify)
-				.values({ jobId, payload: JSON.stringify({ jobId, binding: 'SET6', state: 'COMPLETED', attempts: 1 }) })
-				.run();
+			((instance as any).repo.sql as SqlStorage).exec(
+				`INSERT INTO settled_notify (job_id, payload) VALUES (?, ?)`,
+				jobId,
+				JSON.stringify({ jobId, binding: 'SET6', state: 'COMPLETED', attempts: 1 }),
+			);
 		});
 		await runDurableObjectAlarm(shard('SET6#0'));
 

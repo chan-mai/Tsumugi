@@ -1,12 +1,8 @@
-import { and, asc, desc as sqlDesc, eq, sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import { alias } from 'drizzle-orm/sqlite-core';
 import { attemptsOf } from '../core/attempts.js';
 import { nodeTiming } from '../core/node-timing.js';
 import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
 import { parseAttempts, parseJson } from './job.repository.js';
-import { job as readModel } from '../projection/tables.js';
-import { run as runModel, runNode } from '../projection/run-tables.js';
+import { and, condition, whereOf } from './where.js';
 
 export type RunListQuery = { state: string | null; flow: string | null; limit: number; offset: number };
 
@@ -23,108 +19,114 @@ export class RunReadRepository implements RunRepository {
 	}
 
 	async list({ state, flow, limit, offset }: RunListQuery): Promise<{ runs: RunListItem[]; total: number }> {
-		const d = drizzle(this.#db);
-		const filters = [state ? eq(runModel.state, state) : undefined, flow ? eq(runModel.flow, flow) : undefined].filter(
-			(f) => f !== undefined,
-		);
-		const clause = filters.length > 0 ? and(...filters) : undefined;
+		const where = whereOf(and(state ? condition('state = ?', state) : undefined, flow ? condition('flow = ?', flow) : undefined));
 
-		const [page, total] = await d.batch([
-			d
-				.select({
-					id: runModel.id,
-					flow: runModel.flow,
-					state: runModel.state,
-					nodeTotal: runModel.nodeTotal,
-					nodeDone: runModel.nodeDone,
-					nodeFailed: runModel.nodeFailed,
-					createdAt: runModel.createdAt,
-					updatedAt: runModel.updatedAt,
-				})
-				.from(runModel)
-				.where(clause)
-				.orderBy(sqlDesc(runModel.updatedAt), sqlDesc(runModel.id))
-				.limit(limit)
-				.offset(offset),
-			d
-				.select({ total: sql<number>`count(*)` })
-				.from(runModel)
-				.where(clause),
+		const [page, total] = await this.#db.batch([
+			this.#db
+				.prepare(
+					`SELECT id, flow, state, node_total AS "nodeTotal", node_done AS "nodeDone", node_failed AS "nodeFailed",
+						created_at AS "createdAt", updated_at AS "updatedAt"
+					FROM run${where.sql} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
+				)
+				.bind(...where.params, limit, offset),
+			this.#db.prepare(`SELECT count(*) AS total FROM run${where.sql}`).bind(...where.params),
 		]);
-		return { runs: page, total: total[0]?.total ?? 0 };
+		return { runs: page!.results as RunListItem[], total: (total!.results[0] as { total: number } | undefined)?.total ?? 0 };
 	}
 
 	// グラフは1クエリで返却, 段組み描画に全ノード必要
 	async find(id: string): Promise<{ run: Run; nodes: RunNode[] } | null> {
-		const d = drizzle(this.#db);
-		const childRun = alias(runModel, 'child_run');
-		const [runs, nodes] = await d.batch([
-			d.select().from(runModel).where(eq(runModel.id, id)).limit(1),
-
-			d
-				.select({
-					node: runNode,
-					job: {
-						state: sql<string>`${readModel.state}`.as('job_state'),
-						attempts: sql<number>`${readModel.attempts}`.as('job_attempts'),
-						createdAt: sql<number>`${readModel.createdAt}`.as('job_created_at'),
-						updatedAt: sql<number>`${readModel.updatedAt}`.as('job_updated_at'),
-						dispatchedAt: sql<number | null>`${readModel.dispatchedAt}`.as('job_dispatched_at'),
-						runAfter: sql<number | null>`${readModel.runAfter}`.as('job_run_after'),
-						attemptsLog: sql<string | null>`${readModel.attemptsLog}`.as('job_attempts_log'),
-					},
-					child: {
-						state: sql<string>`${childRun.state}`.as('child_state'),
-						createdAt: sql<number>`${childRun.createdAt}`.as('child_created_at'),
-						updatedAt: sql<number>`${childRun.updatedAt}`.as('child_updated_at'),
-					},
-				})
-				.from(runNode)
-				.leftJoin(readModel, eq(readModel.id, runNode.jobId))
-				.leftJoin(childRun, eq(childRun.id, runNode.childRunId))
-				.where(eq(runNode.runId, id))
-				.orderBy(asc(runNode.position)),
+		const [runs, nodes] = await this.#db.batch([
+			this.#db
+				.prepare(
+					`SELECT id, flow, state, input, node_total AS "nodeTotal", node_done AS "nodeDone", node_failed AS "nodeFailed",
+						created_at AS "createdAt", updated_at AS "updatedAt", parent_run_id AS "parentRunId", parent_node_id AS "parentNodeId"
+					FROM run WHERE id = ? LIMIT 1`,
+				)
+				.bind(id),
+			this.#db
+				.prepare(
+					`SELECT n.node_id, n.binding, n.state, n.container, n.parent, n.origin, n."after", n.job_id, n.child_run_id,
+						n.result, n.error, n.position, n.created_at, n.updated_at,
+						j.state AS job_state, j.attempts AS job_attempts, j.created_at AS job_created_at, j.updated_at AS job_updated_at,
+						j.dispatched_at AS job_dispatched_at, j.run_after AS job_run_after, j.attempts_log AS job_attempts_log,
+						c.state AS child_state, c.created_at AS child_created_at, c.updated_at AS child_updated_at
+					FROM run_node n
+					LEFT JOIN job j ON j.id = n.job_id
+					LEFT JOIN run c ON c.id = n.child_run_id
+					WHERE n.run_id = ?
+					ORDER BY n.position ASC`,
+				)
+				.bind(id),
 		]);
 
-		const found = runs[0];
+		const found = runs!.results[0] as Run | undefined;
 		if (!found) return null;
 		return {
-			run: {
-				id: found.id,
-				flow: found.flow,
-				state: found.state,
-				input: found.input,
-				nodeTotal: found.nodeTotal,
-				nodeDone: found.nodeDone,
-				nodeFailed: found.nodeFailed,
-				createdAt: found.createdAt,
-				updatedAt: found.updatedAt,
-				parentRunId: found.parentRunId,
-				parentNodeId: found.parentNodeId,
-			},
-			nodes: nodes.map(({ node, job: joined, child: joinedChild }) => {
+			run: found,
+			nodes: (nodes!.results as JoinedNode[]).map((node) => {
 				// 結合先なしは全列null
-				const job = joined?.state != null ? joined : null;
-				const child = joinedChild?.state != null ? joinedChild : null;
+				const job =
+					node.job_state != null
+						? {
+								state: node.job_state,
+								attempts: node.job_attempts!,
+								createdAt: node.job_created_at!,
+								updatedAt: node.job_updated_at!,
+								dispatchedAt: node.job_dispatched_at,
+								runAfter: node.job_run_after,
+							}
+						: null;
+				const child =
+					node.child_state != null
+						? { state: node.child_state, createdAt: node.child_created_at!, updatedAt: node.child_updated_at! }
+						: null;
 				return {
-					id: node.nodeId,
+					id: node.node_id,
 					binding: node.binding,
 					state: node.state,
 					container: node.container === 1,
 					parent: node.parent,
 					origin: node.origin,
 					after: parseJson<string>(node.after),
-					jobId: node.jobId,
-					childRunId: node.childRunId,
+					jobId: node.job_id,
+					childRunId: node.child_run_id,
 					result: node.result,
 					error: node.error,
 					position: node.position,
-					createdAt: node.createdAt,
-					updatedAt: node.updatedAt,
+					createdAt: node.created_at,
+					updatedAt: node.updated_at,
 					...nodeTiming(job, child),
-					attempts: job ? attemptsOf(job, parseAttempts(job.attemptsLog)) : [],
+					attempts: job ? attemptsOf(job, parseAttempts(node.job_attempts_log)) : [],
 				};
 			}),
 		};
 	}
 }
+
+type JoinedNode = {
+	node_id: string;
+	binding: string;
+	state: string;
+	container: number;
+	parent: string | null;
+	origin: string;
+	after: string;
+	job_id: string | null;
+	child_run_id: string | null;
+	result: string | null;
+	error: string | null;
+	position: number;
+	created_at: number;
+	updated_at: number;
+	job_state: string | null;
+	job_attempts: number | null;
+	job_created_at: number | null;
+	job_updated_at: number | null;
+	job_dispatched_at: number | null;
+	job_run_after: number | null;
+	job_attempts_log: string | null;
+	child_state: string | null;
+	child_created_at: number | null;
+	child_updated_at: number | null;
+};

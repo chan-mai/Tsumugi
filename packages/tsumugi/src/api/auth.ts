@@ -1,11 +1,12 @@
-import type { MiddlewareHandler } from 'hono';
-
 /**
  * 認証はfail-closed(ADR-0013)
  * 未設定時はREST API, ダッシュボードとも無効
  * 設定漏れ時は無警告の公開より動作停止が安全
+ * undefinedで認証成功, Responseで拒否
  */
-export type AuthMiddleware = MiddlewareHandler;
+export type AuthMiddleware<Env = any> = (request: Request, env: Env) => Response | undefined | Promise<Response | undefined>;
+
+export const unauthorized = () => Response.json({ error: 'unauthorized' }, { status: 401 });
 
 // 長さ含め定数時間比較, タイミング差による漏洩防止
 function timingSafeEqual(a: string, b: string): boolean {
@@ -54,13 +55,13 @@ export function readCookie(header: string | undefined, name: string): string | u
  */
 export function unsafeNoAuth(): AuthMiddleware {
 	let warned = false;
-	return async (_c, next) => {
+	return () => {
 		// isolate毎に1回, 毎リクエストのログ回避
 		if (!warned) {
 			warned = true;
 			console.warn('tsumugi: unsafeNoAuth is enabled, anyone who can reach this Worker can read and control jobs');
 		}
-		await next();
+		return undefined;
 	};
 }
 
@@ -75,22 +76,20 @@ export type TokenResolver = (env: any) => string | undefined;
 export function bearerAuth(token: string | TokenResolver, options: BearerOptions = {}): AuthMiddleware {
 	if (typeof token === 'string' && token.length === 0) throw new Error('bearerAuth token is empty, the fail-closed premise breaks');
 
-	return async (c, next) => {
-		const expected = typeof token === 'string' ? token : token(c.env);
-		if (!expected) return c.json({ error: 'unauthorized' }, 401);
+	return (request, env) => {
+		const expected = typeof token === 'string' ? token : token(env);
+		if (!expected) return unauthorized();
 
-		const header = c.req.header('authorization') ?? '';
+		const header = request.headers.get('authorization') ?? '';
 		const [scheme, value] = header.split(' ');
 		const presented =
 			scheme?.toLowerCase() === 'bearer' && value !== undefined
 				? value
 				: options.cookie
-					? readCookie(c.req.header('cookie'), options.cookie)
+					? readCookie(request.headers.get('cookie') ?? undefined, options.cookie)
 					: undefined;
 
-		if (presented === undefined || !timingSafeEqual(presented, expected)) {
-			return c.json({ error: 'unauthorized' }, 401);
-		}
-		await next();
+		if (presented === undefined || !timingSafeEqual(presented, expected)) return unauthorized();
+		return undefined;
 	};
 }

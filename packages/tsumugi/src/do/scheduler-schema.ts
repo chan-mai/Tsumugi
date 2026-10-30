@@ -30,6 +30,31 @@ const SCHEDULER_SCHEMA = [
 	)`,
 ] as const;
 
+// 取得列の明示, 既存DOの残存列除外
+export const SCHEDULER_COLUMNS = {
+	schedule: [
+		'name',
+		'kind',
+		'target',
+		'every_ms',
+		'cron',
+		'time_zone',
+		'overlap',
+		'paused',
+		'next_occurrence_at',
+		'last_occurrence_at',
+		'last_fired_at',
+		'last_job_id',
+		'last_run_id',
+		'last_skipped_at',
+		'skipped_count',
+		'last_error',
+		'created_at',
+		'updated_at',
+	] satisfies readonly (keyof ScheduleRow)[],
+	setting: ['key', 'value'],
+} as const;
+
 export function applySchedulerSchema(sql: SqlStorage): void {
 	// 旧列名の既存DO, 索引も追従
 	const existing = new Set(

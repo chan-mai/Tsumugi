@@ -1,23 +1,25 @@
-import { and, asc, desc as sqlDesc, eq, gt, gte, inArray, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import { attemptsOf } from '../core/attempts.js';
 import type { Attempt, Job, JobListItem, JobSortKey } from '../core/entity/job.entity.js';
 import type { JobLogEntry } from '../core/log.js';
-import { job as readModel } from '../projection/tables.js';
+import { READ_MODEL_COLUMNS, type ReadModelRow } from '../projection/columns.js';
+import { and, condition, inList, or, whereOf, type Condition } from './where.js';
 
 // 一覧, 詳細はD1の読み取りモデルから取得(ADR-0008)
 // 稼働中も投影済み, ページング, ソートは通常のSQL
 
-// ソート許可列の対応, 列オブジェクトへ解決し許可リスト外の文字列はSQLへ未到達
+// ソート許可列の対応, 列名へ解決し許可リスト外の文字列はSQLへ未到達
 // `satisfies`で全列網羅, 対応漏れは型検査で失敗
 const SORT_COLUMNS = {
-	updatedAt: readModel.updatedAt,
-	createdAt: readModel.createdAt,
-	binding: readModel.binding,
-	state: readModel.state,
-	priority: readModel.priority,
-	attempts: readModel.attempts,
-} satisfies Record<JobSortKey, unknown>;
+	updatedAt: 'updated_at',
+	createdAt: 'created_at',
+	binding: 'binding',
+	state: 'state',
+	priority: 'priority',
+	attempts: 'attempts',
+} satisfies Record<JobSortKey, string>;
+
+const LIST_COLUMNS = `id, binding, state, priority, attempts, max_attempts AS "maxAttempts", created_at AS "createdAt",
+	updated_at AS "updatedAt", dispatched_at AS "dispatchedAt"`;
 
 export type JobFilters = {
 	id?: string;
@@ -50,6 +52,32 @@ export type RetainedFailures = {
 };
 
 type JobStatsRow = { byState: Record<string, number>; oldestScheduledAt: number | null };
+
+type StoredJob = ReadModelRow<'job'> & {
+	id: string;
+	binding: string;
+	state: string;
+	priority: number;
+	attempts: number;
+	max_attempts: number;
+	concurrency_key: string | null;
+	unique_key: string | null;
+	guarantee: string;
+	created_at: number;
+	updated_at: number;
+	dispatched_at: number | null;
+	run_after: number | null;
+	expires_at: number | null;
+	cancel_requested_at: number | null;
+	progress: number | null;
+	payload: string;
+	result: string | null;
+	traceparent: string | null;
+	run_id: string | null;
+	node_id: string | null;
+	attempts_log: string | null;
+	logs: string | null;
+};
 
 export interface JobRepository {
 	list(query: JobListQuery): Promise<{ jobs: JobListItem[]; total: number }>;
@@ -92,12 +120,25 @@ export function parseAttempts(raw: unknown): Attempt[] {
 // DOに残る失敗ジョブの条件, retryableと同じ保持期間から近似
 // 未除外では削除済み行がcreatedAt順の先頭に残り, 繰り返しても後続へ未到達
 // binding未指定時は登録binding毎の条件, 登録一覧なしは近似不能で条件なし
-function retainedClause(retention: RetainedFailures | undefined, binding: string | undefined, now: number): SQL | undefined {
+function retainedClause(retention: RetainedFailures | undefined, binding: string | undefined, now: number): Condition | undefined {
 	if (!retention) return undefined;
-	const retained = (name: string) => gt(readModel.updatedAt, now - retention.of(name));
+	const retained = (name: string) => condition('updated_at > ?', now - retention.of(name));
 	if (binding) return retained(binding);
 	if (!retention.bindings || retention.bindings.length === 0) return undefined;
-	return or(...retention.bindings.map((name) => and(eq(readModel.binding, name), retained(name))));
+	return or(...retention.bindings.map((name) => and(condition('binding = ?', name), retained(name))));
+}
+
+// フィルタ共通の条件
+function filtersOf(filters: JobFilters & { binding?: string | null }): (Condition | undefined)[] {
+	const { binding, id, uniqueKey, concurrencyKey, createdFrom, createdTo } = filters;
+	return [
+		binding ? condition('binding = ?', binding) : undefined,
+		id ? condition('id = ?', id) : undefined,
+		uniqueKey ? condition('unique_key = ?', uniqueKey) : undefined,
+		concurrencyKey ? condition('concurrency_key = ?', concurrencyKey) : undefined,
+		createdFrom !== undefined ? condition('created_at >= ?', createdFrom) : undefined,
+		createdTo !== undefined ? condition('created_at <= ?', createdTo) : undefined,
+	];
 }
 
 export class JobReadRepository implements JobRepository {
@@ -108,49 +149,22 @@ export class JobReadRepository implements JobRepository {
 	}
 
 	async list(query: JobListQuery): Promise<{ jobs: JobListItem[]; total: number }> {
-		const { state, binding, id, uniqueKey, concurrencyKey, createdFrom, createdTo, limit, offset, sort, desc } = query;
-		const d = drizzle(this.#db);
-		const filters = [
-			state ? eq(readModel.state, state) : undefined,
-			binding ? eq(readModel.binding, binding) : undefined,
-			id ? eq(readModel.id, id) : undefined,
-			uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
-			concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
-			createdFrom !== undefined ? gte(readModel.createdAt, createdFrom) : undefined,
-			createdTo !== undefined ? lte(readModel.createdAt, createdTo) : undefined,
-		].filter((f) => f !== undefined);
-		const clause = filters.length > 0 ? and(...filters) : undefined;
-		const sortBy = SORT_COLUMNS[sort];
+		const { state, limit, offset, sort, desc } = query;
+		const where = whereOf(and(state ? condition('state = ?', state) : undefined, ...filtersOf(query)));
+		const order = `${SORT_COLUMNS[sort]} ${desc ? 'DESC' : 'ASC'}, id DESC`;
 
-		const [page, total] = await d.batch([
-			d
-				.select({
-					id: readModel.id,
-					binding: readModel.binding,
-					state: readModel.state,
-					priority: readModel.priority,
-					attempts: readModel.attempts,
-					maxAttempts: readModel.maxAttempts,
-					createdAt: readModel.createdAt,
-					updatedAt: readModel.updatedAt,
-					dispatchedAt: readModel.dispatchedAt,
-				})
-				.from(readModel)
-				.where(clause)
-				.orderBy(desc ? sqlDesc(sortBy) : asc(sortBy), sqlDesc(readModel.id))
-				.limit(limit)
-				.offset(offset),
-			d
-				.select({ total: sql<number>`count(*)` })
-				.from(readModel)
-				.where(clause),
+		const [page, total] = await this.#db.batch([
+			this.#db
+				.prepare(`SELECT ${LIST_COLUMNS} FROM job${where.sql} ORDER BY ${order} LIMIT ? OFFSET ?`)
+				.bind(...where.params, limit, offset),
+			this.#db.prepare(`SELECT count(*) AS total FROM job${where.sql}`).bind(...where.params),
 		]);
-		return { jobs: page, total: total[0]?.total ?? 0 };
+		return { jobs: page!.results as JobListItem[], total: (total!.results[0] as { total: number } | undefined)?.total ?? 0 };
 	}
 
 	async listBindings(): Promise<string[]> {
-		const rows = await drizzle(this.#db).selectDistinct({ binding: readModel.binding }).from(readModel).orderBy(asc(readModel.binding));
-		return rows.map((row) => row.binding);
+		const { results } = await this.#db.prepare(`SELECT DISTINCT binding FROM job ORDER BY binding ASC`).all<{ binding: string }>();
+		return results.map((row) => row.binding);
 	}
 
 	async selectBulkTargets(
@@ -159,49 +173,41 @@ export class JobReadRepository implements JobRepository {
 		retention: RetainedFailures | undefined,
 		now: number,
 	): Promise<{ ids: string[]; remaining: number }> {
-		const { states, limit, binding, uniqueKey, concurrencyKey, createdFrom, createdTo } = filter;
-		const d = drizzle(this.#db);
-		const clause = and(
-			...[
-				inArray(readModel.state, [...states]),
-				action === 'cancel' ? isNull(readModel.cancelRequestedAt) : undefined,
+		const { states, limit, binding } = filter;
+		const where = whereOf(
+			and(
+				inList('state', states),
+				action === 'cancel' ? condition('cancel_requested_at IS NULL') : undefined,
 				action === 'retry' ? retainedClause(retention, binding, now) : undefined,
-				binding ? eq(readModel.binding, binding) : undefined,
-				uniqueKey ? eq(readModel.uniqueKey, uniqueKey) : undefined,
-				concurrencyKey ? eq(readModel.concurrencyKey, concurrencyKey) : undefined,
-				createdFrom !== undefined ? gte(readModel.createdAt, createdFrom) : undefined,
-				createdTo !== undefined ? lte(readModel.createdAt, createdTo) : undefined,
-			].filter((f) => f !== undefined),
+				...filtersOf(filter),
+			),
 		);
 
 		// 古い順に処理, 繰り返し呼び出しで対象が減少
-		const [page, total] = await d.batch([
-			d.select({ id: readModel.id }).from(readModel).where(clause).orderBy(asc(readModel.createdAt), asc(readModel.id)).limit(limit),
-			d
-				.select({ total: sql<number>`count(*)` })
-				.from(readModel)
-				.where(clause),
+		const [page, total] = await this.#db.batch([
+			this.#db.prepare(`SELECT id FROM job${where.sql} ORDER BY created_at ASC, id ASC LIMIT ?`).bind(...where.params, limit),
+			this.#db.prepare(`SELECT count(*) AS total FROM job${where.sql}`).bind(...where.params),
 		]);
-		const ids = page.map((row) => row.id);
-		return { ids, remaining: Math.max(0, (total[0]?.total ?? 0) - ids.length) };
+		const ids = (page!.results as { id: string }[]).map((row) => row.id);
+		return { ids, remaining: Math.max(0, ((total!.results[0] as { total: number } | undefined)?.total ?? 0) - ids.length) };
 	}
 
 	async stats(): Promise<JobStatsRow> {
-		const d = drizzle(this.#db);
-		const rows = await d
-			.select({ state: readModel.state, count: sql<number>`count(*)` })
-			.from(readModel)
-			.groupBy(readModel.state);
-		const oldest = await d
-			.select({ createdAt: sql<number | null>`min(${readModel.createdAt})` })
-			.from(readModel)
-			.where(eq(readModel.state, 'SCHEDULED'));
-		return { byState: Object.fromEntries(rows.map((r) => [r.state, r.count])), oldestScheduledAt: oldest[0]?.createdAt ?? null };
+		const { results: rows } = await this.#db
+			.prepare(`SELECT state, count(*) AS count FROM job GROUP BY state`)
+			.all<{ state: string; count: number }>();
+		const oldest = await this.#db
+			.prepare(`SELECT min(created_at) AS created_at FROM job WHERE state = ?`)
+			.bind('SCHEDULED')
+			.first<{ created_at: number | null }>();
+		return { byState: Object.fromEntries(rows.map((r) => [r.state, r.count])), oldestScheduledAt: oldest?.created_at ?? null };
 	}
 
 	async find(id: string): Promise<Job | null> {
-		const rows = await drizzle(this.#db).select().from(readModel).where(eq(readModel.id, id)).limit(1);
-		const found = rows[0];
+		const found = await this.#db
+			.prepare(`SELECT ${READ_MODEL_COLUMNS.job.map((column) => `"${column}"`).join(', ')} FROM job WHERE id = ? LIMIT 1`)
+			.bind(id)
+			.first<StoredJob>();
 		if (!found) return null;
 		// 返却列を明示, スプレッドでは内部列(seq)も露出
 		const job: Omit<Job, 'attemptsLog'> = {
@@ -210,24 +216,24 @@ export class JobReadRepository implements JobRepository {
 			state: found.state,
 			priority: found.priority,
 			attempts: found.attempts,
-			maxAttempts: found.maxAttempts,
-			concurrencyKey: found.concurrencyKey,
-			uniqueKey: found.uniqueKey,
+			maxAttempts: found.max_attempts,
+			concurrencyKey: found.concurrency_key,
+			uniqueKey: found.unique_key,
 			guarantee: found.guarantee,
-			createdAt: found.createdAt,
-			updatedAt: found.updatedAt,
-			dispatchedAt: found.dispatchedAt,
-			runAfter: found.runAfter,
-			expiresAt: found.expiresAt,
-			cancelRequestedAt: found.cancelRequestedAt,
+			createdAt: found.created_at,
+			updatedAt: found.updated_at,
+			dispatchedAt: found.dispatched_at,
+			runAfter: found.run_after,
+			expiresAt: found.expires_at,
+			cancelRequestedAt: found.cancel_requested_at,
 			progress: found.progress,
 			traceparent: found.traceparent,
 			logs: parseJson<JobLogEntry>(found.logs),
 			payload: found.payload,
 			result: found.result,
-			runId: found.runId,
-			nodeId: found.nodeId,
+			runId: found.run_id,
+			nodeId: found.node_id,
 		};
-		return { ...job, attemptsLog: attemptsOf(job, parseAttempts(found.attemptsLog)) };
+		return { ...job, attemptsLog: attemptsOf(job, parseAttempts(found.attempts_log)) };
 	}
 }

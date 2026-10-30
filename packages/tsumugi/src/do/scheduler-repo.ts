@@ -1,8 +1,8 @@
-import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { NormalizedSchedule } from '../core/recurring.js';
-import { applySchedulerSchema, type ScheduleRow } from './scheduler-schema.js';
-import { schedule, schedulerSetting, type ScheduleRecord } from './scheduler-tables.js';
+import { columnList, placeholders } from './bind.js';
+import { applySchedulerSchema, SCHEDULER_COLUMNS, type ScheduleRow } from './scheduler-schema.js';
+
+const SCHEDULE_SELECT = columnList(SCHEDULER_COLUMNS.schedule);
 
 export type FiredPatch = {
 	occurrence: number;
@@ -12,160 +12,117 @@ export type FiredPatch = {
 
 /** SQLite読み書きのみ, 次回時刻計算はcore/recurring.ts(ADR-0018) */
 export class SchedulerRepo {
-	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
 	readonly sql: SqlStorage;
 
 	constructor(storage: DurableObjectStorage) {
 		this.sql = storage.sql;
 		applySchedulerSchema(storage.sql);
-		this.db = drizzle(storage);
+	}
+
+	#all<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]): T[] {
+		return this.sql.exec<T>(query, ...bindings).toArray();
+	}
+
+	// nullの次回時刻は既存値維持
+	#update(name: string, set: Record<string, SqlStorageValue>, nextOccurrenceAt: number | null, increment = ''): void {
+		const columns = nextOccurrenceAt !== null ? { ...set, next_occurrence_at: nextOccurrenceAt } : set;
+		const assignments = Object.keys(columns)
+			.map((column) => `${column} = ?`)
+			.join(', ');
+		this.sql.exec(`UPDATE schedule SET ${assignments}${increment} WHERE name = ?`, ...Object.values(columns), name);
 	}
 
 	readSetting(key: string): string | undefined {
-		return this.db.select().from(schedulerSetting).where(eq(schedulerSetting.key, key)).get()?.value;
+		return this.#all<{ value: string }>(`SELECT value FROM setting WHERE key = ?`, key)[0]?.value;
 	}
 
 	writeSetting(key: string, value: string): void {
-		this.db.insert(schedulerSetting).values({ key, value }).onConflictDoUpdate({ target: schedulerSetting.key, set: { value } }).run();
+		this.sql.exec(`INSERT INTO setting (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, key, value);
 	}
 
 	rows(): ScheduleRow[] {
-		return this.db.select().from(schedule).orderBy(asc(schedule.name)).all().map(this.#toRow);
+		return this.#all<ScheduleRow>(`SELECT ${SCHEDULE_SELECT} FROM schedule ORDER BY name ASC`);
 	}
 
 	find(name: string): ScheduleRow | undefined {
-		const record = this.db.select().from(schedule).where(eq(schedule.name, name)).get();
-		return record === undefined ? undefined : this.#toRow(record);
+		return this.#all<ScheduleRow>(`SELECT ${SCHEDULE_SELECT} FROM schedule WHERE name = ?`, name)[0];
 	}
 
 	insert(spec: NormalizedSchedule, nextOccurrenceAt: number, now: number): void {
-		this.db
-			.insert(schedule)
-			.values({
-				name: spec.name,
-				kind: spec.kind,
-				target: spec.target,
-				everyMs: spec.everyMs,
-				cron: spec.cron,
-				timeZone: spec.timeZone,
-				overlap: spec.overlap,
-				nextOccurrenceAt,
-				createdAt: now,
-				updatedAt: now,
-			})
-			.run();
+		this.sql.exec(
+			`INSERT INTO schedule (name, kind, target, every_ms, cron, time_zone, overlap, next_occurrence_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			spec.name,
+			spec.kind,
+			spec.target,
+			spec.everyMs,
+			spec.cron,
+			spec.timeZone,
+			spec.overlap,
+			nextOccurrenceAt,
+			now,
+			now,
+		);
 	}
 
 	updateSpec(spec: NormalizedSchedule, nextOccurrenceAt: number | null, now: number): void {
-		this.db
-			.update(schedule)
-			.set({
+		this.#update(
+			spec.name,
+			{
 				kind: spec.kind,
 				target: spec.target,
-				everyMs: spec.everyMs,
+				every_ms: spec.everyMs,
 				cron: spec.cron,
-				timeZone: spec.timeZone,
+				time_zone: spec.timeZone,
 				overlap: spec.overlap,
-				...(nextOccurrenceAt !== null ? { nextOccurrenceAt } : {}),
-				updatedAt: now,
-			})
-			.where(eq(schedule.name, spec.name))
-			.run();
+				updated_at: now,
+			},
+			nextOccurrenceAt,
+		);
 	}
 
 	remove(names: readonly string[]): void {
 		if (names.length === 0) return;
-		this.db
-			.delete(schedule)
-			.where(inArray(schedule.name, [...names]))
-			.run();
+		this.sql.exec(`DELETE FROM schedule WHERE name IN (${placeholders(names.length)})`, ...names);
 	}
 
 	due(now: number, limit: number): ScheduleRow[] {
-		return this.db
-			.select()
-			.from(schedule)
-			.where(and(lte(schedule.nextOccurrenceAt, now), eq(schedule.paused, 0)))
-			.orderBy(asc(schedule.nextOccurrenceAt), asc(schedule.name))
-			.limit(limit)
-			.all()
-			.map(this.#toRow);
+		return this.#all<ScheduleRow>(
+			`SELECT ${SCHEDULE_SELECT} FROM schedule WHERE next_occurrence_at <= ? AND paused = 0
+			ORDER BY next_occurrence_at ASC, name ASC LIMIT ?`,
+			now,
+			limit,
+		);
 	}
 
 	minNextRunAt(): number | null {
-		const row = this.db
-			.select({ min: sql<number | null>`min(${schedule.nextOccurrenceAt})` })
-			.from(schedule)
-			.where(eq(schedule.paused, 0))
-			.get();
-		return row?.min ?? null;
+		return this.#all<{ min: number | null }>(`SELECT min(next_occurrence_at) AS min FROM schedule WHERE paused = 0`)[0]?.min ?? null;
 	}
 
 	setPaused(name: string, paused: boolean, nextOccurrenceAt: number | null, now: number): void {
-		this.db
-			.update(schedule)
-			.set({ paused: paused ? 1 : 0, ...(nextOccurrenceAt !== null ? { nextOccurrenceAt } : {}), updatedAt: now })
-			.where(eq(schedule.name, name))
-			.run();
+		this.#update(name, { paused: paused ? 1 : 0, updated_at: now }, nextOccurrenceAt);
 	}
 
 	markFired(name: string, fired: FiredPatch, nextOccurrenceAt: number | null, now: number): void {
-		this.db
-			.update(schedule)
-			.set({
-				lastOccurrenceAt: fired.occurrence,
-				lastFiredAt: now,
-				lastJobId: fired.jobId ?? null,
-				lastRunId: fired.runId ?? null,
-				lastError: null,
-				...(nextOccurrenceAt !== null ? { nextOccurrenceAt } : {}),
-				updatedAt: now,
-			})
-			.where(eq(schedule.name, name))
-			.run();
+		this.#update(
+			name,
+			{
+				last_occurrence_at: fired.occurrence,
+				last_fired_at: now,
+				last_job_id: fired.jobId ?? null,
+				last_run_id: fired.runId ?? null,
+				last_error: null,
+				updated_at: now,
+			},
+			nextOccurrenceAt,
+		);
 	}
 
 	markSkipped(name: string, nextOccurrenceAt: number, now: number): void {
-		this.db
-			.update(schedule)
-			.set({
-				lastSkippedAt: now,
-				skippedCount: sql`${schedule.skippedCount} + 1`,
-				nextOccurrenceAt,
-				updatedAt: now,
-			})
-			.where(eq(schedule.name, name))
-			.run();
+		this.#update(name, { last_skipped_at: now, updated_at: now }, nextOccurrenceAt, ', skipped_count = skipped_count + 1');
 	}
 
 	markError(name: string, message: string, nextOccurrenceAt: number | null, now: number): void {
-		this.db
-			.update(schedule)
-			.set({ lastError: message, ...(nextOccurrenceAt !== null ? { nextOccurrenceAt } : {}), updatedAt: now })
-			.where(eq(schedule.name, name))
-			.run();
-	}
-
-	#toRow(record: ScheduleRecord): ScheduleRow {
-		return {
-			name: record.name,
-			kind: record.kind,
-			target: record.target,
-			every_ms: record.everyMs,
-			cron: record.cron,
-			time_zone: record.timeZone,
-			overlap: record.overlap,
-			paused: record.paused,
-			next_occurrence_at: record.nextOccurrenceAt,
-			last_occurrence_at: record.lastOccurrenceAt,
-			last_fired_at: record.lastFiredAt,
-			last_job_id: record.lastJobId,
-			last_run_id: record.lastRunId,
-			last_skipped_at: record.lastSkippedAt,
-			skipped_count: record.skippedCount,
-			last_error: record.lastError,
-			created_at: record.createdAt,
-			updated_at: record.updatedAt,
-		};
+		this.#update(name, { last_error: message, updated_at: now }, nextOccurrenceAt);
 	}
 }

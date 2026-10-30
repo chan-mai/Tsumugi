@@ -6,7 +6,7 @@ export type { AccessJwk, AccessOptions, Jwks } from '../api/access.js';
 export { createRest } from '../api/rest.js';
 export { validateCreateJob, validateStartRun } from '../api/validate.js';
 export { resolveSort, SORTABLE_COLUMNS } from '../api/sort.js';
-export type { RestEnv, RestOptions } from '../api/rest.js';
+export type { Rest, RestEnv, RestOptions } from '../api/rest.js';
 export type { CreateJobInput, StartRunInput } from '../api/validate.js';
 export type { SortColumn } from '../api/sort.js';
 export { project } from '../projection/projector.js';

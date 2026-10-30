@@ -1,4 +1,3 @@
-import { Hono } from 'hono';
 import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
 import { parseMetricsQuery } from '../analytics/reader.js';
 import { createBindingService } from '../service/bindings.service.js';
@@ -9,6 +8,7 @@ import { createScheduleService } from '../service/schedules.service.js';
 import type { MutationOutcome, ServiceEnv, ServiceOptions } from '../service/types.js';
 import type { Ui } from '../ui/serve.js';
 import type { AuthMiddleware } from './auth.js';
+import { createRouter, type Route } from './router.js';
 import { SORT_KEYS, toJobDetail, toJobSummary, toRunDetail, toRunNode, toRunSummary } from './mapper.js';
 import { openapiDocument } from './openapi.js';
 import { resolveSort } from './sort.js';
@@ -43,6 +43,11 @@ import type {
 export type RestEnv = ServiceEnv;
 
 export type RestOptions<Env extends RestEnv> = ServiceOptions<Env> & { dashboard?: Ui };
+
+export type Rest<Env> = {
+	fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response>;
+	readonly routes: readonly Route[];
+};
 
 const INVALID_JSON = Symbol('invalid json');
 const INVALID_JSON_BODY = { error: 'body must be valid JSON' } satisfies ErrorResponse;
@@ -80,7 +85,7 @@ const partial = (binding: string, shards: number, failed: number[]) =>
 		failed,
 	}) satisfies PartialPolicyResponse;
 
-export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: RestOptions<Env> = {}): Hono<{ Bindings: Env }> {
+export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, options: RestOptions<Env> = {}): Rest<Env> {
 	const { dashboard, bindings, flows } = options;
 	const jobs = createJobService(options);
 	const runs = createRunService(options);
@@ -88,9 +93,9 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 	const schedules = createScheduleService(options);
 	const metrics = createMetricsService(options);
 
-	const app = new Hono<{ Bindings: Env }>();
+	const app = createRouter<Env>();
 	// HTMLはデータを含まず, 未認証で返却しSPAでトークン入力欄を表示(ADR-0013)
-	app.use('/api/*', auth);
+	app.use('/api/*', (c) => auth(c.req.raw, c.env));
 
 	// D1不使用, マイグレーション検査前に配置し適用漏れ環境でも取得可能
 	const document = openapiDocument();
@@ -98,14 +103,14 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 
 	// マイグレーション適用漏れの検出, 未検査ではD1のraw errorのみで原因判別不能
 	const checkSchema = cachedCheck();
-	app.use('/api/*', async (c, next) => {
+	app.use('/api/*', async (c) => {
 		const status = await checkSchema(c.env.TSUMUGI_DB);
 		if (!status.ok) {
 			// 適用漏れ時のみ復旧コマンド案内, 一時障害で適用済み環境への誤案内回避(#8)
 			const message = 'missing' in status ? migrationErrorMessage(status.missing) : 'database temporarily unavailable';
 			return c.json({ error: message }, 503);
 		}
-		await next();
+		return undefined;
 	});
 
 	app.get('/api/jobs', async (c) => {
@@ -294,5 +299,5 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware, options: R
 		app.get('*', (c) => c.html(dashboard.render()));
 	}
 
-	return app;
+	return { routes: app.routes, fetch: (request, env) => app.fetch(request, env) };
 }
