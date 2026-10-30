@@ -2,7 +2,6 @@ import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { FailureNotice } from '../../src/core/types.js';
-import { failureNotify } from '../../src/do/tables.js';
 import { embedJobId } from '../../src/core/ids.js';
 
 const T0 = 2_500_000_000_000;
@@ -131,10 +130,11 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		// 送信後中断を再現, カーソル未更新で同じ通知を再送
 		await runInDurableObject(shard('FAIL4#0'), (instance) => {
-			(instance as any).repo.db
-				.insert(failureNotify)
-				.values({ jobId, payload: JSON.stringify({ jobId, binding: 'FAIL4', state: 'FAILED', attempts: 1 }) })
-				.run();
+			((instance as any).repo.sql as SqlStorage).exec(
+				`INSERT INTO failure_notify (job_id, payload) VALUES (?, ?)`,
+				jobId,
+				JSON.stringify({ jobId, binding: 'FAIL4', state: 'FAILED', attempts: 1 }),
+			);
 		});
 		await runDurableObjectAlarm(shard('FAIL4#0'));
 

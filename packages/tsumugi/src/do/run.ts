@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createId } from '@paralleldrive/cuid2';
+import { createLocalId } from './local-id.js';
 import type { BindingConfig, ClientEnv, EnqueueHook } from '../client/enqueue.js';
 import { configOf, createClient } from '../client/enqueue.js';
 import {
@@ -509,7 +509,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						return [row.id];
 					}
 					// ジョブIDを先に確保, 投入後の中断でも同一IDの再投入で重複なし
-					const jobId = row.job_id ?? formatJobId({ binding: row.binding, shard: this.#shardOf(row.binding, runId), localId: createId() });
+					const jobId =
+						row.job_id ?? formatJobId({ binding: row.binding, shard: this.#shardOf(row.binding, runId), localId: createLocalId() });
 					if (row.job_id === null) this.repo.updateNode(row.id, { jobId }, now);
 					inputs.push({ ...built, id: jobId, binding: row.binding, runId, nodeId: row.id, partitionKey: runId });
 					starting.push(row.id);

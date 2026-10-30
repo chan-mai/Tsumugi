@@ -1,4 +1,4 @@
-import { createId } from '@paralleldrive/cuid2';
+import { createLocalId } from './do/local-id.js';
 import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
 import { configOf, createClient, type BindingConfig, type ClientEnv, type EnqueueHook } from './client/enqueue.js';
 import { TERMINAL_STATES } from './core/transitions.js';
@@ -66,9 +66,9 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	bindings?: Record<string, BindingConfig>;
 	/**
 	 * 認証ミドルウェア, 未設定ならREST APIとダッシュボード無効(ADR-0013)
-	 * 同梱`bearerAuth`か任意のHonoミドルウェア, 認証無しは`unsafeNoAuth`を明示(ADR-0044)
+	 * 同梱`bearerAuth`か独自の認証関数, 認証無しは`unsafeNoAuth`を明示(ADR-0044)
 	 */
-	auth?: AuthMiddleware;
+	auth?: AuthMiddleware<Env>;
 	/** `tsumugi/ui`の`ui()`, 未使用時はバンドル対象外(ADR-0025) */
 	ui?: Ui;
 	/** D1読み取りモデルの保持設定, cronトリガー設定時は`scheduled`で古い終端ジョブ削除 */
@@ -205,7 +205,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 	const start = async (env: Env, flow: string, input: unknown, options?: StartOptions): Promise<string> => {
 		assertConfigured(env);
 		if (!Object.hasOwn(flows, flow)) throw new Error(`flow is not registered: ${flow}`);
-		const runId = formatRunId({ flow, localId: options?.id ?? createId() });
+		const runId = formatRunId({ flow, localId: options?.id ?? createLocalId() });
 		const result = await runFor(env, runId).start({
 			flow,
 			input,

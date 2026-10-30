@@ -1,18 +1,14 @@
-import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
 
 // base64のsecretに含まれる文字, ダッシュボードはencodeURIComponent後にcookieへ保存
 const TOKEN = 'sk+ab/cd=';
 
-const appWith = (token: string) => {
-	const app = new Hono();
-	app.use('/api/*', bearerAuth(token, { cookie: 'tsumugi_token' }));
-	app.get('/api/ping', (c) => c.text('ok'));
-	return app;
+// 認証成功は200扱い
+const get = async (token: string, headers: Record<string, string>) => {
+	const rejected = await bearerAuth(token, { cookie: 'tsumugi_token' })(new Request('https://example.com/api/ping', { headers }), {});
+	return { status: rejected?.status ?? 200 };
 };
-
-const get = (token: string, headers: Record<string, string>) => appWith(token).request('/api/ping', { headers });
 
 describe('bearerAuth', () => {
 	it('Authorizationヘッダを受け付ける', async () => {

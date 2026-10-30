@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toStatements } from '../../src/projection/projector.js';
+import { toUpserts } from '../../src/projection/projector.js';
 
 const snapshot = JSON.stringify({
 	id: 'A#0:x',
@@ -20,14 +20,13 @@ const snapshot = JSON.stringify({
 });
 
 const setClauseOf = () => {
-	const [stmt] = toStatements({} as D1Database, [{ seq: 1, job_id: 'A#0:x', snapshot }]);
-	const text = (stmt as unknown as { toSQL(): { sql: string } }).toSQL().sql;
-	return text.slice(text.indexOf('do update set'));
+	const [upsert] = toUpserts([{ seq: 1, job_id: 'A#0:x', snapshot }]);
+	return upsert!.sql.slice(upsert!.sql.indexOf('DO UPDATE SET'));
 };
 
 describe('投影のUPSERTが更新する列', () => {
 	it('不変の列を更新しない', () => {
-		// 分割代入での漏れは警告なしで影響拡大
+		// 除外漏れは警告なしで影響拡大
 		const set = setClauseOf();
 		for (const column of ['"id"', '"binding"', '"guarantee"', '"created_at"']) {
 			expect(set.includes(`${column} = `), `${column}が更新対象に入っている`).toBe(false);
@@ -42,6 +41,6 @@ describe('投影のUPSERTが更新する列', () => {
 	});
 
 	it('古いseqの上書きを防止する条件が残っている', () => {
-		expect(setClauseOf()).toContain('excluded');
+		expect(setClauseOf()).toContain('WHERE excluded.seq > job.seq');
 	});
 });

@@ -57,3 +57,5 @@
 - [ADR-0052](0052-cooperative-cancellation.md) - 実行中のジョブの取り消しは協調的な要求として扱う
 - [ADR-0053](0053-performer-fail-options.md) - 失敗した試行の再試行の扱いをperformerが`ctx.fail`で指定する
 - [ADR-0054](0054-start-notice-for-at-least-once.md) - at-least-onceのジョブも実行開始時にRUNNINGへ遷移させる
+- [ADR-0055](0055-no-runtime-dependencies.md) - ランタイム依存を持たない
+- [ADR-0056](0056-auth-as-request-function.md) - authをRequestを受け取る関数で表す

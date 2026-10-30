@@ -1,4 +1,4 @@
-import { readCookie, type AuthMiddleware } from './auth.js';
+import { readCookie, unauthorized, type AuthMiddleware } from './auth.js';
 
 /**
  * Accessは`Cf-Access-Jwt-Assertion`ヘッダ付与で転送
@@ -113,14 +113,13 @@ export function cloudflareAccess(options: AccessOptions): AuthMiddleware {
 		throw new Error('cloudflareAccess requires teamDomain and aud, otherwise the fail-closed premise breaks');
 	}
 
-	return async (c, next) => {
-		const token = c.req.header('cf-access-jwt-assertion') ?? readCookie(c.req.header('cookie'), 'CF_Authorization');
-		if (!token) return c.json({ error: 'unauthorized' }, 401);
+	return async (request) => {
+		const token =
+			request.headers.get('cf-access-jwt-assertion') ?? readCookie(request.headers.get('cookie') ?? undefined, 'CF_Authorization');
+		if (!token) return unauthorized();
 
 		const claims = await verifyAccessJwt(token, options, Date.now());
-		if (!claims) return c.json({ error: 'unauthorized' }, 401);
-
-		c.set('accessClaims', claims);
-		await next();
+		if (!claims) return unauthorized();
+		return undefined;
 	};
 }

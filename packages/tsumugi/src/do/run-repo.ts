@@ -1,13 +1,10 @@
-import { asc, eq, getTableColumns, inArray, lte, sql } from 'drizzle-orm';
-import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
 import type { NodeTrigger } from '../core/flow.js';
-import { chunk } from './bind.js';
-import { applyRunSchema, type NodeRow, type RunRow } from './run-schema.js';
-import { node, run, runOutbox } from './run-tables.js';
+import { assignments, chunk, columnList, placeholders, valuesOf } from './bind.js';
+import { applyRunSchema, RUN_COLUMNS, type NodeRow, type RunRow } from './run-schema.js';
 
-const NODE_COLUMNS = Object.keys(getTableColumns(node)).length;
-const OUTBOX_COLUMNS = Object.keys(getTableColumns(runOutbox)).length;
+const RUN_SELECT = columnList(RUN_COLUMNS.run);
+const NODE_SELECT = columnList(RUN_COLUMNS.node);
 
 export const deadlineErrorOf = (deadlineMs: number | null) => `run deadline exceeded: ${deadlineMs}ms`;
 
@@ -70,18 +67,19 @@ export type NodeSnapshot = {
 
 /** SQLite読み書きのみ, 進行判断は`core/run.ts`(ADR-0018) */
 export class RunRepo {
-	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
 	readonly sql: SqlStorage;
 
 	constructor(storage: DurableObjectStorage) {
 		this.sql = storage.sql;
 		applyRunSchema(storage.sql);
-		this.db = drizzle(storage);
+	}
+
+	#all<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]): T[] {
+		return this.sql.exec<T>(query, ...bindings).toArray();
 	}
 
 	findRun(): RunRow | undefined {
-		const row = this.db.select().from(run).limit(1).get();
-		return row ? this.#toRunRow(row) : undefined;
+		return this.#all<RunRow>(`SELECT ${RUN_SELECT} FROM run LIMIT 1`)[0];
 	}
 
 	// 同一runIdは同一DOで検査と挿入が不可分(ADR-0029)
@@ -95,58 +93,58 @@ export class RunRepo {
 		depth?: number;
 		deadlineMs?: number;
 	}): boolean {
-		const inserted = this.db
-			.insert(run)
-			.values({
+		const inserted = this.#all(
+			`INSERT INTO run (${RUN_SELECT}) VALUES (${placeholders(RUN_COLUMNS.run.length)}) ON CONFLICT DO NOTHING RETURNING id`,
+			...valuesOf(RUN_COLUMNS.run, {
 				id: input.id,
 				flow: input.flow,
 				state: 'RUNNING',
 				input: input.input,
 				shape: input.shape,
 				cancelling: 0,
-				parentRunId: input.parent?.runId ?? null,
-				parentNodeId: input.parent?.nodeId ?? null,
+				parent_run_id: input.parent?.runId ?? null,
+				parent_node_id: input.parent?.nodeId ?? null,
 				depth: input.depth ?? 0,
-				parentNotified: 0,
-				deadlineMs: input.deadlineMs ?? null,
-				deadlineAt: input.deadlineMs !== undefined ? input.now + input.deadlineMs : null,
+				parent_notified: 0,
+				deadline_ms: input.deadlineMs ?? null,
+				deadline_at: input.deadlineMs !== undefined ? input.now + input.deadlineMs : null,
 				expired: 0,
-				createdAt: input.now,
-				updatedAt: input.now,
-			})
-			.onConflictDoNothing()
-			.returning({ id: run.id })
-			.all();
+				created_at: input.now,
+				updated_at: input.now,
+			}),
+		);
 		return inserted.length > 0;
 	}
 
 	setRunState(id: string, state: RunState, now: number): void {
-		this.db.update(run).set({ state, updatedAt: now }).where(eq(run.id, id)).run();
+		this.sql.exec(`UPDATE run SET state = ?, updated_at = ? WHERE id = ?`, state, now, id);
 	}
 
 	markParentNotified(id: string, now: number): void {
-		this.db.update(run).set({ parentNotified: 1, updatedAt: now }).where(eq(run.id, id)).run();
+		this.sql.exec(`UPDATE run SET parent_notified = 1, updated_at = ? WHERE id = ?`, now, id);
 	}
 
 	markCancelling(id: string, now: number): void {
-		this.db.update(run).set({ cancelling: 1, updatedAt: now }).where(eq(run.id, id)).run();
+		this.sql.exec(`UPDATE run SET cancelling = 1, updated_at = ? WHERE id = ?`, now, id);
 	}
 
 	markExpired(id: string, now: number): void {
-		this.db.update(run).set({ expired: 1, updatedAt: now }).where(eq(run.id, id)).run();
+		this.sql.exec(`UPDATE run SET expired = 1, updated_at = ? WHERE id = ?`, now, id);
 	}
 
 	insertNodes(nodes: readonly NewNode[], now: number): void {
-		for (const part of chunk(nodes, NODE_COLUMNS)) {
+		for (const part of chunk(nodes, RUN_COLUMNS.node.length)) {
 			this.#insertNodeChunk(part, now);
 		}
 	}
 
 	#insertNodeChunk(nodes: readonly NewNode[], now: number): void {
-		this.db
-			.insert(node)
-			.values(
-				nodes.map((n) => ({
+		const row = `(${placeholders(RUN_COLUMNS.node.length)})`;
+		this.sql.exec(
+			// 同一IDのspawnは既存維持(ADR-0032)
+			`INSERT INTO node (${NODE_SELECT}) VALUES ${nodes.map(() => row).join(', ')} ON CONFLICT DO NOTHING`,
+			...nodes.flatMap((n) =>
+				valuesOf(RUN_COLUMNS.node, {
 					id: n.id,
 					binding: n.binding,
 					state: 'PENDING',
@@ -158,36 +156,23 @@ export class RunRepo {
 					payload: n.payload ?? null,
 					options: n.options ?? null,
 					subflow: n.subflow ?? null,
-					jobId: null,
-					childRunId: null,
+					job_id: null,
+					child_run_id: null,
 					result: null,
 					error: null,
 					seq: n.seq,
-					createdAt: now,
-					updatedAt: now,
-				})),
-			)
-			// 同一IDのspawnは既存維持(ADR-0032)
-			.onConflictDoNothing()
-			.run();
+					created_at: now,
+					updated_at: now,
+				}),
+			),
+		);
 	}
 
 	// result, errorは毎tick全件読み取りの負荷で除外
 	views(): NodeView[] {
-		const rows = this.db
-			.select({
-				id: node.id,
-				state: node.state,
-				container: node.container,
-				subflow: node.subflow,
-				parent: node.parent,
-				origin: node.origin,
-				after: node.after,
-				trigger: node.trigger,
-			})
-			.from(node)
-			.orderBy(asc(node.seq), asc(node.id))
-			.all();
+		const rows = this.#all<Pick<NodeRow, 'id' | 'state' | 'container' | 'subflow' | 'parent' | 'origin' | 'after' | 'trigger'>>(
+			`SELECT id, state, container, subflow, parent, origin, "after", "trigger" FROM node ORDER BY seq ASC, id ASC`,
+		);
 		return rows.map((row) => ({
 			id: row.id,
 			state: row.state as NodeState,
@@ -201,31 +186,29 @@ export class RunRepo {
 	}
 
 	findNode(id: string): NodeRow | undefined {
-		const row = this.db.select().from(node).where(eq(node.id, id)).get();
-		return row ? this.#toNodeRow(row) : undefined;
+		return this.#all<NodeRow>(`SELECT ${NODE_SELECT} FROM node WHERE id = ?`, id)[0];
 	}
 
 	resultsOf(ids: readonly string[]): Map<string, unknown> {
 		const results = new Map<string, unknown>();
 		for (const part of chunk(ids, 1)) {
-			const rows = this.db
-				.select({ id: node.id, result: node.result })
-				.from(node)
-				.where(inArray(node.id, [...part]))
-				.all();
+			const rows = this.#all<{ id: string; result: string | null }>(
+				`SELECT id, result FROM node WHERE id IN (${placeholders(part.length)})`,
+				...part,
+			);
 			for (const row of rows) results.set(row.id, row.result === null ? undefined : (JSON.parse(row.result) as unknown));
 		}
 		return results;
 	}
 
 	updateNode(id: string, patch: NodePatch, now: number): void {
-		const set: Record<string, unknown> = { updatedAt: now };
+		const set: Record<string, SqlStorageValue> = { updated_at: now };
 		if (patch.state !== undefined) set.state = patch.state;
-		if (patch.jobId !== undefined) set.jobId = patch.jobId;
-		if (patch.childRunId !== undefined) set.childRunId = patch.childRunId;
+		if (patch.jobId !== undefined) set.job_id = patch.jobId;
+		if (patch.childRunId !== undefined) set.child_run_id = patch.childRunId;
 		if (patch.result !== undefined) set.result = patch.result;
 		if (patch.error !== undefined) set.error = patch.error;
-		this.db.update(node).set(set).where(eq(node.id, id)).run();
+		this.sql.exec(`UPDATE node SET ${assignments(set)} WHERE id = ?`, ...Object.values(set), id);
 	}
 
 	nextSeq(): number {
@@ -280,11 +263,7 @@ export class RunRepo {
 	}
 
 	countNodes(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(node)
-			.get();
-		return row?.c ?? 0;
+		return this.sql.exec<{ c: number }>(`SELECT count(*) AS c FROM node`).one().c;
 	}
 
 	childSummary(parent: string): { total: number; succeeded: number; failed: number } {
@@ -329,105 +308,56 @@ export class RunRepo {
 			parent_run_id: row.parent_run_id,
 			parent_node_id: row.parent_node_id,
 		};
-		this.db
-			.insert(runOutbox)
-			.values({ kind: 'run', target: row.id, snapshot: JSON.stringify(snapshot) })
-			.run();
+		this.sql.exec(`INSERT INTO run_outbox (kind, target, snapshot) VALUES (?, ?, ?)`, 'run', row.id, JSON.stringify(snapshot));
 	}
 
 	appendNodeOutbox(runId: string, ids: readonly string[]): void {
 		// 追記側の列数で分割, 読み取り側のIDも上限内
-		for (const part of chunk(ids, OUTBOX_COLUMNS)) {
+		for (const part of chunk(ids, RUN_COLUMNS.run_outbox.length)) {
 			this.#appendNodeOutboxChunk(runId, part);
 		}
 	}
 
 	#appendNodeOutboxChunk(runId: string, ids: readonly string[]): void {
-		const rows = this.db
-			.select()
-			.from(node)
-			.where(inArray(node.id, [...ids]))
-			.all();
+		const rows = this.#all<NodeRow>(`SELECT ${NODE_SELECT} FROM node WHERE id IN (${placeholders(ids.length)})`, ...ids);
 		if (rows.length === 0) return;
-		this.db
-			.insert(runOutbox)
-			.values(
-				rows.map((row) => {
-					const snapshot: NodeSnapshot = {
-						run_id: runId,
-						node_id: row.id,
-						binding: row.binding,
-						state: row.state,
-						container: row.container,
-						parent: row.parent,
-						origin: row.origin,
-						after: row.after,
-						job_id: row.jobId,
-						child_run_id: row.childRunId,
-						result: row.container === 1 ? row.result : null,
-						error: row.error,
-						position: row.seq,
-						created_at: row.createdAt,
-						updated_at: row.updatedAt,
-					};
-					return { kind: 'node', target: row.id, snapshot: JSON.stringify(snapshot) };
-				}),
-			)
-			.run();
+		this.sql.exec(
+			`INSERT INTO run_outbox (kind, target, snapshot) VALUES ${rows.map(() => '(?, ?, ?)').join(', ')}`,
+			...rows.flatMap((row) => {
+				const snapshot: NodeSnapshot = {
+					run_id: runId,
+					node_id: row.id,
+					binding: row.binding,
+					state: row.state,
+					container: row.container,
+					parent: row.parent,
+					origin: row.origin,
+					after: row.after,
+					job_id: row.job_id,
+					child_run_id: row.child_run_id,
+					result: row.container === 1 ? row.result : null,
+					error: row.error,
+					position: row.seq,
+					created_at: row.created_at,
+					updated_at: row.updated_at,
+				};
+				return ['node', row.id, JSON.stringify(snapshot)];
+			}),
+		);
 	}
 
 	outboxBatch(limit: number): { seq: number; kind: string; target: string; snapshot: string }[] {
-		return this.db.select().from(runOutbox).orderBy(asc(runOutbox.seq)).limit(limit).all();
+		return this.#all<{ seq: number; kind: string; target: string; snapshot: string }>(
+			`SELECT seq, kind, target, snapshot FROM run_outbox ORDER BY seq ASC LIMIT ?`,
+			limit,
+		);
 	}
 
 	deleteOutboxThrough(seq: number): void {
-		this.db.delete(runOutbox).where(lte(runOutbox.seq, seq)).run();
+		this.sql.exec(`DELETE FROM run_outbox WHERE seq <= ?`, seq);
 	}
 
 	hasOutbox(): boolean {
-		return this.db.select({ seq: runOutbox.seq }).from(runOutbox).limit(1).get() !== undefined;
-	}
-
-	#toRunRow(row: typeof run.$inferSelect): RunRow {
-		return {
-			id: row.id,
-			flow: row.flow,
-			state: row.state,
-			input: row.input,
-			shape: row.shape,
-			cancelling: row.cancelling,
-			parent_run_id: row.parentRunId,
-			parent_node_id: row.parentNodeId,
-			depth: row.depth,
-			parent_notified: row.parentNotified,
-			deadline_ms: row.deadlineMs,
-			deadline_at: row.deadlineAt,
-			expired: row.expired,
-			created_at: row.createdAt,
-			updated_at: row.updatedAt,
-		};
-	}
-
-	#toNodeRow(row: typeof node.$inferSelect): NodeRow {
-		return {
-			id: row.id,
-			binding: row.binding,
-			state: row.state,
-			container: row.container,
-			parent: row.parent,
-			origin: row.origin,
-			after: row.after,
-			trigger: row.trigger,
-			payload: row.payload,
-			options: row.options,
-			subflow: row.subflow,
-			job_id: row.jobId,
-			child_run_id: row.childRunId,
-			result: row.result,
-			error: row.error,
-			seq: row.seq,
-			created_at: row.createdAt,
-			updated_at: row.updatedAt,
-		};
+		return this.#all(`SELECT seq FROM run_outbox LIMIT 1`).length > 0;
 	}
 }

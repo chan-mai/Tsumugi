@@ -1,9 +1,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
-import { and, asc, eq, lte } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import type { JobRepo } from '../../src/do/repo.js';
-import { applySchema } from '../../src/do/schema.js';
-import { job } from '../../src/do/tables.js';
+import { columnList } from '../../src/do/bind.js';
+import { applySchema, COLUMNS } from '../../src/do/schema.js';
 
 const T0 = 2_400_000_000_000;
 const N = 2_000;
@@ -31,23 +30,18 @@ describe('tickの読み取り行数', () => {
 			seed(repo.sql, 'SCHEDULED', T0, T0);
 
 			// scheduleWindowのreadyと同形
-			const { sql: text, params } = repo.db
-				.select()
-				.from(job)
-				.where(and(eq(job.state, 'SCHEDULED'), lte(job.runAfter, T0)))
-				.orderBy(asc(job.runAfter), asc(job.id))
-				.limit(LIMIT)
-				.toSQL();
+			const text = `SELECT ${columnList(COLUMNS.job)} FROM job WHERE state = ? AND run_after <= ? ORDER BY run_after ASC, id ASC LIMIT ?`;
+			const params = ['SCHEDULED', T0, LIMIT];
 
 			const plan = repo.sql
-				.exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${text}`, ...(params as SqlStorageValue[]))
+				.exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${text}`, ...params)
 				.toArray()
 				.map((r) => r.detail)
 				.join('\n');
 			expect(plan).toContain('job_due');
 			expect(plan).not.toContain('TEMP B-TREE');
 
-			const cursor = repo.sql.exec(text, ...(params as SqlStorageValue[]));
+			const cursor = repo.sql.exec(text, ...params);
 			expect(cursor.toArray()).toHaveLength(LIMIT);
 			expect(cursor.rowsRead).toBeLessThan(N / 2);
 

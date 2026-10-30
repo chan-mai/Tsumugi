@@ -16,8 +16,8 @@ const BUDGETS = {
 const FORBIDDEN = {
 	'dist/client.js': [/extends DurableObject/, /CREATE TABLE/],
 	'dist/performer.js': [/extends DurableObject/, /CREATE TABLE/],
-	'dist/testing.js': [/extends DurableObject/, /CREATE TABLE/, /hono/],
-	'dist/cli.js': [/extends DurableObject/, /hono/],
+	'dist/testing.js': [/extends DurableObject/, /CREATE TABLE/],
+	'dist/cli.js': [/extends DurableObject/],
 };
 
 const CANARY = { 'dist/index.js': [/extends DurableObject/, /CREATE TABLE/] };
@@ -27,7 +27,7 @@ const IMPORT = /(?:from|import)\s*["'](\.[^"']+)["']/g;
 // 外部依存はgzip量に非反映で集合検査
 const ALLOWED_EXTERNALS = {
 	'dist/ui.js': [],
-	'dist/index.js': ['@paralleldrive/cuid2', 'drizzle-orm', 'hono'],
+	'dist/index.js': [],
 	'dist/performer.js': [],
 	'dist/client.js': [],
 	'dist/testing.js': [],

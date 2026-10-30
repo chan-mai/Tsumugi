@@ -2,7 +2,7 @@
 title: 設定
 description: defineTsumugiに指定する設定項目の型と既定値, wranglerのbindingの設定について
 publishedAt: 2026-07-22
-updatedAt: 2026-10-25
+updatedAt: 2026-10-30
 ---
 
 # 設定
@@ -71,7 +71,9 @@ bindingごとのpayloadの型と`Env`は、`performers`の内容から自動的�
 | `cloudflareAccess` | Cloudflare AccessのJWTの検証 |
 | `unsafeNoAuth` | 認証なし |
 
-任意のHonoミドルウェアも、`auth`に指定する値として受け付けます。
+独自の認証関数を`auth`に指定することができます。
+関数の引数は`request`と`env`で、戻り値は`Response`または`undefined`です。
+詳細は[ダッシュボードと認証](/guide/dashboard#独自の認証)を参照してください。
 `auth`を設定しない場合、REST APIとダッシュボードへのすべてのリクエストに404で応答します。
 `unsafeNoAuth`の影響は、[ダッシュボードと認証](/guide/dashboard#認証しない構成)を参照してください。
 

@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
-import { createRest, type RestEnv } from '../../src/api/rest.js';
+import { createRest, type Rest, type RestEnv } from '../../src/api/rest.js';
 import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
 import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
 import { hashToShard } from '../../src/core/shard.js';
@@ -49,6 +49,9 @@ const call = (handler: ExportedHandler<RestEnv>, method: string, path: string, h
 			passThroughOnException: () => {},
 		} as unknown as ExecutionContext,
 	);
+
+const request = (rest: Rest<RestEnv>, path: string, init: RequestInit, target: RestEnv) =>
+	rest.fetch(new Request(`https://example.com${path}`, init), target);
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
@@ -439,7 +442,7 @@ describe('REST API', () => {
 		const app = createRest(bearerAuth(TOKEN), {
 			schedulerFor: () => ({ list: async () => [schedule] }) as never,
 		});
-		const res = await app.request('/api/schedules', { headers: authorized }, env as RestEnv);
+		const res = await request(app, '/api/schedules', { headers: authorized }, env as RestEnv);
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ schedules: [schedule] });
 	});
@@ -469,7 +472,7 @@ describe('scheduleの操作', () => {
 	}
 
 	const post = (app: ReturnType<typeof appWith>['app'], path: string) =>
-		app.request(path, { method: 'POST', headers: authorized }, env as RestEnv);
+		request(app, path, { method: 'POST', headers: authorized }, env as RestEnv);
 
 	it('pauseとresumeがDOへ届く', async () => {
 		const { app, calls } = appWith();
@@ -993,7 +996,8 @@ describe('一括リトライと一括取り消し', () => {
 	});
 
 	const bulkWith = (shards: unknown, ids: string[]) =>
-		createRest(bearerAuth(TOKEN), { bindings: ['REST'] }).request(
+		request(
+			createRest(bearerAuth(TOKEN), { bindings: ['REST'] }),
 			'/api/jobs/bulk-retry',
 			{ method: 'POST', headers: authorized, body: JSON.stringify({ ids }) },
 			{ ...env, JOB_SHARD: shards } as unknown as RestEnv,

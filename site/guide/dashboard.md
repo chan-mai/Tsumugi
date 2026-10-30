@@ -2,7 +2,7 @@
 title: ダッシュボードと認証
 description: REST APIとダッシュボードの認証の設定と、ダッシュボードでのジョブとRunの参照, 検索, 一括操作について
 publishedAt: 2026-07-22
-updatedAt: 2026-10-25
+updatedAt: 2026-10-30
 ---
 
 # ダッシュボードと認証
@@ -39,7 +39,6 @@ cookieを発行する側では、`SameSite=Strict`を明示的に指定してく
 ## Cloudflare Access
 
 `cloudflareAccess`を指定すると、Cloudflare Accessが発行したJWTを検証します。
-`auth`は、`bearerAuth`, `cloudflareAccess`, `unsafeNoAuth`の戻り値に加えて、任意のHonoミドルウェアも受け入れます。
 
 ```ts
 import { cloudflareAccess, defineTsumugi } from 'tsumugi';
@@ -55,6 +54,27 @@ const tsumugi = defineTsumugi({
 | `teamDomain` | `<team>.cloudflareaccess.com`のteam部分 |
 | `aud` | Accessアプリケーションのaudience tag |
 | `cacheTtlMs` | JWKSの再取得間隔。既定は1時間 |
+
+## 独自の認証
+
+独自の認証を実装するには、`auth`オプションに関数を指定します。
+この関数の引数は`request`と`env`です。
+この関数の戻り値は`Response`または`undefined`です。
+戻り値が`undefined`の場合、認証は成功し、Tsumugiはリクエストの処理を続けます。
+戻り値が`Response`の場合、認証は失敗し、Tsumugiはその`Response`で応答して処理を終えます。
+たとえば、`findSession`でセッションを確認し、存在しない場合は401の`Response`を戻り値とする実装が可能です。
+
+```ts
+import { defineTsumugi } from 'tsumugi';
+
+const tsumugi = defineTsumugi({
+  performers,
+  auth: async (request, env: Env) => {
+    const session = await findSession(request, env);
+    return session ? undefined : Response.json({ error: 'unauthorized' }, { status: 401 });
+  },
+});
+```
 
 ## 認証しない構成
 

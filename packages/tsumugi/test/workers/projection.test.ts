@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { project, toStatements, type OutboxRow } from '../../src/projection/projector.js';
+import { project, toUpserts, type OutboxRow } from '../../src/projection/projector.js';
 
 const T0 = 2_100_000_000_000;
 
@@ -79,7 +79,7 @@ describe('D1への投影(ADR-0008)', () => {
 			{ seq: base + 2, job_id: jobId, snapshot: JSON.stringify({ ...snapshot, state: 'COMPLETED' }) },
 			{ seq: base + 1, job_id: jobId, snapshot: JSON.stringify({ ...snapshot, state: 'RUNNING' }) },
 		];
-		expect(toStatements(env.TSUMUGI_DB, rows)).toHaveLength(1);
+		expect(toUpserts(rows)).toHaveLength(1);
 		await project(env.TSUMUGI_DB, rows);
 
 		expect(await readD1(jobId)).toMatchObject({ state: 'COMPLETED', seq: base + 2 });

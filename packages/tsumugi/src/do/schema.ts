@@ -109,6 +109,45 @@ export const SCHEMA = [
 	)`,
 ] as const;
 
+// 取得列の明示, 既存DOの残存列除外
+export const COLUMNS = {
+	job: [
+		'id',
+		'binding',
+		'state',
+		'priority',
+		'attempts',
+		'max_attempts',
+		'concurrency_key',
+		'unique_key',
+		'guarantee',
+		'timeout_ms',
+		'backoff',
+		'run_after',
+		'expires_at',
+		'created_at',
+		'updated_at',
+		'dispatched_at',
+		'heartbeat_at',
+		'progress',
+		'payload',
+		'result',
+		'traceparent',
+		'cancel_requested_at',
+		'run_id',
+		'node_id',
+	] satisfies readonly (keyof JobRow)[],
+	unique_key: ['key', 'job_id', 'expires_at'],
+	setting: ['key', 'value'],
+	key_bucket: ['key', 'tokens', 'refilled_at'],
+	attempt: ['job_id', 'attempt', 'state', 'started_at', 'finished_at', 'error'] satisfies readonly (keyof AttemptRow)[],
+	job_log: ['seq', 'job_id', 'attempt', 'timestamp', 'message'],
+	run_notify: ['seq', 'run_id', 'event'],
+	failure_notify: ['seq', 'job_id', 'payload'],
+	settled_notify: ['seq', 'job_id', 'payload'],
+	outbox: ['seq', 'job_id', 'snapshot'],
+} as const;
+
 export function applySchema(sql: SqlStorage): void {
 	// 既存DOの全状態対象の旧索引, 直後のCREATEで部分索引へ
 	const terminal = sql.exec<{ sql: string }>(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'job_terminal'`).toArray()[0];

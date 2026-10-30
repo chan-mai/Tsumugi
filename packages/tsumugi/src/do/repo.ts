@@ -1,5 +1,3 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
-import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { ACTIVE_STATES, assertTransition, FAILURE_STATES, TERMINAL_STATES } from '../core/transitions.js';
 import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../core/log.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
@@ -15,9 +13,8 @@ import type {
 	SettledState,
 	SettledTarget,
 } from '../core/types.js';
-import { chunk } from './bind.js';
-import { applySchema, TERMINAL_INDEX_WHERE, type AttemptRow, type JobRow } from './schema.js';
-import { attempt, failureNotify, job, jobLog, keyBucket, outbox, runNotify, setting, settledNotify, uniqueKey } from './tables.js';
+import { assignments, chunk, columnList, placeholders, valuesOf } from './bind.js';
+import { applySchema, COLUMNS, TERMINAL_INDEX_WHERE, type AttemptRow, type JobRow } from './schema.js';
 
 /** HTMLページ全体等によるDOとD1の圧迫防止 */
 export const ERROR_MAX_CHARS = 2_000;
@@ -69,17 +66,15 @@ const toView = (row: JobRow): JobView => ({
 	cancelRequestedAt: row.cancel_requested_at,
 });
 
+const JOB_COLUMNS = columnList(COLUMNS.job);
+const IN_FLIGHT = placeholders(2);
+
 // sweepStateのSQLと同条件を維持, 部分索引条件は各分岐内でMULTI-INDEX OR維持
-const sweepable = (now: number, retention: Retention) =>
-	or(
-		and(inArray(job.state, ['COMPLETED', 'CANCELLED']), lt(job.updatedAt, now - retention.sweepAfterMs), sql.raw(TERMINAL_INDEX_WHERE)),
-		and(inArray(job.state, ['FAILED', 'STALLED']), lt(job.updatedAt, now - retention.failedRetentionMs), sql.raw(TERMINAL_INDEX_WHERE)),
-	);
+const SWEEPABLE = `(state IN ('COMPLETED', 'CANCELLED') AND updated_at < ? AND ${TERMINAL_INDEX_WHERE})
+	OR (state IN ('FAILED', 'STALLED') AND updated_at < ? AND ${TERMINAL_INDEX_WHERE})`;
 
 /** 状態遷移は条件付きUPDATEの`returning`で成否判定, 読んでから書く方式は不使用 */
 export class JobRepo {
-	readonly db: DrizzleSqliteDODatabase<Record<string, never>>;
-	/** クエリビルダで表現不能な集計等用 */
 	readonly sql: SqlStorage;
 	/** 1ジョブあたり書き込み予算のテスト用 */
 	writes = 0;
@@ -91,39 +86,53 @@ export class JobRepo {
 	constructor(storage: DurableObjectStorage) {
 		this.sql = storage.sql;
 		applySchema(storage.sql);
-		this.db = drizzle(storage);
+	}
+
+	// 呼び出し毎にthis.sql参照, テストの差し替え対象
+	#all<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]): T[] {
+		return this.sql.exec<T>(query, ...bindings).toArray();
+	}
+
+	#first<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]): T | undefined {
+		return this.#all<T>(query, ...bindings)[0];
+	}
+
+	#write(query: string, ...bindings: SqlStorageValue[]): number {
+		const cursor = this.sql.exec(query, ...bindings);
+		this.writes++;
+		return cursor.rowsWritten;
 	}
 
 	insert(newJob: NewJob): void {
-		this.db
-			.insert(job)
-			.values({
+		this.#write(
+			`INSERT INTO job (${JOB_COLUMNS}) VALUES (${placeholders(COLUMNS.job.length)})`,
+			...valuesOf(COLUMNS.job, {
 				id: newJob.id,
 				binding: newJob.binding,
 				state: 'SCHEDULED',
 				priority: newJob.priority,
 				attempts: 0,
-				maxAttempts: newJob.maxAttempts,
-				concurrencyKey: newJob.concurrencyKey,
-				uniqueKey: newJob.uniqueKey,
+				max_attempts: newJob.maxAttempts,
+				concurrency_key: newJob.concurrencyKey,
+				unique_key: newJob.uniqueKey,
 				guarantee: newJob.guarantee,
-				timeoutMs: newJob.timeoutMs,
+				timeout_ms: newJob.timeoutMs,
 				backoff: JSON.stringify(newJob.backoff),
-				runAfter: newJob.runAfter,
-				expiresAt: newJob.expiresAt,
-				createdAt: newJob.createdAt,
-				updatedAt: newJob.createdAt,
-				dispatchedAt: null,
-				heartbeatAt: null,
+				run_after: newJob.runAfter,
+				expires_at: newJob.expiresAt,
+				created_at: newJob.createdAt,
+				updated_at: newJob.createdAt,
+				dispatched_at: null,
+				heartbeat_at: null,
 				progress: null,
 				payload: JSON.stringify(newJob.payload),
 				result: null,
 				traceparent: newJob.traceparent ?? null,
-				runId: newJob.runId ?? null,
-				nodeId: newJob.nodeId ?? null,
-			})
-			.run();
-		this.writes++;
+				cancel_requested_at: null,
+				run_id: newJob.runId ?? null,
+				node_id: newJob.nodeId ?? null,
+			}),
+		);
 		this.#appendOutbox(newJob.id);
 	}
 
@@ -139,14 +148,14 @@ export class JobRepo {
 		// 終端の行は上書き対象外, 再試行時のメトリクス欠落防止
 		const terminal = TERMINAL_STATES.includes(row.state as JobState);
 		if (pending !== undefined) {
-			const updated = this.db.update(outbox).set({ snapshot }).where(eq(outbox.seq, pending)).returning({ seq: outbox.seq }).all();
+			const updated = this.#all(`UPDATE outbox SET snapshot = ? WHERE seq = ? RETURNING seq`, snapshot, pending);
 			this.writes++;
 			if (updated.length > 0) {
 				if (terminal) this.#pendingOutbox.delete(id);
 				return { row, attempts };
 			}
 		}
-		const [inserted] = this.db.insert(outbox).values({ jobId: id, snapshot }).returning({ seq: outbox.seq }).all();
+		const inserted = this.#first<{ seq: number }>(`INSERT INTO outbox (job_id, snapshot) VALUES (?, ?) RETURNING seq`, id, snapshot);
 		this.writes++;
 		if (inserted && !terminal) this.#pendingOutbox.set(id, inserted.seq);
 		else this.#pendingOutbox.delete(id);
@@ -154,47 +163,39 @@ export class JobRepo {
 	}
 
 	attemptsOf(jobId: string): AttemptRow[] {
-		const rows = this.db.select().from(attempt).where(eq(attempt.jobId, jobId)).orderBy(desc(attempt.attempt)).limit(ATTEMPT_KEEP).all();
-		return rows.map((r) => ({
-			job_id: r.jobId,
-			attempt: r.attempt,
-			state: r.state,
-			started_at: r.startedAt,
-			finished_at: r.finishedAt,
-			error: r.error,
-		}));
+		return this.#all<AttemptRow>(
+			`SELECT ${columnList(COLUMNS.attempt)} FROM attempt WHERE job_id = ? ORDER BY attempt DESC LIMIT ?`,
+			jobId,
+			ATTEMPT_KEEP,
+		);
 	}
 
 	logsOf(jobId: string): JobLogEntry[] {
-		const rows = this.db
-			.select({ attempt: jobLog.attempt, timestamp: jobLog.timestamp, message: jobLog.message })
-			.from(jobLog)
-			.where(eq(jobLog.jobId, jobId))
-			.orderBy(asc(jobLog.seq))
-			.limit(LOG_KEEP)
-			.all();
-		return rows;
+		return this.#all<JobLogEntry>(
+			`SELECT attempt, timestamp, message FROM job_log WHERE job_id = ? ORDER BY seq ASC LIMIT ?`,
+			jobId,
+			LOG_KEEP,
+		);
 	}
 
 	log(id: string, attemptNumber: number, message: string, now: number): 'stored' | 'throttled' | 'rejected' {
 		const row = this.find(id);
 		if (!row || (row.state !== 'QUEUED' && row.state !== 'RUNNING') || row.attempts + 1 !== attemptNumber) return 'rejected';
-		const history = this.db
-			.select({ count: sql<number>`count(*)`, lastAt: sql<number | null>`max(${jobLog.timestamp})` })
-			.from(jobLog)
-			.where(eq(jobLog.jobId, id))
-			.get();
-		if (history?.lastAt !== null && history?.lastAt !== undefined && now - history.lastAt < LOG_MIN_INTERVAL_MS) return 'throttled';
-		this.db
-			.insert(jobLog)
-			.values({ jobId: id, attempt: attemptNumber, timestamp: now, message: message.slice(0, LOG_MAX_CHARS) })
-			.run();
-		this.writes++;
+		const history = this.#first<{ count: number; last_at: number | null }>(
+			`SELECT count(*) AS count, max(timestamp) AS last_at FROM job_log WHERE job_id = ?`,
+			id,
+		);
+		if (history?.last_at !== null && history?.last_at !== undefined && now - history.last_at < LOG_MIN_INTERVAL_MS) return 'throttled';
+		this.#write(
+			`INSERT INTO job_log (job_id, attempt, timestamp, message) VALUES (?, ?, ?, ?)`,
+			id,
+			attemptNumber,
+			now,
+			message.slice(0, LOG_MAX_CHARS),
+		);
 		const excess = (history?.count ?? 0) + 1 - LOG_KEEP;
 		if (excess > 0) {
-			const oldest = this.db.select({ seq: jobLog.seq }).from(jobLog).where(eq(jobLog.jobId, id)).orderBy(asc(jobLog.seq)).limit(excess);
-			this.db.delete(jobLog).where(inArray(jobLog.seq, oldest)).run();
-			this.writes++;
+			this.#write(`DELETE FROM job_log WHERE seq IN (SELECT seq FROM job_log WHERE job_id = ? ORDER BY seq ASC LIMIT ?)`, id, excess);
 		}
 		this.#appendOutbox(id);
 		return 'stored';
@@ -202,49 +203,40 @@ export class JobRepo {
 
 	/** 同試行番号は置換, 重複配送でも1行 */
 	recordAttempt(record: AttemptRow): void {
-		const values = {
-			jobId: record.job_id,
-			attempt: record.attempt,
-			state: record.state,
-			startedAt: record.started_at,
-			finishedAt: record.finished_at,
-			error: record.error === null ? null : record.error.slice(0, ERROR_MAX_CHARS),
-		};
-		this.db
-			.insert(attempt)
-			.values(values)
-			.onConflictDoUpdate({
-				target: [attempt.jobId, attempt.attempt],
-				set: { state: values.state, startedAt: values.startedAt, finishedAt: values.finishedAt, error: values.error },
-			})
-			.run();
-		this.writes++;
+		this.#write(
+			`INSERT INTO attempt (job_id, attempt, state, started_at, finished_at, error) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT (job_id, attempt) DO UPDATE SET
+				state = excluded.state, started_at = excluded.started_at, finished_at = excluded.finished_at, error = excluded.error`,
+			record.job_id,
+			record.attempt,
+			record.state,
+			record.started_at,
+			record.finished_at,
+			record.error === null ? null : record.error.slice(0, ERROR_MAX_CHARS),
+		);
 	}
 
 	outboxBatch(limit: number): { seq: number; job_id: string; snapshot: string }[] {
-		const rows = this.db.select().from(outbox).orderBy(asc(outbox.seq)).limit(limit).all();
+		const rows = this.#all<{ seq: number; job_id: string; snapshot: string }>(
+			`SELECT seq, job_id, snapshot FROM outbox ORDER BY seq ASC LIMIT ?`,
+			limit,
+		);
 		// 投影中の行は上書き対象外, D1書き込み待機中の遷移が削除で消失
-		for (const r of rows) if (this.#pendingOutbox.get(r.jobId) === r.seq) this.#pendingOutbox.delete(r.jobId);
-		return rows.map((r) => ({ seq: r.seq, job_id: r.jobId, snapshot: r.snapshot }));
+		for (const r of rows) if (this.#pendingOutbox.get(r.job_id) === r.seq) this.#pendingOutbox.delete(r.job_id);
+		return rows;
 	}
 
 	/** D1書き込み成功後専用 */
 	deleteOutboxThrough(seq: number): void {
-		this.db.delete(outbox).where(lte(outbox.seq, seq)).run();
-		this.writes++;
+		this.#write(`DELETE FROM outbox WHERE seq <= ?`, seq);
 	}
 
 	countOutbox(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(outbox)
-			.get();
-		return row?.c ?? 0;
+		return this.#first<{ c: number }>(`SELECT count(*) AS c FROM outbox`)?.c ?? 0;
 	}
 
 	hasOutbox(): boolean {
-		const row = this.db.select({ seq: outbox.seq }).from(outbox).limit(1).get();
-		return row !== undefined;
+		return this.#first(`SELECT seq FROM outbox LIMIT 1`) !== undefined;
 	}
 
 	/**
@@ -256,76 +248,39 @@ export class JobRepo {
 	 */
 	scheduleWindow(now: number, limit: number, inFlightLimit = limit): { jobs: JobView[]; readyCount: number } {
 		// 実行中: reaper無応答判定と実行中件数集計用
-		const inFlight = this.db
-			.select()
-			.from(job)
-			.where(inArray(job.state, ['QUEUED', 'RUNNING']))
-			.orderBy(asc(job.createdAt), asc(job.id))
-			.limit(inFlightLimit)
-			.all();
+		const inFlight = this.#all<JobRow>(
+			`SELECT ${JOB_COLUMNS} FROM job WHERE state IN (${IN_FLIGHT}) ORDER BY created_at ASC, id ASC LIMIT ?`,
+			'QUEUED',
+			'RUNNING',
+			inFlightLimit,
+		);
 		// 実行可能: 投入候補, job_dueで到来順に取得し滞留時もlimit件まで(#104)
-		const ready = this.db
-			.select()
-			.from(job)
-			.where(and(eq(job.state, 'SCHEDULED'), lte(job.runAfter, now)))
-			.orderBy(asc(job.runAfter), asc(job.id))
-			.limit(limit)
-			.all();
+		const ready = this.#all<JobRow>(
+			`SELECT ${JOB_COLUMNS} FROM job WHERE state = ? AND run_after <= ? ORDER BY run_after ASC, id ASC LIMIT ?`,
+			'SCHEDULED',
+			now,
+			limit,
+		);
 		// 未到来の最早1件: alarm設定用
-		const future = this.db
-			.select()
-			.from(job)
-			.where(and(eq(job.state, 'SCHEDULED'), gt(job.runAfter, now)))
-			.orderBy(asc(job.runAfter))
-			.limit(1)
-			.all();
+		const future = this.#all<JobRow>(
+			`SELECT ${JOB_COLUMNS} FROM job WHERE state = ? AND run_after > ? ORDER BY run_after ASC LIMIT 1`,
+			'SCHEDULED',
+			now,
+		);
 		// 3つは状態/run_afterで互いに素
-		const jobs = [...inFlight, ...ready, ...future].map((r) => toView(this.#toJobRow(r)));
+		const jobs = [...inFlight, ...ready, ...future].map(toView);
 		return { jobs, readyCount: ready.length };
 	}
 
 	countActive(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(job)
-			.where(inArray(job.state, [...ACTIVE_STATES]))
-			.get();
-		return row?.c ?? 0;
+		return (
+			this.#first<{ c: number }>(`SELECT count(*) AS c FROM job WHERE state IN (${placeholders(ACTIVE_STATES.length)})`, ...ACTIVE_STATES)
+				?.c ?? 0
+		);
 	}
 
 	find(id: string): JobRow | undefined {
-		const row = this.db.select().from(job).where(eq(job.id, id)).get();
-		return row ? this.#toJobRow(row) : undefined;
-	}
-
-	// 投影とテスト用にスネークケースへ変換
-	#toJobRow(r: typeof job.$inferSelect): JobRow {
-		return {
-			id: r.id,
-			binding: r.binding,
-			state: r.state,
-			priority: r.priority,
-			attempts: r.attempts,
-			max_attempts: r.maxAttempts,
-			concurrency_key: r.concurrencyKey,
-			unique_key: r.uniqueKey,
-			guarantee: r.guarantee,
-			timeout_ms: r.timeoutMs,
-			backoff: r.backoff,
-			run_after: r.runAfter,
-			expires_at: r.expiresAt,
-			created_at: r.createdAt,
-			updated_at: r.updatedAt,
-			dispatched_at: r.dispatchedAt,
-			heartbeat_at: r.heartbeatAt,
-			progress: r.progress,
-			payload: r.payload,
-			result: r.result,
-			traceparent: r.traceparent,
-			cancel_requested_at: r.cancelRequestedAt,
-			run_id: r.runId,
-			node_id: r.nodeId,
-		};
+		return this.#first<JobRow>(`SELECT ${JOB_COLUMNS} FROM job WHERE id = ?`, id);
 	}
 
 	compareAndSet(
@@ -349,24 +304,23 @@ export class JobRepo {
 		for (const state of from) assertTransition(state, to);
 
 		// 生存報告消去, 前試行の報告でのreaper期限延長防止
-		const set: Record<string, unknown> = { state: to, updatedAt: patch.now, heartbeatAt: null, progress: null };
-		if (patch.dispatchedAt !== undefined) set.dispatchedAt = patch.dispatchedAt;
-		if (patch.attempts !== undefined) set.attempts = patch.attempts;
-		if (patch.runAfter !== undefined) set.runAfter = patch.runAfter;
+		const set: Record<string, SqlStorageValue> = { state: to, updated_at: patch.now, heartbeat_at: null, progress: null };
+		if (patch.dispatchedAt !== undefined) set.dispatched_at = patch.dispatchedAt;
+		if (patch.attempts !== undefined && !patch.countAttempt) set.attempts = patch.attempts;
+		if (patch.runAfter !== undefined) set.run_after = patch.runAfter;
 		if (patch.result !== undefined) set.result = patch.result;
-		if (patch.countAttempt) set.attempts = sql`${job.attempts} + 1`;
 		// 要求は既定で維持, reap後の再投入防止(#95)
-		if (patch.cancelRequestedAt !== undefined) set.cancelRequestedAt = patch.cancelRequestedAt;
+		if (patch.cancelRequestedAt !== undefined) set.cancel_requested_at = patch.cancelRequestedAt;
+		const increment = patch.countAttempt ? ', attempts = attempts + 1' : '';
 
-		// drizzleのrunは影響行数非返却でreturning使用, 宛先も同時取得(ADR-0031)
-		const updated = this.db
-			.update(job)
-			.set(set)
-			.where(and(eq(job.id, id), inArray(job.state, [...from])))
-			.returning({ id: job.id, runId: job.runId, nodeId: job.nodeId })
-			.all();
+		// returningで成否と宛先を同時取得(ADR-0031)
+		const row = this.#first<{ run_id: string | null; node_id: string | null }>(
+			`UPDATE job SET ${assignments(set)}${increment} WHERE id = ? AND state IN (${placeholders(from.length)}) RETURNING run_id, node_id`,
+			...Object.values(set),
+			id,
+			...from,
+		);
 		this.writes++;
-		const row = updated[0];
 		if (!row) return false;
 		const current = this.#appendOutbox(id);
 		if (current && FAILURE_STATES.includes(to)) {
@@ -376,9 +330,9 @@ export class JobRepo {
 			this.#appendSettled(current.row, current.attempts, to as SettledState, patch.error ?? null, patch.now);
 		}
 		// 終端検出を1箇所に集約, 呼び出し側ごとの実装は漏れの原因
-		if (row.runId !== null && row.nodeId !== null && TERMINAL_STATES.includes(to)) {
-			this.appendRunNotify(row.runId, {
-				nodeId: row.nodeId,
+		if (row.run_id !== null && row.node_id !== null && TERMINAL_STATES.includes(to)) {
+			this.appendRunNotify(row.run_id, {
+				nodeId: row.node_id,
 				jobId: id,
 				state: to as NodeEvent['state'],
 				result: patch.result ?? null,
@@ -391,33 +345,36 @@ export class JobRepo {
 
 	/** `projected`: outbox追記の有無, 進捗不変の場合省略 */
 	heartbeat(id: string, now: number, progress: number | null): { accepted: boolean; cancelRequested: boolean; projected: boolean } {
-		const set: Record<string, unknown> = { heartbeatAt: now };
+		const set: Record<string, SqlStorageValue> = { heartbeat_at: now };
 		if (progress !== null) set.progress = progress;
 		const previous =
-			progress === null ? undefined : this.db.select({ progress: job.progress }).from(job).where(eq(job.id, id)).get()?.progress;
+			progress === null ? undefined : this.#first<{ progress: number | null }>(`SELECT progress FROM job WHERE id = ?`, id)?.progress;
 
-		const updated = this.db
-			.update(job)
-			.set(set)
-			.where(and(eq(job.id, id), inArray(job.state, ['QUEUED', 'RUNNING'])))
-			.returning({ id: job.id, cancelRequestedAt: job.cancelRequestedAt })
-			.all();
+		const row = this.#first<{ cancel_requested_at: number | null }>(
+			`UPDATE job SET ${assignments(set)} WHERE id = ? AND state IN (${IN_FLIGHT}) RETURNING cancel_requested_at`,
+			...Object.values(set),
+			id,
+			'QUEUED',
+			'RUNNING',
+		);
 		this.writes++;
-		const row = updated[0];
 		if (!row) return { accepted: false, cancelRequested: false, projected: false };
 		// 進捗表示用の投影, heartbeat_atはD1に無く進捗変化時のみ
 		const projected = progress !== null && progress !== previous;
 		if (projected) this.#appendOutbox(id);
-		return { accepted: true, cancelRequested: row.cancelRequestedAt !== null, projected };
+		return { accepted: true, cancelRequested: row.cancel_requested_at !== null, projected };
 	}
 
 	requestCancel(id: string, now: number): boolean {
-		const updated = this.db
-			.update(job)
-			.set({ cancelRequestedAt: now, updatedAt: now })
-			.where(and(eq(job.id, id), inArray(job.state, ['QUEUED', 'RUNNING']), isNull(job.cancelRequestedAt)))
-			.returning({ id: job.id })
-			.all();
+		const updated = this.#all(
+			`UPDATE job SET cancel_requested_at = ?, updated_at = ?
+			WHERE id = ? AND state IN (${IN_FLIGHT}) AND cancel_requested_at IS NULL RETURNING id`,
+			now,
+			now,
+			id,
+			'QUEUED',
+			'RUNNING',
+		);
 		this.writes++;
 		if (updated.length === 0) return false;
 		// 要求中表示用の投影
@@ -430,15 +387,15 @@ export class JobRepo {
 	 * 取り消し要求済みは対象外, runAfter後ろ倒しでの確定遅延防止(#95)
 	 */
 	reschedule(id: string, runAfter: number, priority: number | undefined, now: number): boolean {
-		const set: Record<string, unknown> = { runAfter, updatedAt: now };
+		const set: Record<string, SqlStorageValue> = { run_after: runAfter, updated_at: now };
 		if (priority !== undefined) set.priority = priority;
 
-		const updated = this.db
-			.update(job)
-			.set(set)
-			.where(and(eq(job.id, id), eq(job.state, 'SCHEDULED'), isNull(job.cancelRequestedAt)))
-			.returning({ id: job.id })
-			.all();
+		const updated = this.#all(
+			`UPDATE job SET ${assignments(set)} WHERE id = ? AND state = ? AND cancel_requested_at IS NULL RETURNING id`,
+			...Object.values(set),
+			id,
+			'SCHEDULED',
+		);
 		this.writes++;
 		if (updated.length === 0) return false;
 		this.#appendOutbox(id);
@@ -459,22 +416,16 @@ export class JobRepo {
 			nodeId: row.node_id,
 			failedAt: now,
 		};
-		this.db
-			.insert(failureNotify)
-			.values({ jobId: row.id, payload: JSON.stringify(notice) })
-			.run();
-		this.writes++;
+		this.#write(`INSERT INTO failure_notify (job_id, payload) VALUES (?, ?)`, row.id, JSON.stringify(notice));
 	}
 
 	failureBatch(limit: number): { seq: number; payload: string }[] {
-		const rows = this.db.select().from(failureNotify).orderBy(asc(failureNotify.seq)).limit(limit).all();
-		return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
+		return this.#all<{ seq: number; payload: string }>(`SELECT seq, payload FROM failure_notify ORDER BY seq ASC LIMIT ?`, limit);
 	}
 
 	/** 投入成功後専用 */
 	deleteFailureThrough(seq: number): void {
-		this.db.delete(failureNotify).where(lte(failureNotify.seq, seq)).run();
-		this.writes++;
+		this.#write(`DELETE FROM failure_notify WHERE seq <= ?`, seq);
 	}
 
 	/** `#loadPolicy`を経ない`compareAndSet`経路用にここで読込(#96) */
@@ -514,49 +465,36 @@ export class JobRepo {
 			nodeId: row.node_id,
 			settledAt: now,
 		};
-		this.db
-			.insert(settledNotify)
-			.values({ jobId: row.id, payload: JSON.stringify(notice) })
-			.run();
-		this.writes++;
+		this.#write(`INSERT INTO settled_notify (job_id, payload) VALUES (?, ?)`, row.id, JSON.stringify(notice));
 	}
 
 	settledBatch(limit: number): { seq: number; payload: string }[] {
-		const rows = this.db.select().from(settledNotify).orderBy(asc(settledNotify.seq)).limit(limit).all();
-		return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
+		return this.#all<{ seq: number; payload: string }>(`SELECT seq, payload FROM settled_notify ORDER BY seq ASC LIMIT ?`, limit);
 	}
 
 	/** 投入成功後専用 */
 	deleteSettledThrough(seq: number): void {
-		this.db.delete(settledNotify).where(lte(settledNotify.seq, seq)).run();
-		this.writes++;
+		this.#write(`DELETE FROM settled_notify WHERE seq <= ?`, seq);
 	}
 
 	countSettledNotify(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(settledNotify)
-			.get();
-		return row?.c ?? 0;
+		return this.#first<{ c: number }>(`SELECT count(*) AS c FROM settled_notify`)?.c ?? 0;
 	}
 
 	appendRunNotify(runId: string, event: NodeEvent): void {
-		this.db
-			.insert(runNotify)
-			.values({ runId, event: JSON.stringify(event) })
-			.run();
-		this.writes++;
+		this.#write(`INSERT INTO run_notify (run_id, event) VALUES (?, ?)`, runId, JSON.stringify(event));
 	}
 
 	runNotifyBatch(limit: number): { seq: number; run_id: string; event: string }[] {
-		const rows = this.db.select().from(runNotify).orderBy(asc(runNotify.seq)).limit(limit).all();
-		return rows.map((row) => ({ seq: row.seq, run_id: row.runId, event: row.event }));
+		return this.#all<{ seq: number; run_id: string; event: string }>(
+			`SELECT seq, run_id, event FROM run_notify ORDER BY seq ASC LIMIT ?`,
+			limit,
+		);
 	}
 
 	/** 送信成功後専用 */
 	deleteRunNotifyThrough(seq: number): void {
-		this.db.delete(runNotify).where(lte(runNotify.seq, seq)).run();
-		this.writes++;
+		this.#write(`DELETE FROM run_notify WHERE seq <= ?`, seq);
 	}
 
 	payloadOf(row: JobRow): unknown {
@@ -568,25 +506,19 @@ export class JobRepo {
 	 * outboxはジョブ行非参照で投影滞留中も削除可能
 	 */
 	sweepTerminal(now: number, retention: Retention, limit: number): number {
-		const targets = this.db.select({ id: job.id }).from(job).where(sweepable(now, retention)).limit(limit);
+		const targets = `SELECT id FROM job WHERE ${SWEEPABLE} LIMIT ?`;
+		const bindings = [now - retention.sweepAfterMs, now - retention.failedRetentionMs, limit];
 
 		// ジョブ行より先に履歴削除, 後では対象特定不能
-		this.db.delete(attempt).where(inArray(attempt.jobId, targets)).run();
-		this.writes++;
-		this.db.delete(jobLog).where(inArray(jobLog.jobId, targets)).run();
-		this.writes++;
-
+		this.#write(`DELETE FROM attempt WHERE job_id IN (${targets})`, ...bindings);
+		this.#write(`DELETE FROM job_log WHERE job_id IN (${targets})`, ...bindings);
 		// 件数はカーソルから取得, returningは全行転送
-		const { sql: text, params } = this.db.delete(job).where(inArray(job.id, targets)).toSQL();
-		const cursor = this.sql.exec(text, ...(params as SqlStorageValue[]));
-		this.writes++;
-		return cursor.rowsWritten;
+		return this.#write(`DELETE FROM job WHERE id IN (${targets})`, ...bindings);
 	}
 
 	/**
 	 * 削除対象の有無と次回時刻を1回の読み取りで取得, 対象無しDELETEも書き込みに計上
 	 * nextDueAtは失敗ジョブのみ残存時の短間隔alarm回避用
-	 * 3集計の1文はクエリビルダで表現不能で生SQL
 	 * next_dueは状態別MINでjob_terminalの先頭1件から取得(#104), 多引数min()はNULL含有でNULL
 	 */
 	sweepState(now: number, retention: Retention): { jobs: boolean; uniqueKeys: boolean; nextDueAt: number | null } {
@@ -617,16 +549,11 @@ export class JobRepo {
 	 * 件数非返却, 上限無しで集計は全件転送
 	 */
 	sweepExpiredUniqueKeys(now: number): void {
-		this.db.delete(uniqueKey).where(lte(uniqueKey.expiresAt, now)).run();
-		this.writes++;
+		this.#write(`DELETE FROM unique_key WHERE expires_at <= ?`, now);
 	}
 
 	countJobs(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(job)
-			.get();
-		return row?.c ?? 0;
+		return this.#first<{ c: number }>(`SELECT count(*) AS c FROM job`)?.c ?? 0;
 	}
 
 	/**
@@ -635,85 +562,74 @@ export class JobRepo {
 	 */
 	reserveUniqueKey(key: string, jobId: string, expiresAt: number, now: number): string | null {
 		// 他キーの期限切れはtickで削除
-		this.db
-			.delete(uniqueKey)
-			.where(and(eq(uniqueKey.key, key), lte(uniqueKey.expiresAt, now)))
-			.run();
-		this.writes++;
+		this.#write(`DELETE FROM unique_key WHERE key = ? AND expires_at <= ?`, key, now);
 
-		const inserted = this.db
-			.insert(uniqueKey)
-			.values({ key, jobId, expiresAt })
-			.onConflictDoNothing()
-			.returning({ key: uniqueKey.key })
-			.all();
+		const inserted = this.#all(
+			`INSERT INTO unique_key (key, job_id, expires_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING key`,
+			key,
+			jobId,
+			expiresAt,
+		);
 		this.writes++;
 		if (inserted.length > 0) return null;
 
-		const row = this.db.select({ jobId: uniqueKey.jobId }).from(uniqueKey).where(eq(uniqueKey.key, key)).get();
-		return row?.jobId ?? null;
+		return this.#first<{ job_id: string }>(`SELECT job_id FROM unique_key WHERE key = ?`, key)?.job_id ?? null;
 	}
 
 	readSetting(key: string): string | undefined {
-		const row = this.db.select({ value: setting.value }).from(setting).where(eq(setting.key, key)).get();
-		return row?.value;
+		return this.#first<{ value: string }>(`SELECT value FROM setting WHERE key = ?`, key)?.value;
 	}
 
 	writeSetting(key: string, value: string): void {
-		this.db.insert(setting).values({ key, value }).onConflictDoUpdate({ target: setting.key, set: { value } }).run();
-		this.writes++;
+		this.#write(`INSERT INTO setting (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, key, value);
 	}
 
 	deleteSetting(key: string): void {
-		this.db.delete(setting).where(eq(setting.key, key)).run();
-		this.writes++;
+		this.#write(`DELETE FROM setting WHERE key = ?`, key);
 	}
 
 	/** 投入候補キーのみで有界(ADR-0045) */
 	readKeyBuckets(keys: readonly string[]): KeyBuckets {
 		const buckets: KeyBuckets = Object.create(null);
 		for (const part of chunk(keys, 1)) {
-			const rows = this.db.select().from(keyBucket).where(inArray(keyBucket.key, part)).all();
-			for (const r of rows) buckets[r.key] = { tokens: r.tokens, refilledAt: r.refilledAt };
+			const rows = this.#all<{ key: string; tokens: number; refilled_at: number }>(
+				`SELECT key, tokens, refilled_at FROM key_bucket WHERE key IN (${placeholders(part.length)})`,
+				...part,
+			);
+			for (const r of rows) buckets[r.key] = { tokens: r.tokens, refilledAt: r.refilled_at };
 		}
 		return buckets;
 	}
 
 	writeKeyBuckets(buckets: KeyBuckets): void {
 		for (const [key, b] of Object.entries(buckets)) {
-			this.db
-				.insert(keyBucket)
-				.values({ key, tokens: b.tokens, refilledAt: b.refilledAt })
-				.onConflictDoUpdate({ target: keyBucket.key, set: { tokens: b.tokens, refilledAt: b.refilledAt } })
-				.run();
-			this.writes++;
+			this.#write(
+				`INSERT INTO key_bucket (key, tokens, refilled_at) VALUES (?, ?, ?)
+				ON CONFLICT (key) DO UPDATE SET tokens = excluded.tokens, refilled_at = excluded.refilled_at`,
+				key,
+				b.tokens,
+				b.refilledAt,
+			);
 		}
 	}
 
 	deleteKeyBuckets(keys: readonly string[]): void {
 		for (const part of chunk(keys, 1)) {
-			this.db.delete(keyBucket).where(inArray(keyBucket.key, part)).run();
-			this.writes++;
+			this.#write(`DELETE FROM key_bucket WHERE key IN (${placeholders(part.length)})`, ...part);
 		}
 	}
 
 	/** tokens0以上はintervalMs以内に上限到達 */
 	sweepKeyBuckets(before: number): void {
-		this.db.delete(keyBucket).where(lte(keyBucket.refilledAt, before)).run();
-		this.writes++;
+		this.#write(`DELETE FROM key_bucket WHERE refilled_at <= ?`, before);
 	}
 
 	/** perKeyRate無効化後の残存行削除用 */
 	clearKeyBuckets(): void {
-		this.db.delete(keyBucket).run();
-		this.writes++;
+		this.#write(`DELETE FROM key_bucket`);
 	}
 
 	countKeyBuckets(): number {
-		const row = this.db
-			.select({ c: sql<number>`count(*)` })
-			.from(keyBucket)
-			.get();
-		return row?.c ?? 0;
+		return this.#first<{ c: number }>(`SELECT count(*) AS c FROM key_bucket`)?.c ?? 0;
 	}
 }
