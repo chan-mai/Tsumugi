@@ -57,16 +57,16 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@clack/prompts": "^1.8.1",
-    "@cloudflare/workers-types": "^5.20261019.1",
+    "@cloudflare/workers-types": "^5.20261027.1",
     "@tsumugi/dashboard": "workspace:*",
     "@tsumugi/spec": "workspace:*",
     "publint": "^0.3.25",
-    "tsdown": "^0.23.1",
+    "tsdown": "^0.23.2",
     "unrun": "^0.3.1"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",
     "drizzle-orm": "^0.45.4",
-    "hono": "^4.13.13"
+    "hono": "^4.13.14"
   }
 }
