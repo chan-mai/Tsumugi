@@ -13,6 +13,12 @@ export const placeholders = (count: number) => Array.from({ length: count }, () 
 // 予約語の列名(after, trigger等)対策
 export const columnList = (columns: readonly string[]) => columns.map((column) => `"${column}"`).join(', ');
 
+// 列名は呼び出し側の固定値のみ
+export const assignments = (set: Record<string, SqlStorageValue>) =>
+	Object.keys(set)
+		.map((column) => `${column} = ?`)
+		.join(', ');
+
 // 列名で値を対応, 列順変更時の取り違え防止
 export const valuesOf = <Column extends string>(columns: readonly Column[], row: Record<Column, SqlStorageValue>) =>
 	columns.map((column) => row[column]);

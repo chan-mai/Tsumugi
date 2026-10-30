@@ -13,7 +13,7 @@ import type {
 	SettledState,
 	SettledTarget,
 } from '../core/types.js';
-import { chunk, columnList, placeholders, valuesOf } from './bind.js';
+import { assignments, chunk, columnList, placeholders, valuesOf } from './bind.js';
 import { applySchema, COLUMNS, TERMINAL_INDEX_WHERE, type AttemptRow, type JobRow } from './schema.js';
 
 /** HTMLページ全体等によるDOとD1の圧迫防止 */
@@ -72,12 +72,6 @@ const IN_FLIGHT = placeholders(2);
 // sweepStateのSQLと同条件を維持, 部分索引条件は各分岐内でMULTI-INDEX OR維持
 const SWEEPABLE = `(state IN ('COMPLETED', 'CANCELLED') AND updated_at < ? AND ${TERMINAL_INDEX_WHERE})
 	OR (state IN ('FAILED', 'STALLED') AND updated_at < ? AND ${TERMINAL_INDEX_WHERE})`;
-
-// 列名は呼び出し側の固定値のみ
-const assignments = (set: Record<string, SqlStorageValue>) =>
-	Object.keys(set)
-		.map((column) => `${column} = ?`)
-		.join(', ');
 
 /** 状態遷移は条件付きUPDATEの`returning`で成否判定, 読んでから書く方式は不使用 */
 export class JobRepo {

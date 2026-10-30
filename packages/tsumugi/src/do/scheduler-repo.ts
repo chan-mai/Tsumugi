@@ -1,5 +1,5 @@
 import type { NormalizedSchedule } from '../core/recurring.js';
-import { columnList, placeholders } from './bind.js';
+import { assignments, columnList, placeholders } from './bind.js';
 import { applySchedulerSchema, SCHEDULER_COLUMNS, type ScheduleRow } from './scheduler-schema.js';
 
 const SCHEDULE_SELECT = columnList(SCHEDULER_COLUMNS.schedule);
@@ -26,10 +26,7 @@ export class SchedulerRepo {
 	// nullの次回時刻は既存値維持
 	#update(name: string, set: Record<string, SqlStorageValue>, nextOccurrenceAt: number | null, increment = ''): void {
 		const columns = nextOccurrenceAt !== null ? { ...set, next_occurrence_at: nextOccurrenceAt } : set;
-		const assignments = Object.keys(columns)
-			.map((column) => `${column} = ?`)
-			.join(', ');
-		this.sql.exec(`UPDATE schedule SET ${assignments}${increment} WHERE name = ?`, ...Object.values(columns), name);
+		this.sql.exec(`UPDATE schedule SET ${assignments(columns)}${increment} WHERE name = ?`, ...Object.values(columns), name);
 	}
 
 	readSetting(key: string): string | undefined {

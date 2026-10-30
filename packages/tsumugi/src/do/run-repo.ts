@@ -1,6 +1,6 @@
 import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
 import type { NodeTrigger } from '../core/flow.js';
-import { chunk, columnList, placeholders, valuesOf } from './bind.js';
+import { assignments, chunk, columnList, placeholders, valuesOf } from './bind.js';
 import { applyRunSchema, RUN_COLUMNS, type NodeRow, type RunRow } from './run-schema.js';
 
 const RUN_SELECT = columnList(RUN_COLUMNS.run);
@@ -208,10 +208,7 @@ export class RunRepo {
 		if (patch.childRunId !== undefined) set.child_run_id = patch.childRunId;
 		if (patch.result !== undefined) set.result = patch.result;
 		if (patch.error !== undefined) set.error = patch.error;
-		const assignments = Object.keys(set)
-			.map((column) => `${column} = ?`)
-			.join(', ');
-		this.sql.exec(`UPDATE node SET ${assignments} WHERE id = ?`, ...Object.values(set), id);
+		this.sql.exec(`UPDATE node SET ${assignments(set)} WHERE id = ?`, ...Object.values(set), id);
 	}
 
 	nextSeq(): number {
