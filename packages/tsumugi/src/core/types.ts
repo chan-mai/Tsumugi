@@ -22,6 +22,7 @@ export type JobView = {
 	createdAt: number;
 	/** QUEUEDへの遷移時刻, SCHEDULEDならnull */
 	dispatchedAt: number | null;
+	/** 実行開始/最終heartbeat時刻 */
 	heartbeatAt: number | null;
 	guarantee: DeliveryGuarantee;
 	timeoutMs: number;

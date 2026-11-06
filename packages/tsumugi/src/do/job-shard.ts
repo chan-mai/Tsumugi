@@ -532,7 +532,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			if (this.repo.compareAndSet(jobId, ['QUEUED'], 'CANCELLED', { now })) await this.#armAlarm(now);
 			return false;
 		}
-		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now });
+		// 無応答判定は実行開始起点, Queues滞留時間を除外
+		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now, heartbeatAt: now });
 	}
 
 	/**
@@ -544,7 +545,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const row = this.repo.find(jobId);
 		if (!row || row.state !== 'QUEUED' || row.attempts + 1 !== attempt) return;
 		// 投影用alarm, 無いと表示がreaper期限まで遅延
-		if (this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now })) await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
+		// 無応答判定は実行開始起点, Queues滞留時間を除外
+		if (this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now, heartbeatAt: now }))
+			await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
 	}
 
 	/** consumerからの実行開始前の期限切れ報告(ADR-0047), Queues滞留分も対象 */

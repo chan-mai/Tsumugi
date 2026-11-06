@@ -290,6 +290,7 @@ export class JobRepo {
 		patch: {
 			now: number;
 			dispatchedAt?: number | null;
+			heartbeatAt?: number;
 			attempts?: number;
 			runAfter?: number;
 			countAttempt?: boolean;
@@ -304,7 +305,12 @@ export class JobRepo {
 		for (const state of from) assertTransition(state, to);
 
 		// 生存報告消去, 前試行の報告でのreaper期限延長防止
-		const set: Record<string, SqlStorageValue> = { state: to, updated_at: patch.now, heartbeat_at: null, progress: null };
+		const set: Record<string, SqlStorageValue> = {
+			state: to,
+			updated_at: patch.now,
+			heartbeat_at: patch.heartbeatAt ?? null,
+			progress: null,
+		};
 		if (patch.dispatchedAt !== undefined) set.dispatched_at = patch.dispatchedAt;
 		if (patch.attempts !== undefined && !patch.countAttempt) set.attempts = patch.attempts;
 		if (patch.runAfter !== undefined) set.run_after = patch.runAfter;

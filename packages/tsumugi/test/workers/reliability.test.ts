@@ -207,6 +207,46 @@ describe('reaper', () => {
 
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 	});
+
+	it('claim後は実行開始から判定しQueuesの滞留を含めない', async () => {
+		const clock = fixedClock(T0);
+		const { queue } = captureQueue();
+		await install('ONCE', clock, queue);
+		const jobId = await shard('ONCE').enqueue({ binding: 'ONCE', payload: {}, guarantee: 'at-most-once', timeoutMs: 60_000 });
+		await runDurableObjectAlarm(shard('ONCE'));
+
+		clock.advance(40_000);
+		await install('ONCE', clock, queue);
+		expect(await shard('ONCE').claim(jobId)).toBe(true);
+
+		clock.advance(50_000);
+		await install('ONCE', clock, queue);
+		await runDurableObjectAlarm(shard('ONCE'));
+		expect(await stateOf('ONCE', jobId)).toBe('RUNNING');
+
+		clock.advance(40_000);
+		await install('ONCE', clock, queue);
+		await runDurableObjectAlarm(shard('ONCE'));
+		expect(await stateOf('ONCE', jobId)).toBe('STALLED');
+	});
+
+	it('start後は実行開始から判定しQueuesの滞留を含めない(ADR-0054)', async () => {
+		const clock = fixedClock(T0);
+		const { sent, queue } = captureQueue();
+		await install('BOOM', clock, queue);
+		const jobId = await shard('BOOM').enqueue({ binding: 'BOOM', payload: {}, timeoutMs: 60_000, maxAttempts: 5 });
+		await runDurableObjectAlarm(shard('BOOM'));
+
+		clock.advance(40_000);
+		await install('BOOM', clock, queue);
+		await shard('BOOM').start(jobId, 1);
+
+		clock.advance(50_000);
+		await install('BOOM', clock, queue);
+		await runDurableObjectAlarm(shard('BOOM'));
+		expect(await stateOf('BOOM', jobId)).toBe('RUNNING');
+		expect(sent.filter((m) => m.jobId === jobId)).toHaveLength(1);
+	});
 });
 
 describe('claim (ADR-0007)', () => {

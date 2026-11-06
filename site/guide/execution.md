@@ -87,7 +87,8 @@ await tsumugi.enqueue(env, {
 タイムアウト後も、performerの実行は停止されません。
 処理を中断する方法は、[タイムアウトによる中断](/guide/performer#タイムアウトによる中断)を参照してください。
 
-`QUEUED`または`RUNNING`のジョブは、実行開始(または最後の`heartbeat`)から`timeoutMs`と`reaperGraceMs`(既定30秒)を過ぎても試行結果が記録されない場合に無応答と判定されます。
+`RUNNING`のジョブは、実行開始(または最後の`heartbeat`)から`timeoutMs`と`reaperGraceMs`(既定30秒)を過ぎても試行結果が記録されない場合に無応答と判定されます。
+`QUEUED`のジョブは、Queuesへの送信(または最後の`heartbeat`)から同じ時間を過ぎた場合に無応答と判定されます。
 `at-most-once`のジョブは、試行回数に関係なく`STALLED`へ遷移します。
 `at-least-once`のジョブは、試行回数が上限に達していなければ再投入され、達していれば`FAILED`に遷移します。
 
