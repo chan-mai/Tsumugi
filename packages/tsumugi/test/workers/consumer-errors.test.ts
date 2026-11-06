@@ -98,7 +98,7 @@ describe('reportの失敗(ADR-0004)', () => {
 
 		expect(performed).toEqual(['OK#0:valid']);
 		expect(report).toHaveBeenCalledTimes(1);
-		expect(report).toHaveBeenCalledWith('OK#0:valid', { ok: true });
+		expect(report).toHaveBeenCalledWith('OK#0:valid', { ok: true }, 1);
 		// 報告喪失時もack, QUEUEDのジョブはreaperが再処理
 		expect(msg.ack).toHaveBeenCalledTimes(1);
 		expect(msg.retry).not.toHaveBeenCalled();

@@ -350,18 +350,25 @@ export class JobRepo {
 	}
 
 	/** `projected`: outbox追記の有無, 進捗不変の場合省略 */
-	heartbeat(id: string, now: number, progress: number | null): { accepted: boolean; cancelRequested: boolean; projected: boolean } {
+	heartbeat(
+		id: string,
+		now: number,
+		progress: number | null,
+		attempt?: number,
+	): { accepted: boolean; cancelRequested: boolean; projected: boolean } {
 		const set: Record<string, SqlStorageValue> = { heartbeat_at: now };
 		if (progress !== null) set.progress = progress;
 		const previous =
 			progress === null ? undefined : this.#first<{ progress: number | null }>(`SELECT progress FROM job WHERE id = ?`, id)?.progress;
 
+		const current = attempt === undefined ? '' : ' AND attempts + 1 = ?';
 		const row = this.#first<{ cancel_requested_at: number | null }>(
-			`UPDATE job SET ${assignments(set)} WHERE id = ? AND state IN (${IN_FLIGHT}) RETURNING cancel_requested_at`,
+			`UPDATE job SET ${assignments(set)} WHERE id = ? AND state IN (${IN_FLIGHT})${current} RETURNING cancel_requested_at`,
 			...Object.values(set),
 			id,
 			'QUEUED',
 			'RUNNING',
+			...(attempt === undefined ? [] : [attempt]),
 		);
 		this.writes++;
 		if (!row) return { accepted: false, cancelRequested: false, projected: false };

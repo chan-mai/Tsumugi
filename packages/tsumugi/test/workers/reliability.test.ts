@@ -269,6 +269,87 @@ describe('reaper', () => {
 	});
 });
 
+describe('前の試行からの通知', () => {
+	// 回収後に再投入された試行2の実行中, 試行1のメッセージが遅れて処理される状況
+	async function secondAttempt(binding: string, guarantee: 'at-least-once' | 'at-most-once' = 'at-least-once') {
+		const clock = fixedClock(T0);
+		const { queue } = captureQueue();
+		await install(binding, clock, queue);
+		const jobId = await shard(binding).enqueue({ binding, payload: {}, timeoutMs: 60_000, maxAttempts: 5, guarantee });
+		await runDurableObjectAlarm(shard(binding));
+		clock.advance(60_000 + 30_000);
+		await install(binding, clock, queue);
+		await runDurableObjectAlarm(shard(binding));
+		if (guarantee === 'at-least-once') {
+			await runDurableObjectAlarm(shard(binding));
+			await shard(binding).start(jobId, 2);
+		}
+		return { jobId, clock, queue };
+	}
+
+	it('前の試行のreportは現在の試行へ適用しない', async () => {
+		const { jobId } = await secondAttempt('STALE1');
+		expect(await stateOf('STALE1', jobId)).toBe('RUNNING');
+
+		await shard('STALE1').report(jobId, { ok: false, error: 'late failure' }, 1);
+		expect(await stateOf('STALE1', jobId)).toBe('RUNNING');
+		expect((await rowOf('STALE1', jobId)).attempts).toBe(1);
+
+		await shard('STALE1').report(jobId, { ok: true }, 2);
+		expect(await stateOf('STALE1', jobId)).toBe('COMPLETED');
+	});
+
+	it('重複配送の2回目のreportは試行回数を消費しない', async () => {
+		const clock = fixedClock(T0);
+		const { queue } = captureQueue();
+		await install('STALE2', clock, queue);
+		const jobId = await shard('STALE2').enqueue({ binding: 'STALE2', payload: {}, maxAttempts: 5, backoff: { kind: 'fixed', delayMs: 0 } });
+		await runDurableObjectAlarm(shard('STALE2'));
+
+		await shard('STALE2').report(jobId, { ok: false, error: 'first delivery' }, 1);
+		// 試行2の投入後に同じメッセージの2回目の配送が終了
+		await runDurableObjectAlarm(shard('STALE2'));
+		expect(await stateOf('STALE2', jobId)).toBe('QUEUED');
+		await shard('STALE2').report(jobId, { ok: false, error: 'second delivery' }, 1);
+		expect(await stateOf('STALE2', jobId)).toBe('QUEUED');
+		expect((await rowOf('STALE2', jobId)).attempts).toBe(1);
+	});
+
+	it('前の試行のheartbeatは受理せず回収期限を延長しない', async () => {
+		const { jobId, clock, queue } = await secondAttempt('STALE3');
+
+		expect(await shard('STALE3').heartbeat(jobId, undefined, 1)).toEqual({ accepted: false, cancelRequested: false });
+		expect(await shard('STALE3').heartbeat(jobId, undefined, 2)).toEqual({ accepted: true, cancelRequested: false });
+
+		clock.advance(60_000 + 30_000);
+		await install('STALE3', clock, queue);
+		await shard('STALE3').heartbeat(jobId, undefined, 1);
+		await runDurableObjectAlarm(shard('STALE3'));
+		expect(await stateOf('STALE3', jobId)).toBe('SCHEDULED');
+	});
+
+	it('前の試行のメッセージはclaimできない(ADR-0007)', async () => {
+		const clock = fixedClock(T0);
+		const { queue } = captureQueue();
+		await install('STALE4', clock, queue);
+		const jobId = await shard('STALE4').enqueue({
+			binding: 'STALE4',
+			payload: {},
+			guarantee: 'at-most-once',
+			maxAttempts: 5,
+			backoff: { kind: 'fixed', delayMs: 0 },
+		});
+		await runDurableObjectAlarm(shard('STALE4'));
+		// 失敗報告で試行2へ
+		expect(await shard('STALE4').claim(jobId, 1)).toBe(true);
+		await shard('STALE4').report(jobId, { ok: false, error: 'failure' }, 1);
+		await runDurableObjectAlarm(shard('STALE4'));
+
+		expect(await shard('STALE4').claim(jobId, 1)).toBe(false);
+		expect(await shard('STALE4').claim(jobId, 2)).toBe(true);
+	});
+});
+
 describe('claim (ADR-0007)', () => {
 	it('同時に2本claimしても勝つのは1本だけ', async () => {
 		const clock = fixedClock(T0);

@@ -165,6 +165,7 @@ export async function handleBatch<Env extends ConsumerEnv>(
 async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessage>, env: Env, exports: PerformerSource): Promise<void> {
 	// 報告先特定用jobIdをtry外で保持, 本文不正時は未取得
 	let jobId: string | undefined;
+	let reportedAttempt: number | undefined;
 	let ok = false;
 	let failure: string | undefined;
 	let timedOut = false;
@@ -179,6 +180,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
 		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt, traceparent } = body;
+		reportedAttempt = attempt;
 
 		// 期限切れは非実行, 滞留解消時の一括実行防止(ADR-0047)
 		// 報告失敗時はreaperが期限切れとしてCANCELLEDへ遷移
@@ -192,7 +194,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 			return;
 		}
 
-		if (claimRequired && !(await shardStub(env, jobId).claim(jobId))) {
+		if (claimRequired && !(await shardStub(env, jobId).claim(jobId, attempt))) {
 			// 重複配送で他方が実行権取得済み, 二重実行回避で終了(ADR-0007)
 			message.ack();
 			return;
@@ -229,7 +231,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 			const heartbeat = createHeartbeat(
 				(progress) =>
 					starting
-						.then(() => stub.heartbeat(stableId, progress))
+						.then(() => stub.heartbeat(stableId, progress, attempt))
 						.then((ack) => {
 							if (ack.accepted) touch();
 							return ack;
@@ -281,7 +283,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 					...(timedOut ? { timedOut: true } : {}),
 				};
 		await starting;
-		await shardStub(env, jobId).report(jobId, outcome);
+		await shardStub(env, jobId).report(jobId, outcome, reportedAttempt);
 	} catch (error) {
 		// 報告喪失時はQUEUED / RUNNINGのまま, reaperが無応答として処理
 		console.error(`tsumugi: report failed (${jobId})`, error);

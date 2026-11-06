@@ -413,16 +413,22 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async report(
 		jobId: string,
 		outcome: { ok: boolean; error?: string; result?: unknown; spawns?: readonly SpawnRequest[]; fail?: FailOptions; timedOut?: boolean },
+		attempt?: number,
 	): Promise<void> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
 		// 受理可否は事前判定, compareAndSet判定では記録が遷移後でoutboxに履歴欠落(ADR-0028)
 		if (!row || (row.state !== 'QUEUED' && row.state !== 'RUNNING')) return;
+		if (attempt !== undefined && row.attempts + 1 !== attempt) return;
 
 		const serialized = outcome.ok ? serializeResult(outcome.result) : null;
 		// runノードの戻り値は後段payload, 保存不能のまま成功では後段にnull(ADR-0035)
 		if (outcome.ok && row.run_id !== null && outcome.result !== undefined && serialized === null) {
-			await this.report(jobId, { ok: false, error: `cannot store the result (over ${RESULT_MAX_CHARS} chars or not serializable)` });
+			await this.report(
+				jobId,
+				{ ok: false, error: `cannot store the result (over ${RESULT_MAX_CHARS} chars or not serializable)` },
+				attempt,
+			);
 			return;
 		}
 
@@ -510,11 +516,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 所要時間が変動するジョブでもtimeoutMsの最長化不要
 	 * 進捗表示用に投影対象, 報告間隔はconsumer側で制限
 	 */
-	async heartbeat(jobId: string, progress?: number): Promise<{ accepted: boolean; cancelRequested: boolean }> {
+	async heartbeat(jobId: string, progress?: number, attempt?: number): Promise<{ accepted: boolean; cancelRequested: boolean }> {
 		const now = this.clock.now();
 		// 画面の進捗100%超過防止
 		const clamped = typeof progress === 'number' && Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : null;
-		const { accepted, cancelRequested, projected } = this.repo.heartbeat(jobId, now, clamped);
+		const { accepted, cancelRequested, projected } = this.repo.heartbeat(jobId, now, clamped, attempt);
 		// 投影用alarm, 無いと進捗表示がreaper期限まで遅延
 		if (projected) await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
 		return { accepted, cancelRequested };
@@ -532,9 +538,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * at-most-onceジョブの実行権, Queuesの重複配送下も条件付きUPDATEで1つに限定(ADR-0007)
 	 * 取り消し要求済みは実行せず終了, CAS条件に要求が無く事前確認(ADR-0052)
 	 */
-	async claim(jobId: string): Promise<boolean> {
+	async claim(jobId: string, attempt?: number): Promise<boolean> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
+		// 前試行のメッセージは実行権なし, 現在の試行のメッセージが取得
+		if (row && attempt !== undefined && row.attempts + 1 !== attempt) return false;
 		if (row && row.cancel_requested_at !== null) {
 			if (this.repo.compareAndSet(jobId, ['QUEUED'], 'CANCELLED', { now })) await this.#armAlarm(now);
 			return false;
