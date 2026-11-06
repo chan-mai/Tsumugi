@@ -543,6 +543,12 @@ describe('ジョブの投入', () => {
 		expect(res.status).toBe(400);
 	});
 
+	it('上限を超えるpayloadは400', async () => {
+		const res = await post({ binding: 'REST', payload: { text: 'x'.repeat(130_000) } });
+		expect(res.status).toBe(400);
+		expect((await res.json<{ error: string }>()).error).toContain('payload is too large');
+	});
+
 	it('壊れたJSONは400', async () => {
 		const res = await withAuth.fetch!(
 			new Request('https://example.com/api/jobs', { method: 'POST', headers: authorized, body: '{' }),

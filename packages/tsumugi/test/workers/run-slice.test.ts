@@ -212,6 +212,19 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('FAILED');
 	});
 
+	it('上限を超えるpayloadはノードのFAILEDになる', async () => {
+		const runId = 'GREETINGS:bigpayload';
+		const stub = runStub(runId);
+		await installQueues();
+		// 投入時の例外ではtickが毎回同じ位置で停止
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'x'.repeat(130_000) } });
+		await settleRun(runId);
+
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
+		expect(await errorOf(runId, 'list')).toMatch(/^input failed: payload is too large/);
+		expect(await stateOf(runId)).toBe('FAILED');
+	});
+
 	it('ノードの失敗で下流が中断されrunがFAILEDになる', async () => {
 		const runId = 'GREETINGS:fail1';
 		const stub = runStub(runId);

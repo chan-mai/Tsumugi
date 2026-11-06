@@ -49,6 +49,7 @@ binding名は、[exportした名前](/guide/performer#binding名)と一致させ
 
 `input`には、Flowの入力と前段の戻り値からpayloadを生成する関数を指定します。
 第2引数は、`after`に渡したオブジェクトのキーをプロパティ名とするオブジェクトです。
+生成したpayloadが[上限](/guide/enqueue#enqueue)を超えた場合、そのノードは`FAILED`になります。
 ノードの定義には、ジョブの投入時と同じオプション(`maxAttempts`, `backoff`, `timeoutMs`, `priority`, `concurrencyKey`など)を任意で指定します。
 
 ## 開始

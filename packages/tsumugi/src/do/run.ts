@@ -14,6 +14,7 @@ import {
 	shapeOf,
 } from '../core/flow.js';
 import { formatJobId, formatRunId, parseRunId, shardNameOf } from '../core/ids.js';
+import { assertPayloadSize } from '../core/message.js';
 import {
 	advance,
 	isNodeTerminal,
@@ -674,8 +675,11 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		}
 
 		#buildJob(row: NodeRow, definitions: Map<string, FlowNode>, runInput: unknown): BuiltJob | null {
+			// 投入時の例外ではtickが毎回同じ位置で停止
 			if (row.payload !== null) {
-				return { payload: JSON.parse(row.payload), ...(JSON.parse(row.options ?? '{}') as NodeJobOptions) };
+				const payload: unknown = JSON.parse(row.payload);
+				assertPayloadSize(payload);
+				return { payload, ...(JSON.parse(row.options ?? '{}') as NodeJobOptions) };
 			}
 
 			const definition = definitions.get(row.id);
@@ -683,8 +687,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const deps = this.#depsOf(definition);
 			const concurrencyKey =
 				typeof definition.concurrencyKey === 'function' ? definition.concurrencyKey(runInput, deps) : definition.concurrencyKey;
+			const payload = definition.input(runInput, deps);
+			assertPayloadSize(payload);
 			return {
-				payload: definition.input(runInput, deps),
+				payload,
 				...definition.job,
 				...(concurrencyKey === undefined ? {} : { concurrencyKey }),
 			};

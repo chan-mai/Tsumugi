@@ -179,7 +179,7 @@ runIdの形式が不正な場合、`/api/runs/:id`を含むエンドポイント
 | 状態 | 意味 |
 | --- | --- |
 | 201 | 作成。本文は`{ "id": "..." }` |
-| 400 | JSONの不正, または検証の失敗(未登録のbinding, 整数以外の値, 不正な`traceparent`) |
+| 400 | JSONの不正, または検証の失敗(未登録のbinding, 整数以外の値, 不正な`traceparent`, 上限を超えるpayload) |
 
 ### POST /api/jobs/:id/retry
 

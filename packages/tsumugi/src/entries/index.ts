@@ -71,6 +71,7 @@ export {
 	shardName,
 	shardNameOf,
 } from '../core/ids.js';
+export { PAYLOAD_MAX_BYTES, PayloadTooLargeError } from '../core/message.js';
 export { hashToShard, resolveShard } from '../core/shard.js';
 export { InvalidTransitionError, assertTransition, canTransition, isActive, isTerminal } from '../core/transitions.js';
 export type * from './types.js';

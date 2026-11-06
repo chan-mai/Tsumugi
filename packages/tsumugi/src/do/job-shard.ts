@@ -7,6 +7,7 @@ import { retentionOf } from '../core/retention.js';
 import { RETRYABLE_STATES } from '../core/transitions.js';
 import { planDispatch } from '../core/dispatch.js';
 import { normalizeTraceparent } from '../core/trace.js';
+import { assertPayloadSize, splitBatches } from '../core/message.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type {
 	Backoff,
@@ -158,9 +159,6 @@ const PROGRESS_PROJECTION_DELAY_MS = 3_000;
 const PROJECTION_LIMIT = 200;
 
 const RUN_NOTIFY_LIMIT = 200;
-
-// Queuesプロデューサ側のsendBatch上限
-const SEND_BATCH_LIMIT = 100;
 
 const SWEEP_LIMIT = 200;
 
@@ -356,6 +354,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/** 個別RPCの逐次enqueueはDOの1,000 req/sソフト上限で実測78件/秒 */
 	async enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]> {
 		const traceparents = inputs.map((input) => normalizeTraceparent(input.traceparent));
+		// 書き込み前に全件検証, 送信不能なジョブの登録防止
+		for (const input of inputs) assertPayloadSize(input.payload);
 		const now = this.clock.now();
 		this.#loadPolicy();
 		// enqueue同梱は静的設定, configure()でpin済みなら無視(#6)
@@ -668,25 +668,23 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#persistKeyBuckets(keyBuckets, output.keyBuckets, now);
 		this.#persistBlocked(output.blocked);
 
-		const messages: MessageSendRequest<DispatchMessage>[] = [];
+		const messages: DispatchMessage[] = [];
 		for (const decision of output.decisions) {
 			switch (decision.type) {
 				case 'dispatch': {
 					const row = this.repo.find(decision.id);
 					if (!row) break;
-					// 遷移後に投入, 投入失敗時はQUEUEDのままreaperが処理
+					// 遷移後に投入, 投入失敗時はSCHEDULEDへ復帰
 					if (!this.repo.compareAndSet(decision.id, ['SCHEDULED'], 'QUEUED', { now, dispatchedAt: now })) break;
 					messages.push({
-						body: {
-							jobId: row.id,
-							binding: row.binding,
-							attempt: row.attempts + 1,
-							payload: this.repo.payloadOf(row),
-							timeoutMs: row.timeout_ms,
-							claimRequired: row.guarantee === 'at-most-once',
-							...(row.traceparent !== null ? { traceparent: row.traceparent } : {}),
-							expiresAt: row.expires_at,
-						},
+						jobId: row.id,
+						binding: row.binding,
+						attempt: row.attempts + 1,
+						payload: this.repo.payloadOf(row),
+						timeoutMs: row.timeout_ms,
+						claimRequired: row.guarantee === 'at-most-once',
+						...(row.traceparent !== null ? { traceparent: row.traceparent } : {}),
+						expiresAt: row.expires_at,
 					});
 					break;
 				}
@@ -712,13 +710,26 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			}
 		}
 
-		// concurrency>100で1 tickの投入が上限超過(ADR-0009)
-		for (let i = 0; i < messages.length; i += SEND_BATCH_LIMIT) {
-			await this.env.TSUMUGI_QUEUE.sendBatch(messages.slice(i, i + SEND_BATCH_LIMIT));
+		// 件数とバイト数の上限で分割, concurrency>100で1 tickの投入が件数上限超過(ADR-0009)
+		const { batches, oversized } = splitBatches(messages);
+		for (const message of oversized) {
+			// 再試行でも送信不能
+			this.repo.compareAndSet(message.jobId, ['QUEUED'], 'FAILED', { now, error: 'dispatch message exceeds the Queues size limit' });
+		}
+		let sendFailed = false;
+		for (const batch of batches) {
+			try {
+				await this.env.TSUMUGI_QUEUE.sendBatch(batch.map((body) => ({ body })));
+			} catch (error) {
+				console.error('tsumugi: sendBatch failed', error);
+				sendFailed = true;
+				// 未実行の試行, attempts維持で再投入
+				for (const message of batch) this.repo.compareAndSet(message.jobId, ['QUEUED'], 'SCHEDULED', { now, dispatchedAt: null });
+			}
 		}
 
-		// 後段は相互独立
-		let failed = false;
+		// 後段は相互独立, 投入失敗とも独立
+		let failed = sendFailed;
 		const stage = async <T>(name: string, run: () => T | Promise<T>, fallback: T): Promise<T> => {
 			try {
 				return await run();
@@ -741,7 +752,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const blockedOnTokens = output.blocked.tokens || output.blocked.perKeyTokens;
 		const progressed = output.decisions.some((d) => d.type === 'dispatch' || d.type === 'expire' || d.type === 'cancel');
 		const hasMore =
-			(readyCount >= TICK_LIMIT && !blockedOnTokens && progressed) ||
+			// 投入失敗時は即時再実行せず, 障害中の反復防止
+			(readyCount >= TICK_LIMIT && !blockedOnTokens && progressed && !sendFailed) ||
 			projected >= PROJECTION_LIMIT ||
 			deleted >= SWEEP_LIMIT ||
 			notifiedRuns >= RUN_NOTIFY_LIMIT ||

@@ -1,5 +1,6 @@
 import { shardName } from '../core/ids.js';
 import { resolveShard } from '../core/shard.js';
+import { assertPayloadSize } from '../core/message.js';
 import { normalizeTraceparent } from '../core/trace.js';
 import type { Policy, SettledTarget } from '../core/types.js';
 import type { EnqueueInput, ShardSettings } from '../do/job-shard.js';
@@ -131,7 +132,11 @@ export function createClient<Env extends ClientEnv>(
 		// フックは宛先解決前に適用, traceparent検証はフック付与分含む
 		const onEnqueue = hooks.onEnqueue;
 		const inputs = onEnqueue ? rawInputs.map((input) => applyDefaults(input, onEnqueue(input))) : rawInputs;
-		for (const input of inputs) normalizeTraceparent(input.traceparent);
+		for (const input of inputs) {
+			normalizeTraceparent(input.traceparent);
+			// RPC前に検証, DO側の例外は型を保持せず
+			assertPayloadSize(input.payload);
+		}
 		// 宛先DOごとに集約, 個別RPCはDOの1,000 req/sソフト上限で律速
 		type Group = { stub: DurableObjectStub<JobShardStub>; settings: ShardSettings | undefined; items: EnqueueInput[] };
 		const groups = new Map<string, Group>();

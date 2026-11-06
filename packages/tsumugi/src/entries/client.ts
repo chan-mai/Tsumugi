@@ -1,5 +1,6 @@
 // enqueue専用Worker向け, DO実装のバンドル回避用に本体と分離
 export { createClient } from '../client/enqueue.js';
+export { PAYLOAD_MAX_BYTES, PayloadTooLargeError } from '../core/message.js';
 export type {
 	BindingConfig,
 	ClientEnv,
