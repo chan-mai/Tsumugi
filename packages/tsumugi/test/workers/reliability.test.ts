@@ -28,7 +28,7 @@ const waitForDeadline = {
 	},
 };
 
-const performers = { BOOM: boom, SLOW: waitForDeadline, ONCE: boom };
+const performers = { BOOM: boom, SLOW: waitForDeadline, ONCE: boom, SLOWONCE: waitForDeadline };
 
 function captureQueue() {
 	const sent: DispatchMessage[] = [];
@@ -149,6 +149,26 @@ describe('timeout', () => {
 
 		expect(aborted).toBe(true);
 		expect(await stateOf('SLOW', jobId)).toBe('SCHEDULED');
+	});
+
+	it('at-most-onceはtimeoutで再試行せずSTALLEDになる(ADR-0007)', async () => {
+		const clock = fixedClock(T0);
+		const { sent, queue } = captureQueue();
+		await install('SLOWONCE', clock, queue);
+
+		const jobId = await shard('SLOWONCE').enqueue({
+			binding: 'SLOWONCE',
+			payload: {},
+			guarantee: 'at-most-once',
+			timeoutMs: 50,
+			maxAttempts: 3,
+		});
+		await runDurableObjectAlarm(shard('SLOWONCE'));
+		await handleBatch(makeBatch(sent), consumerEnv, performers);
+
+		// performerは実行継続, 再投入で同時に2つ実行
+		expect(await stateOf('SLOWONCE', jobId)).toBe('STALLED');
+		expect((await rowOf('SLOWONCE', jobId)).attempts).toBe(1);
 	});
 });
 

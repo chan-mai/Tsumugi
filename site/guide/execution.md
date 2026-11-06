@@ -85,6 +85,7 @@ await tsumugi.enqueue(env, {
 `timeoutMs`を過ぎた試行は、失敗として扱われます。
 試行のエラーには、`TsumugiTimeoutError`(`job timed out (<jobId>, <timeoutMs>ms)`)が記録されます。
 タイムアウト後も、performerの実行は停止されません。
+そのため、`at-most-once`のジョブはタイムアウトで`STALLED`へ遷移し、試行回数が残っていても再試行されません。
 処理を中断する方法は、[タイムアウトによる中断](/guide/performer#タイムアウトによる中断)を参照してください。
 
 `RUNNING`のジョブは、実行開始(または最後の`heartbeat`)から`timeoutMs`と`reaperGraceMs`(既定30秒)を過ぎても試行結果が記録されない場合に無応答と判定されます。

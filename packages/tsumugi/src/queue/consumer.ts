@@ -167,6 +167,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 	let jobId: string | undefined;
 	let ok = false;
 	let failure: string | undefined;
+	let timedOut = false;
 	let result: unknown;
 	const spawns: SpawnRequest[] = [];
 	let fail: FailOptions | undefined;
@@ -258,6 +259,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 	} catch (error) {
 		// エラー本文をDOへ送信, 失敗理由のダッシュボード表示用(ADR-0028)
 		failure = describeError(error);
+		timedOut = error instanceof TsumugiTimeoutError;
 		console.error(`tsumugi: perform failed (${jobId ?? 'unknown'})`, error);
 	}
 
@@ -272,7 +274,12 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		// 失敗試行のspawnは非送信, 再実行時に再要求(ADR-0032)
 		const outcome = ok
 			? { ok: true, result, ...(spawns.length > 0 ? { spawns } : {}) }
-			: { ok: false, ...(failure === undefined ? {} : { error: failure }), ...(fail ? { fail } : {}) };
+			: {
+					ok: false,
+					...(failure === undefined ? {} : { error: failure }),
+					...(fail ? { fail } : {}),
+					...(timedOut ? { timedOut: true } : {}),
+				};
 		await starting;
 		await shardStub(env, jobId).report(jobId, outcome);
 	} catch (error) {

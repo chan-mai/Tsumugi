@@ -412,7 +412,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 */
 	async report(
 		jobId: string,
-		outcome: { ok: boolean; error?: string; result?: unknown; spawns?: readonly SpawnRequest[]; fail?: FailOptions },
+		outcome: { ok: boolean; error?: string; result?: unknown; spawns?: readonly SpawnRequest[]; fail?: FailOptions; timedOut?: boolean },
 	): Promise<void> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
@@ -456,6 +456,13 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 取り消し要求後の失敗は中断由来, リトライ無しで確定(ADR-0052)
 		if (row.cancel_requested_at !== null) {
 			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'CANCELLED', { now, attempts, error: outcome.error ?? null });
+			await this.#armAlarm(now);
+			return;
+		}
+
+		// timeout後もperformerは実行継続で結果不明, 再投入は二重実行(ADR-0006, ADR-0007)
+		if (outcome.timedOut === true && row.guarantee === 'at-most-once') {
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'STALLED', { now, attempts, error: outcome.error ?? null });
 			await this.#armAlarm(now);
 			return;
 		}
