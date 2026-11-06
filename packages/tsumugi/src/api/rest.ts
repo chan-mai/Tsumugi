@@ -71,6 +71,8 @@ function mutationResponse(outcome: MutationOutcome, subject: 'job' | 'run') {
 			return { body: error(`${subject} not found: it does not exist or was removed after the retention period`), status: 410 } as const;
 		case 'invalid-id':
 			return { body: error(`invalid ${subject} id`), status: 400 } as const;
+		case 'in-run':
+			return { body: error('the job belongs to a run, resume the run instead'), status: 409 } as const;
 		default:
 			return { body: error('not allowed in the current state'), status: 409 } as const;
 	}

@@ -91,6 +91,7 @@ export default {
 		noActions: '実行できる操作はありません',
 		cancelHint: '予約済みのJobは即時にキャンセルされ、実行中のJobにはキャンセル要求が送られます',
 		gone: '保持期間を過ぎたため、コーディネータから削除されています',
+		inRun: 'Runに属するJobはRunの再開で再実行します',
 		requestFailed: 'リクエストに失敗しました',
 	},
 	bulk: {

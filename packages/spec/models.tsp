@@ -255,8 +255,8 @@ model BulkResult {
 	failed: {
 		id: string;
 
-		@doc("invalid-state matches 409, gone matches 410, invalid-id is a malformed job id, unreachable means the shard did not respond")
-		reason: "invalid-state" | "gone" | "invalid-id" | "unreachable";
+		@doc("invalid-state and in-run match 409, gone matches 410, invalid-id is a malformed job id, unreachable means the shard did not respond")
+		reason: "invalid-state" | "in-run" | "gone" | "invalid-id" | "unreachable";
 	}[];
 
 	@doc("Estimated matches left after the limit. Always 0 when ids was given.")
@@ -509,7 +509,7 @@ model MutationAccepted {
 	@body body: Mutation;
 }
 
-@doc("Not allowed in the current state")
+@doc("Not allowed in the current state, or a retry of a job in a run")
 model InvalidState {
 	@statusCode statusCode: 409;
 	@body body: Error;

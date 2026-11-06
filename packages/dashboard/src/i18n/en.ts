@@ -89,6 +89,7 @@ export default {
 		noActions: 'No actions available',
 		cancelHint: 'Scheduled jobs are cancelled immediately, running jobs receive a request',
 		gone: 'Removed from the coordinator after the retention period',
+		inRun: 'Jobs in a run are retried by resuming the run',
 		requestFailed: 'Request failed',
 	},
 	bulk: {

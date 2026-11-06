@@ -73,9 +73,9 @@ export interface NoticeEnqueueStub extends Rpc.DurableObjectBranded {
  * `requested`は取り消し要求の受理(ADR-0052), 応答か期限で遷移確定
  * `gone`は保持期間経過でDOから削除済み, 一覧はD1由来で残存(ADR-0027)
  */
-export type MutationResult = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' };
+export type MutationResult = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' | 'in-run' };
 
-export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' };
+export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' | 'in-run' };
 type BulkResult = { ok: string[]; failed: BulkFailure[] };
 
 export type ShardSettings = {
@@ -563,6 +563,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	#retryOne(jobId: string, now: number): MutationResult {
+		// 個別リトライはrunの終端状態を上書き, 再実行はrunの再開経由(ADR-0034)
+		const row = this.repo.find(jobId);
+		if (row && row.run_id !== null) return { ok: false, reason: 'in-run' };
 		// 取り消し要求クリア, 残すと再投入直後にCANCELLED(#95)
 		const ok = this.repo.compareAndSet(jobId, RETRYABLE_STATES, 'SCHEDULED', {
 			now,

@@ -11,7 +11,7 @@ const emit = defineEmits<{ changed: []; message: [text: string] }>();
 const { t } = useI18n();
 
 const source = computed(() => ({ state: props.state, retryable: props.retryable }));
-const { busy, canRetry, canCancel, goneReason, act } = useJobActions(toRef(source));
+const { busy, canRetry, canCancel, retryHint, act } = useJobActions(toRef(source));
 
 async function run(kind: 'retry' | 'cancel') {
 	const message = await act(kind, props.jobId);
@@ -48,7 +48,7 @@ async function run(kind: 'retry' | 'cancel') {
 							active && canRetry ? 'bg-accent-soft text-accent-strong' : '',
 							canRetry ? '' : 'cursor-not-allowed text-ink-subtle',
 						]"
-						:title="goneReason"
+						:title="retryHint"
 						@click="canRetry && run('retry')"
 					>
 						{{ t('common.retry') }}

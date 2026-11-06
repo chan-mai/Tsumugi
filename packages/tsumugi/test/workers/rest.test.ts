@@ -966,13 +966,13 @@ describe('一括リトライと一括取り消し', () => {
 		);
 
 	// DO側の状態判定込みでFAILEDジョブ作成
-	async function failedJob(): Promise<string> {
+	async function failedJob(run?: { runId: string; nodeId: string }): Promise<string> {
 		const stub = shard('REST#0');
 		await runInDurableObject(stub, (instance) => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 		});
-		const jobId = await stub.enqueue({ binding: 'REST', payload: {}, maxAttempts: 1 });
+		const jobId = await stub.enqueue({ binding: 'REST', payload: {}, maxAttempts: 1, ...run });
 		await runDurableObjectAlarm(stub);
 		await stub.report(jobId, { ok: false, error: 'intentional failure' });
 		await runDurableObjectAlarm(stub);
@@ -1056,6 +1056,35 @@ describe('一括リトライと一括取り消し', () => {
 
 		await runDurableObjectAlarm(shard('REST#0'));
 		expect(await stateOf(jobId)).not.toBe('FAILED');
+	});
+
+	it('runのジョブは個別リトライを409で拒否する(ADR-0034)', async () => {
+		const jobId = await failedJob({ runId: 'NORUN:single', nodeId: 'list' });
+
+		const res = await withAuth.fetch!(
+			new Request(`https://example.com/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST', headers: authorized }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		expect(res.status).toBe(409);
+		expect((await res.json<{ error: string }>()).error).toContain('resume the run');
+		const bulk = await post('retry', { ids: [jobId] });
+		expect(await bulk.json()).toEqual({
+			ok: [],
+			failed: [{ id: jobId, reason: 'in-run' }],
+			remaining: 0,
+		});
+		expect(await stateOf(jobId)).toBe('FAILED');
+	});
+
+	it('条件指定のbulk-retryはrunのジョブを対象にしない', async () => {
+		const jobId = await failedJob({ runId: 'NORUN:bulk', nodeId: 'list' });
+
+		const res = await post('retry', { binding: 'REST' });
+		const body = await res.json<{ ok: string[]; failed: { id: string }[]; remaining: number }>();
+		expect(body.ok).not.toContain(jobId);
+		expect(body.failed.map((f) => f.id)).not.toContain(jobId);
+		expect(body.remaining).toBe(0);
 	});
 
 	it('上限を超えた分を残り件数として返す', async () => {
