@@ -391,3 +391,22 @@ describe('cancel (ADR-0012)', () => {
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 	});
 });
+
+describe('configure', () => {
+	it('停止の解除でalarmを設定し、待機中のジョブを投入する', async () => {
+		const clock = fixedClock(T0);
+		const { sent, queue } = captureQueue();
+		await install('PAUSE', clock, queue);
+
+		await shard('PAUSE').configure({ policy: { paused: true } });
+		const jobId = await shard('PAUSE').enqueue({ binding: 'PAUSE', payload: {} });
+		await runDurableObjectAlarm(shard('PAUSE'));
+		expect(await stateOf('PAUSE', jobId)).toBe('SCHEDULED');
+		expect(await alarmOf('PAUSE')).toBeNull();
+
+		await shard('PAUSE').configure({ policy: { paused: false } });
+		expect(await runDurableObjectAlarm(shard('PAUSE'))).toBe(true);
+		expect(await stateOf('PAUSE', jobId)).toBe('QUEUED');
+		expect(sent.map((m) => m.jobId)).toEqual([jobId]);
+	});
+});

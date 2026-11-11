@@ -223,6 +223,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async configure(settings: ShardSettings): Promise<void> {
 		// 実行時設定, 静的設定より優先のpin付与(#6)
 		this.#applySettings(settings, true);
+		// 停止解除, concurrency引き上げの即時反映
+		await this.#armAlarm(this.clock.now());
 	}
 
 	/** configure()同様pin設定で静的設定より優先(#6) */
