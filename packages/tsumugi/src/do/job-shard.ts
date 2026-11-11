@@ -362,45 +362,48 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		if (settings) this.#applySettings(settings, false);
 		const ids: string[] = [];
 
-		for (const [index, input] of inputs.entries()) {
-			const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createLocalId() });
+		// 途中の例外での予約残存と一部登録の防止
+		this.ctx.storage.transactionSync(() => {
+			for (const [index, input] of inputs.entries()) {
+				const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createLocalId() });
 
-			// ID指定の再投入は既存ID返却, Run DO再送での重複防止
-			if (input.id !== undefined && this.repo.find(id)) {
-				ids.push(id);
-				continue;
-			}
-
-			if (input.uniqueKey !== undefined) {
-				const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
-				const existing = this.repo.reserveUniqueKey(input.uniqueKey, id, expiresAt, now);
-				// 衝突は正常系, 先行ジョブID返却で冪等(ADR-0021)
-				if (existing !== null) {
-					ids.push(existing);
+				// ID指定の再投入は既存ID返却, Run DO再送での重複防止
+				if (input.id !== undefined && this.repo.find(id)) {
+					ids.push(id);
 					continue;
 				}
-			}
 
-			this.repo.insert({
-				id,
-				binding: input.binding,
-				priority: input.priority ?? DEFAULTS.priority,
-				maxAttempts: input.maxAttempts ?? DEFAULTS.maxAttempts,
-				concurrencyKey: input.concurrencyKey ?? null,
-				uniqueKey: input.uniqueKey ?? null,
-				guarantee: input.guarantee ?? DEFAULTS.guarantee,
-				timeoutMs: input.timeoutMs ?? DEFAULTS.timeoutMs,
-				backoff: input.backoff ?? DEFAULTS.backoff,
-				runAfter: input.runAt ?? now + (input.delayMs ?? 0),
-				expiresAt: input.expiresAt ?? (input.expiresInMs !== undefined ? now + input.expiresInMs : null),
-				createdAt: now,
-				payload: input.payload,
-				traceparent: traceparents[index] ?? null,
-				runId: input.runId ?? null,
-				nodeId: input.nodeId ?? null,
-			});
-			ids.push(id);
-		}
+				if (input.uniqueKey !== undefined) {
+					const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
+					const existing = this.repo.reserveUniqueKey(input.uniqueKey, id, expiresAt, now);
+					// 衝突は正常系, 先行ジョブID返却で冪等(ADR-0021)
+					if (existing !== null) {
+						ids.push(existing);
+						continue;
+					}
+				}
+
+				this.repo.insert({
+					id,
+					binding: input.binding,
+					priority: input.priority ?? DEFAULTS.priority,
+					maxAttempts: input.maxAttempts ?? DEFAULTS.maxAttempts,
+					concurrencyKey: input.concurrencyKey ?? null,
+					uniqueKey: input.uniqueKey ?? null,
+					guarantee: input.guarantee ?? DEFAULTS.guarantee,
+					timeoutMs: input.timeoutMs ?? DEFAULTS.timeoutMs,
+					backoff: input.backoff ?? DEFAULTS.backoff,
+					runAfter: input.runAt ?? now + (input.delayMs ?? 0),
+					expiresAt: input.expiresAt ?? (input.expiresInMs !== undefined ? now + input.expiresInMs : null),
+					createdAt: now,
+					payload: input.payload,
+					traceparent: traceparents[index] ?? null,
+					runId: input.runId ?? null,
+					nodeId: input.nodeId ?? null,
+				});
+				ids.push(id);
+			}
+		});
 
 		await this.#armAlarm(now);
 		return ids;

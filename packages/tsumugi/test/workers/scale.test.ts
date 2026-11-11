@@ -59,6 +59,28 @@ describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 		expect(a).not.toBe(b);
 	});
 
+	it('enqueueManyが途中で例外になると予約とジョブ行を残さない', async () => {
+		const { queue } = captureQueue();
+		await install('UNIQTX#0', T0, queue);
+
+		// 2件目のbinding名がジョブIDとして不正, 1件目の予約と行の書き込み後に例外
+		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
+		await expect(
+			runInDurableObject(shard('UNIQTX#0'), (instance) =>
+				(instance as any).enqueueMany([
+					{ binding: 'UNIQTX', payload: {}, uniqueKey: 'tx' },
+					{ binding: 'bad#name', payload: {} },
+				]),
+			),
+		).rejects.toThrow();
+		const count = await runInDurableObject(shard('UNIQTX#0'), (instance) => (instance as any).repo.countActive() as number);
+		expect(count).toBe(0);
+
+		// 予約残存時は存在しないジョブIDが返却
+		const id = await shard('UNIQTX#0').enqueue({ binding: 'UNIQTX', payload: {}, uniqueKey: 'tx' });
+		expect(await stateOf('UNIQTX#0', id)).toBe('SCHEDULED');
+	});
+
 	it('予約期間を過ぎれば新しいジョブになる', async () => {
 		const { queue } = captureQueue();
 		await install('UNIQ3#0', T0, queue);
