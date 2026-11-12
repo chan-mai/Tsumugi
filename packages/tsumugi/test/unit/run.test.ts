@@ -112,7 +112,21 @@ describe('runの進行判断', () => {
 			node({ id: 'each', state: 'RUNNING', container: true }),
 			node({ id: 'each:0', state: 'COMPLETED', parent: 'each', origin: 'fanOut' }),
 		];
-		expect(advance({ nodes, cancelling: false }).decisions).toEqual([{ type: 'aggregate', id: 'each' }]);
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
+			{ type: 'aggregate', id: 'each', summary: { total: 1, succeeded: 1, failed: 0 } },
+		]);
+	});
+
+	it('fan-outの集計値はspawnされた子孫の失敗を数える', () => {
+		const nodes = [
+			node({ id: 'each', state: 'RUNNING', container: true }),
+			node({ id: 'each:0', state: 'COMPLETED', parent: 'each', origin: 'fanOut' }),
+			node({ id: 'each:0:child', state: 'FAILED', parent: 'each:0', origin: 'spawn' }),
+			node({ id: 'each:1', state: 'COMPLETED', parent: 'each', origin: 'fanOut' }),
+		];
+		expect(advance({ nodes, cancelling: false }).decisions).toEqual([
+			{ type: 'aggregate', id: 'each', summary: { total: 2, succeeded: 1, failed: 1 } },
+		]);
 	});
 
 	it('子が残っているfan-outノードは集約しない', () => {
@@ -143,7 +157,7 @@ describe('runの進行判断', () => {
 			node({ id: 'each:0', state: 'COMPLETED', parent: 'each', origin: 'fanOut' }),
 		];
 		const output = advance({ nodes, cancelling: true });
-		expect(output.decisions).toEqual([{ type: 'aggregate', id: 'each' }]);
+		expect(output.decisions).toEqual([{ type: 'aggregate', id: 'each', summary: { total: 1, succeeded: 1, failed: 0 } }]);
 		expect(output.state).toBe('RUNNING');
 	});
 

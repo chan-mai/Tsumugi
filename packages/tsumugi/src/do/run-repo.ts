@@ -268,19 +268,6 @@ export class RunRepo {
 		return this.sql.exec<{ c: number }>(`SELECT count(*) AS c FROM node`).one().c;
 	}
 
-	childSummary(parent: string): { total: number; succeeded: number; failed: number } {
-		const row = this.sql
-			.exec<{ total: number; succeeded: number }>(
-				`SELECT count(*) AS total, sum(CASE WHEN state = 'COMPLETED' THEN 1 ELSE 0 END) AS succeeded
-				 FROM node WHERE parent = ?`,
-				parent,
-			)
-			.one();
-		const total = row.total;
-		const succeeded = row.succeeded ?? 0;
-		return { total, succeeded, failed: total - succeeded };
-	}
-
 	progress(): { total: number; done: number; failed: number } {
 		const row = this.sql
 			.exec<{ total: number; done: number; failed: number }>(

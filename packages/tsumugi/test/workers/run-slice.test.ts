@@ -280,6 +280,40 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await jobIdOf(runId, 'greet:0')).toBe(tolerated);
 	});
 
+	it('fan-outの集計値はspawnされた子孫の失敗を数える', async () => {
+		const runId = 'GREETINGS:fanspawnfail';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'fs' } });
+
+		const finish = async (
+			nodeId: string,
+			state: 'COMPLETED' | 'FAILED',
+			result: unknown = null,
+			spawns: { id: string; binding: string; payload: unknown }[] = [],
+		) => {
+			await settleRun(runId);
+			sent.length = 0;
+			const jobId = await jobIdOf(runId, nodeId);
+			if (jobId === null) throw new Error(`${nodeId} has no job id`);
+			await stub.notify([
+				{ nodeId, jobId, state, result: JSON.stringify(result), error: state === 'FAILED' ? 'intentional failure' : null, spawns },
+			]);
+		};
+		await finish('list', 'COMPLETED', { names: ['a', 'b'] });
+		await finish('greet:0', 'COMPLETED', null, [{ id: 'child', binding: 'Greet', payload: {} }]);
+		await finish('greet:1', 'COMPLETED');
+		await finish('greet:0:child', 'FAILED');
+		await settleRun(runId);
+
+		const greet = await runInDurableObject(stub, (instance) => (instance as any).repo.findNode('greet')?.result as string | null);
+		expect(greet === null ? null : JSON.parse(greet)).toEqual({ total: 2, succeeded: 1, failed: 1 });
+		await finish('report', 'COMPLETED');
+		await settleRun(runId);
+		// fan-outの子の失敗は非致命(ADR-0035)
+		expect(await stateOf(runId)).toBe('COMPLETED');
+	});
+
 	it('取り消しは未起動を止めて終端を待つ', async () => {
 		const runId = 'GREETINGS:cancel1';
 		const stub = runStub(runId);

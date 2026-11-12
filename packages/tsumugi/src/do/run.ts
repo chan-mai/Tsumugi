@@ -559,7 +559,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 				case 'aggregate': {
 					// fan-outノードはジョブなし, 戻り値は子の成否集計(ADR-0035)
-					this.repo.updateNode(row.id, { state: 'COMPLETED', result: JSON.stringify(this.repo.childSummary(row.id)) }, now);
+					this.repo.updateNode(row.id, { state: 'COMPLETED', result: JSON.stringify(decision.summary) }, now);
 					return [row.id];
 				}
 

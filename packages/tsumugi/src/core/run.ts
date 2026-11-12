@@ -1,4 +1,4 @@
-import type { NodeJobOptions, NodeTrigger } from './flow.js';
+import type { FanOutSummary, NodeJobOptions, NodeTrigger } from './flow.js';
 import { TERMINAL_STATES } from './transitions.js';
 import type { JobState } from './types.js';
 
@@ -41,7 +41,7 @@ export type RunDecision =
 	/** fan-outノードの展開, overを評価して子を作成 */
 	| { type: 'expand'; id: string }
 	/** fan-outノードの集約, 子孫全ての終端到達後に自身を終端へ */
-	| { type: 'aggregate'; id: string }
+	| { type: 'aggregate'; id: string; summary: FanOutSummary }
 	/** 発火条件を満たさないノードの不実行, 理由はノードのerrorへ記録(ADR-0041) */
 	| { type: 'skip'; id: string; reason: string }
 	/** 取り消し, 未起動は即時終端, SCHEDULEDはJob DOへ取り消し送信 */
@@ -141,8 +141,10 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 	const decisions: RunDecision[] = [];
 	for (const node of nodes) {
 		// 取り消し中も集約継続, 停止時は子孫終了後もRUNNINGのまま残りrunが未完了
-		if (node.container && node.state === 'RUNNING' && (children.get(node.id) ?? []).every(settled)) {
-			decisions.push({ type: 'aggregate', id: node.id });
+		const kids = children.get(node.id) ?? [];
+		if (node.container && node.state === 'RUNNING' && kids.every(settled)) {
+			const ok = kids.filter(succeeded).length;
+			decisions.push({ type: 'aggregate', id: node.id, summary: { total: kids.length, succeeded: ok, failed: kids.length - ok } });
 			continue;
 		}
 
