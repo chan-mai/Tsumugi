@@ -350,6 +350,50 @@ describe('前の試行からの通知', () => {
 	});
 });
 
+describe('無応答の試行の計上', () => {
+	it('STALLEDからの手動リトライ後は前の試行のメッセージでclaimできない', async () => {
+		const clock = fixedClock(T0);
+		const { sent, queue } = captureQueue();
+		await install('STALE5', clock, queue);
+		const jobId = await shard('STALE5').enqueue({ binding: 'STALE5', payload: {}, guarantee: 'at-most-once', timeoutMs: 60_000 });
+		await runDurableObjectAlarm(shard('STALE5'));
+		clock.advance(60_000 + 30_000);
+		await install('STALE5', clock, queue);
+		await runDurableObjectAlarm(shard('STALE5'));
+		expect(await stateOf('STALE5', jobId)).toBe('STALLED');
+		expect((await rowOf('STALE5', jobId)).attempts).toBe(1);
+
+		expect(await shard('STALE5').retry(jobId)).toEqual({ ok: true });
+		await runDurableObjectAlarm(shard('STALE5'));
+		expect(sent.map((m) => m.attempt)).toEqual([1, 2]);
+		expect(await shard('STALE5').claim(jobId, 1)).toBe(false);
+		expect(await shard('STALE5').claim(jobId, 2)).toBe(true);
+	});
+
+	it('無応答が続いてもmaxAttemptsを超えて投入しない', async () => {
+		const clock = fixedClock(T0);
+		const { sent, queue } = captureQueue();
+		await install('STALE6', clock, queue);
+		const jobId = await shard('STALE6').enqueue({ binding: 'STALE6', payload: {}, timeoutMs: 60_000, maxAttempts: 2 });
+		for (let i = 0; i < 4; i++) {
+			await runDurableObjectAlarm(shard('STALE6'));
+			clock.advance(60_000 + 30_000);
+			await install('STALE6', clock, queue);
+		}
+		expect(await stateOf('STALE6', jobId)).toBe('FAILED');
+		expect(sent.map((m) => m.attempt)).toEqual([1, 2]);
+		expect((await rowOf('STALE6', jobId)).attempts).toBe(2);
+
+		// 手動リトライ後は新しい試行番号
+		expect(await shard('STALE6').retry(jobId)).toEqual({ ok: true });
+		await runDurableObjectAlarm(shard('STALE6'));
+		await shard('STALE6').start(jobId, 2);
+		expect(await stateOf('STALE6', jobId)).toBe('QUEUED');
+		await shard('STALE6').start(jobId, 3);
+		expect(await stateOf('STALE6', jobId)).toBe('RUNNING');
+	});
+});
+
 describe('claim (ADR-0007)', () => {
 	it('同時に2本claimしても勝つのは1本だけ', async () => {
 		const clock = fixedClock(T0);

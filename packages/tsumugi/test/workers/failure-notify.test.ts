@@ -160,8 +160,8 @@ describe('失敗したジョブの通知(#30)', () => {
 		await runInDurableObject(shard('FAIL6#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 120_000 }));
 		await runDurableObjectAlarm(shard('FAIL6#0'));
 
-		// 報告なしで試行未計上
-		expect(await payloadOf(noticeIdOf(jobId, 0))).toMatchObject({ jobId, binding: 'FAIL6', state: 'STALLED', attempts: 0 });
+		// 無応答の試行も計上
+		expect(await payloadOf(noticeIdOf(jobId, 1))).toMatchObject({ jobId, binding: 'FAIL6', state: 'STALLED', attempts: 1 });
 	});
 
 	it('流量を固定したshardにも後から追加した宛先が届く', async () => {

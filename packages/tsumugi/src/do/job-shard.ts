@@ -720,7 +720,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				case 'expire':
 				// cancelは取り消し要求の確定, 応答期限経過とreap後の残留(ADR-0052)
 				case 'cancel':
-					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', { now });
+					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', {
+						now,
+						...(decision.attempts !== undefined ? { attempts: decision.attempts } : {}),
+					});
 					break;
 				case 'reap':
 					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'SCHEDULED', {
@@ -730,10 +733,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 					});
 					break;
 				case 'stall':
-					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'STALLED', { now });
+					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'STALLED', { now, attempts: decision.attempts });
 					break;
 				case 'fail':
-					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'FAILED', { now });
+					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'FAILED', { now, attempts: decision.attempts });
 					break;
 			}
 		}

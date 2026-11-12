@@ -218,9 +218,9 @@ describe('終端に達したジョブの通知(#96)', () => {
 		await shard('SET7#0').cancel(jobId);
 		await runDurableObjectAlarm(shard('SET7#0'));
 
-		// 報告なしで試行未計上, 理由もnull
-		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 0, 'stalled'))).toMatchObject({ jobId, state: 'STALLED', error: null });
-		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 0, 'cancelled'))).toMatchObject({ jobId, state: 'CANCELLED' });
+		// 無応答の試行も計上, 理由はnull
+		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 1, 'stalled'))).toMatchObject({ jobId, state: 'STALLED', error: null });
+		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 1, 'cancelled'))).toMatchObject({ jobId, state: 'CANCELLED' });
 	});
 
 	it('結果の無い完了はresultがnullになる', async () => {

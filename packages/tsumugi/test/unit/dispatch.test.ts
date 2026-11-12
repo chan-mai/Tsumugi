@@ -435,17 +435,17 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 			policy: policy(),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toEqual([{ type: 'stall', id: 'a' }]);
+		expect(out.decisions).toEqual([{ type: 'stall', id: 'a', attempts: 1 }]);
 	});
 
-	it('試行回数を使い切っていればFAILEDにする', () => {
+	it('最終試行の無応答で試行回数を使い切ればFAILEDにする', () => {
 		const out = planDispatch({
 			now: T0 + 90_000,
-			jobs: [dispatched({ id: 'a', attempts: 3, maxAttempts: 3 })],
+			jobs: [dispatched({ id: 'a', attempts: 2, maxAttempts: 3 })],
 			policy: policy(),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toEqual([{ type: 'fail', id: 'a', reason: 'exhausted' }]);
+		expect(out.decisions).toEqual([{ type: 'fail', id: 'a', reason: 'exhausted', attempts: 3 }]);
 	});
 
 	it('回収で空いた分は,同じtickで他のジョブが使える', () => {
@@ -586,7 +586,7 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			policy: policy({ reaperGraceMs: 30_000 }),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toEqual([{ type: 'cancel', id: 'a' }]);
+		expect(out.decisions).toEqual([{ type: 'cancel', id: 'a', attempts: 1 }]);
 	});
 
 	it('期限切れが要求より優先される', () => {
@@ -597,7 +597,7 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			policy: policy({ reaperGraceMs: 30_000 }),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toEqual([{ type: 'expire', id: 'a' }]);
+		expect(out.decisions).toEqual([{ type: 'expire', id: 'a', attempts: 1 }]);
 	});
 
 	it('at-most-onceも試行回数の枯渇も要求があればcancelで終了する', () => {
@@ -605,13 +605,13 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			now: T0 + 60_000 + 30_000,
 			jobs: [
 				dispatched({ id: 'amo', guarantee: 'at-most-once', cancelRequestedAt: T0 }),
-				dispatched({ id: 'spent', attempts: 3, cancelRequestedAt: T0 }),
+				dispatched({ id: 'spent', attempts: 2, cancelRequestedAt: T0 }),
 			],
 			policy: policy(),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'amo' });
-		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'spent' });
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'amo', attempts: 1 });
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'spent', attempts: 3 });
 	});
 
 	it('要求済みのSCHEDULEDは投入せずcancelで終了する', () => {
@@ -633,7 +633,7 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			policy: policy({ concurrency: 1, reaperGraceMs: 30_000 }),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'busy' });
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'busy', attempts: 1 });
 		expect(ids(out.decisions, 'dispatch')).toEqual(['next']);
 	});
 });
