@@ -8,6 +8,18 @@ const NODE_SELECT = columnList(RUN_COLUMNS.node);
 
 export const deadlineErrorOf = (deadlineMs: number | null) => `run deadline exceeded: ${deadlineMs}ms`;
 
+type HaltSource = Pick<RunRow, 'cancelling' | 'expired' | 'deadline_ms' | 'abort_error'>;
+
+// 中断ノード理由
+export const abortErrorOf = (run: HaltSource): string | null =>
+	run.cancelling === 1 ? null : (run.abort_error ?? (run.expired === 1 ? deadlineErrorOf(run.deadline_ms) : null));
+
+// 再開で復帰する中断理由
+export const abortErrorsOf = (run: HaltSource): string[] =>
+	run.cancelling === 1
+		? []
+		: [run.abort_error, run.expired === 1 ? deadlineErrorOf(run.deadline_ms) : null].filter((error) => error !== null);
+
 export type NewNode = {
 	id: string;
 	binding: string;
@@ -109,6 +121,7 @@ export class RunRepo {
 				deadline_ms: input.deadlineMs ?? null,
 				deadline_at: input.deadlineMs !== undefined ? input.now + input.deadlineMs : null,
 				expired: 0,
+				abort_error: null,
 				created_at: input.now,
 				updated_at: input.now,
 			}),
@@ -130,6 +143,11 @@ export class RunRepo {
 
 	markExpired(id: string, now: number): void {
 		this.sql.exec(`UPDATE run SET expired = 1, updated_at = ? WHERE id = ?`, now, id);
+	}
+
+	// 最初の理由を保持
+	markAborted(id: string, error: string, now: number): void {
+		this.sql.exec(`UPDATE run SET abort_error = ?, updated_at = ? WHERE id = ? AND abort_error IS NULL`, error, now, id);
 	}
 
 	insertNodes(nodes: readonly NewNode[], now: number): void {
@@ -219,9 +237,9 @@ export class RunRepo {
 	/**
 	 * fan-outノードは子を再作成せず集約待ちへ, 再作成では成功済みの子も消失(ADR-0034)
 	 * 子runIDも解除, 残すと旧い子の遅延通知が再開後を上書き
-	 * fan-outの子は期限超過で中断分のみ, 実行済み失敗は集計値で後段へ反映済み
+	 * fan-outの子は中断分のみ, 実行済み失敗は集計値で後段へ反映済み
 	 */
-	resetForRetry(now: number, aborted: string | null): string[] {
+	resetForRetry(now: number, aborted: readonly string[]): string[] {
 		// 親への通知済みフラグ解除, 未解除では再開後の終端が親へ未通知
 		// 取り消し中フラグ解除, CANCELLEDの子runの再開用
 		// 期限の再計算と超過フラグ解除, 未解除では再開直後に再超過(ADR-0039)
@@ -232,6 +250,7 @@ export class RunRepo {
 				parent_notified = 0,
 				deadline_at = CASE WHEN deadline_ms IS NULL THEN deadline_at ELSE ? + deadline_ms END,
 				expired = 0,
+				abort_error = NULL,
 				updated_at = ?`,
 			now,
 			now,
@@ -241,11 +260,11 @@ export class RunRepo {
 			`UPDATE node SET state = 'RUNNING', updated_at = ?
 			WHERE container = 1 AND state = 'COMPLETED' AND EXISTS(
 				SELECT 1 FROM node child
-				WHERE child.parent = node.id AND child.origin = 'fanOut' AND child.state = 'FAILED' AND child.error = ?
+				WHERE child.parent = node.id AND child.origin = 'fanOut' AND child.state = 'FAILED' AND child.error IN (${placeholders(aborted.length)})
 			)
 			RETURNING id`,
 			now,
-			aborted,
+			...aborted,
 		);
 		const reopened = containers.toArray().map((row) => row.id);
 		const cursor = this.sql.exec<{ id: string }>(
@@ -256,10 +275,10 @@ export class RunRepo {
 				error = NULL,
 				updated_at = ?
 			WHERE state IN ('FAILED', 'STALLED', 'SKIPPED', 'CANCELLED')
-				AND (origin <> 'fanOut' OR (state = 'FAILED' AND error = ?))
+				AND (origin <> 'fanOut' OR (state = 'FAILED' AND error IN (${placeholders(aborted.length)})))
 			RETURNING id`,
 			now,
-			aborted,
+			...aborted,
 		);
 		return [...reopened, ...cursor.toArray().map((row) => row.id)];
 	}

@@ -21,6 +21,8 @@ const RUN_SCHEMA = [
 		deadline_ms INTEGER,
 		deadline_at INTEGER,
 		expired INTEGER NOT NULL DEFAULT 0,
+		-- ノード数上限超過等の中断理由(ADR-0035)
+		abort_error TEXT,
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
 	)`,
@@ -71,6 +73,7 @@ export const RUN_COLUMNS = {
 		'deadline_ms',
 		'deadline_at',
 		'expired',
+		'abort_error',
 		'created_at',
 		'updated_at',
 	] satisfies readonly (keyof RunRow)[],
@@ -109,6 +112,7 @@ export function applyRunSchema(sql: SqlStorage): void {
 		['deadline_ms', 'INTEGER'],
 		['deadline_at', 'INTEGER'],
 		['expired', 'INTEGER NOT NULL DEFAULT 0'],
+		['abort_error', 'TEXT'],
 	]);
 	ensureColumns(sql, 'node', [
 		['trigger', "TEXT NOT NULL DEFAULT 'success'"],
@@ -131,6 +135,7 @@ export type RunRow = {
 	deadline_ms: number | null;
 	deadline_at: number | null;
 	expired: number;
+	abort_error: string | null;
 	created_at: number;
 	updated_at: number;
 };

@@ -308,7 +308,7 @@ describe('期限超過(ADR-0039)', () => {
 			node({ id: 'c', state: 'RUNNING' }),
 			node({ id: 'child', state: 'RUNNING', subflow: true }),
 		];
-		expect(advance({ nodes, cancelling: false, expired: true }).decisions).toEqual([
+		expect(advance({ nodes, cancelling: false, aborted: true }).decisions).toEqual([
 			{ type: 'cancel', id: 'a' },
 			{ type: 'cancel', id: 'b' },
 			{ type: 'cancel', id: 'child' },
@@ -316,17 +316,17 @@ describe('期限超過(ADR-0039)', () => {
 	});
 
 	it('実行中が残る間はRUNNING', () => {
-		expect(advance({ nodes: [node({ id: 'a', state: 'RUNNING' })], cancelling: false, expired: true }).state).toBe('RUNNING');
+		expect(advance({ nodes: [node({ id: 'a', state: 'RUNNING' })], cancelling: false, aborted: true }).state).toBe('RUNNING');
 	});
 
 	it('中断されたノードが残ればFAILED', () => {
 		const nodes = [node({ id: 'a', state: 'COMPLETED' }), node({ id: 'b', state: 'FAILED' })];
-		expect(advance({ nodes, cancelling: false, expired: true }).state).toBe('FAILED');
+		expect(advance({ nodes, cancelling: false, aborted: true }).state).toBe('FAILED');
 	});
 
 	it('全て成功していてもFAILEDになる', () => {
 		// 期限時点で未決着のrunは残りの結果に関わらず失敗
-		expect(advance({ nodes: [node({ id: 'a', state: 'COMPLETED' })], cancelling: false, expired: true }).state).toBe('FAILED');
+		expect(advance({ nodes: [node({ id: 'a', state: 'COMPLETED' })], cancelling: false, aborted: true }).state).toBe('FAILED');
 	});
 
 	it('期限で中断されたfan-outの子は親を成功扱いにしない', () => {
@@ -335,11 +335,11 @@ describe('期限超過(ADR-0039)', () => {
 			node({ id: 'each', state: 'COMPLETED', container: true }),
 			node({ id: 'each:0', state: 'FAILED', parent: 'each', origin: 'fanOut' }),
 		];
-		expect(advance({ nodes, cancelling: false, expired: true }).state).toBe('FAILED');
+		expect(advance({ nodes, cancelling: false, aborted: true }).state).toBe('FAILED');
 	});
 
 	it('取り消しと重なった場合はCANCELLED', () => {
-		expect(advance({ nodes: [node({ id: 'a', state: 'CANCELLED' })], cancelling: true, expired: true }).state).toBe('CANCELLED');
+		expect(advance({ nodes: [node({ id: 'a', state: 'CANCELLED' })], cancelling: true, aborted: true }).state).toBe('CANCELLED');
 	});
 });
 

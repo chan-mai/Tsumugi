@@ -314,6 +314,56 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
+	it('fan-outの子でノード数の上限を超えるとrunを中断してFAILEDにする(ADR-0035)', async () => {
+		const runId = 'GREETINGS:fanspawnlimit';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'fl' } });
+
+		const finish = async (
+			nodeId: string,
+			state: 'COMPLETED' | 'FAILED' | 'CANCELLED',
+			result: unknown = null,
+			spawns: { id: string; binding: string; payload: unknown }[] = [],
+		) => {
+			await settleRun(runId);
+			sent.length = 0;
+			const jobId = await jobIdOf(runId, nodeId);
+			if (jobId === null) throw new Error(`${nodeId} has no job id`);
+			await stub.notify([
+				{ nodeId, jobId, state, result: JSON.stringify(result), error: state === 'FAILED' ? 'intentional failure' : null, spawns },
+			]);
+		};
+		await finish('list', 'COMPLETED', { names: ['a', 'b'] });
+		const spawns = Array.from({ length: 10_001 }, (_, i) => ({ id: `c${i}`, binding: 'Greet', payload: {} }));
+		await finish('greet:0', 'COMPLETED', null, spawns);
+		await settleRun(runId);
+		const limit = 'node count exceeded the limit: 10000';
+		expect(await errorOf(runId, 'greet:0')).toBe(limit);
+		// 実行中の兄弟は取り消し要求後に終端通知を待機
+		expect(await stateOf(runId)).toBe('RUNNING');
+		await finish('greet:1', 'CANCELLED');
+		await settleRun(runId);
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({
+			list: 'COMPLETED',
+			greet: 'COMPLETED',
+			'greet:0': 'FAILED',
+			'greet:1': 'FAILED',
+			report: 'FAILED',
+		});
+		expect(await errorOf(runId, 'greet:1')).toBe(limit);
+		expect(await stateOf(runId)).toBe('FAILED');
+
+		// 再開で中断分を再実行
+		expect(await stub.retry()).toEqual({ ok: true });
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ 'greet:0': 'PENDING', 'greet:1': 'PENDING' });
+		await finish('greet:0', 'COMPLETED');
+		await finish('greet:1', 'COMPLETED');
+		await finish('report', 'COMPLETED');
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('COMPLETED');
+	});
+
 	it('取り消しは未起動を止めて終端を待つ', async () => {
 		const runId = 'GREETINGS:cancel1';
 		const stub = runStub(runId);

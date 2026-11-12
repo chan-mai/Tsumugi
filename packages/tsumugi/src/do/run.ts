@@ -31,7 +31,7 @@ import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
 import type { NodeRow, RunRow } from './run-schema.js';
-import { deadlineErrorOf, RunRepo, type NewNode } from './run-repo.js';
+import { abortErrorOf, abortErrorsOf, RunRepo, type NewNode } from './run-repo.js';
 
 export type RunEnv = ClientEnv & {
 	TSUMUGI_DB: D1Database;
@@ -227,8 +227,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			// 削除後の通知は破棄, 再作成では保持期間が無意味
 			const run = this.repo.findRun();
 			if (!run) return;
-			// 期限超過の取り消しは未投入ノード同様に期限中断で記録
-			const deadlineError = run.expired === 1 && run.cancelling === 0 ? deadlineErrorOf(run.deadline_ms) : null;
+			// 中断中の取り消しは未投入ノード同様に中断理由で記録
+			const abortError = abortErrorOf(run);
 
 			const touched: string[] = [];
 			for (const event of events) {
@@ -247,8 +247,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					event.nodeId,
 					spawned.error !== null
 						? { state: 'FAILED', error: spawned.error }
-						: event.state === 'CANCELLED' && deadlineError !== null
-							? { state: 'FAILED', error: deadlineError }
+						: event.state === 'CANCELLED' && abortError !== null
+							? { state: 'FAILED', error: abortError }
 							: { state: event.state, result: event.result, error: event.error },
 					now,
 				);
@@ -304,8 +304,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				return { ok: false, reason: 'invalid-state' };
 			}
 
-			const aborted = row.expired === 1 && row.cancelling === 0 ? deadlineErrorOf(row.deadline_ms) : null;
-			const reset = this.repo.resetForRetry(now, aborted);
+			const reset = this.repo.resetForRetry(now, abortErrorsOf(row));
 			this.#cancelSent.clear();
 			this.repo.appendRunOutbox();
 			this.repo.appendNodeOutbox(row.id, reset);
@@ -354,13 +353,11 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const cancelling = runRow.cancelling === 1;
 			// 期限超過は取り消しと同手順で中断(ADR-0039)
 			// 超過フラグはRUNNING中に一度だけ永続化, 毎tick時計判定では決着済みrunがFAILEDへ反転
-			let expired = runRow.expired === 1;
-			if (!expired && runRow.state === 'RUNNING' && runRow.deadline_at !== null && runRow.deadline_at <= now) {
+			if (runRow.expired === 0 && runRow.state === 'RUNNING' && runRow.deadline_at !== null && runRow.deadline_at <= now) {
 				this.repo.markExpired(runRow.id, now);
-				expired = true;
 			}
-			// 中断ノードの理由, runに理由の列なし, 取り消しはCANCELLEDのまま
-			const deadlineError = expired && !cancelling ? deadlineErrorOf(runRow.deadline_ms) : null;
+			// 上限超過はtick中にも記録, 判断ごとに再読み取り
+			const abortErrorNow = () => abortErrorOf(this.repo.findRun() ?? runRow);
 
 			const touched = new Set<string>();
 			const inputs: EnqueueInput[] = [];
@@ -374,7 +371,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			// 中断の連鎖はadvance1回で1段のみ, 新規決定が無くなるまで反復
 			for (let round = 0; round < ADVANCE_ROUNDS; round++) {
-				const output = advance({ nodes: this.repo.views(), cancelling, expired });
+				const abortError = abortErrorNow();
+				const output = advance({ nodes: this.repo.views(), cancelling, aborted: abortError !== null });
 				const fresh = output.decisions.filter((decision) => !handled.has(decision.id));
 				if (fresh.length === 0) break;
 
@@ -396,7 +394,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						starting,
 						subflows,
 						waiting,
-						deadlineError,
+						abortError,
 					});
 					for (const id of applied) touched.add(id);
 				}
@@ -405,7 +403,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			for (const id of await this.#startPending(runRow, inputs, starting, subflows, now)) touched.add(id);
 
 			// 決定反映後の内容で状態決定, 反映前では1tick前の状態を投影
-			const settled = advance({ nodes: this.repo.views(), cancelling, expired });
+			const settled = advance({ nodes: this.repo.views(), cancelling, aborted: abortErrorNow() !== null });
 			if (settled.state !== runRow.state) {
 				this.repo.setRunState(runRow.id, settled.state, now);
 				this.repo.appendRunOutbox();
@@ -498,10 +496,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				starting: string[];
 				subflows: SubflowStart[];
 				waiting: Set<string>;
-				deadlineError: string | null;
+				abortError: string | null;
 			},
 		): Promise<string[]> {
-			const { definitions, runInput, runId, now, inputs, starting, subflows, waiting, deadlineError } = context;
+			const { definitions, runInput, runId, now, inputs, starting, subflows, waiting, abortError } = context;
 			const row = this.repo.findNode(decision.id);
 			if (!row) return [];
 
@@ -569,8 +567,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					return [row.id];
 
 				case 'cancel': {
-					const terminal =
-						deadlineError !== null ? ({ state: 'FAILED', error: deadlineError } as const) : ({ state: 'CANCELLED' } as const);
+					const terminal = abortError !== null ? ({ state: 'FAILED', error: abortError } as const) : ({ state: 'CANCELLED' } as const);
 					if (row.child_run_id !== null) {
 						// 子のcancelは要求受理のみ, 終端は子からの通知で確定
 						const key = `${row.id}:${row.child_run_id}`;
@@ -611,7 +608,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			const items = this.#evaluate(row, 'over', now, () => definition.over!(runInput, this.#depsOf(definition)));
 			if (!items.ok) return [row.id];
-			const exceeded = this.#nodeLimitError(items.value.length);
+			const exceeded = this.#nodeLimitError(items.value.length, now);
 			if (exceeded) {
 				this.repo.updateNode(row.id, { state: 'FAILED', error: exceeded }, now);
 				return [row.id];
@@ -648,7 +645,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		// 作成不可は例外でなく理由を返却, 例外では通知滞留
 		#applySpawns(parentId: string, spawns: readonly SpawnRequest[], now: number): { ids: string[]; error: string | null } {
 			if (spawns.length === 0) return { ids: [], error: null };
-			const exceeded = this.#nodeLimitError(spawns.length);
+			const exceeded = this.#nodeLimitError(spawns.length, now);
 			if (exceeded) return { ids: [], error: exceeded };
 			const invalid = spawns.find((spawn) => !isNodeId(spawn.id));
 			if (invalid) return { ids: [], error: `invalid spawn id: ${JSON.stringify(invalid.id)}` };
@@ -666,8 +663,12 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			return { ids: children.map((child) => child.id), error: null };
 		}
 
-		#nodeLimitError(adding: number): string | null {
-			return this.repo.countNodes() + adding > maxNodes ? `node count exceeded the limit: ${maxNodes}` : null;
+		// 超過時はrun全体を中断(ADR-0035)
+		#nodeLimitError(adding: number, now: number): string | null {
+			if (this.repo.countNodes() + adding <= maxNodes) return null;
+			const error = `node count exceeded the limit: ${maxNodes}`;
+			this.repo.markAborted(this.runId, error, now);
+			return error;
 		}
 
 		#childNodes(parent: string, origin: 'fanOut' | 'spawn', specs: readonly ChildSpec[]): NewNode[] {
