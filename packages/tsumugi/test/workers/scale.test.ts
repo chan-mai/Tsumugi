@@ -125,6 +125,38 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 
 		expect(sent).toHaveLength(2);
 	});
+
+	it('単一キーの滞留が読み取り範囲を埋めても別キーとキーがnullのジョブを投入する(ADR-0057)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('CKEY3#0', T0, queue);
+		await shard('CKEY3#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 1 } });
+
+		await shard('CKEY3#0').enqueueMany(Array.from({ length: 250 }, () => ({ binding: 'CKEY3', payload: {}, concurrencyKey: 'tenant-a' })));
+		await install('CKEY3#0', T0 + 1_000, queue);
+		const other = await shard('CKEY3#0').enqueue({ binding: 'CKEY3', payload: {}, concurrencyKey: 'tenant-b' });
+		const unkeyed = await shard('CKEY3#0').enqueue({ binding: 'CKEY3', payload: {} });
+		await runDurableObjectAlarm(shard('CKEY3#0'));
+
+		expect(sent).toHaveLength(3);
+		expect(sent.map((m) => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
+	});
+
+	it('perKeyRateのトークン不足でも範囲外の別キーを投入する(ADR-0057)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('CKEY4#0', T0, queue);
+		await shard('CKEY4#0').configure({
+			policy: { concurrency: 100, perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } },
+		});
+
+		await shard('CKEY4#0').enqueueMany(Array.from({ length: 250 }, () => ({ binding: 'CKEY4', payload: {}, concurrencyKey: 'tenant-a' })));
+		await install('CKEY4#0', T0 + 1_000, queue);
+		const other = await shard('CKEY4#0').enqueue({ binding: 'CKEY4', payload: {}, concurrencyKey: 'tenant-b' });
+		const unkeyed = await shard('CKEY4#0').enqueue({ binding: 'CKEY4', payload: {} });
+		await runDurableObjectAlarm(shard('CKEY4#0'));
+
+		expect(sent).toHaveLength(3);
+		expect(sent.map((m) => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
+	});
 });
 
 describe('ポリシーの永続化', () => {

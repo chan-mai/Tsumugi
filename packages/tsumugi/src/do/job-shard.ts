@@ -15,6 +15,7 @@ import type {
 	Bucket,
 	DeliveryGuarantee,
 	FailureNotice,
+	JobView,
 	KeyBuckets,
 	Policy,
 	Retention,
@@ -192,6 +193,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#policyLoaded = false;
 	#lastBlocked: BlockedBy = { paused: false, capacity: false, tokens: false, perKey: false, perKeyTokens: false };
 	#blockedLoaded = false;
+	// 範囲外候補のキー列挙位置, 再生成時は先頭から
+	#keyCursor: string | null = null;
 
 	get repo(): JobRepo {
 		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage);
@@ -674,7 +677,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#loadPolicy();
 		this.#loadBucket();
 		// 実行中がconcurrency未満なら全件取得, 以上なら空き0で影響無し
-		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT, Math.max(TICK_LIMIT, this.policy.concurrency));
+		const window = this.repo.scheduleWindow(now, TICK_LIMIT, Math.max(TICK_LIMIT, this.policy.concurrency));
+		const { readyCount } = window;
+		const jobs = readyCount >= TICK_LIMIT ? [...window.jobs, ...this.#outsideWindow(now, window.jobs)] : window.jobs;
 
 		const readyKeys =
 			this.policy.perKeyRate === null
@@ -791,6 +796,45 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// ハンドラ開始時にalarmは消去済み, 現存分はtick中の設定
 		// setAlarmで上書きすると投影が保持期間経過まで遅延
 		if (next !== null) await this.#armAlarm(next);
+	}
+
+	/**
+	 * 範囲内がキー上限で投入不能な場合の範囲外候補(ADR-0057)
+	 * 範囲は到来順, 単一キーの滞留が占有すると空き枠があっても他キーが範囲外
+	 */
+	#outsideWindow(now: number, jobs: readonly JobView[]): JobView[] {
+		const { concurrency, perKeyConcurrency, perKeyRate, paused } = this.policy;
+		const inFlight = new Map<string, number>();
+		const ready = new Map<string | null, number>();
+		let inFlightTotal = 0;
+		for (const job of jobs) {
+			if (job.state === 'QUEUED' || job.state === 'RUNNING') {
+				inFlightTotal++;
+				if (job.concurrencyKey !== null) inFlight.set(job.concurrencyKey, (inFlight.get(job.concurrencyKey) ?? 0) + 1);
+			} else if (job.state === 'SCHEDULED' && job.runAfter <= now) {
+				ready.set(job.concurrencyKey, (ready.get(job.concurrencyKey) ?? 0) + 1);
+			}
+		}
+		const budget = paused ? 0 : Math.min(TICK_LIMIT, concurrency - inFlightTotal);
+		if (budget <= 0) return [];
+		const skip = new Set([...inFlight].filter(([, n]) => n >= perKeyConcurrency).map(([key]) => key));
+		// 範囲内の投入可能見込み, キートークンは未読のため不足扱い
+		let dispatchable = ready.get(null) ?? 0;
+		if (perKeyRate === null) {
+			for (const [key, n] of ready)
+				if (key !== null && !skip.has(key)) dispatchable += Math.min(n, perKeyConcurrency - (inFlight.get(key) ?? 0));
+		}
+		if (dispatchable >= budget) return [];
+		const { jobs: extra, nextAfter } = this.repo.keyHeads(now, {
+			after: this.#keyCursor,
+			budget,
+			maxKeys: TICK_LIMIT,
+			perKey: perKeyConcurrency,
+			skip,
+			window: ready,
+		});
+		this.#keyCursor = nextAfter;
+		return extra;
 	}
 
 	async #project(): Promise<number> {

@@ -40,6 +40,8 @@ export const SCHEMA = [
 	)`,
 	// tickの実行可能ジョブ抽出, ORDER BYもインデックスで解決(#104)
 	`CREATE INDEX IF NOT EXISTS job_due ON job (state, run_after, id)`,
+	// キー単位の先頭取得, 単一キー滞留時の範囲外候補用(ADR-0057)
+	`CREATE INDEX IF NOT EXISTS job_key_due ON job (state, concurrency_key, run_after, id)`,
 	// sweep次回時刻の状態別MIN取得用, 稼働中の遷移で更新不要
 	`CREATE INDEX IF NOT EXISTS job_terminal ON job (state, updated_at) WHERE ${TERMINAL_INDEX_WHERE}`,
 	// 重複排除キー(ADR-0021 / ADR-0022), KVに条件付き書き込み無くDO内配置
