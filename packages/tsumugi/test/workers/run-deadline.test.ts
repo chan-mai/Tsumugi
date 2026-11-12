@@ -354,4 +354,50 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(await stateOf(parentId)).toBe('FAILED');
 		expect(Object.fromEntries(await nodesOf(parentId))).toEqual({ greetings: 'CANCELLED', summary: 'FAILED' });
 	});
+
+	it('子のrunがCANCELLEDのsubflowノードを親の再開で再実行する', async () => {
+		await installQueues();
+		await shard('ListNames').configure({ policy: { concurrency: 0 } });
+
+		const parentId = 'PIPELINE:deadline-sub-retry';
+		const childId = 'GREETINGS:deadline-sub-retry-greetings';
+		const stub = runStub(parentId);
+		await setClock(parentId, T0);
+		await stub.start({ flow: 'PIPELINE', input: { prefix: 'sr' }, deadlineMs: DEADLINE });
+		await settleRun(parentId);
+		await settleRun(childId);
+
+		await setClock(parentId, T0 + DEADLINE);
+		for (let i = 0; i < 6; i++) {
+			await runDurableObjectAlarm(stub);
+			await runDurableObjectAlarm(runStub(childId));
+		}
+		expect(await stateOf(childId)).toBe('CANCELLED');
+		expect(await stateOf(parentId)).toBe('FAILED');
+
+		// 子のDOは保持期間内で残存, 同じ子runIdで開始
+		await shard('ListNames').configure({ policy: { concurrency: 100 } });
+		await setClock(parentId, T0 + 60_000);
+		expect(await stub.retry()).toEqual({ ok: true });
+		for (let i = 0; i < 14; i++) {
+			await settle(childId, 1);
+			await runDurableObjectAlarm(stub);
+		}
+
+		expect(await stateOf(childId)).toBe('COMPLETED');
+		expect(Object.fromEntries(await nodesOf(parentId))).toEqual({ greetings: 'COMPLETED', summary: 'COMPLETED' });
+		expect(await stateOf(parentId)).toBe('COMPLETED');
+	});
+
+	it('REST APIからの再開はCANCELLEDのrunを対象にしない', async () => {
+		const runId = 'GREETINGS:cancelled-retry';
+		const stub = runStub(runId);
+		await setClock(runId, T0);
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'cr' } });
+		await stub.cancel();
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('CANCELLED');
+
+		expect(await stub.retry()).toEqual({ ok: false, reason: 'invalid-state' });
+	});
 });

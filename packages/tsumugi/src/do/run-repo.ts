@@ -223,10 +223,12 @@ export class RunRepo {
 	 */
 	resetForRetry(now: number, aborted: string | null): string[] {
 		// 親への通知済みフラグ解除, 未解除では再開後の終端が親へ未通知
+		// 取り消し中フラグ解除, CANCELLEDの子runの再開用
 		// 期限の再計算と超過フラグ解除, 未解除では再開直後に再超過(ADR-0039)
 		this.sql.exec(
 			`UPDATE run SET
 				state = 'RUNNING',
+				cancelling = 0,
 				parent_notified = 0,
 				deadline_at = CASE WHEN deadline_ms IS NULL THEN deadline_at ELSE ? + deadline_ms END,
 				expired = 0,

@@ -91,12 +91,16 @@ export interface RunNotifyStub extends Rpc.DurableObjectBranded {
 	notify(events: readonly NodeEvent[]): Promise<void>;
 }
 
+export type RetryOptions = {
+	cancelled?: boolean;
+};
+
 // 型展開過多の回避で使用分のみ宣言
 export interface RunLifecycleStub extends Rpc.DurableObjectBranded {
 	start(input: StartInput): Promise<StartResult>;
 	state(): Promise<RunState | null>;
 	cancel(): Promise<MutationResult>;
-	retry(): Promise<MutationResult>;
+	retry(options?: RetryOptions): Promise<MutationResult>;
 	notifyChild(nodeId: string, childRunId: string, state: RunState): Promise<void>;
 }
 
@@ -108,7 +112,7 @@ export interface TsumugiRunInstance extends Rpc.DurableObjectBranded {
 	notify(events: readonly NodeEvent[]): Promise<void>;
 	notifyChild(nodeId: string, childRunId: string, state: RunState): Promise<void>;
 	cancel(): Promise<MutationResult>;
-	retry(): Promise<MutationResult>;
+	retry(options?: RetryOptions): Promise<MutationResult>;
 	state(): Promise<RunState | null>;
 	alarm(): Promise<void>;
 }
@@ -292,11 +296,13 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			return { ok: true };
 		}
 
-		async retry(): Promise<MutationResult> {
+		async retry(options: RetryOptions = {}): Promise<MutationResult> {
 			const now = this.clock.now();
 			const row = this.repo.findRun();
 			if (!row) return { ok: false, reason: 'gone' };
-			if (row.state !== 'FAILED') return { ok: false, reason: 'invalid-state' };
+			if (row.state !== 'FAILED' && !(options.cancelled === true && row.state === 'CANCELLED')) {
+				return { ok: false, reason: 'invalid-state' };
+			}
 
 			const aborted = row.expired === 1 && row.cancelling === 0 ? deadlineErrorOf(row.deadline_ms) : null;
 			const reset = this.repo.resetForRetry(now, aborted);
@@ -737,11 +743,12 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		// 終端済み子runは通知済みで再通知なし(ADR-0034)
 		async #resumeChild(stub: DurableObjectStub<RunLifecycleStub>, nodeId: string, now: number): Promise<boolean> {
 			const state = await stub.state();
-			if (state === 'FAILED') {
-				await stub.retry();
+			// CANCELLEDも再開
+			if (state === 'FAILED' || state === 'CANCELLED') {
+				await stub.retry({ cancelled: true });
 				return false;
 			}
-			if (state !== 'COMPLETED' && state !== 'CANCELLED') return false;
+			if (state !== 'COMPLETED') return false;
 			this.repo.updateNode(nodeId, { state }, now);
 			return true;
 		}
