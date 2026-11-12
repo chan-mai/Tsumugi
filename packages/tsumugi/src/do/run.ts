@@ -221,7 +221,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const now = this.clock.now();
 			const runId = this.runId;
 			// 削除後の通知は破棄, 再作成では保持期間が無意味
-			if (!this.repo.findRun()) return;
+			const run = this.repo.findRun();
+			if (!run) return;
+			// 期限超過の取り消しは未投入ノード同様に期限中断で記録
+			const deadlineError = run.expired === 1 && run.cancelling === 0 ? deadlineErrorOf(run.deadline_ms) : null;
 
 			const touched: string[] = [];
 			for (const event of events) {
@@ -238,9 +241,11 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				// 子の作成失敗時は親をFAILED, 成功扱いでは下流が子の完了前に実行
 				this.repo.updateNode(
 					event.nodeId,
-					spawned.error === null
-						? { state: event.state, result: event.result, error: event.error }
-						: { state: 'FAILED', error: spawned.error },
+					spawned.error !== null
+						? { state: 'FAILED', error: spawned.error }
+						: event.state === 'CANCELLED' && deadlineError !== null
+							? { state: 'FAILED', error: deadlineError }
+							: { state: event.state, result: event.result, error: event.error },
 					now,
 				);
 				touched.push(event.nodeId);

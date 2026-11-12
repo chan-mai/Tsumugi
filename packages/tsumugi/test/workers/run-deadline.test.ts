@@ -248,6 +248,48 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(performed.find((p) => p.binding === 'Report')?.payload).toEqual({ total: 1, failed: 0 });
 	});
 
+	it('再開で期限超過の取り消し要求によりCANCELLEDになったfan-outの子も実行する', async () => {
+		await installQueues();
+		await shard('ListNames').configure({ policy: { concurrency: 100 } });
+		await shard('Greet').configure({ policy: { concurrency: 0 } });
+
+		const runId = 'GREETINGS:deadline-fanout-queued';
+		const stub = runStub(runId);
+		await setClock(runId, T0);
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'dq' }, deadlineMs: DEADLINE });
+		await settle(runId);
+
+		// QUEUEDまで進める, 期限超過時は取り消し要求のみ(ADR-0052)
+		await shard('Greet').configure({ policy: { concurrency: 100 } });
+		await runDurableObjectAlarm(shard('Greet'));
+		const jobId = await jobIdOf(runId, 'greet:0');
+		if (jobId === null) throw new Error('the fan-out child has no job id');
+		expect(await runInDurableObject(shard('Greet'), (instance) => (instance as any).repo.find(jobId)?.state)).toBe('QUEUED');
+
+		await setClock(runId, T0 + DEADLINE);
+		await runDurableObjectAlarm(stub);
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('RUNNING');
+
+		// 取り消し要求後の配送は未実行で終了
+		sent.length = 0;
+		await stub.notify([{ nodeId: 'greet:0', jobId, state: 'CANCELLED', result: null, error: null }]);
+		await settleRun(runId);
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ greet: 'COMPLETED', 'greet:0': 'FAILED', report: 'FAILED' });
+		expect(await nodeErrorOf(runId, 'greet:0')).toBe(`run deadline exceeded: ${DEADLINE}ms`);
+		expect(await stateOf(runId)).toBe('FAILED');
+
+		await setClock(runId, T0 + 60_000);
+		expect(await stub.retry()).toEqual({ ok: true });
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ greet: 'RUNNING', 'greet:0': 'PENDING', report: 'PENDING' });
+
+		performed.length = 0;
+		await settle(runId);
+		expect(await stateOf(runId)).toBe('COMPLETED');
+		expect(performed.filter((p) => p.binding === 'Greet')).toHaveLength(1);
+		expect(performed.find((p) => p.binding === 'Report')?.payload).toEqual({ total: 1, failed: 0 });
+	});
+
 	it('期限前に完了したrunは超過後のtickで反転しない', async () => {
 		await installQueues();
 		await shard('ListNames').configure({ policy: { concurrency: 100 } });
