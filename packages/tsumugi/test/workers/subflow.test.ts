@@ -240,6 +240,23 @@ describe('subflowの縦串', () => {
 		expect(await stateOf(parent)).toBe('CANCELLED');
 	});
 
+	it('子のrunの開始前に中断したsubflowノードの取り消しで親がCANCELLEDになる', async () => {
+		const parent = 'PIPELINE:sub-unstarted';
+		const child = 'GREETINGS:sub-unstarted-greetings';
+		await runInDurableObject(runStub(parent), async (instance) => {
+			await (instance as any).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
+			await (instance as any).ctx.storage.deleteAlarm();
+			(instance as any).repo.updateNode('greetings', { childRunId: child }, Date.now());
+		});
+
+		await runStub(parent).cancel();
+		await settleRuns([parent]);
+
+		expect((await nodeOf(parent, 'greetings'))?.state).toBe('CANCELLED');
+		expect(await stateOf(parent)).toBe('CANCELLED');
+		expect(await stateOf(child)).toBeUndefined();
+	});
+
 	it('入れ子の上限を超える起動を拒否する', async () => {
 		// 既定上限3, 深さ判定は起動先で実施
 		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行

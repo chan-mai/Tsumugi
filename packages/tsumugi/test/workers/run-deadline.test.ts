@@ -389,6 +389,29 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(await stateOf(parentId)).toBe('COMPLETED');
 	});
 
+	it('子のrunの開始前に中断したsubflowノードの期限超過で親がFAILEDになる', async () => {
+		const parentId = 'PIPELINE:deadline-sub-unstarted';
+		const childId = 'GREETINGS:deadline-sub-unstarted-greetings';
+		const stub = runStub(parentId);
+		await setClock(parentId, T0);
+		await runInDurableObject(stub, async (instance) => {
+			await (instance as any).start({ flow: 'PIPELINE', input: { prefix: 'su' }, deadlineMs: DEADLINE });
+			await (instance as any).ctx.storage.deleteAlarm();
+			(instance as any).repo.updateNode('greetings', { childRunId: childId }, T0);
+		});
+
+		await setClock(parentId, T0 + DEADLINE);
+		// tickの中断とalarmの再設定を再現
+		await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.setAlarm(T0 + DEADLINE));
+		await runDurableObjectAlarm(stub);
+		await settleRun(parentId);
+
+		expect(Object.fromEntries(await nodesOf(parentId))).toEqual({ greetings: 'FAILED', summary: 'FAILED' });
+		expect(await nodeErrorOf(parentId, 'greetings')).toBe(`run deadline exceeded: ${DEADLINE}ms`);
+		expect(await stateOf(parentId)).toBe('FAILED');
+		expect(await stateOf(childId)).toBeUndefined();
+	});
+
 	it('REST APIからの再開はCANCELLEDのrunを対象にしない', async () => {
 		const runId = 'GREETINGS:cancelled-retry';
 		const stub = runStub(runId);

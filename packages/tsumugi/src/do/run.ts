@@ -571,7 +571,13 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					if (row.child_run_id !== null) {
 						// 子のcancelは要求受理のみ, 終端は子からの通知で確定
 						const key = `${row.id}:${row.child_run_id}`;
-						if (!this.#cancelSent.has(key)) await this.#runStub(row.child_run_id).cancel();
+						if (!this.#cancelSent.has(key)) {
+							const result = await this.#runStub(row.child_run_id).cancel();
+							if (!result.ok && result.reason === 'gone') {
+								this.repo.updateNode(row.id, terminal, now);
+								return [row.id];
+							}
+						}
 						this.#cancelSent.add(key);
 						waiting.add(row.id);
 						return [];
