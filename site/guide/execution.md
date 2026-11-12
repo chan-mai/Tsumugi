@@ -176,6 +176,10 @@ curl -X POST -H "authorization: Bearer $TOKEN" -H 'content-type: application/jso
 await tsumugi.shardFor(env, 'MAIL').configure({ policy: { concurrency: 5 } });
 ```
 
+shard数が2以上のbindingでは、`shardFor`で取得するstubは、`partitionKey`で選ばれる1つのshardのstubです。
+`configure`による変更は、そのshardに限定して適用されます。
+すべてのshardに適用するには、ダッシュボードまたは[`POST /api/bindings/:binding/policy`](/reference/rest-api#post-apibindingsbindingpolicy)を使用してください。
+
 実行時に変更した設定は、`bindings`の設定より優先されます。
 その後は、`bindings`の設定は適用されません。
 `bindings`の設定に戻すには、[`POST /api/bindings/:binding/policy/reset`](/reference/rest-api#post-apibindingsbindingpolicyreset)を呼び出してください。
@@ -204,6 +208,10 @@ shard数を2以上にすると、`partitionKey`が必須になり、省略する
 `concurrencyKey`と`uniqueKey`による制御の範囲は、shard数によって異なります。
 shard数が1の場合、binding内のすべてのジョブが対象です。
 2以上の場合、`partitionKey`で選ばれる同じshardのジョブに限られます。
+
+[実行量の制限](#実行量の制限)の`concurrency`と`rate`も、shardごとに適用されます。
+binding全体で同時に実行されるジョブ数の上限は`concurrency`の値にshard数を掛けた値です。
+`rate`の上限は、`rate`の値にshard数を掛けた値です。
 
 `concurrencyKey`または`uniqueKey`を使用する場合は、`partitionKey`にも同じキーを指定してください。
 異なる値を設定してもエラーにはなりませんが、同じキーを持つジョブが別々のshardに割り当てられる可能性があります。

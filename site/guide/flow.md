@@ -219,6 +219,9 @@ Runが`FAILED`になるのは、失敗したノードがある場合に限られ
 
 `FAILED`のRunは、ダッシュボードまたはREST APIで再開します。
 成功したノードの結果はそのまま使われ、それ以外のノードは未実行として改めて実行されます。
+ただし、fan-outの子ノードのうち、実行して失敗した子ノードは再実行されません。
+その失敗は、fan-outの集計値の`failed`に数えられたまま後続のノードへ継承されます。
+Runの期限超過またはノード数の上限超過で中断された子ノードは再実行されます。
 
 ## 取り消し
 
@@ -286,6 +289,9 @@ expect(result.nodes[1].payload).toEqual({ name: 'a' });
 `fails`に渡したノードは失敗し、後続のノードは`SKIPPED`へ遷移します。
 Runは`FAILED`へ遷移します。
 fan-outの子ノードは`over`の戻り値から作成されますが、`ctx.spawn`で追加される子ノードは含まれません。
+`simulateFlow`は、subflowノードの子のFlowを実行しません。
+subflowノードの`payload`は、子のRunの入力です。
+subflowノードは、`fails`に指定した場合を除いて`COMPLETED`になります。
 
 ## 制約
 
