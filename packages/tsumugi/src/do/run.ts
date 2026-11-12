@@ -504,7 +504,11 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			if (!row) return [];
 
 			// 起動直前に判定, 依存の戻り値が揃う時点(ADR-0041)
-			if (decision.type === 'start' || decision.type === 'startRun' || decision.type === 'expand') {
+			if (
+				(decision.type === 'start' || decision.type === 'startRun' || decision.type === 'expand') &&
+				row.job_id === null &&
+				row.child_run_id === null
+			) {
 				const gate = this.#gate(row, definitions, runInput, now);
 				if (gate !== null) return gate;
 			}
@@ -582,7 +586,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						waiting.add(row.id);
 						return [];
 					}
-					if (row.job_id === null || row.state === 'PENDING') {
+					if (row.job_id === null) {
 						this.repo.updateNode(row.id, terminal, now);
 						return [row.id];
 					}
@@ -593,6 +597,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					}
 					// QUEUED以降は協調的取り消しの要求のみ, 終端はジョブの通知で確定(ADR-0052)
 					const result = await this.#jobStub(row.job_id).cancel(row.job_id);
+					if (!result.ok && result.reason === 'gone') {
+						this.repo.updateNode(row.id, terminal, now);
+						return [row.id];
+					}
 					if (!result.ok || result.requested) {
 						this.#cancelSent.add(key);
 						waiting.add(row.id);

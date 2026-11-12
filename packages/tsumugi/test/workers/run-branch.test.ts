@@ -123,6 +123,27 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
+	it('記録済みジョブIDを持つノードはwhenを再評価しない', async () => {
+		const runId = 'BRANCHED:when-reserved';
+		const jobId = 'Report#0:whenreserved';
+		await installQueues();
+		await runInDurableObject(runStub(runId), async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'BRANCHED', input: { prefix: 'wr', verbose: false } });
+			await inner.ctx.storage.deleteAlarm();
+			inner.repo.updateNode('list', { state: 'COMPLETED', result: JSON.stringify({ names: ['wr-1'] }) }, Date.now());
+			inner.repo.updateNode('detail', { jobId }, Date.now());
+			await inner.ctx.storage.setAlarm(Date.now());
+		});
+		await runDurableObjectAlarm(runStub(runId));
+		await settleRun(runId);
+
+		expect((await nodesOf(runId))['detail']).not.toBe('SKIPPED');
+		expect(await jobIdOf(runId, 'detail')).toBe(jobId);
+		const job = await runInDurableObject(shard('Report'), (instance) => (instance as any).repo.find(jobId) as { id: string } | undefined);
+		expect(job?.id).toBe(jobId);
+	});
+
 	it('上流が失敗すると後始末が通りrunはFAILEDのまま', async () => {
 		const runId = 'BRANCHED:ng';
 		const stub = runStub(runId);
