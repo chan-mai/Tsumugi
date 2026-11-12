@@ -172,6 +172,51 @@ describe('timeout', () => {
 	});
 });
 
+describe('consumerのwall time上限', () => {
+	it('timeoutMsより先に上限へ達した試行は失敗として報告する', async () => {
+		aborted = false;
+		const clock = fixedClock(T0);
+		const { sent, queue } = captureQueue();
+		await install('SLOW', clock, queue);
+
+		const jobId = await shard('SLOW').enqueue({
+			binding: 'SLOW',
+			payload: {},
+			timeoutMs: 60_000,
+			maxAttempts: 3,
+			backoff: { kind: 'fixed', delayMs: 1_000 },
+		});
+		await runDurableObjectAlarm(shard('SLOW'));
+		await handleBatch(makeBatch(sent.filter((m) => m.jobId === jobId)), consumerEnv, performers, 200);
+
+		expect(aborted).toBe(true);
+		expect(await stateOf('SLOW', jobId)).toBe('SCHEDULED');
+		const attempts = await runInDurableObject(
+			shard('SLOW'),
+			(instance) => (instance as any).repo.attemptsOf(jobId) as { error: string | null }[],
+		);
+		expect(attempts.at(-1)?.error).toContain('job exceeded the consumer wall time limit');
+	});
+
+	it('at-most-onceは上限到達で再試行せずSTALLEDになる', async () => {
+		const clock = fixedClock(T0);
+		const { sent, queue } = captureQueue();
+		await install('SLOWONCE', clock, queue);
+
+		const jobId = await shard('SLOWONCE').enqueue({
+			binding: 'SLOWONCE',
+			payload: {},
+			guarantee: 'at-most-once',
+			timeoutMs: 60_000,
+			maxAttempts: 3,
+		});
+		await runDurableObjectAlarm(shard('SLOWONCE'));
+		await handleBatch(makeBatch(sent.filter((m) => m.jobId === jobId)), consumerEnv, performers, 200);
+
+		expect(await stateOf('SLOWONCE', jobId)).toBe('STALLED');
+	});
+});
+
 describe('reaper', () => {
 	it('無応答のat-least-onceジョブはSCHEDULEDへ戻る', async () => {
 		const clock = fixedClock(T0);

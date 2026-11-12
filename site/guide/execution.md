@@ -88,6 +88,13 @@ await tsumugi.enqueue(env, {
 そのため、`at-most-once`のジョブはタイムアウトで`STALLED`へ遷移し、試行回数が残っていても再試行されません。
 処理を中断する方法は、[タイムアウトによる中断](/guide/performer#タイムアウトによる中断)を参照してください。
 
+Cloudflare Queuesのconsumerの1回の呼び出しは、実行時間(wall time)が15分に制限されています。
+そのため、Tsumugiでは、consumerの呼び出しの開始から14分を過ぎた試行を、`timeoutMs`の経過前であってもタイムアウトとして失敗します。
+試行のエラーには`job exceeded the consumer wall time limit (<jobId>, 900000ms)`が記録されます。
+失敗した後の扱いは、`timeoutMs`によるタイムアウトと同様です。
+再試行は試行回数が残っている場合に行われますが、`at-most-once`のジョブは`STALLED`へ遷移し、再試行されません。
+また、`ctx.deadlineAt`は、この期限よりも後の時刻になりません。
+
 `RUNNING`のジョブは、実行開始(または最後の`heartbeat`)から`timeoutMs`と`reaperGraceMs`(既定30秒)を過ぎても試行結果が記録されない場合に無応答と判定されます。
 `QUEUED`のジョブは、Queuesへの送信(または最後の`heartbeat`)から同じ時間を過ぎた場合に無応答と判定されます。
 `at-most-once`のジョブは、試行回数に関係なく`STALLED`へ遷移します。
