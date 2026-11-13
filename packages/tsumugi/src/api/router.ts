@@ -31,8 +31,7 @@ function decode(value: string): string {
 // 末尾`*`は0個以上のセグメント, `:name`は空でない1セグメント
 function match(pattern: string[], path: string[]): Record<string, string> | null {
 	const params: Record<string, string> = {};
-	for (let i = 0; i < pattern.length; i++) {
-		const segment = pattern[i]!;
+	for (const [i, segment] of pattern.entries()) {
 		if (segment === '*' && i === pattern.length - 1) return params;
 		const actual = path[i];
 		if (actual === undefined) return null;

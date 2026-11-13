@@ -1,9 +1,10 @@
 import { shardName } from '../core/ids.js';
 import { eachShard } from '../do/control.js';
-import { JobReadRepository, type JobRepository } from '../repository/job.repository.js';
+import { JobReadRepository } from '../repository/job.repository.js';
 
 import type { Policy } from '../core/types.js';
 import type { TsumugiJobShard } from '../do/job-shard.js';
+import type { JobRepository } from '../repository/job.repository.js';
 import type { ServiceEnv, ServiceOptions } from './types.js';
 
 type PolicyOutcome<T> = ({ ok: true; shards: number } & T) | { ok: false; reason: 'partial'; shards: number; failed: number[] };

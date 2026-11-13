@@ -1,7 +1,8 @@
 import { assignments, columnList, placeholders } from './bind.js';
-import { applySchedulerSchema, SCHEDULER_COLUMNS, type ScheduleRow } from './scheduler-schema.js';
+import { applySchedulerSchema, SCHEDULER_COLUMNS } from './scheduler-schema.js';
 
 import type { NormalizedSchedule } from '../core/recurring.js';
+import type { ScheduleRow } from './scheduler-schema.js';
 
 const SCHEDULE_SELECT = columnList(SCHEDULER_COLUMNS.schedule);
 

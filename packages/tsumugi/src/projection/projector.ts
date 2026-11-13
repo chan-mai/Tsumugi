@@ -1,11 +1,17 @@
-import { upsertOf, type ReadModelRow, type Upsert } from './columns.js';
+import { upsertOf } from './columns.js';
 
 import type { JobLogEntry } from '../core/log.js';
 import type { AttemptRow, JobRow } from '../do/schema.js';
+import type { ReadModelRow, Upsert } from './columns.js';
 
 export type OutboxRow = { seq: number; job_id: string; snapshot: string };
 
-type JobSnapshot = Omit<JobRow, 'traceparent'> & { traceparent?: string | null; attempts_log?: AttemptRow[]; logs?: JobLogEntry[] };
+type JobSnapshot = Omit<JobRow, 'traceparent' | 'run_after'> & {
+	run_after?: number;
+	traceparent?: string | null;
+	attempts_log?: AttemptRow[];
+	logs?: JobLogEntry[];
+};
 
 // 衝突時の非更新列, キーの`id`と`created_at`はジョブの同一性
 // `binding`と`guarantee`は投入時確定で不変

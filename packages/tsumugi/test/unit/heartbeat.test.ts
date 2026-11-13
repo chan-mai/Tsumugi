@@ -132,7 +132,8 @@ describe('取り消し要求の伝達(#95)', () => {
 			10,
 		);
 		await expect(heartbeat()).resolves.toEqual({ cancelRequested: false });
-		release!();
+		if (release === undefined) throw new Error('heartbeat request not started');
+		release();
 		await new Promise(resolve => setTimeout(resolve, 0));
 		at += HEARTBEAT_MIN_INTERVAL_MS;
 		await expect(heartbeat()).resolves.toEqual({ cancelRequested: true });

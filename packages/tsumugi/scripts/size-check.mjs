@@ -36,10 +36,12 @@ const ALLOWED_EXTERNALS = {
 	'dist/cli.js': ['tsumugi'],
 };
 
+const compareCodeUnits = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
 function externalsOf(files) {
 	const found = new Set();
 	for (const path of files) for (const spec of externalsIn(readFileSync(path, 'utf8'))) found.add(spec);
-	return [...found].sort();
+	return [...found].sort(compareCodeUnits);
 }
 
 function closureOf(entry) {
@@ -57,7 +59,7 @@ function closureOf(entry) {
 		seen.add(path);
 		for (const [, spec] of source.matchAll(IMPORT)) stack.push(normalize(join(dirname(path), spec)));
 	}
-	return [...seen].sort();
+	return [...seen].sort(compareCodeUnits);
 }
 
 const fmt = n => `${(n / 1024).toFixed(1)}KB`;

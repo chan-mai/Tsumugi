@@ -234,7 +234,10 @@ export function parsePaging(url: URL): { limit: number; offset: number } {
  * 完全一致のみ, 部分一致はインデックス不使用で件数増加時に全表走査
  */
 export function parseJobFilters(url: URL): JobFilters {
-	const text = (name: string) => url.searchParams.get(name) || undefined;
+	const text = (name: string) => {
+		const raw = url.searchParams.get(name);
+		return raw === null || raw === '' ? undefined : raw;
+	};
 	const time = (name: string) => {
 		const raw = url.searchParams.get(name);
 		// 空文字は指定なし扱い, Number('')は0で上限が1970年

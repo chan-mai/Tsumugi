@@ -3,8 +3,8 @@ import { createClient } from '../../src/client/enqueue.js';
 
 describe('投入前のtraceparent検証', () => {
 	it('別bindingの不正な値がある場合は全DOへの送信を開始しない', async () => {
-		const idFromName = vi.fn();
-		const get = vi.fn();
+		const idFromName = vi.fn<(name: string) => unknown>();
+		const get = vi.fn<(id: unknown) => unknown>();
 		const client = createClient();
 		await expect(
 			client.enqueueMany({ JOB_SHARD: { idFromName, get } } as never, [

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { getDiagnostics, isUnauthorized, resetPolicy, updatePolicy, type BindingDiagnostics } from '../api';
+import { getDiagnostics, isUnauthorized, resetPolicy, updatePolicy } from '../api';
 import LoadingState from '../components/LoadingState.vue';
 import PageHeader from '../components/PageHeader.vue';
 import { onRefresh } from '../composables/useAutoRefresh';
 import { confirmAction } from '../composables/useConfirm';
 import { button, EMPTY_ROW, ERROR_TEXT, MUTED_TEXT, TABLE, TABLE_WRAP, TBODY, TD, TH, THEAD } from '../ui';
+
+import type { BindingDiagnostics } from '../api';
 
 const { t } = useI18n();
 

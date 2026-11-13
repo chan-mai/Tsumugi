@@ -7,7 +7,7 @@ import { createRunService } from '../service/runs.service.js';
 import { createScheduleService } from '../service/schedules.service.js';
 import { SORT_KEYS, toJobDetail, toJobSummary, toRunDetail, toRunNode, toRunSummary } from './mapper.js';
 import { openapiDocument } from './openapi.js';
-import { createRouter, type Route } from './router.js';
+import { createRouter } from './router.js';
 import { resolveSort } from './sort.js';
 import {
 	parseJobFilters,
@@ -22,6 +22,7 @@ import {
 import type { MutationOutcome, ServiceEnv, ServiceOptions } from '../service/types.js';
 import type { Ui } from '../ui/serve.js';
 import type { AuthMiddleware } from './auth.js';
+import type { Route } from './router.js';
 import type {
 	BindingsResponse,
 	CreateJobResponse,

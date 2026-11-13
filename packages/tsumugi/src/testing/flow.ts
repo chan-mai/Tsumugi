@@ -1,5 +1,8 @@
-import { assertNodeId, shapeOf, type AnyFlow, type FlowNode, type InputOf } from '../core/flow.js';
-import { advance, type NodeState, type NodeView } from '../core/run.js';
+import { assertNodeId, shapeOf } from '../core/flow.js';
+import { advance } from '../core/run.js';
+
+import type { AnyFlow, FlowNode, InputOf } from '../core/flow.js';
+import type { NodeState, NodeView } from '../core/run.js';
 
 // performは非実行で結果は呼び出し側指定, spawnは対象外
 

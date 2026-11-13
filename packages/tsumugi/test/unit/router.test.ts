@@ -84,7 +84,7 @@ describe('ルーティング', () => {
 
 	it('前処理のResponseで後続を中断', async () => {
 		const app = createRouter<{}>();
-		const reached = vi.fn();
+		const reached = vi.fn<() => void>();
 		app.use('/api/*', c => c.json({ error: 'unauthorized' }, 401));
 		app.get('/api/jobs', c => {
 			reached();

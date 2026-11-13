@@ -5,10 +5,11 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import RunChildNode from './graph/RunChildNode.vue';
 import RunEdge from './graph/RunEdge.vue';
-import { HANDLE_TOP, runLayout, type ChildData, type TaskData } from './graph/runLayout';
+import { HANDLE_TOP, runLayout } from './graph/runLayout';
 import RunTaskNode from './graph/RunTaskNode.vue';
 
 import type { RunNode } from '../api';
+import type { ChildData, TaskData } from './graph/runLayout';
 
 const props = defineProps<{ nodes: RunNode[] }>();
 const emit = defineEmits<{ (event: 'select', jobId: string): void; (event: 'run', runId: string): void }>();
@@ -48,15 +49,16 @@ const edges = computed(() =>
 		const target = findNode(edge.target);
 		const first = route[0];
 		const last = route[route.length - 1];
+		const beforeLast = route[route.length - 2];
 		if (source && first && route[1]) {
 			first.x = source.position.x + (source.dimensions.width || Number.parseFloat(source.style?.width as string) || 0);
 			first.y = source.position.y + HANDLE_TOP;
 			route[1].y = first.y;
 		}
-		if (target && last && route[route.length - 2]) {
+		if (target && last && beforeLast) {
 			last.x = target.position.x;
 			last.y = target.position.y + HANDLE_TOP;
-			route[route.length - 2]!.y = last.y;
+			beforeLast.y = last.y;
 		}
 		return { ...edge, data: { route } };
 	}),

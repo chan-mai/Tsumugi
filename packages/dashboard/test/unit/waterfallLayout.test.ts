@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { CHILD_PAGE, formatDuration, tickStep, waterfallLayout, type NodeRow } from '../../src/components/waterfall/waterfallLayout';
+import { CHILD_PAGE, formatDuration, tickStep, waterfallLayout } from '../../src/components/waterfall/waterfallLayout';
 
 import type { RunNode } from '../../src/api';
+import type { NodeRow } from '../../src/components/waterfall/waterfallLayout';
 
 const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 	binding: 'GREET',
@@ -28,7 +29,11 @@ const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 const job = (id: string, over: Partial<RunNode> = {}) => node({ id, job_id: `GREET#0:${id}`, ...over });
 
 const nodeRows = (rows: ReturnType<typeof waterfallLayout>['rows']) => rows.filter((row): row is NodeRow => row.kind === 'node');
-const rowOf = (result: ReturnType<typeof waterfallLayout>, id: string) => nodeRows(result.rows).find(row => row.node.id === id)!;
+const rowOf = (result: ReturnType<typeof waterfallLayout>, id: string) => {
+	const found = nodeRows(result.rows).find(row => row.node.id === id);
+	if (found === undefined) throw new Error(`row not found: ${id}`);
+	return found;
+};
 
 describe('ウォーターフォールの配置', () => {
 	it('親子を前順で並べ兄弟はposition順', () => {

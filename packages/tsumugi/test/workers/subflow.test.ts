@@ -1,9 +1,11 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+import { handleBatch } from '../../src/queue/consumer.js';
 
 import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { RunRepo } from '../../src/do/run-repo.js';
 import type { TsumugiRunInstance } from '../../src/do/run.js';
+import type { ConsumerEnv } from '../../src/queue/consumer.js';
 
 // flow定義はexamples/basic(PIPELINEがGREETINGSを起動)
 
@@ -25,6 +27,14 @@ const consumerEnv: ConsumerEnv = env;
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
 const runNamespace = env.RUN as unknown as DurableObjectNamespace<TsumugiRunInstance>;
 const runStub = (runId: string) => runNamespace.get(runNamespace.idFromName(runId));
+
+type DbLike = {
+	prepare(sql: string): D1PreparedStatement;
+	batch(statements: D1PreparedStatement[]): Promise<unknown>;
+};
+type RunInternals = TsumugiRunInstance & { repo: RunRepo; env: { TSUMUGI_DB: DbLike; RUN: unknown } };
+const internals = (instance: unknown) => instance as RunInternals;
+type ShardInternals = { env: { TSUMUGI_QUEUE: typeof queue } };
 
 const sent: DispatchMessage[] = [];
 const queue = {
@@ -52,7 +62,7 @@ async function settle(runIds: string[], performers: Record<string, unknown>, rou
 	for (let i = 0; i < rounds; i++) {
 		for (const binding of BINDINGS) {
 			await runInDurableObject(shard(binding), instance => {
-				(instance as any).env.TSUMUGI_QUEUE = queue;
+				(instance as unknown as ShardInternals).env.TSUMUGI_QUEUE = queue;
 			});
 			await runDurableObjectAlarm(shard(binding));
 		}
@@ -65,11 +75,11 @@ async function settle(runIds: string[], performers: Record<string, unknown>, rou
 	}
 }
 
-const stateOf = (runId: string) => runInDurableObject(runStub(runId), instance => (instance as any).repo.findRun()?.state as string);
-const nodeOf = (runId: string, nodeId: string) => runInDurableObject(runStub(runId), instance => (instance as any).repo.findNode(nodeId));
+const stateOf = (runId: string) => runInDurableObject(runStub(runId), instance => internals(instance).repo.findRun()?.state as string);
+const nodeOf = (runId: string, nodeId: string) => runInDurableObject(runStub(runId), instance => internals(instance).repo.findNode(nodeId));
 const nodesOf = (runId: string) =>
 	runInDurableObject(runStub(runId), instance =>
-		((instance as any).repo.views() as { id: string; state: string }[]).map(node => [node.id, node.state] as const),
+		(internals(instance).repo.views() as { id: string; state: string }[]).map(node => [node.id, node.state] as const),
 	);
 
 // performer未実行で投入まで, 固定ラウンド数では進行過多の場合あり
@@ -155,8 +165,8 @@ describe('subflowの縦串', () => {
 
 		// デプロイで子flowが定義から削除, ジョブ完了待ちでalarmなく直接起動
 		await runInDurableObject(runStub(child), async instance => {
-			(instance as any).repo.sql.exec(`UPDATE run SET flow = 'REMOVED'`);
-			await (instance as any).alarm();
+			internals(instance).repo.sql.exec(`UPDATE run SET flow = 'REMOVED'`);
+			await internals(instance).alarm();
 		});
 		await settleRuns([parent]);
 
@@ -164,7 +174,7 @@ describe('subflowの縦串', () => {
 		expect((await nodeOf(parent, 'greetings'))?.state).toBe('FAILED');
 		expect(await stateOf(parent)).toBe('FAILED');
 		// 保持期間経過後の削除予定, 未設定時はDO残存
-		const alarm = await runInDurableObject(runStub(child), instance => (instance as any).ctx.storage.getAlarm() as Promise<number | null>);
+		const alarm = await runInDurableObject(runStub(child), (_instance, state) => state.storage.getAlarm());
 		expect(alarm).not.toBeNull();
 	});
 
@@ -177,7 +187,7 @@ describe('subflowの縦串', () => {
 
 		// 子の起動RPCが無応答、親のみ失敗と判定
 		await runInDurableObject(runStub(parent), instance => {
-			(instance as any).repo.sql.exec(`UPDATE node SET state = 'FAILED' WHERE id = 'greetings'`);
+			internals(instance).repo.sql.exec(`UPDATE node SET state = 'FAILED' WHERE id = 'greetings'`);
 		});
 		await runStub(parent).notifyChild('greetings', child, 'COMPLETED');
 
@@ -198,11 +208,11 @@ describe('subflowの縦串', () => {
 		const jobId = (await nodeOf(child, 'list'))?.job_id;
 		if (!jobId) throw new Error('the first node of the child run has no job id');
 
-		const alarm = await runInDurableObject(runStub(child), async instance => {
-			(instance as any).clock = { now: () => T };
+		const alarm = await runInDurableObject(runStub(child), async (instance, state) => {
+			internals(instance).clock = { now: () => T };
 			// 親Run DOへ通知不達, envは他テストと共有で終了時に復元
-			const original = (instance as any).env.RUN;
-			(instance as any).env.RUN = {
+			const original = internals(instance).env.RUN;
+			internals(instance).env.RUN = {
 				idFromName: (name: string) => ({ name }),
 				get: () => ({
 					notifyChild: async () => {
@@ -211,12 +221,12 @@ describe('subflowの縦串', () => {
 				}),
 			};
 			try {
-				await (instance as any).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'boom' }]);
-				await (instance as any).ctx.storage.deleteAlarm();
-				await (instance as any).alarm();
-				return (await (instance as any).ctx.storage.getAlarm()) as number | null;
+				await internals(instance).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'boom' }]);
+				await state.storage.deleteAlarm();
+				await internals(instance).alarm();
+				return await state.storage.getAlarm();
 			} finally {
-				(instance as any).env.RUN = original;
+				internals(instance).env.RUN = original;
 			}
 		});
 
@@ -236,15 +246,15 @@ describe('subflowの縦串', () => {
 		const jobId = (await nodeOf(child, 'list'))?.job_id;
 		if (!jobId) throw new Error('the first node of the child run has no job id');
 
-		return runInDurableObject(runStub(child), async instance => {
-			const inner = instance as any;
+		return runInDurableObject(runStub(child), async (instance, state) => {
+			const inner = internals(instance);
 			const notified: string[] = [];
 			const originalDb = inner.env.TSUMUGI_DB;
 			const originalRun = inner.env.RUN;
 			if (at === 'project') {
 				inner.env.TSUMUGI_DB = {
 					prepare: (sql: string) => originalDb.prepare(sql),
-					batch: async (statements: unknown[]) => {
+					batch: async (statements: D1PreparedStatement[]) => {
 						await inner.retry();
 						return originalDb.batch(statements);
 					},
@@ -261,7 +271,7 @@ describe('subflowの縦串', () => {
 			};
 			try {
 				await inner.notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'boom' }]);
-				await inner.ctx.storage.deleteAlarm();
+				await state.storage.deleteAlarm();
 				await inner.alarm();
 				return { notified, run: inner.repo.findRun() as { state: string; parent_notified: number } };
 			} finally {
@@ -303,10 +313,10 @@ describe('subflowの縦串', () => {
 	it('子のrunの開始前に中断したsubflowノードの取り消しで親がCANCELLEDになる', async () => {
 		const parent = 'PIPELINE:sub-unstarted';
 		const child = 'GREETINGS:sub-unstarted-greetings';
-		await runInDurableObject(runStub(parent), async instance => {
-			await (instance as any).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
-			await (instance as any).ctx.storage.deleteAlarm();
-			(instance as any).repo.updateNode('greetings', { childRunId: child }, Date.now());
+		await runInDurableObject(runStub(parent), async (instance, state) => {
+			await internals(instance).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
+			await state.storage.deleteAlarm();
+			internals(instance).repo.updateNode('greetings', { childRunId: child }, Date.now());
 		});
 
 		await runStub(parent).cancel();
@@ -322,7 +332,7 @@ describe('subflowの縦串', () => {
 		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
 		await expect(
 			runInDurableObject(runStub('GREETINGS:too-deep'), instance =>
-				(instance as any).start({ flow: 'GREETINGS', input: { prefix: 'x' }, depth: 4 }),
+				internals(instance).start({ flow: 'GREETINGS', input: { prefix: 'x' }, depth: 4 }),
 			),
 		).rejects.toThrow('subflow nesting exceeded the limit');
 	});
@@ -333,7 +343,8 @@ describe('subflowの縦串', () => {
 		await runStub(parent).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
 		await settle([parent, child], registry, 2);
 
-		const row = await runInDurableObject(runStub(child), instance => (instance as any).repo.findRun());
+		const row = await runInDurableObject(runStub(child), instance => internals(instance).repo.findRun());
+		if (row === undefined) throw new Error(`run not found: ${child}`);
 		expect(row.parent_run_id).toBe(parent);
 		expect(row.parent_node_id).toBe('greetings');
 		expect(row.depth).toBe(1);

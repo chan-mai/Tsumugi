@@ -21,9 +21,3 @@ export class SendMail extends WorkerEntrypoint {
 		};
 	}
 }
-
-export default {
-	async fetch() {
-		return new Response('performer only', { status: 404 });
-	},
-};

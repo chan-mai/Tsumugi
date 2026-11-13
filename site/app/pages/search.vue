@@ -3,7 +3,7 @@ import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headless
 
 const { t, locale } = useI18n();
 const localePath = useLocalePath();
-const scopes = computed<SearchScope[]>(() => [
+const scopes = computed<[SearchScope, ...SearchScope[]]>(() => [
 	{ value: 'all', label: t('search.all'), prefix: '/' },
 	{ value: 'guide', label: t('nav.guide'), prefix: `${localePath('/guide')}/` },
 	{ value: 'reference', label: t('nav.reference'), prefix: `${localePath('/reference')}/` },
@@ -17,7 +17,7 @@ const route = useRoute();
 const router = useRouter();
 
 const q = computed(() => String(route.query.q ?? '').trim());
-const scope = computed(() => scopes.value.find(item => item.value === route.query.scope) ?? scopes.value[0]!);
+const scope = computed(() => scopes.value.find(item => item.value === route.query.scope) ?? scopes.value[0]);
 const requestedPage = computed(() => Math.max(1, Math.trunc(Number(route.query.page)) || 1));
 
 const draft = ref(q.value);
@@ -41,7 +41,7 @@ function mergePageSections(list: SearchSection[]): SearchSection[] {
 	const roots = new Map(list.filter(s => !s.id.includes('#')).map(s => [s.id, s]));
 	const merged: SearchSection[] = [];
 	for (const section of list) {
-		const path = section.id.split('#')[0]!;
+		const [path = ''] = section.id.split('#');
 		const root = roots.get(path);
 		if (section.level === 1 && section.id.includes('#') && root) {
 			root.content = [root.content, section.content].filter(Boolean).join(' ');
@@ -70,7 +70,8 @@ const page = computed(() => Math.min(requestedPage.value, pageCount.value));
 const from = computed(() => (page.value - 1) * perPage);
 const results = computed(() =>
 	matches.value.slice(from.value, from.value + perPage).map(section => {
-		const pageTitle = pageTitles.value.get(section.id.split('#')[0]!);
+		const [path = ''] = section.id.split('#');
+		const pageTitle = pageTitles.value.get(path);
 		return {
 			id: section.id,
 			title: highlight(pageTitle && pageTitle !== section.title ? `${section.title} | ${pageTitle}` : section.title),

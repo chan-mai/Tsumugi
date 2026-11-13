@@ -1,4 +1,4 @@
-export default {
+export const en = {
 	app: {
 		notAuthorized: 'Not authorized. Sign in through your identity provider and reload.',
 		failedToLoad: 'Failed to load: {error}',

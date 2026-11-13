@@ -97,6 +97,7 @@ export default {
 			const id = await tsumugi.start(env, 'GREETINGS', { prefix: 'hello' });
 			return Response.json({ id });
 		}
-		return tsumugi.fetch!(request, env, ctx);
+		if (!tsumugi.fetch) throw new Error('tsumugi fetch handler is not defined');
+		return tsumugi.fetch(request, env, ctx);
 	},
 } satisfies ExportedHandler<Env>;

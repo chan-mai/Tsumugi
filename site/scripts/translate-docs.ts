@@ -64,9 +64,9 @@ function annotateHeadingIds(markdown: string): { text: string; ids: string[] } {
 		}
 		const heading = !fence && line.match(/^(#{1,6})\s+(.+?)\s*$/);
 		if (!heading) return line;
-		const id = slugger.slug(heading[2]!).replace(/-+/g, '-').replace(/^-|-$/g, '').replace(/^(\d)/, '_$1');
+		const id = slugger.slug(heading[2]).replace(/-+/g, '-').replace(/^-|-$/g, '').replace(/^(\d)/, '_$1');
 		ids.push(id);
-		const level = heading[1]!.length;
+		const level = heading[1].length;
 		return `<h${level} id="${id}">${heading[2]}</h${level}>`;
 	});
 	return { text: lines.join('\n'), ids };
@@ -101,7 +101,7 @@ function readFrontmatter(markdown: string): Map<string, string> | undefined {
 		.split('\n')
 		.flatMap(line => {
 			const match = line.match(/^([\w-]+):\s*(.*)$/);
-			return match ? [[match[1]!, match[2]!.trim()] as const] : [];
+			return match ? [[match[1], match[2].trim()] as const] : [];
 		});
 	return new Map(entries);
 }
@@ -178,8 +178,9 @@ const queue = [...targets];
 await Promise.all(
 	Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
 		for (let target = queue.shift(); target; target = queue.shift()) {
-			await processTarget(client, target).catch((error: unknown) => {
-				console.error(`failed: ${target!.output}`, error);
+			const current = target;
+			await processTarget(client, current).catch((error: unknown) => {
+				console.error(`failed: ${current.output}`, error);
 				process.exit(1);
 			});
 		}

@@ -2,8 +2,8 @@ import { useStorage } from '@vueuse/core';
 import { watch } from 'vue';
 import { createI18n } from 'vue-i18n';
 import { timeLocale } from '../time';
-import en from './en';
-import ja from './ja';
+import { en } from './en';
+import { ja } from './ja';
 
 export const LOCALES = [
 	{ key: 'ja', label: '日本語', time: 'ja-JP' },

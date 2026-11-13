@@ -1,12 +1,13 @@
-import { toFailOptions, type FailOptions, type JobContext, type PerformerLike, type RemoteRef } from '../core/api.js';
+import { toFailOptions } from '../core/api.js';
 import { assertNodeId } from '../core/flow.js';
 import { shardNameOf } from '../core/ids.js';
 import { LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS } from '../core/log.js';
 
+import type { AnyPerformer, FailOptions, JobContext, RemoteRef } from '../core/api.js';
 import type { SpawnRequest } from '../core/run.js';
 import type { DispatchMessage, TsumugiJobShard } from '../do/job-shard.js';
 
-export type PerformerCtor<Env> = new (ctx: ExecutionContext, env: Env) => PerformerLike<any, any, any>;
+export type PerformerCtor<Env> = new (ctx: ExecutionContext, env: Env) => AnyPerformer;
 
 export type PerformerService = {
 	perform(payload: unknown, ctx: JobContext): Promise<unknown>;
@@ -208,7 +209,7 @@ async function handleOne<Env extends ConsumerEnv>(
 
 	try {
 		// 分割代入もtry内, 本文null等の例外でのack欠落防止(ADR-0004)
-		const body = message.body;
+		const body = message.body as DispatchMessage | null | undefined;
 		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
 		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt, traceparent } = body;

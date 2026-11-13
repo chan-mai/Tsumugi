@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { flip, offset, shift, useFloating, type VirtualElement } from '@floating-ui/vue';
+import { flip, offset, shift, useFloating } from '@floating-ui/vue';
 import { ChevronRight, CircleAlert } from '@lucide/vue';
 import { useNow } from '@vueuse/core';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatTimestamp, timeLocale } from '../../time';
 import StatusCell from '../StatusCell.vue';
-import { CHILD_PAGE, formatDuration, waterfallLayout, type NodeRow, type Segment } from './waterfallLayout';
+import { CHILD_PAGE, formatDuration, waterfallLayout } from './waterfallLayout';
 
 import type { RunNode } from '../../api';
+import type { NodeRow, Segment } from './waterfallLayout';
+import type { VirtualElement } from '@floating-ui/vue';
 
 const props = defineProps<{ nodes: RunNode[] }>();
 const emit = defineEmits<{ (event: 'select', jobId: string): void; (event: 'run', runId: string): void }>();
@@ -58,7 +60,7 @@ function labelClass(row: NodeRow) {
 
 function barClass(segment: Segment) {
 	// 終了前の実行区間はノードの状態によらず実行中
-	const tone = (segment.kind === 'running' || segment.kind === 'span') && segment.open ? TONE.RUNNING! : (TONE[segment.state] ?? NEUTRAL);
+	const tone = (segment.kind === 'running' || segment.kind === 'span') && segment.open ? TONE.RUNNING : (TONE[segment.state] ?? NEUTRAL);
 	switch (segment.kind) {
 		case 'queued':
 			return ['border border-dashed border-line-strong bg-neutral-soft', segment.open ? 'animate-pulse' : ''];

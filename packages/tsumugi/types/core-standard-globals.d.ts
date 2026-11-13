@@ -4,7 +4,7 @@
 
 interface AbortSignal {
 	readonly aborted: boolean;
-	readonly reason: any;
+	readonly reason: unknown;
 	throwIfAborted(): void;
 	addEventListener(type: 'abort', listener: () => void): void;
 	removeEventListener(type: 'abort', listener: () => void): void;
@@ -14,7 +14,7 @@ interface TextEncoder {
 	encode(input?: string): Uint8Array;
 }
 
-declare var TextEncoder: {
+declare const TextEncoder: {
 	prototype: TextEncoder;
 	new (): TextEncoder;
 };

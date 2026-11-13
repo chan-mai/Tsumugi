@@ -48,11 +48,12 @@ function readColor(probe: HTMLElement, name: string) {
 	probe.style.color = `var(${name})`;
 	const canvas = document.createElement('canvas');
 	canvas.width = canvas.height = 1;
-	const context = canvas.getContext('2d')!;
+	const context = canvas.getContext('2d');
+	if (!context) throw new Error('2d canvas context is not available');
 	context.fillStyle = getComputedStyle(probe).color;
 	context.fillRect(0, 0, 1, 1);
-	const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
-	return new THREE.Color().setRGB(r! / 255, g! / 255, b! / 255, THREE.SRGBColorSpace);
+	const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
+	return new THREE.Color().setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
 }
 
 let cleanup: (() => void) | undefined;
@@ -101,15 +102,16 @@ onMounted(async () => {
 	const baseAspect = 16 / 9;
 
 	// 透過の屈折先として不透明な背景面をカメラに固定
+	const backgroundUniforms = {
+		uColor1: { value: new THREE.Color() },
+		uColor2: { value: new THREE.Color() },
+		uColor3: { value: new THREE.Color() },
+		uColor4: { value: new THREE.Color() },
+		uTime: { value: 0 },
+		uResolution: { value: new THREE.Vector2(1, 1) },
+	};
 	const backgroundMaterial = new THREE.ShaderMaterial({
-		uniforms: {
-			uColor1: { value: new THREE.Color() },
-			uColor2: { value: new THREE.Color() },
-			uColor3: { value: new THREE.Color() },
-			uColor4: { value: new THREE.Color() },
-			uTime: { value: 0 },
-			uResolution: { value: new THREE.Vector2(1, 1) },
-		},
+		uniforms: backgroundUniforms,
 		vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
 		fragmentShader: backgroundShader,
 		toneMapped: false,
@@ -147,8 +149,8 @@ onMounted(async () => {
 
 	// _toneの値ごとに透過色を設定
 	function applyPalette() {
-		const uniforms = backgroundMaterial.uniforms;
-		for (const index of [1, 2, 3, 4]) uniforms[`uColor${index}`]!.value.copy(readColor(probe, `--color-hero-gradient-${index}`));
+		const gradient = [backgroundUniforms.uColor1, backgroundUniforms.uColor2, backgroundUniforms.uColor3, backgroundUniforms.uColor4];
+		gradient.forEach((uniform, i) => uniform.value.copy(readColor(probe, `--color-hero-gradient-${i + 1}`)));
 		const tones = [0, 1, 2].map(index => readColor(probe, `--color-hero-tone-${index}`).lerp(new THREE.Color(1, 1, 1), 0.55));
 		gltf.scene.traverse(object => {
 			if (!(object instanceof THREE.Mesh)) return;
@@ -156,13 +158,17 @@ onMounted(async () => {
 			const tone = geometry.getAttribute('_tone');
 			if (!tone) return;
 			const colors = new Float32Array(tone.count * 3);
-			for (let i = 0; i < tone.count; i++) tones[Math.round(tone.getX(i))]!.toArray(colors, i * 3);
+			for (let i = 0; i < tone.count; i++) {
+				const color = tones[Math.round(tone.getX(i))];
+				if (!color) throw new Error(`unknown _tone value at vertex ${i}`);
+				color.toArray(colors, i * 3);
+			}
 			geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 		});
 	}
 
-	function resize() {
-		const { clientWidth: width, clientHeight: height } = element!;
+	const resize = () => {
+		const { clientWidth: width, clientHeight: height } = element;
 		renderer.setSize(width, height, false);
 		renderer.domElement.style.width = '100%';
 		renderer.domElement.style.height = '100%';
@@ -173,8 +179,8 @@ onMounted(async () => {
 		camera.updateProjectionMatrix();
 		const planeHeight = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * -backgroundPlane.position.z;
 		backgroundPlane.scale.set(planeHeight * camera.aspect, planeHeight, 1);
-		backgroundMaterial.uniforms.uResolution!.value.set(width, height);
-	}
+		backgroundUniforms.uResolution.value.set(width, height);
+	};
 
 	const pointer = new THREE.Vector2();
 	function onPointerMove(event: PointerEvent) {
@@ -193,7 +199,7 @@ onMounted(async () => {
 			pivot.rotation.y = THREE.MathUtils.lerp(pivot.rotation.y, Math.sin(t * 0.25) * 0.15 + pointer.x * 0.1, 0.05);
 			pivot.rotation.x = THREE.MathUtils.lerp(pivot.rotation.x, Math.cos(t * 0.2) * 0.06 + pointer.y * 0.06, 0.05);
 			pivot.position.y = Math.sin(t * 0.5) * 0.15;
-			backgroundMaterial.uniforms.uTime!.value = t;
+			backgroundUniforms.uTime.value = t;
 		}
 		renderer.render(scene, camera);
 	}

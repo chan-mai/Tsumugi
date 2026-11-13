@@ -15,8 +15,9 @@ class Noop extends Performer<unknown, void, {}, RestEnv> {
 
 const app = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
 
-const call = (path: string, database: D1Database) =>
-	app.fetch!(
+const call = (path: string, database: D1Database) => {
+	if (app.fetch === undefined) throw new Error('fetch handler is missing');
+	return app.fetch(
 		new Request(`https://example.com${path}`, { headers: { authorization: `Bearer ${TOKEN}` } }),
 		{
 			...env,
@@ -24,6 +25,7 @@ const call = (path: string, database: D1Database) =>
 		} as RestEnv,
 		{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 	);
+};
 
 // D1メソッドはプロトタイプ上で展開時に欠落, `batch`実行時のみ失敗
 function proxyD1(onMigrationsQuery: () => D1PreparedStatement): D1Database {
@@ -82,7 +84,8 @@ describe('マイグレーション適用漏れの検出', () => {
 	it('一時障害では適用漏れの復旧手順を案内しない(#8)', async () => {
 		// unavailableはTTL内再利用、共有appのキャッシュへの影響回避で専用app
 		const isolated = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
-		const res = await isolated.fetch!(
+		if (isolated.fetch === undefined) throw new Error('fetch handler is missing');
+		const res = await isolated.fetch(
 			new Request('https://example.com/api/jobs', { headers: { authorization: `Bearer ${TOKEN}` } }),
 			{ ...env, TSUMUGI_DB: withError('D1_ERROR: Network connection lost') } as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,

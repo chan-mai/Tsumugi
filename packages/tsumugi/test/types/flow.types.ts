@@ -53,7 +53,7 @@ export const triggers = flow<{ orderId: string }>(f => {
 	const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 
 	// successでは依存の戻り値が全て存在
-	f.node('ok', 'PROCESS', { after: { fetched }, input: (_i, d) => ({ id: d.fetched.items[0]!.id }) });
+	f.node('ok', 'PROCESS', { after: { fetched }, input: (_i, d) => ({ id: d.fetched.items[0]?.id ?? 'none' }) });
 
 	// failure, alwaysでは失敗した依存の戻り値なし
 	f.node('cleanup', 'PROCESS', {

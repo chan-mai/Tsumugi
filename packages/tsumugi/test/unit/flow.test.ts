@@ -123,7 +123,9 @@ describe('flowの構築', () => {
 		const other = flow<void>(f => {
 			f.node('outside', 'FETCH', { input: () => ({ since: 0 }) });
 		});
-		const foreign = { id: other.nodes[0]!.id } as never;
+		const [outside] = other.nodes;
+		if (outside === undefined) throw new Error('outside node not declared');
+		const foreign = { id: outside.id } as never;
 
 		expect(() =>
 			flow<void>(f => {

@@ -77,11 +77,7 @@ describe('assertTransition', () => {
 
 	it('禁止された遷移はfromとtoを持つ例外を投げる', () => {
 		expect(() => assertTransition('COMPLETED', 'SCHEDULED')).toThrow(InvalidTransitionError);
-		try {
-			assertTransition('COMPLETED', 'SCHEDULED');
-		} catch (e) {
-			expect(e).toMatchObject({ from: 'COMPLETED', to: 'SCHEDULED' });
-		}
+		expect(() => assertTransition('COMPLETED', 'SCHEDULED')).toThrow(expect.objectContaining({ from: 'COMPLETED', to: 'SCHEDULED' }));
 	});
 });
 

@@ -1,8 +1,9 @@
 import { assignments, chunk, columnList, placeholders, valuesOf } from './bind.js';
-import { applyRunSchema, RUN_COLUMNS, type NodeRow, type RunRow } from './run-schema.js';
+import { applyRunSchema, RUN_COLUMNS } from './run-schema.js';
 
 import type { NodeTrigger } from '../core/flow.js';
 import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
+import type { NodeRow, RunRow } from './run-schema.js';
 
 const RUN_SELECT = columnList(RUN_COLUMNS.run);
 const NODE_SELECT = columnList(RUN_COLUMNS.node);
@@ -312,7 +313,7 @@ export class RunRepo {
 
 	progress(): { total: number; done: number; failed: number } {
 		const row = this.sql
-			.exec<{ total: number; done: number; failed: number }>(
+			.exec<{ total: number; done: number | null; failed: number | null }>(
 				`SELECT count(*) AS total,
 					sum(CASE WHEN state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'STALLED', 'SKIPPED') THEN 1 ELSE 0 END) AS done,
 					sum(CASE WHEN state IN ('FAILED', 'STALLED') THEN 1 ELSE 0 END) AS failed

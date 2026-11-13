@@ -23,7 +23,7 @@ export type NodeRef<Result = unknown> = {
 /** fan-outノードが後続へ渡す集計値, 個々のresultは対象外(ADR-0035) */
 export type FanOutSummary = { total: number; succeeded: number; failed: number };
 
-type Refs = Record<string, NodeRef<any>>;
+type Refs = Record<string, NodeRef<unknown>>;
 
 type DepsOf<A extends Refs> = { [K in keyof A]: A[K] extends NodeRef<infer R> ? R : never };
 
@@ -162,6 +162,7 @@ export type Flow<Input = unknown> = {
 	readonly __input?: Input;
 };
 
+// oxlint-disable-next-line typescript/no-explicit-any -- Flow<具体型>への代入用
 export type AnyFlow = Flow<any>;
 
 export type Flows = Record<string, AnyFlow>;
@@ -212,7 +213,7 @@ export function assertNodeId(id: string): void {
 const refIds = (after: Refs | undefined): Record<string, string> =>
 	Object.fromEntries(Object.entries(after ?? {}).map(([name, ref]) => [name, ref.id]));
 
-const gateOf = (options: Record<string, any>): { trigger: NodeTrigger; when?: WhenFn } => ({
+const gateOf = (options: Record<string, unknown>): { trigger: NodeTrigger; when?: WhenFn } => ({
 	trigger: (options.trigger as NodeTrigger | undefined) ?? 'success',
 	...(options.when !== undefined ? { when: options.when as WhenFn } : {}),
 });
@@ -237,7 +238,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 		const nodes: FlowNode[] = [];
 		const seen = new Set<string>();
 
-		const register = (node: FlowNode): NodeRef<any> => {
+		const register = (node: FlowNode): NodeRef<unknown> => {
 			assertNodeId(node.id);
 			if (!NODE_TRIGGERS.includes(node.trigger)) {
 				throw new InvalidFlowError(`invalid trigger: ${node.id} -> ${JSON.stringify(node.trigger)}`);
@@ -257,7 +258,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 		};
 
 		const builder = {
-			node(id: string, binding: string, options: Record<string, any>) {
+			node(id: string, binding: string, options: Record<string, unknown>) {
 				return register({
 					id,
 					binding,
@@ -269,7 +270,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 					...(options.concurrencyKey !== undefined ? { concurrencyKey: options.concurrencyKey as string | ConcurrencyKeyFn } : {}),
 				});
 			},
-			subflow(id: string, child: AnyFlow, options: Record<string, any>) {
+			subflow(id: string, child: AnyFlow, options: Record<string, unknown>) {
 				return register({
 					id,
 					// 対応performerなし, 画面には起動するflow名を表示
@@ -282,7 +283,7 @@ export function createFlow<const R extends Record<string, unknown>>(_performers:
 					subflow: child,
 				});
 			},
-			fanOut(id: string, binding: string, options: Record<string, any>) {
+			fanOut(id: string, binding: string, options: Record<string, unknown>) {
 				return register({
 					id,
 					binding,

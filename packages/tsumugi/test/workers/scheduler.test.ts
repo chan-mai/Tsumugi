@@ -1,9 +1,11 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { RunRow } from '../../src/do/run-schema.js';
-import type { ScheduleRow } from '../../src/do/scheduler-schema.js';
-import type { ScheduleView } from '../../src/do/scheduler.js';
+import type { Clock } from '../../src/do/clock.js';
+import type { JobRepo } from '../../src/do/repo.js';
+import type { RunRepo } from '../../src/do/run-repo.js';
+import type { SchedulerRepo } from '../../src/do/scheduler-repo.js';
+import type { ScheduleMutationResult, ScheduleTriggerResult, ScheduleView } from '../../src/do/scheduler.js';
 
 // schedule定義はexamples/basic, Scheduler DOが参照(ADR-0040)
 // poll-namesは固定間隔skip, ping-helloはoverlap, nightlyはcronでflow起動
@@ -21,20 +23,37 @@ const nightlyOf = (base: number) => base + 6 * 60 * 60 * 1000;
 // 使用メソッドのみ宣言, DO型直接参照でTS2589発生
 interface SchedulerFace extends Rpc.DurableObjectBranded {
 	sync(): Promise<void>;
-	list(): Promise<unknown[]>;
-	setPaused(name: string, paused: boolean): Promise<unknown>;
-	trigger(name: string): Promise<unknown>;
+	list(): Promise<ScheduleView[]>;
+	setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult>;
+	trigger(name: string): Promise<ScheduleTriggerResult>;
 }
+
+type ShardStub = { id: unknown; enqueueMany(inputs: unknown, settings: unknown): Promise<unknown> };
+
+type ShardNamespace = {
+	idFromName(name: string): unknown;
+	get(id: unknown): ShardStub;
+};
+
+type SchedulerInternals = {
+	repo: SchedulerRepo;
+	ctx: DurableObjectState;
+	clock: Clock;
+	env: { RUN: unknown; JOB_SHARD: ShardNamespace };
+	setPaused(name: string, paused: boolean): Promise<ScheduleMutationResult>;
+};
+
+const internals = (instance: unknown) => instance as SchedulerInternals;
 
 const namespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 const inside = () => namespace.get(namespace.idFromName('scheduler'));
 const callSync = () => inside().sync();
-const callList = async () => (await inside().list()) as ScheduleView[];
+const callList = () => inside().list();
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
 
-const rowsOf = () => runInDurableObject(inside(), instance => (instance as any).repo.rows() as ScheduleRow[]);
+const rowsOf = () => runInDurableObject(inside(), instance => internals(instance).repo.rows());
 const rowOf = async (name: string) => (await rowsOf()).find(row => row.name === name);
-const alarmOf = () => runInDurableObject(inside(), instance => (instance as any).ctx.storage.getAlarm() as number | null);
+const alarmOf = () => runInDurableObject(inside(), instance => internals(instance).ctx.storage.getAlarm());
 
 // 実キューではconsumer実行でジョブ終端化、skip判定が変化
 const BINDINGS = ['ListNames', 'Hello', 'Greet', 'Report'] as const;
@@ -43,7 +62,7 @@ const queue = { send: async () => {}, sendBatch: async () => {} };
 async function installQueues(): Promise<void> {
 	for (const binding of BINDINGS) {
 		await runInDurableObject(shard(binding), instance => {
-			(instance as any).env.TSUMUGI_QUEUE = queue;
+			(instance as unknown as { env: { TSUMUGI_QUEUE: unknown } }).env.TSUMUGI_QUEUE = queue;
 		});
 	}
 }
@@ -51,7 +70,7 @@ async function installQueues(): Promise<void> {
 const jobIdOf = (binding: string, name: string, occurrence: number) => `${binding}#0:${name}-${occurrence}`;
 
 const jobStateOf = (binding: string, jobId: string) =>
-	runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId)?.state as string | undefined);
+	runInDurableObject(shard(binding), instance => (instance as unknown as { repo: JobRepo }).repo.find(jobId)?.state);
 
 const fired = async (binding: string, name: string, occurrence: number) =>
 	(await jobStateOf(binding, jobIdOf(binding, name, occurrence))) !== undefined;
@@ -63,11 +82,13 @@ interface RunFace extends Rpc.DurableObjectBranded {
 const runNamespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
 
 const runRowOf = (runId: string) =>
-	runInDurableObject(runNamespace.get(runNamespace.idFromName(runId)), instance => (instance as any).repo.findRun() as RunRow | undefined);
+	runInDurableObject(runNamespace.get(runNamespace.idFromName(runId)), instance =>
+		(instance as unknown as { repo: RunRepo }).repo.findRun(),
+	);
 
 async function tickAt(now: number): Promise<void> {
 	await runInDurableObject(inside(), instance => {
-		(instance as any).clock = { now: () => now };
+		internals(instance).clock = { now: () => now };
 	});
 	await runDurableObjectAlarm(inside());
 }
@@ -77,10 +98,10 @@ async function tickAt(now: number): Promise<void> {
 async function sync(now: number): Promise<void> {
 	await installQueues();
 	await runInDurableObject(inside(), async instance => {
-		(instance as any).clock = { now: () => now };
-		(instance as any).repo.sql.exec('DELETE FROM schedule');
-		(instance as any).repo.sql.exec('DELETE FROM setting');
-		await (instance as any).ctx.storage.deleteAlarm();
+		internals(instance).clock = { now: () => now };
+		internals(instance).repo.sql.exec('DELETE FROM schedule');
+		internals(instance).repo.sql.exec('DELETE FROM setting');
+		await internals(instance).ctx.storage.deleteAlarm();
 	});
 	await callSync();
 }
@@ -127,7 +148,7 @@ describe('定期実行(ADR-0040)', () => {
 		const base = day(12);
 		await sync(base);
 		await runInDurableObject(inside(), instance => {
-			(instance as any).repo.sql.exec(`UPDATE schedule SET next_occurrence_at = ? WHERE name = 'nightly'`, base + 15 * 60 * 60 * 1000);
+			internals(instance).repo.sql.exec(`UPDATE schedule SET next_occurrence_at = ? WHERE name = 'nightly'`, base + 15 * 60 * 60 * 1000);
 		});
 
 		await callSync();
@@ -138,11 +159,11 @@ describe('定期実行(ADR-0040)', () => {
 		const base = day(13);
 		await sync(base);
 		await runInDurableObject(inside(), instance => {
-			(instance as any).repo.sql.exec(
+			internals(instance).repo.sql.exec(
 				`UPDATE schedule SET time_zone = 'UTC', next_occurrence_at = ? WHERE name = 'nightly'`,
 				base + 15 * 60 * 60 * 1000,
 			);
-			(instance as any).repo.sql.exec('DELETE FROM setting');
+			internals(instance).repo.sql.exec('DELETE FROM setting');
 		});
 
 		await callSync();
@@ -154,7 +175,7 @@ describe('定期実行(ADR-0040)', () => {
 		const base = day(14);
 		const existingNext = base + 123_456;
 		await runInDurableObject(legacy, instance => {
-			const sql = (instance as any).ctx.storage.sql as SqlStorage;
+			const sql = internals(instance).ctx.storage.sql;
 			sql.exec(`CREATE TABLE schedule (
 				name TEXT PRIMARY KEY,
 				kind TEXT NOT NULL,
@@ -181,11 +202,11 @@ describe('定期実行(ADR-0040)', () => {
 				base,
 				base,
 			);
-			(instance as any).clock = { now: () => base };
+			internals(instance).clock = { now: () => base };
 		});
 
 		await legacy.sync();
-		const rows = (await legacy.list()) as ScheduleView[];
+		const rows = await legacy.list();
 		expect(rows.find(row => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_occurrence_at: existingNext });
 	});
 
@@ -194,7 +215,7 @@ describe('定期実行(ADR-0040)', () => {
 		const base = day(15);
 		const existingNext = base + 123_456;
 		await runInDurableObject(legacy, instance => {
-			const sql = (instance as any).ctx.storage.sql as SqlStorage;
+			const sql = internals(instance).ctx.storage.sql;
 			sql.exec(`CREATE TABLE schedule (
 				name TEXT PRIMARY KEY,
 				kind TEXT NOT NULL,
@@ -222,11 +243,11 @@ describe('定期実行(ADR-0040)', () => {
 				base,
 				base,
 			);
-			(instance as any).clock = { now: () => base };
+			internals(instance).clock = { now: () => base };
 		});
 
 		await legacy.sync();
-		const rows = (await legacy.list()) as ScheduleView[];
+		const rows = await legacy.list();
 		expect(rows.find(row => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_occurrence_at: existingNext });
 	});
 
@@ -260,7 +281,7 @@ describe('定期実行(ADR-0040)', () => {
 
 		// 予定を戻して同時刻を再発火, 決定的IDで既存を返却(ADR-0029)
 		await runInDurableObject(inside(), instance => {
-			(instance as any).repo.markSkipped('ping-hello', occurrence, occurrence);
+			internals(instance).repo.markSkipped('ping-hello', occurrence, occurrence);
 		});
 		await tickAt(occurrence);
 
@@ -332,13 +353,13 @@ describe('定期実行(ADR-0040)', () => {
 		const occurrence = nightlyOf(base);
 
 		const restore = await runInDurableObject(inside(), instance => {
-			const saved = (instance as any).env.RUN;
-			(instance as any).env.RUN = undefined;
+			const saved = internals(instance).env.RUN;
+			internals(instance).env.RUN = undefined;
 			return saved;
 		});
 		await tickAt(occurrence);
 		await runInDurableObject(inside(), instance => {
-			(instance as any).env.RUN = restore;
+			internals(instance).env.RUN = restore;
 		});
 
 		const row = await rowOf('nightly');
@@ -355,13 +376,13 @@ describe('定期実行(ADR-0040)', () => {
 		const occurrence = nightlyOf(base);
 
 		const restore = await runInDurableObject(inside(), instance => {
-			const saved = (instance as any).env.RUN;
-			(instance as any).env.RUN = undefined;
+			const saved = internals(instance).env.RUN;
+			internals(instance).env.RUN = undefined;
 			return saved;
 		});
 		await tickAt(occurrence);
 		await runInDurableObject(inside(), instance => {
-			(instance as any).env.RUN = restore;
+			internals(instance).env.RUN = restore;
 		});
 
 		expect((await rowOf('nightly'))?.last_error).not.toBeNull();
@@ -423,7 +444,7 @@ describe('一時停止と手動発火', () => {
 
 		const later = base + PING_MS * 3 + 1_000;
 		await runInDurableObject(inside(), instance => {
-			(instance as any).clock = { now: () => later };
+			internals(instance).clock = { now: () => later };
 		});
 		await inside().setPaused('ping-hello', false);
 
@@ -444,7 +465,7 @@ describe('一時停止と手動発火', () => {
 		const base = day(25);
 		await sync(base);
 		await runInDurableObject(inside(), instance => {
-			(instance as any).clock = { now: () => base + PING_MS + 1_000 };
+			internals(instance).clock = { now: () => base + PING_MS + 1_000 };
 		});
 		await inside().setPaused('ping-hello', false);
 		expect(await rowOf('ping-hello')).toMatchObject({ paused: 0, next_occurrence_at: base + PING_MS });
@@ -504,13 +525,13 @@ describe('一時停止と手動発火', () => {
 		await sync(base);
 
 		const restore = await runInDurableObject(inside(), instance => {
-			const saved = (instance as any).env.RUN;
-			(instance as any).env.RUN = undefined;
+			const saved = internals(instance).env.RUN;
+			internals(instance).env.RUN = undefined;
 			return saved;
 		});
 		const result = await inside().trigger('nightly');
 		await runInDurableObject(inside(), instance => {
-			(instance as any).env.RUN = restore;
+			internals(instance).env.RUN = restore;
 		});
 
 		expect(result).toMatchObject({ ok: false, reason: 'failed' });
@@ -536,8 +557,8 @@ describe('一時停止と手動発火', () => {
 
 		// ping-hello投入中の割り込みRPCでpoll-names一時停止
 		const restore = await runInDurableObject(inside(), instance => {
-			const real = (instance as any).env.JOB_SHARD;
-			(instance as any).env.JOB_SHARD = {
+			const real = internals(instance).env.JOB_SHARD;
+			internals(instance).env.JOB_SHARD = {
 				idFromName: (name: string) => ({ name, id: real.idFromName(name) }),
 				get: (ref: { name: string; id: unknown }) => {
 					const stub = real.get(ref.id);
@@ -545,7 +566,7 @@ describe('一時停止と手動発火', () => {
 					return {
 						id: stub.id,
 						enqueueMany: async (inputs: unknown, settings: unknown) => {
-							await (instance as any).setPaused('poll-names', true);
+							await internals(instance).setPaused('poll-names', true);
 							return stub.enqueueMany(inputs, settings);
 						},
 					};
@@ -556,7 +577,7 @@ describe('一時停止と手動発火', () => {
 		// 両方期限到来, 予定の早いping-helloが先に発火
 		await tickAt(base + POLL_MS);
 		await runInDurableObject(inside(), instance => {
-			(instance as any).env.JOB_SHARD = restore;
+			internals(instance).env.JOB_SHARD = restore;
 		});
 
 		expect(await fired('Hello', 'ping-hello', base + PING_MS)).toBe(true);

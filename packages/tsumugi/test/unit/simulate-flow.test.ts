@@ -6,7 +6,7 @@ import type { PerformerLike } from '../../src/core/api.js';
 
 // `createFlow`はctorのインスタンス型から型導出のみ, 実体の呼び出しなし
 // `Performer`は`cloudflare:workers`依存, workerd非起動の本プロジェクトでは読込不可
-type Ctor<P, R> = new (...args: any[]) => PerformerLike<P, R>;
+type Ctor<P, R> = new (...args: unknown[]) => PerformerLike<P, R>;
 
 const performers = {
 	LIST: class {} as Ctor<{ prefix: string }, { names: string[] }>,

@@ -16,7 +16,7 @@ export type MissingBinding = {
 type ConfigStatus = { ok: true } | { ok: false; missing: MissingBinding[] };
 
 type ValidateInput = {
-	performers: PerformerRegistry<any>;
+	performers: PerformerRegistry<never>;
 	flows?: Flows;
 	schedules?: Record<string, unknown>;
 };

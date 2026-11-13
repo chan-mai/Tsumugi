@@ -23,9 +23,10 @@ export function useNavigation() {
 
 	function breadcrumbs(path: string, title: string): BreadcrumbItem[] {
 		const group = groupOf(path);
+		const first = group?.items[0];
 		return [
 			{ text: t('nav.home'), link: localePath('/') },
-			...(group ? [{ text: group.text, link: group.items[0]!.link }] : []),
+			...(group && first ? [{ text: group.text, link: first.link }] : []),
 			{ text: title },
 		];
 	}

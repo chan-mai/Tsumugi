@@ -106,9 +106,9 @@ export function normalizeSchedules(
 	defs: AnySchedules,
 	context: NormalizeContext,
 ): { schedules: NormalizedSchedule[]; fingerprint: string } {
-	const schedules = Object.keys(defs)
-		.sort()
-		.map(name => normalizeSchedule(name, defs[name]!, context));
+	const schedules = Object.entries(defs)
+		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+		.map(([name, def]) => normalizeSchedule(name, def, context));
 	return { schedules, fingerprint: JSON.stringify(schedules) };
 }
 
@@ -123,7 +123,8 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 		if (key in def) throw new InvalidScheduleError(`${key} is not allowed in a schedule: ${name}`);
 	}
 
-	if (def.overlap !== undefined && def.overlap !== 'skip' && def.overlap !== 'overlap') {
+	const overlap: unknown = def.overlap;
+	if (overlap !== undefined && overlap !== 'skip' && overlap !== 'overlap') {
 		throw new InvalidScheduleError(`overlap must be 'skip' or 'overlap': ${name}`);
 	}
 
@@ -157,7 +158,8 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 		}
 	}
 
-	if ((def.binding === undefined) === (def.flow === undefined)) {
+	const target = def.binding ?? def.flow;
+	if (target === undefined || (def.binding !== undefined && def.flow !== undefined)) {
 		throw new InvalidScheduleError(`exactly one of binding and flow is required: ${name}`);
 	}
 
@@ -169,14 +171,14 @@ function normalizeSchedule(name: string, def: AnyScheduleDef, context: Normalize
 			throw new InvalidScheduleError(`partitionKey is required for a sharded binding: ${name} -> ${def.binding}`);
 		}
 	} else {
-		if (!context.flows.includes(def.flow!)) throw new InvalidScheduleError(`flow is not registered: ${name} -> ${def.flow}`);
+		if (!context.flows.includes(target)) throw new InvalidScheduleError(`flow is not registered: ${name} -> ${target}`);
 		if (!('input' in def)) throw new InvalidScheduleError(`input is required: ${name}`);
 	}
 
 	return {
 		name,
 		kind: def.binding !== undefined ? 'job' : 'flow',
-		target: def.binding ?? def.flow!,
+		target,
 		everyMs: def.everyMs ?? null,
 		cron: def.cron ?? null,
 		timeZone,

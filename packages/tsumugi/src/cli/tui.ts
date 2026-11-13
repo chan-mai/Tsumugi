@@ -1,7 +1,8 @@
 import { addPerformer, performerNames } from './add-performer.js';
-import { detectWranglerConfig, type ConfigFormat } from './config-file.js';
+import { detectWranglerConfig } from './config-file.js';
 import { init, resolveWorkerName } from './init.js';
 
+import type { ConfigFormat } from './config-file.js';
 import type { CliDeps } from './index.js';
 
 // 入力は`Prompts`経由, テストは固定応答の代替実装で検査

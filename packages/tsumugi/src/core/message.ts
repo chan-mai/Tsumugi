@@ -17,7 +17,10 @@ export class PayloadTooLargeError extends Error {
 
 const encoder = new TextEncoder();
 
-export const jsonBytes = (value: unknown): number => encoder.encode(JSON.stringify(value) ?? '').byteLength;
+// 引数undefined, 関数で戻り値undefined
+export const stringifyJson = (value: unknown): string | undefined => JSON.stringify(value);
+
+export const jsonBytes = (value: unknown): number => encoder.encode(stringifyJson(value) ?? '').byteLength;
 
 export function assertPayloadSize(payload: unknown): void {
 	const bytes = jsonBytes(payload);

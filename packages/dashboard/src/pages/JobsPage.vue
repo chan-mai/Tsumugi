@@ -3,7 +3,7 @@ import { Plus } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
-import { isUnauthorized, listJobs, type Job } from '../api';
+import { isUnauthorized, listJobs } from '../api';
 import { TOGGLEABLE, toggleColumn, visible } from '../columns';
 import BulkActions from '../components/BulkActions.vue';
 import DateRangeMenu from '../components/DateRangeMenu.vue';
@@ -19,8 +19,11 @@ import { onRefresh } from '../composables/useAutoRefresh';
 import { bindings, definitionsReady } from '../composables/useDefinitions';
 import { useDetail } from '../composables/useDetail';
 import { useQueryChoice, useQueryDate, useQueryInteger, useQueryText } from '../composables/useQueryState';
-import { isJobId, SEARCH_FIELDS, type SearchField } from '../search';
+import { isJobId, SEARCH_FIELDS } from '../search';
 import { button, ERROR_TEXT, MUTED_TEXT } from '../ui';
+
+import type { Job } from '../api';
+import type { SearchField } from '../search';
 
 const STATES = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];
 

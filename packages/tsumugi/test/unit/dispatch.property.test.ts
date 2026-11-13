@@ -65,12 +65,9 @@ describe('planDispatch()の不変条件', () => {
 		fc.assert(
 			fc.property(dispatchInput, input => {
 				const out = planDispatch(input);
-				if (input.policy.rate === null) {
-					expect(out.bucket.tokens).toBe(Number.POSITIVE_INFINITY);
-					return;
-				}
-				expect(out.bucket.tokens).toBeGreaterThanOrEqual(0);
-				expect(out.bucket.tokens).toBeLessThanOrEqual(input.policy.rate.tokens);
+				const rate = input.policy.rate;
+				expect(out.bucket.tokens).toBeGreaterThanOrEqual(rate === null ? Number.POSITIVE_INFINITY : 0);
+				expect(out.bucket.tokens).toBeLessThanOrEqual(rate?.tokens ?? Number.POSITIVE_INFINITY);
 			}),
 			{ numRuns: RUNS },
 		);
@@ -105,13 +102,10 @@ describe('planDispatch()の不変条件', () => {
 			fc.property(dispatchInput, input => {
 				const out = planDispatch(input);
 				const rate = input.policy.perKeyRate;
-				if (rate === null) {
-					expect(out.keyBuckets).toEqual({});
-					return;
-				}
+				expect(rate === null ? out.keyBuckets : {}).toEqual({});
 				for (const [key, b] of Object.entries(out.keyBuckets)) {
 					expect(b.tokens, `key ${key}`).toBeGreaterThanOrEqual(0);
-					expect(b.tokens, `key ${key}`).toBeLessThan(rate.tokens);
+					expect(b.tokens, `key ${key}`).toBeLessThan(rate?.tokens ?? Number.POSITIVE_INFINITY);
 				}
 			}),
 			{ numRuns: RUNS },
@@ -142,8 +136,9 @@ describe('planDispatch()の不変条件', () => {
 				const out = planDispatch(input);
 				const byId = activeById(input);
 				for (const d of out.decisions) {
-					const from = byId.get(d.id)!.state;
-					expect(canTransition(from, target[d.type]), `${from} -> ${target[d.type]}`).toBe(true);
+					const job = byId.get(d.id);
+					if (job === undefined) throw new Error(`decision for unknown job: ${d.id}`);
+					expect(canTransition(job.state, target[d.type]), `${job.state} -> ${target[d.type]}`).toBe(true);
 				}
 			}),
 			{ numRuns: RUNS },
@@ -191,9 +186,8 @@ describe('planDispatch()の不変条件', () => {
 		fc.assert(
 			fc.property(dispatchInput, input => {
 				const out = planDispatch(input);
-				if (out.decisions.some(d => d.type !== 'dispatch' && d.type !== 'expire' && d.type !== 'cancel')) {
-					expect(out.nextAlarmAt).toBe(input.now);
-				}
+				const continues = out.decisions.some(d => d.type !== 'dispatch' && d.type !== 'expire' && d.type !== 'cancel');
+				expect(continues ? out.nextAlarmAt : input.now).toBe(input.now);
 			}),
 			{ numRuns: RUNS },
 		);
@@ -205,9 +199,7 @@ describe('planDispatch()の不変条件', () => {
 			fc.property(dispatchInput, input => {
 				const out = planDispatch(input);
 				const byId = activeById(input);
-				for (const d of out.decisions) {
-					if (d.type === 'dispatch') expect(byId.get(d.id)!.cancelRequestedAt).toBeNull();
-				}
+				expect(dispatches(out.decisions).filter(d => byId.get(d.id)?.cancelRequestedAt !== null)).toEqual([]);
 			}),
 			{ numRuns: RUNS },
 		);

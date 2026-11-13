@@ -6,6 +6,7 @@ import { defineTsumugi } from '../../src/worker.js';
 
 import type { RestEnv } from '../../src/api/rest.js';
 import type { JobDetailResponse, JobListResponse } from '../../src/api/types.js';
+import type { TsumugiJobShard } from '../../src/do/job-shard.js';
 
 const T0 = 2_200_000_000_000;
 const TRACEPARENT = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
@@ -20,8 +21,14 @@ class Noop extends Performer<unknown, void, {}, RestEnv> {
 const worker = defineTsumugi({ performers: { [BINDING]: Noop }, auth: bearerAuth('trace-test-token') });
 const stub = () => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${BINDING}#0`));
 
+type ShardInternals = Pick<TsumugiJobShard, 'clock' | 'repo'> & {
+	env: { TSUMUGI_QUEUE: { send(): Promise<void>; sendBatch(): Promise<void> } };
+};
+const shardInternals = (instance: unknown) => instance as ShardInternals;
+
 function request(method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}) {
-	return worker.fetch!(
+	if (worker.fetch === undefined) throw new Error('fetch handler is not defined');
+	return worker.fetch(
 		new Request(`https://example.com${path}`, {
 			method,
 			headers: { ...headers, ...extraHeaders },
@@ -34,8 +41,8 @@ function request(method: string, path: string, body?: unknown, extraHeaders: Rec
 
 async function enqueue(body: Record<string, unknown> = {}, extraHeaders: Record<string, string> = {}) {
 	await runInDurableObject(stub(), instance => {
-		(instance as any).clock = { now: () => T0 };
-		(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+		shardInternals(instance).clock = { now: () => T0 };
+		shardInternals(instance).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 	});
 	const response = await request('POST', '/api/jobs', { binding: BINDING, payload: {}, ...body }, extraHeaders);
 	expect(response.status).toBe(201);
@@ -96,7 +103,7 @@ describe('RESTのトレースとログ', () => {
 
 		expect(await stub().claim(id)).toBe(true);
 		await runInDurableObject(stub(), instance => {
-			(instance as any).clock = { now: () => T0 + 1_000 };
+			shardInternals(instance).clock = { now: () => T0 + 1_000 };
 		});
 		expect(await stub().log(id, 1, '処理終了')).toBe(true);
 		await runDurableObjectAlarm(stub());

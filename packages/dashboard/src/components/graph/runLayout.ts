@@ -131,6 +131,12 @@ const MIN_GUTTER = 24;
 
 type Gutter = { left: number; right: number };
 
+function lookup<K, V>(map: ReadonlyMap<K, V>, key: K): V {
+	const value = map.get(key);
+	if (value === undefined) throw new Error(`layout key not found: ${String(key)}`);
+	return value;
+}
+
 // 横の区間の高さはdagreの値, ランクを跨ぐ辺とノードの重なり回避
 function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Box>, lanes: ReadonlyMap<string, Point[]>): LayoutEdge[] {
 	// dagreのrankは非連番, 整列して列番号へ変換
@@ -146,8 +152,8 @@ function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Bo
 
 	const anchors = new Map(
 		pairs.map(([from, to]) => {
-			const source = boxes.get(from)!;
-			const target = boxes.get(to)!;
+			const source = lookup(boxes, from);
+			const target = lookup(boxes, to);
 			return [
 				`${from}->${to}`,
 				{ start: { x: source.x + source.w, y: source.y + HANDLE_TOP }, end: { x: target.x, y: target.y + HANDLE_TOP } },
@@ -159,21 +165,21 @@ function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Bo
 	const crossing = gutters.map(() => [] as string[]);
 	for (const [from, to] of pairs) {
 		const id = `${from}->${to}`;
-		for (let i = rankOf.get(from)!; i < rankOf.get(to)!; i++) crossing[i]!.push(id);
+		for (let i = lookup(rankOf, from); i < lookup(rankOf, to); i++) crossing[i].push(id);
 	}
-	for (const ids of crossing) ids.sort((a, b) => anchors.get(a)!.start.y - anchors.get(b)!.start.y || a.localeCompare(b));
+	for (const ids of crossing) ids.sort((a, b) => lookup(anchors, a).start.y - lookup(anchors, b).start.y || a.localeCompare(b));
 
 	const channel = (index: number, id: string): number => {
-		const gutter = gutters[index]!;
-		const ids = crossing[index]!;
+		const gutter = gutters[index];
+		const ids = crossing[index];
 		return gutter.left + ((gutter.right - gutter.left) * (ids.indexOf(id) + 1)) / (ids.length + 1);
 	};
 
 	return pairs.map(([from, to]) => {
 		const id = `${from}->${to}`;
-		const { start, end } = anchors.get(id)!;
-		const first = rankOf.get(from)!;
-		const last = rankOf.get(to)!;
+		const { start, end } = lookup(anchors, id);
+		const first = lookup(rankOf, from);
+		const last = lookup(rankOf, to);
 		const points: Point[] = [start];
 		let y = start.y;
 
@@ -253,7 +259,7 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 
 	const laid: LayoutNode[] = [];
 	for (const item of packed) {
-		const box = boxes.get(item.node.id)!;
+		const box = lookup(boxes, item.node.id);
 		laid.push({
 			id: item.node.id,
 			type: 'task',

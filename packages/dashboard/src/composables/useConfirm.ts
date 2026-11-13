@@ -12,7 +12,7 @@ const dialog = useConfirmDialog<ConfirmOptions>();
 export const confirmRequest = shallowRef<ConfirmOptions | null>(null);
 export const { isRevealed, confirm: accept, cancel: dismiss } = dialog;
 
-dialog.onReveal(options => (confirmRequest.value = options ?? null));
+dialog.onReveal(options => (confirmRequest.value = options));
 
 // 確定でtrue
 export async function confirmAction(options: ConfirmOptions): Promise<boolean> {

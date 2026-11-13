@@ -21,8 +21,9 @@ const handler = (options: { auth?: boolean } = {}) =>
 		ui: ui(),
 	});
 
-const call = (h: ReturnType<typeof handler>, path: string, headers: Record<string, string> = {}) =>
-	h.fetch!(
+const call = (h: ReturnType<typeof handler>, path: string, headers: Record<string, string> = {}) => {
+	if (h.fetch === undefined) throw new Error('fetch handler is not defined');
+	return h.fetch(
 		new Request(`https://example.com${path}`, { headers }),
 		env as RestEnv,
 		{
@@ -30,6 +31,7 @@ const call = (h: ReturnType<typeof handler>, path: string, headers: Record<strin
 			passThroughOnException: () => {},
 		} as unknown as ExecutionContext,
 	);
+};
 
 const authorized = { authorization: `Bearer ${TOKEN}` };
 

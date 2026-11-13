@@ -3,12 +3,31 @@ import { describe, expect, it } from 'vitest';
 import { fixedClock } from '../../src/do/clock.js';
 
 import type { SettledNotice } from '../../src/core/types.js';
+import type { Clock } from '../../src/do/clock.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { JobRepo } from '../../src/do/repo.js';
+import type { RunRepo } from '../../src/do/run-repo.js';
+import type { TsumugiRunInstance } from '../../src/do/run.js';
 
 // 確定はperformerの報告か要求後reaperGraceMs(既定30秒)経過時
 
 const T0 = 2_700_000_000_000;
 const GRACE = 30_000;
+
+type ShardInternals = {
+	clock: Clock;
+	env: { TSUMUGI_QUEUE: unknown };
+	repo: JobRepo;
+};
+
+type RunInternals = TsumugiRunInstance & {
+	ctx: DurableObjectState;
+	env: { JOB_SHARD: { idFromName(name: string): unknown; get(id: unknown): unknown } };
+	repo: RunRepo;
+};
+
+const internals = (instance: unknown) => instance as ShardInternals;
+const runInternals = (instance: unknown) => instance as RunInternals;
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
@@ -16,7 +35,7 @@ const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)
 async function install(name: string) {
 	const sent: DispatchMessage[] = [];
 	await runInDurableObject(shard(name), instance => {
-		(instance as any).env.TSUMUGI_QUEUE = {
+		internals(instance).env.TSUMUGI_QUEUE = {
 			send: async (body: DispatchMessage) => void sent.push(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
 				for (const m of batch) sent.push(m.body);
@@ -27,15 +46,18 @@ async function install(name: string) {
 }
 
 // DO再生成で時計が既定へ復帰、操作直前に再設定
-const setClock = (name: string, at: number) => runInDurableObject(shard(name), instance => void ((instance as any).clock = fixedClock(at)));
+const setClock = (name: string, at: number) =>
+	runInDurableObject(shard(name), instance => void (internals(instance).clock = fixedClock(at)));
 
 type Row = { state: string; attempts: number; result: string | null; cancel_requested_at: number | null } | undefined;
-const rowOf = (name: string, jobId: string) => runInDurableObject(shard(name), instance => (instance as any).repo.find(jobId) as Row);
+const rowOf = (name: string, jobId: string) => runInDurableObject(shard(name), instance => internals(instance).repo.find(jobId) as Row);
 
 async function queued(name: string, options: Record<string, unknown> = {}): Promise<string> {
 	await install(name);
 	await setClock(name, T0);
-	const jobId = await shard(name).enqueue({ binding: name.split('#')[0]!, payload: {}, ...options });
+	const [binding] = name.split('#');
+	if (binding === undefined) throw new Error('binding is missing');
+	const jobId = await shard(name).enqueue({ binding, payload: {}, ...options });
 	await runDurableObjectAlarm(shard(name));
 	return jobId;
 }
@@ -121,7 +143,7 @@ describe('取り消し要求(#95)', () => {
 		expect((await rowOf('CX8#0', jobId))?.state).toBe('FAILED');
 		// 終端行に要求が残存した場合の防御, 公開経路では要求済み終端はCANCELLEDのみ
 		await runInDurableObject(shard('CX8#0'), instance =>
-			(instance as any).repo.sql.exec(`UPDATE job SET cancel_requested_at = ? WHERE id = ?`, T0, jobId),
+			internals(instance).repo.sql.exec(`UPDATE job SET cancel_requested_at = ? WHERE id = ?`, T0, jobId),
 		);
 
 		expect(await shard('CX8#0').retry(jobId)).toEqual({ ok: true });
@@ -136,7 +158,7 @@ describe('取り消し要求(#95)', () => {
 		const jobId = await shard('CX9#0').enqueue({ binding: 'CX9', payload: {}, delayMs: 60_000 });
 		// SCHEDULEDへは要求記録なし、reaper処理との競合時の残留を直接再現
 		await runInDurableObject(shard('CX9#0'), instance =>
-			(instance as any).repo.sql.exec(`UPDATE job SET cancel_requested_at = ? WHERE id = ?`, T0, jobId),
+			internals(instance).repo.sql.exec(`UPDATE job SET cancel_requested_at = ? WHERE id = ?`, T0, jobId),
 		);
 
 		expect(await shard('CX9#0').reschedule(jobId, { runAfter: T0 + 120_000 })).toEqual({ ok: false, reason: 'invalid-state' });
@@ -163,16 +185,14 @@ describe('取り消し要求(#95)', () => {
 		let jobId: string | null = null;
 		for (let i = 0; i < 10 && jobId === null; i++) {
 			await runDurableObjectAlarm(run as never);
-			jobId = await runInDurableObject(
-				run as never,
-				instance => ((instance as any).repo.findNode('list')?.job_id ?? null) as string | null,
-			);
+			jobId = await runInDurableObject(run as never, instance => runInternals(instance).repo.findNode('list')?.job_id ?? null);
 		}
+		if (jobId === null) throw new Error('node job id is missing');
 		// 共有shardに他テストの残留あり、投入までalarm反復
 		let jobState: string | undefined;
 		for (let i = 0; i < 20 && jobState !== 'QUEUED'; i++) {
 			await runDurableObjectAlarm(shard('ListNames#0'));
-			jobState = (await rowOf('ListNames#0', jobId!))?.state;
+			jobState = (await rowOf('ListNames#0', jobId))?.state;
 		}
 		expect(jobState).toBe('QUEUED');
 
@@ -183,16 +203,16 @@ describe('取り消し要求(#95)', () => {
 		for (let i = 0; i < 20 && requestedAt === null; i++) {
 			await runDurableObjectAlarm(run as never);
 			await new Promise(resolve => setTimeout(resolve, 10));
-			requestedAt = (await rowOf('ListNames#0', jobId!))?.cancel_requested_at ?? null;
+			requestedAt = (await rowOf('ListNames#0', jobId))?.cancel_requested_at ?? null;
 		}
 		expect(requestedAt).toBe(T0);
-		const nodeState = await runInDurableObject(run as never, instance => (instance as any).repo.findNode('list')?.state as string);
+		const nodeState = await runInDurableObject(run as never, instance => runInternals(instance).repo.findNode('list')?.state);
 		expect(['COMPLETED', 'FAILED', 'CANCELLED', 'SKIPPED']).not.toContain(nodeState);
 
 		await setClock('ListNames#0', T0 + GRACE);
 		for (let i = 0; i < 20 && jobState !== 'CANCELLED'; i++) {
 			await runDurableObjectAlarm(shard('ListNames#0'));
-			jobState = (await rowOf('ListNames#0', jobId!))?.state;
+			jobState = (await rowOf('ListNames#0', jobId))?.state;
 		}
 		expect(jobState).toBe('CANCELLED');
 		let runState: string | null = null;
@@ -208,7 +228,7 @@ describe('取り消し要求(#95)', () => {
 		const runNamespace = env.RUN as unknown as DurableObjectNamespace<Rpc.DurableObjectBranded>;
 		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:cancel-once'));
 		const calls = await runInDurableObject(run as never, async instance => {
-			const inner = instance as any;
+			const inner = runInternals(instance);
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cancel-once' } });
 			inner.repo.sql.exec(`UPDATE node SET state = 'SCHEDULED', job_id = 'ListNames#0:once' WHERE id = 'list'`);
 			const original = inner.env.JOB_SHARD;
@@ -240,7 +260,7 @@ describe('取り消し要求(#95)', () => {
 		const runNamespace = env.RUN as unknown as DurableObjectNamespace<Rpc.DurableObjectBranded>;
 		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:cancel-pending'));
 		const states = await runInDurableObject(run as never, async instance => {
-			const inner = instance as any;
+			const inner = runInternals(instance);
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cancel-pending' } });
 			await inner.ctx.storage.deleteAlarm();
 			inner.repo.updateNode('list', { jobId }, T0);
@@ -257,7 +277,7 @@ describe('取り消し要求(#95)', () => {
 		const runNamespace = env.RUN as unknown as DurableObjectNamespace<Rpc.DurableObjectBranded>;
 		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:cancel-gone'));
 		const states = await runInDurableObject(run as never, async instance => {
-			const inner = instance as any;
+			const inner = runInternals(instance);
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cancel-gone' } });
 			await inner.ctx.storage.deleteAlarm();
 			inner.repo.updateNode('list', { jobId: 'CX12#0:missing00000000000000000' }, T0);
@@ -278,7 +298,7 @@ describe('取り消し要求(#95)', () => {
 		await runDurableObjectAlarm(shard('CX10#0'));
 
 		const notice = await runInDurableObject(shard('CXNOTIFY#0'), instance => {
-			const rows = (instance as any).repo.sql.exec(`SELECT payload FROM job`).toArray() as { payload: string }[];
+			const rows = internals(instance).repo.sql.exec<{ payload: string }>(`SELECT payload FROM job`).toArray();
 			return rows.map(r => JSON.parse(r.payload) as SettledNotice).find(n => n.jobId === jobId) ?? null;
 		});
 		expect(notice?.state).toBe('CANCELLED');

@@ -51,8 +51,11 @@ function timedSegments(node: RunNode, now: number): Segment[] {
 
 	// 最新試行は開始時刻が一致, 1回目成功の導出分も同様
 	const previous = node.attempts_log
-		.filter(a => a.started_at !== null && a.started_at !== node.started_at)
-		.map<Segment>(a => ({ kind: 'attempt', start: a.started_at!, end: a.finished_at, state: a.state, attempt: a.attempt, open: false }))
+		.flatMap<Segment>(a =>
+			a.started_at !== null && a.started_at !== node.started_at
+				? [{ kind: 'attempt', start: a.started_at, end: a.finished_at, state: a.state, attempt: a.attempt, open: false }]
+				: [],
+		)
 		.sort((x, y) => x.start - y.start);
 
 	const segments: Segment[] = [...previous];
@@ -137,7 +140,7 @@ export function waterfallLayout(nodes: RunNode[], now: number, options: Waterfal
 }
 
 export function tickStep(duration: number): number {
-	return TICK_STEPS.find(step => duration / step <= TICK_TARGET) ?? TICK_STEPS[TICK_STEPS.length - 1]!;
+	return TICK_STEPS.find(step => duration / step <= TICK_TARGET) ?? TICK_STEPS[TICK_STEPS.length - 1];
 }
 
 function ticks(duration: number): Tick[] {

@@ -7,7 +7,7 @@ import { READ_MODEL_COLUMNS } from '../../src/projection/columns.js';
 
 // DDLとクエリの取得列の二重管理, 片方のみの修正では実行時に列欠落
 const columnsIn = (instance: unknown, table: string) =>
-	((instance as any).repo.sql as SqlStorage)
+	(instance as { repo: { sql: SqlStorage } }).repo.sql
 		.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
 		.toArray()
 		.map(r => r.name)

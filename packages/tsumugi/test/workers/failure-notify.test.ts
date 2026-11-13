@@ -3,12 +3,25 @@ import { describe, expect, it } from 'vitest';
 import { embedJobId } from '../../src/core/ids.js';
 
 import type { FailureNotice } from '../../src/core/types.js';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { Clock } from '../../src/do/clock.js';
+import type { DispatchMessage, ShardEnv, TsumugiJobShard } from '../../src/do/job-shard.js';
 
 const T0 = 2_500_000_000_000;
 const NOTIFY = 'NotifyFailure';
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
+
+type ShardInternals = Pick<TsumugiJobShard, 'clock' | 'repo' | 'alarm'> & { env: ShardEnv };
+type EnvOverrides = { env: { TSUMUGI_QUEUE: unknown; TSUMUGI_DB: unknown } };
+const shardInternals = (instance: unknown) => instance as ShardInternals;
+const envOverrides = (instance: unknown) => instance as EnvOverrides;
+type SchedulerInternals = { clock: Clock };
+
+const firstJobId = (sent: readonly DispatchMessage[]): string => {
+	const [first] = sent;
+	if (first === undefined) throw new Error('no message dispatched');
+	return first.jobId;
+};
 
 // 実キューはconsumer実行で状態変化
 async function install(name: string, sent: DispatchMessage[] = []): Promise<void> {
@@ -16,8 +29,8 @@ async function install(name: string, sent: DispatchMessage[] = []): Promise<void
 		if (body.jobId.startsWith(`${name}:`)) sent.push(body);
 	};
 	await runInDurableObject(shard(name), instance => {
-		(instance as any).clock = { now: () => T0 };
-		(instance as any).env.TSUMUGI_QUEUE = {
+		shardInternals(instance).clock = { now: () => T0 };
+		envOverrides(instance).env.TSUMUGI_QUEUE = {
 			send: async (body: DispatchMessage) => record(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
 				for (const m of batch) record(m.body);
@@ -28,7 +41,7 @@ async function install(name: string, sent: DispatchMessage[] = []): Promise<void
 
 const payloadOf = (jobId: string) =>
 	runInDurableObject(shard(`${NOTIFY}#0`), instance => {
-		const row = (instance as any).repo.find(jobId) as { payload: string } | undefined;
+		const row = shardInternals(instance).repo.find(jobId);
 		return row ? (JSON.parse(row.payload) as FailureNotice) : undefined;
 	});
 
@@ -36,16 +49,16 @@ const noticeIdOf = (jobId: string, attempts: number) => `${NOTIFY}#0:failure-${e
 
 // RPC型はブランド継承が必要
 interface RunFace extends Rpc.DurableObjectBranded {
-	start(input: { flow: string; input: unknown }): Promise<unknown>;
+	start(input: { flow: string; input: unknown }): Promise<{ id: string; created: boolean }>;
 }
 interface SchedulerFace extends Rpc.DurableObjectBranded {
 	sync(): Promise<void>;
 }
 
 const bindingOf = (name: string) =>
-	runInDurableObject(shard(name), instance => (instance as any).repo.readSetting('failure_binding') as string | undefined);
+	runInDurableObject(shard(name), instance => shardInternals(instance).repo.readSetting('failure_binding'));
 
-const countOf = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countJobs() as number);
+const countOf = (name: string) => runInDurableObject(shard(name), instance => shardInternals(instance).repo.countJobs());
 
 // 実運用ではenqueueに同梱
 const configure = (name: string) => shard(name).configure({ failureBinding: NOTIFY });
@@ -58,7 +71,7 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		const jobId = await shard('FAIL1#0').enqueue({ binding: 'FAIL1', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('FAIL1#0'));
-		await shard('FAIL1#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('FAIL1#0').report(firstJobId(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('FAIL1#0'));
 
 		const notice = await payloadOf(noticeIdOf(jobId, 1));
@@ -83,7 +96,7 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		await shard('FAIL2#0').enqueue({ binding: 'FAIL2', payload: {}, maxAttempts: 3 });
 		await runDurableObjectAlarm(shard('FAIL2#0'));
-		await shard('FAIL2#0').report(sent[0]!.jobId, { ok: false, error: 'retry me' });
+		await shard('FAIL2#0').report(firstJobId(sent), { ok: false, error: 'retry me' });
 		await runDurableObjectAlarm(shard('FAIL2#0'));
 
 		expect(await countOf(`${NOTIFY}#0`)).toBe(before);
@@ -96,7 +109,7 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		await shard('FAIL3#0').enqueue({ binding: 'FAIL3', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('FAIL3#0'));
-		await shard('FAIL3#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('FAIL3#0').report(firstJobId(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('FAIL3#0'));
 
 		expect(await countOf(`${NOTIFY}#0`)).toBe(before);
@@ -111,7 +124,7 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		await shard(`${NOTIFY}#0`).enqueue({ binding: NOTIFY, payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard(`${NOTIFY}#0`));
-		await shard(`${NOTIFY}#0`).report(sent[0]!.jobId, { ok: false, error: 'notification failed' });
+		await shard(`${NOTIFY}#0`).report(firstJobId(sent), { ok: false, error: 'notification failed' });
 		await runDurableObjectAlarm(shard(`${NOTIFY}#0`));
 
 		// 投入1件のみ増加, その失敗から新規通知なし
@@ -125,13 +138,13 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		const jobId = await shard('FAIL4#0').enqueue({ binding: 'FAIL4', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('FAIL4#0'));
-		await shard('FAIL4#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('FAIL4#0').report(firstJobId(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('FAIL4#0'));
 		const after = await countOf(`${NOTIFY}#0`);
 
 		// 送信後中断を再現, カーソル未更新で同じ通知を再送
 		await runInDurableObject(shard('FAIL4#0'), instance => {
-			((instance as any).repo.sql as SqlStorage).exec(
+			shardInternals(instance).repo.sql.exec(
 				`INSERT INTO failure_notify (job_id, payload) VALUES (?, ?)`,
 				jobId,
 				JSON.stringify({ jobId, binding: 'FAIL4', state: 'FAILED', attempts: 1 }),
@@ -158,7 +171,10 @@ describe('失敗したジョブの通知(#30)', () => {
 		});
 		await runDurableObjectAlarm(shard('FAIL6#0'));
 		// 無応答で期限と猶予経過後にreaper処理
-		await runInDurableObject(shard('FAIL6#0'), instance => void ((instance as any).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
+		await runInDurableObject(
+			shard('FAIL6#0'),
+			instance => void (shardInternals(instance).clock = { now: () => T0 + 15 * 60_000 + 120_000 }),
+		);
 		await runDurableObjectAlarm(shard('FAIL6#0'));
 
 		// 無応答の試行も計上
@@ -173,10 +189,10 @@ describe('失敗したジョブの通知(#30)', () => {
 		await shard('FAIL7#0').enqueueMany([{ binding: 'FAIL7', payload: {}, maxAttempts: 1 }], { failureBinding: NOTIFY });
 
 		await runDurableObjectAlarm(shard('FAIL7#0'));
-		await shard('FAIL7#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('FAIL7#0').report(firstJobId(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('FAIL7#0'));
 
-		expect(await payloadOf(noticeIdOf(sent[0]!.jobId, 1))).toBeDefined();
+		expect(await payloadOf(noticeIdOf(firstJobId(sent), 1))).toBeDefined();
 	});
 
 	it('bindingが違えばローカル部が同じでも別の通知になる', async () => {
@@ -209,7 +225,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		const before = await countOf(`${NOTIFY}#0`);
 
 		await runDurableObjectAlarm(shard('FAIL10#0'));
-		await shard('FAIL10#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('FAIL10#0').report(firstJobId(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('FAIL10#0'));
 
 		expect(await countOf(`${NOTIFY}#0`)).toBe(before);
@@ -225,7 +241,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		await scheduler.sync();
 		// 最短定義は1分間隔, 発火用に時計を前進
 		const ahead = Date.now() + 2 * 60_000;
-		await runInDurableObject(scheduler, instance => void ((instance as any).clock = { now: () => ahead }));
+		await runInDurableObject(scheduler, instance => void ((instance as unknown as SchedulerInternals).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 
 		// Run DOはlistへ, Scheduler DOはpoll-namesとping-helloへ投入
@@ -241,10 +257,10 @@ describe('失敗したジョブの通知(#30)', () => {
 		await shard('FAIL5#0').enqueueMany([{ binding: 'FAIL5', payload: {}, maxAttempts: 1 }], { policy: { concurrency: 5 } });
 
 		await runDurableObjectAlarm(shard('FAIL5#0'));
-		await shard('FAIL5#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('FAIL5#0').report(firstJobId(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('FAIL5#0'));
 
-		expect(await payloadOf(noticeIdOf(sent[0]!.jobId, 1))).toBeDefined();
+		expect(await payloadOf(noticeIdOf(firstJobId(sent), 1))).toBeDefined();
 	});
 
 	it('D1への投影が失敗しても失敗の通知を投入し5秒後に再試行する', async () => {
@@ -253,10 +269,10 @@ describe('失敗したジョブの通知(#30)', () => {
 		await configure('FAIL7#0');
 		const jobId = await shard('FAIL7#0').enqueue({ binding: 'FAIL7', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('FAIL7#0'));
-		await shard('FAIL7#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('FAIL7#0').report(firstJobId(sent), { ok: false, error: 'boom' });
 
-		const alarm = await runInDurableObject(shard('FAIL7#0'), async instance => {
-			const env = (instance as any).env;
+		const alarm = await runInDurableObject(shard('FAIL7#0'), async (instance, state) => {
+			const env = envOverrides(instance).env;
 			const original = env.TSUMUGI_DB;
 			env.TSUMUGI_DB = {
 				batch: async () => {
@@ -267,9 +283,9 @@ describe('失敗したジョブの通知(#30)', () => {
 				},
 			};
 			try {
-				await (instance as any).ctx.storage.deleteAlarm();
-				await (instance as any).alarm();
-				return (await (instance as any).ctx.storage.getAlarm()) as number | null;
+				await state.storage.deleteAlarm();
+				await shardInternals(instance).alarm();
+				return await state.storage.getAlarm();
 			} finally {
 				env.TSUMUGI_DB = original;
 			}
@@ -280,7 +296,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		expect(alarm).toBe(T0 + 5_000);
 
 		await runDurableObjectAlarm(shard('FAIL7#0'));
-		const remaining = await runInDurableObject(shard('FAIL7#0'), instance => (instance as any).repo.countOutbox() as number);
+		const remaining = await runInDurableObject(shard('FAIL7#0'), instance => shardInternals(instance).repo.countOutbox());
 		expect(remaining).toBe(0);
 		const row = await env.TSUMUGI_DB.prepare('SELECT state FROM job WHERE id = ?').bind(jobId).first<{ state: string }>();
 		expect(row?.state).toBe('FAILED');
@@ -293,12 +309,12 @@ describe('失敗したジョブの通知(#30)', () => {
 
 		// 同一ストレージで新インスタンス生成し退避後を再現
 		const jobId = await runInDurableObject(shard('FAIL6#0'), async (instance, state) => {
-			const fresh = new (instance.constructor as any)(state, (instance as any).env);
-			fresh.clock = (instance as any).clock;
+			const fresh = new (instance.constructor as typeof TsumugiJobShard)(state, shardInternals(instance).env);
+			fresh.clock = shardInternals(instance).clock;
 			await fresh.resetPolicy();
-			const id = (await fresh.enqueue({ binding: 'FAIL6', payload: {}, maxAttempts: 1 })) as string;
+			const id = await fresh.enqueue({ binding: 'FAIL6', payload: {}, maxAttempts: 1 });
 			await fresh.alarm();
-			await fresh.report(sent[0]!.jobId, { ok: false, error: 'boom' });
+			await fresh.report(firstJobId(sent), { ok: false, error: 'boom' });
 			await fresh.alarm();
 			return id;
 		});

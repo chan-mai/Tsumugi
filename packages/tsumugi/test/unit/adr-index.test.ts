@@ -25,8 +25,6 @@ describe('ADR索引の網羅', () => {
 			.sort((a, b) => a - b);
 
 		expect(numbers[0]).toBe(1);
-		for (let i = 1; i < numbers.length; i++) {
-			expect(numbers[i], `ADR-${String(numbers[i]).padStart(4, '0')}の手前で欠番`).toBe(numbers[i - 1]! + 1);
-		}
+		expect(numbers).toEqual(Array.from({ length: numbers.length }, (_unused, i) => i + 1));
 	});
 });

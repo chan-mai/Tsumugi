@@ -1,7 +1,8 @@
-import { upsertOf, type ReadModelRow, type Upsert } from './columns.js';
+import { upsertOf } from './columns.js';
 import { latestPerKey } from './projector.js';
 
 import type { NodeSnapshot, RunSnapshot } from '../do/run-repo.js';
+import type { ReadModelRow, Upsert } from './columns.js';
 
 export type RunOutboxRow = { seq: number; kind: string; target: string; snapshot: string };
 

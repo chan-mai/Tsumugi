@@ -11,7 +11,8 @@ function observe() {
 	observer = new IntersectionObserver(
 		entries => {
 			const visible = entries.filter(entry => entry.isIntersecting).map(entry => entry.target.id);
-			if (visible.length) active.value = visible[0]!;
+			const [first] = visible;
+			if (first !== undefined) active.value = first;
 		},
 		{ rootMargin: '-80px 0px -70% 0px' },
 	);

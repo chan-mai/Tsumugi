@@ -1,10 +1,13 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { fixedClock, type Clock } from '../../src/do/clock.js';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+import { fixedClock } from '../../src/do/clock.js';
+import { handleBatch } from '../../src/queue/consumer.js';
 
 import type { JobContext } from '../../src/core/api.js';
+import type { Clock } from '../../src/do/clock.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { JobRepo } from '../../src/do/repo.js';
+import type { ConsumerEnv } from '../../src/queue/consumer.js';
 
 const T0 = 1_900_000_000_000;
 const QUEUE_WAIT = 15 * 60_000;
@@ -59,21 +62,33 @@ function makeBatch(bodies: DispatchMessage[]) {
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;
 }
 
+type ShardInternals = {
+	clock: Clock;
+	env: { TSUMUGI_QUEUE: unknown };
+	repo: JobRepo;
+};
+
+const internals = (instance: unknown) => instance as ShardInternals;
+
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
 
 // DO再生成で時計が既定へ復帰、操作直前に再設定
 async function install(binding: string, clock: Clock, queue: unknown) {
 	await runInDurableObject(shard(binding), instance => {
-		(instance as any).clock = clock;
-		(instance as any).env.TSUMUGI_QUEUE = queue;
+		internals(instance).clock = clock;
+		internals(instance).env.TSUMUGI_QUEUE = queue;
 	});
 }
 
 const stateOf = (binding: string, jobId: string) =>
-	runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId)?.state as string | undefined);
+	runInDurableObject(shard(binding), instance => internals(instance).repo.find(jobId)?.state);
 
 const rowOf = (binding: string, jobId: string) =>
-	runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId) as { attempts: number; run_after: number });
+	runInDurableObject(shard(binding), instance => {
+		const row = internals(instance).repo.find(jobId);
+		if (row === undefined) throw new Error(`job not found: ${jobId}`);
+		return row;
+	});
 
 const alarmOf = (binding: string) => runInDurableObject(shard(binding), (_i, state) => state.storage.getAlarm());
 
@@ -193,10 +208,7 @@ describe('consumerのwall time上限', () => {
 
 		expect(aborted).toBe(true);
 		expect(await stateOf('SLOW', jobId)).toBe('SCHEDULED');
-		const attempts = await runInDurableObject(
-			shard('SLOW'),
-			instance => (instance as any).repo.attemptsOf(jobId) as { error: string | null }[],
-		);
+		const attempts = await runInDurableObject(shard('SLOW'), instance => internals(instance).repo.attemptsOf(jobId));
 		expect(attempts.at(-1)?.error).toContain('job exceeded the consumer wall time limit');
 	});
 

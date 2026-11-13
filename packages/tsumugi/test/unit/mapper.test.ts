@@ -9,7 +9,7 @@ const attempt = { attempt: 1, state: 'FAILED', startedAt: 10, finishedAt: 20, er
 
 describe('レスポンスへの変換', () => {
 	it('並べ替えの列名を全てエンティティのキーへ対応させる', () => {
-		for (const column of SORTABLE_COLUMNS) expect(SORT_KEYS[column], column).toBeDefined();
+		expect(SORTABLE_COLUMNS.map(column => SORT_KEYS[column])).not.toContain(undefined);
 	});
 
 	it('ジョブ詳細は試行のエラー本文を含めsnake_caseで返す', () => {

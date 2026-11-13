@@ -3,19 +3,30 @@ import { describe, expect, it } from 'vitest';
 import { embedJobId } from '../../src/core/ids.js';
 
 import type { SettledNotice, SettledTarget } from '../../src/core/types.js';
+import type { Clock } from '../../src/do/clock.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { JobRepo } from '../../src/do/repo.js';
+import type { StartResult } from '../../src/do/run.js';
 
 const T0 = 2_600_000_000_000;
 const TARGET = 'NotifySettled';
 const FAILURE = 'NotifyFailure';
+
+type ShardInternals = {
+	clock: Clock;
+	env: { TSUMUGI_QUEUE: unknown };
+	repo: JobRepo;
+};
+
+const internals = (instance: unknown) => instance as ShardInternals;
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 // 実キューはconsumer実行で状態変化
 async function install(name: string, sent: DispatchMessage[] = []): Promise<void> {
 	await runInDurableObject(shard(name), instance => {
-		(instance as any).clock = { now: () => T0 };
-		(instance as any).env.TSUMUGI_QUEUE = {
+		internals(instance).clock = { now: () => T0 };
+		internals(instance).env.TSUMUGI_QUEUE = {
 			send: async (body: DispatchMessage) => void sent.push(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
 				for (const m of batch) sent.push(m.body);
@@ -26,22 +37,28 @@ async function install(name: string, sent: DispatchMessage[] = []): Promise<void
 
 const payloadOf = (shardName: string, jobId: string) =>
 	runInDurableObject(shard(shardName), instance => {
-		const row = (instance as any).repo.find(jobId) as { payload: string } | undefined;
+		const row = internals(instance).repo.find(jobId);
 		return row ? (JSON.parse(row.payload) as SettledNotice) : undefined;
 	});
 
+const firstJobIdOf = (sent: DispatchMessage[]) => {
+	const [message] = sent;
+	if (message === undefined) throw new Error('dispatched message is missing');
+	return message.jobId;
+};
+
 const noticeIdOf = (jobId: string, attempts: number, state: string) => `${TARGET}#0:settled-${embedJobId(jobId)}-${attempts}-${state}`;
 
-const countOf = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countJobs() as number);
+const countOf = (name: string) => runInDurableObject(shard(name), instance => internals(instance).repo.countJobs());
 
-const settledRowsOf = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countSettledNotify() as number);
+const settledRowsOf = (name: string) => runInDurableObject(shard(name), instance => internals(instance).repo.countSettledNotify());
 
 // 実運用ではenqueueに同梱
 const configure = (name: string, states: SettledTarget['states']) => shard(name).configure({ settled: { binding: TARGET, states } });
 
 // RPC型はブランド継承が必要
 interface RunFace extends Rpc.DurableObjectBranded {
-	start(input: { flow: string; input: unknown }): Promise<unknown>;
+	start(input: { flow: string; input: unknown }): Promise<StartResult>;
 }
 interface SchedulerFace extends Rpc.DurableObjectBranded {
 	sync(): Promise<void>;
@@ -49,7 +66,7 @@ interface SchedulerFace extends Rpc.DurableObjectBranded {
 
 const targetOf = (name: string) =>
 	runInDurableObject(shard(name), instance => {
-		const raw = (instance as any).repo.readSetting('settled_target') as string | undefined;
+		const raw = internals(instance).repo.readSetting('settled_target');
 		return raw !== undefined ? (JSON.parse(raw) as SettledTarget) : undefined;
 	});
 
@@ -61,7 +78,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		const jobId = await shard('SET1#0').enqueue({ binding: 'SET1', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('SET1#0'));
-		await shard('SET1#0').report(sent[0]!.jobId, { ok: true, result: { greeting: 'hi' } });
+		await shard('SET1#0').report(firstJobIdOf(sent), { ok: true, result: { greeting: 'hi' } });
 		await runDurableObjectAlarm(shard('SET1#0'));
 
 		const notice = await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 1, 'completed'));
@@ -87,7 +104,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		await shard('SET2#0').enqueue({ binding: 'SET2', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('SET2#0'));
-		await shard('SET2#0').report(sent[0]!.jobId, { ok: true });
+		await shard('SET2#0').report(firstJobIdOf(sent), { ok: true });
 		await runDurableObjectAlarm(shard('SET2#0'));
 
 		expect(await settledRowsOf('SET2#0')).toBe(0);
@@ -101,7 +118,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		const jobId = await shard('SET3#0').enqueue({ binding: 'SET3', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('SET3#0'));
-		await shard('SET3#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('SET3#0').report(firstJobIdOf(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('SET3#0'));
 
 		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 1, 'failed'))).toMatchObject({ jobId, state: 'FAILED' });
@@ -117,7 +134,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		await shard(`${TARGET}#0`).enqueue({ binding: TARGET, payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard(`${TARGET}#0`));
-		await shard(`${TARGET}#0`).report(sent[0]!.jobId, { ok: true });
+		await shard(`${TARGET}#0`).report(firstJobIdOf(sent), { ok: true });
 		await runDurableObjectAlarm(shard(`${TARGET}#0`));
 
 		// 投入1件のみ増加, その完了から新規通知なし
@@ -134,7 +151,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		await shard(`${FAILURE}#0`).enqueue({ binding: FAILURE, payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard(`${FAILURE}#0`));
-		await shard(`${FAILURE}#0`).report(sent[0]!.jobId, { ok: false, error: 'notification failed' });
+		await shard(`${FAILURE}#0`).report(firstJobIdOf(sent), { ok: false, error: 'notification failed' });
 		await runDurableObjectAlarm(shard(`${FAILURE}#0`));
 
 		expect(await countOf(`${TARGET}#0`)).toBe(before);
@@ -147,7 +164,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		await shard('SET4#0').enqueue({ binding: 'SET4', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('SET4#0'));
-		await shard('SET4#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('SET4#0').report(firstJobIdOf(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('SET4#0'));
 
 		expect(await settledRowsOf('SET4#0')).toBe(0);
@@ -164,7 +181,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		const before = await countOf(`${TARGET}#0`);
 
 		await runDurableObjectAlarm(shard('SET5#0'));
-		await shard('SET5#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		await shard('SET5#0').report(firstJobIdOf(sent), { ok: false, error: 'boom' });
 		await runDurableObjectAlarm(shard('SET5#0'));
 
 		expect(await countOf(`${TARGET}#0`)).toBe(before);
@@ -177,13 +194,13 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		const jobId = await shard('SET6#0').enqueue({ binding: 'SET6', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('SET6#0'));
-		await shard('SET6#0').report(sent[0]!.jobId, { ok: true });
+		await shard('SET6#0').report(firstJobIdOf(sent), { ok: true });
 		await runDurableObjectAlarm(shard('SET6#0'));
 		const after = await countOf(`${TARGET}#0`);
 
 		// 送信後中断を再現, カーソル未更新で同じ通知を再送
 		await runInDurableObject(shard('SET6#0'), instance => {
-			((instance as any).repo.sql as SqlStorage).exec(
+			internals(instance).repo.sql.exec(
 				`INSERT INTO settled_notify (job_id, payload) VALUES (?, ?)`,
 				jobId,
 				JSON.stringify({ jobId, binding: 'SET6', state: 'COMPLETED', attempts: 1 }),
@@ -211,7 +228,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		});
 		await runDurableObjectAlarm(shard('SET7#0'));
 		// 無応答で期限と猶予経過後にreaper処理
-		await runInDurableObject(shard('SET7#0'), instance => void ((instance as any).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
+		await runInDurableObject(shard('SET7#0'), instance => void (internals(instance).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
 		await runDurableObjectAlarm(shard('SET7#0'));
 
 		await shard('SET7#0').retry(jobId);
@@ -230,7 +247,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 
 		const jobId = await shard('SET8#0').enqueue({ binding: 'SET8', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('SET8#0'));
-		await shard('SET8#0').report(sent[0]!.jobId, { ok: true });
+		await shard('SET8#0').report(firstJobIdOf(sent), { ok: true });
 		await runDurableObjectAlarm(shard('SET8#0'));
 
 		expect(await payloadOf(`${TARGET}#0`, noticeIdOf(jobId, 1, 'completed'))).toMatchObject({ jobId, result: null });
@@ -248,7 +265,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		await scheduler.sync();
 		// 最短定義は1分間隔, 発火用に時計を前進
 		const ahead = Date.now() + 2 * 60_000;
-		await runInDurableObject(scheduler, instance => void ((instance as any).clock = { now: () => ahead }));
+		await runInDurableObject(scheduler, instance => void ((instance as unknown as { clock: Clock }).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 
 		// Run DOはlistへ, Scheduler DOはpoll-namesとping-helloへ投入

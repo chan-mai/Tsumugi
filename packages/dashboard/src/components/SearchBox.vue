@@ -3,8 +3,10 @@ import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessu
 import { Check, ChevronDown, X } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { SEARCH_FIELDS as FIELDS, type SearchField } from '../search';
+import { SEARCH_FIELDS as FIELDS } from '../search';
 import { MENU_ITEM, MENU_ITEM_HOVER, MENU_PANEL } from '../ui';
+
+import type { SearchField } from '../search';
 
 const props = defineProps<{ field: SearchField; value: string }>();
 const emit = defineEmits<{ 'update:field': [value: SearchField]; 'update:value': [value: string] }>();

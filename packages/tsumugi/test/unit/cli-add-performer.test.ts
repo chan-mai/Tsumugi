@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { addPerformer, performerNames } from '../../src/cli/add-performer.js';
-import { makeDeps, type Harness } from './cli-harness.js';
+import { makeDeps } from './cli-harness.js';
+
+import type { Harness } from './cli-harness.js';
 
 // バレルは利用者の手書き行と同居
 // 既存行破損で全performerが解決不能

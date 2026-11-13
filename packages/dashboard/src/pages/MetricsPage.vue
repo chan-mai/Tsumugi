@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { getMetrics, isUnauthorized, type Metrics } from '../api';
+import { getMetrics, isUnauthorized } from '../api';
 import FilterMenu from '../components/FilterMenu.vue';
 import LoadingState from '../components/LoadingState.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -10,6 +10,8 @@ import { bindings, definitionsReady } from '../composables/useDefinitions';
 import { useQueryChoice, useQueryText } from '../composables/useQueryState';
 import { formatTimestamp } from '../time';
 import { CARD, EMPTY_ROW, ERROR_TEXT, TABLE, TABLE_WRAP, TBODY, TD, TH, THEAD } from '../ui';
+
+import type { Metrics } from '../api';
 
 const WINDOWS = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 } as const;
 type Window = keyof typeof WINDOWS;

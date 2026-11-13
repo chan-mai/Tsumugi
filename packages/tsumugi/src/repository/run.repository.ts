@@ -1,6 +1,6 @@
 import { attemptsOf } from '../core/attempts.js';
 import { nodeTiming } from '../core/node-timing.js';
-import { parseAttempts, parseJson } from './job.repository.js';
+import { pairOf, parseAttempts, parseJson } from './job.repository.js';
 import { and, condition, whereOf } from './where.js';
 
 import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
@@ -22,32 +22,35 @@ export class RunReadRepository implements RunRepository {
 	async list({ state, flow, limit, offset }: RunListQuery): Promise<{ runs: RunListItem[]; total: number }> {
 		const where = whereOf(and(state ? condition('state = ?', state) : undefined, flow ? condition('flow = ?', flow) : undefined));
 
-		const [page, total] = await this.#db.batch([
-			this.#db
-				.prepare(
-					`SELECT id, flow, state, node_total AS "nodeTotal", node_done AS "nodeDone", node_failed AS "nodeFailed",
+		const [page, total] = pairOf(
+			await this.#db.batch([
+				this.#db
+					.prepare(
+						`SELECT id, flow, state, node_total AS "nodeTotal", node_done AS "nodeDone", node_failed AS "nodeFailed",
 						created_at AS "createdAt", updated_at AS "updatedAt"
 					FROM run${where.sql} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
-				)
-				.bind(...where.params, limit, offset),
-			this.#db.prepare(`SELECT count(*) AS total FROM run${where.sql}`).bind(...where.params),
-		]);
-		return { runs: page!.results as RunListItem[], total: (total!.results[0] as { total: number } | undefined)?.total ?? 0 };
+					)
+					.bind(...where.params, limit, offset),
+				this.#db.prepare(`SELECT count(*) AS total FROM run${where.sql}`).bind(...where.params),
+			]),
+		);
+		return { runs: page.results as RunListItem[], total: (total.results[0] as { total: number } | undefined)?.total ?? 0 };
 	}
 
 	// グラフは1クエリで返却, 段組み描画に全ノード必要
 	async find(id: string): Promise<{ run: Run; nodes: RunNode[] } | null> {
-		const [runs, nodes] = await this.#db.batch([
-			this.#db
-				.prepare(
-					`SELECT id, flow, state, input, node_total AS "nodeTotal", node_done AS "nodeDone", node_failed AS "nodeFailed",
+		const [runs, nodes] = pairOf(
+			await this.#db.batch([
+				this.#db
+					.prepare(
+						`SELECT id, flow, state, input, node_total AS "nodeTotal", node_done AS "nodeDone", node_failed AS "nodeFailed",
 						created_at AS "createdAt", updated_at AS "updatedAt", parent_run_id AS "parentRunId", parent_node_id AS "parentNodeId"
 					FROM run WHERE id = ? LIMIT 1`,
-				)
-				.bind(id),
-			this.#db
-				.prepare(
-					`SELECT n.node_id, n.binding, n.state, n.container, n.parent, n.origin, n."after", n.job_id, n.child_run_id,
+					)
+					.bind(id),
+				this.#db
+					.prepare(
+						`SELECT n.node_id, n.binding, n.state, n.container, n.parent, n.origin, n."after", n.job_id, n.child_run_id,
 						n.result, n.error, n.position, n.created_at, n.updated_at,
 						j.state AS job_state, j.attempts AS job_attempts, j.created_at AS job_created_at, j.updated_at AS job_updated_at,
 						j.dispatched_at AS job_dispatched_at, j.run_after AS job_run_after, j.attempts_log AS job_attempts_log,
@@ -57,30 +60,31 @@ export class RunReadRepository implements RunRepository {
 					LEFT JOIN run c ON c.id = n.child_run_id
 					WHERE n.run_id = ?
 					ORDER BY n.position ASC`,
-				)
-				.bind(id),
-		]);
+					)
+					.bind(id),
+			]),
+		);
 
-		const found = runs!.results[0] as Run | undefined;
+		const found = runs.results[0] as Run | undefined;
 		if (!found) return null;
 		return {
 			run: found,
-			nodes: (nodes!.results as JoinedNode[]).map(node => {
+			nodes: (nodes.results as JoinedNode[]).map(node => {
 				// 結合先なしは全列null
 				const job =
-					node.job_state != null
+					node.job_state != null && node.job_attempts != null && node.job_created_at != null && node.job_updated_at != null
 						? {
 								state: node.job_state,
-								attempts: node.job_attempts!,
-								createdAt: node.job_created_at!,
-								updatedAt: node.job_updated_at!,
+								attempts: node.job_attempts,
+								createdAt: node.job_created_at,
+								updatedAt: node.job_updated_at,
 								dispatchedAt: node.job_dispatched_at,
 								runAfter: node.job_run_after,
 							}
 						: null;
 				const child =
-					node.child_state != null
-						? { state: node.child_state, createdAt: node.child_created_at!, updatedAt: node.child_updated_at! }
+					node.child_state != null && node.child_created_at != null && node.child_updated_at != null
+						? { state: node.child_state, createdAt: node.child_created_at, updatedAt: node.child_updated_at }
 						: null;
 				return {
 					id: node.node_id,

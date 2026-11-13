@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { isUnauthorized, listSchedules, setSchedulePaused, triggerSchedule, type Schedule } from '../api';
+import { isUnauthorized, listSchedules, setSchedulePaused, triggerSchedule } from '../api';
 import LoadingState from '../components/LoadingState.vue';
 import PageHeader from '../components/PageHeader.vue';
 import { onRefresh } from '../composables/useAutoRefresh';
@@ -9,6 +9,8 @@ import { confirmAction } from '../composables/useConfirm';
 import { useDetail } from '../composables/useDetail';
 import { formatTimestamp } from '../time';
 import { button, EMPTY_ROW, ERROR_TEXT, LINK, MUTED_TEXT, TABLE, TABLE_WRAP, TBODY, TD, TH, THEAD } from '../ui';
+
+import type { Schedule } from '../api';
 
 const { openJob, openRun } = useDetail();
 const { t } = useI18n();

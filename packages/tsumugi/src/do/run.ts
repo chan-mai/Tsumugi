@@ -1,42 +1,29 @@
 import { DurableObject } from 'cloudflare:workers';
 import { configOf, createClient } from '../client/enqueue.js';
-import {
-	assertDeadlineMs,
-	assertNodeId,
-	isNodeId,
-	type AnyFlow,
-	type FlowNode,
-	type Flows,
-	type FlowShape,
-	type NodeJobOptions,
-	shapeOf,
-} from '../core/flow.js';
+import { assertDeadlineMs, assertNodeId, isNodeId, shapeOf } from '../core/flow.js';
 import { formatJobId, formatRunId, parseRunId, shardNameOf } from '../core/ids.js';
 import { assertPayloadSize } from '../core/message.js';
 import { retentionOf } from '../core/retention.js';
-import {
-	advance,
-	isNodeTerminal,
-	type NodeEvent,
-	type NodeState,
-	type RunDecision,
-	type RunState,
-	type SpawnRequest,
-} from '../core/run.js';
+import { advance, isNodeTerminal } from '../core/run.js';
 import { resolveShard } from '../core/shard.js';
 import { projectRun } from '../projection/run-projector.js';
-import { systemClock, type Clock } from './clock.js';
+import { systemClock } from './clock.js';
 import { createLocalId } from './local-id.js';
-import { abortErrorOf, abortErrorsOf, RunRepo, type NewNode } from './run-repo.js';
+import { abortErrorOf, abortErrorsOf, RunRepo } from './run-repo.js';
 
 import type { BindingConfig, ClientEnv, EnqueueHook } from '../client/enqueue.js';
+import type { AnyFlow, FlowNode, Flows, FlowShape, NodeJobOptions } from '../core/flow.js';
+import type { NodeEvent, NodeState, RunDecision, RunState, SpawnRequest } from '../core/run.js';
 import type { SettledTarget } from '../core/types.js';
+import type { Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
+import type { NewNode } from './run-repo.js';
 import type { NodeRow, RunRow } from './run-schema.js';
 
 export type RunEnv = ClientEnv & {
 	TSUMUGI_DB: D1Database;
 	/** subflow使用時のみ必要 */
+	// oxlint-disable-next-line typescript/no-explicit-any -- 利用者のEnv受け入れ
 	RUN?: DurableObjectNamespace<any>;
 };
 
@@ -161,7 +148,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		#cancelSent = new Set<string>();
 
 		get repo(): RunRepo {
-			if (!this.#repo) this.#repo = new RunRepo(this.ctx.storage);
+			this.#repo ??= new RunRepo(this.ctx.storage);
 			return this.#repo;
 		}
 
@@ -621,7 +608,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				return [row.id];
 			}
 
-			const items = this.#evaluate(row, 'over', now, () => definition.over!(runInput, this.#depsOf(definition)));
+			const { over } = definition;
+			const items = this.#evaluate(row, 'over', now, () => over(runInput, this.#depsOf(definition)));
 			if (!items.ok) return [row.id];
 			const exceeded = this.#nodeLimitError(items.value.length, now);
 			if (exceeded) {
@@ -640,7 +628,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 							key,
 							binding: definition.binding,
 							payload: definition.item?.(item, runInput, index),
-							job: definition.job ?? {},
+							job: definition.job,
 							concurrencyKey:
 								typeof definition.childConcurrencyKey === 'function'
 									? definition.childConcurrencyKey(item, index)
@@ -738,7 +726,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const definition = definitions.get(row.id);
 			if (!definition?.when) return null;
 
-			const passed = this.#evaluate(row, 'when', now, () => definition.when!(runInput, this.#depsOf(definition)));
+			const { when } = definition;
+			const passed = this.#evaluate(row, 'when', now, () => when(runInput, this.#depsOf(definition)));
 			if (!passed.ok) return [row.id];
 			if (passed.value) return null;
 
@@ -814,9 +803,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 		async #project(): Promise<number> {
 			const rows = this.repo.outboxBatch(PROJECTION_LIMIT);
-			if (rows.length === 0) return 0;
+			const last = rows.at(-1);
+			if (last === undefined) return 0;
 			await projectRun(this.env.TSUMUGI_DB, rows);
-			this.repo.deleteOutboxThrough(rows[rows.length - 1]!.seq);
+			this.repo.deleteOutboxThrough(last.seq);
 			return rows.length;
 		}
 

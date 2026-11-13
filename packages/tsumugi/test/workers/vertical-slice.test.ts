@@ -2,10 +2,11 @@ import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest';
 import { parseJobId } from '../../src/core/ids.js';
 import { fixedClock } from '../../src/do/clock.js';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+import { handleBatch } from '../../src/queue/consumer.js';
 
 import type { JobContext } from '../../src/core/api.js';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { DispatchMessage, TsumugiJobShard } from '../../src/do/job-shard.js';
+import type { ConsumerEnv } from '../../src/queue/consumer.js';
 
 const T0 = 1_800_000_000_000;
 
@@ -59,12 +60,23 @@ function makeBatch(bodies: DispatchMessage[]) {
 	return { acked, batch: { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage> };
 }
 
+type ShardInternals = Pick<TsumugiJobShard, 'clock' | 'repo'> & { env: { TSUMUGI_QUEUE: ReturnType<typeof captureQueue>['queue'] } };
+const shardInternals = (instance: unknown) => instance as ShardInternals;
+
+function jobRow(stub: ReturnType<typeof shard>, jobId: string) {
+	return runInDurableObject(stub, instance => {
+		const row = shardInternals(instance).repo.find(jobId);
+		if (row === undefined) throw new Error(`job not found: ${jobId}`);
+		return row;
+	});
+}
+
 function shard(binding: string) {
 	return env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
 }
 
 async function stateOf(binding: string, jobId: string): Promise<string | undefined> {
-	return runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId)?.state);
+	return runInDurableObject(shard(binding), instance => shardInternals(instance).repo.find(jobId)?.state);
 }
 
 describe('縦串: enqueueからCOMPLETEDまで', () => {
@@ -78,8 +90,8 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		const clock = fixedClock(T0);
 
 		await runInDurableObject(stub, instance => {
-			(instance as any).clock = clock;
-			(instance as any).env.TSUMUGI_QUEUE = queue;
+			shardInternals(instance).clock = clock;
+			shardInternals(instance).env.TSUMUGI_QUEUE = queue;
 		});
 
 		const jobId = await stub.enqueue({ binding: 'HELLO', payload: { name: 'world' } });
@@ -99,10 +111,12 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 
 		expect(performed).toHaveLength(1);
 		expect(performed[0]).toMatchObject({ payload: { name: 'world' }, attempt: 1, jobId });
-		expect(performed[0]!.deadlineAt).toBeGreaterThan(Date.now());
+		const [first] = performed;
+		if (first === undefined) throw new Error('performer was not called');
+		expect(first.deadlineAt).toBeGreaterThan(Date.now());
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
-		const row = await runInDurableObject(shard('HELLO'), instance => (instance as any).repo.find(jobId) as { attempts: number });
+		const row = await jobRow(shard('HELLO'), jobId);
 		expect(row.attempts).toBe(1);
 	});
 
@@ -111,8 +125,8 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		const { sent, queue } = captureQueue();
 
 		await runInDurableObject(stub, instance => {
-			(instance as any).clock = fixedClock(T0);
-			(instance as any).env.TSUMUGI_QUEUE = queue;
+			shardInternals(instance).clock = fixedClock(T0);
+			shardInternals(instance).env.TSUMUGI_QUEUE = queue;
 		});
 
 		const jobId = await stub.enqueue({ binding: 'BOOM', payload: {} });
@@ -130,8 +144,8 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		const { sent, queue } = captureQueue();
 
 		await runInDurableObject(stub, instance => {
-			(instance as any).clock = fixedClock(T0);
-			(instance as any).env.TSUMUGI_QUEUE = queue;
+			shardInternals(instance).clock = fixedClock(T0);
+			shardInternals(instance).env.TSUMUGI_QUEUE = queue;
 		});
 
 		const jobId = await stub.enqueue({ binding: 'ECHO', payload: { msg: 'hi' } });
@@ -139,7 +153,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		await handleBatch(makeBatch(sent).batch, consumerEnv, performers);
 		expect(await stateOf('ECHO', jobId)).toBe('COMPLETED');
 
-		const row = await runInDurableObject(shard('ECHO'), instance => (instance as any).repo.find(jobId) as { result: string | null });
+		const row = await jobRow(shard('ECHO'), jobId);
 		expect(row.result).toBe(JSON.stringify({ echoed: 'hi' }));
 
 		await runDurableObjectAlarm(stub);
@@ -154,15 +168,15 @@ describe('DOの書き込み回数', () => {
 		const { sent, queue } = captureQueue();
 
 		await runInDurableObject(stub, instance => {
-			(instance as any).clock = fixedClock(T0);
-			(instance as any).env.TSUMUGI_QUEUE = queue;
+			shardInternals(instance).clock = fixedClock(T0);
+			shardInternals(instance).env.TSUMUGI_QUEUE = queue;
 		});
 
-		const before = await runInDurableObject(stub, instance => (instance as any).repo.writes as number);
+		const before = await runInDurableObject(stub, instance => shardInternals(instance).repo.writes);
 		const jobId = await stub.enqueue({ binding: 'HELLO', payload: { name: 'budget' } });
 		await runDurableObjectAlarm(stub);
 		await handleBatch(makeBatch(sent).batch, consumerEnv, performers);
-		const after = await runInDurableObject(stub, instance => (instance as any).repo.writes as number);
+		const after = await runInDurableObject(stub, instance => shardInternals(instance).repo.writes);
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
 		// insert, QUEUED遷移, RUNNING遷移(ADR-0054), COMPLETED遷移と各アウトボックス追記で8回

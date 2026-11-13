@@ -3,12 +3,12 @@ import { writeMetrics } from '../analytics/writer.js';
 import { nextAttempt } from '../core/backoff.js';
 import { planDispatch } from '../core/dispatch.js';
 import { embedJobId, formatJobId, shardName } from '../core/ids.js';
-import { assertPayloadSize, splitBatches } from '../core/message.js';
+import { assertPayloadSize, splitBatches, stringifyJson } from '../core/message.js';
 import { retentionOf } from '../core/retention.js';
 import { normalizeTraceparent } from '../core/trace.js';
 import { RETRYABLE_STATES } from '../core/transitions.js';
 import { project } from '../projection/projector.js';
-import { systemClock, type Clock } from './clock.js';
+import { systemClock } from './clock.js';
 import { createLocalId } from './local-id.js';
 import { JobRepo, RESULT_MAX_CHARS } from './repo.js';
 
@@ -27,6 +27,7 @@ import type {
 	SettledNotice,
 	SettledTarget,
 } from '../core/types.js';
+import type { Clock } from './clock.js';
 import type { RunNotifyStub } from './run.js';
 import type { JobRow } from './schema.js';
 
@@ -34,7 +35,7 @@ function serializeResult(value: unknown): string | null {
 	if (value === undefined) return null;
 	let text: string | undefined;
 	try {
-		text = JSON.stringify(value);
+		text = stringifyJson(value);
 	} catch {
 		return null;
 	}
@@ -199,7 +200,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#keyCursor: string | null = null;
 
 	get repo(): JobRepo {
-		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage);
+		this.#repo ??= new JobRepo(this.ctx.storage);
 		return this.#repo;
 	}
 
@@ -823,7 +824,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			if (job.state === 'QUEUED' || job.state === 'RUNNING') {
 				inFlightTotal++;
 				if (job.concurrencyKey !== null) inFlight.set(job.concurrencyKey, (inFlight.get(job.concurrencyKey) ?? 0) + 1);
-			} else if (job.state === 'SCHEDULED' && job.runAfter <= now) {
+			} else if (job.runAfter <= now) {
 				ready.set(job.concurrencyKey, (ready.get(job.concurrencyKey) ?? 0) + 1);
 			}
 		}
@@ -851,10 +852,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	async #project(): Promise<number> {
 		const rows = this.repo.outboxBatch(PROJECTION_LIMIT);
-		if (rows.length === 0) return 0;
+		const last = rows.at(-1);
+		if (last === undefined) return 0;
 		await project(this.env.TSUMUGI_DB, rows);
 		// 投影は冪等で再処理可(#7)
-		this.repo.deleteOutboxThrough(rows[rows.length - 1]!.seq);
+		this.repo.deleteOutboxThrough(last.seq);
 		// メトリクスは非冪等でカーソル前進後, 失敗分は欠落しat-most-once(ADR-0016 / #7)
 		// 任意機能で失敗は捕捉, tick継続
 		try {
@@ -872,7 +874,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	// 失敗時は次tickで再送, Run DO側は重複通知に冪等
 	async #notifyRuns(): Promise<number> {
 		const rows = this.repo.runNotifyBatch(RUN_NOTIFY_LIMIT);
-		if (rows.length === 0) return 0;
+		const last = rows.at(-1);
+		if (last === undefined) return 0;
 
 		const namespace = this.env.RUN;
 		if (!namespace) {
@@ -890,7 +893,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		}
 
 		await Promise.all([...groups].map(([runId, events]) => namespace.get(namespace.idFromName(runId)).notify(events)));
-		this.repo.deleteRunNotifyThrough(rows[rows.length - 1]!.seq);
+		this.repo.deleteRunNotifyThrough(last.seq);
 		return rows.length;
 	}
 
@@ -931,8 +934,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		label: string;
 	}): Promise<number> {
 		const { rows } = spec;
-		if (rows.length === 0) return 0;
-		const last = rows[rows.length - 1]!.seq;
+		const last = rows.at(-1)?.seq;
+		if (last === undefined) return 0;
 
 		const target = spec.target();
 		if (target === null) {

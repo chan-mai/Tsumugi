@@ -21,7 +21,8 @@ const snapshot = JSON.stringify({
 
 const setClauseOf = () => {
 	const [upsert] = toUpserts([{ seq: 1, job_id: 'A#0:x', snapshot }]);
-	return upsert!.sql.slice(upsert!.sql.indexOf('DO UPDATE SET'));
+	if (upsert === undefined) throw new Error('no upsert generated');
+	return upsert.sql.slice(upsert.sql.indexOf('DO UPDATE SET'));
 };
 
 describe('投影のUPSERTが更新する列', () => {

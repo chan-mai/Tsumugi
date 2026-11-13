@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { advance, type NodeState, type NodeView } from '../../src/core/run.js';
+import { advance } from '../../src/core/run.js';
 
 import type { NodeTrigger } from '../../src/core/flow.js';
+import type { NodeState, NodeView } from '../../src/core/run.js';
 
 type NodeSpec = {
 	id: string;

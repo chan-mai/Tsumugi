@@ -1,9 +1,11 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { fixedClock, type Clock } from '../../src/do/clock.js';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+import { fixedClock } from '../../src/do/clock.js';
+import { handleBatch } from '../../src/queue/consumer.js';
 
-import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { Clock } from '../../src/do/clock.js';
+import type { DispatchMessage, TsumugiJobShard } from '../../src/do/job-shard.js';
+import type { ConsumerEnv } from '../../src/queue/consumer.js';
 
 // ストレージはテスト間で残存, bindingをテストごとに分離
 
@@ -62,19 +64,26 @@ function makeBatch(bodies: DispatchMessage[]) {
 
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
 
+type ShardInternals = Pick<TsumugiJobShard, 'clock' | 'repo'> & { env: { TSUMUGI_QUEUE: unknown } };
+const shardInternals = (instance: unknown) => instance as ShardInternals;
+
 // DO再生成で時計が既定へ復帰、操作直前に再設定
 async function install(binding: string, clock: Clock, queue: unknown) {
 	await runInDurableObject(shard(binding), instance => {
-		(instance as any).clock = clock;
-		(instance as any).env.TSUMUGI_QUEUE = queue;
+		shardInternals(instance).clock = clock;
+		shardInternals(instance).env.TSUMUGI_QUEUE = queue;
 	});
 }
 
 const stateOf = (binding: string, jobId: string) =>
-	runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId)?.state as string | undefined);
+	runInDurableObject(shard(binding), instance => shardInternals(instance).repo.find(jobId)?.state);
 
 const rowOf = (binding: string, jobId: string) =>
-	runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId) as { attempts: number; expires_at: number | null });
+	runInDurableObject(shard(binding), instance => {
+		const row = shardInternals(instance).repo.find(jobId);
+		if (row === undefined) throw new Error(`job not found: ${jobId}`);
+		return row;
+	});
 
 describe('有効期限(ADR-0047)', () => {
 	beforeEach(() => {

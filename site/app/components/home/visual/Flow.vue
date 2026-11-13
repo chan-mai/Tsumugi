@@ -6,7 +6,7 @@ const nodes = [
 	{ x: 120, y: 140 },
 	{ x: 120, y: 190 },
 	{ x: 210, y: 110 },
-];
+] as const;
 const edges = [
 	[0, 1],
 	[0, 2],
@@ -18,9 +18,9 @@ const edges = [
 	[4, 5],
 ] as const;
 
-function path(from: number, to: number) {
-	const a = nodes[from]!;
-	const b = nodes[to]!;
+function path(from: (typeof edges)[number][number], to: (typeof edges)[number][number]) {
+	const a = nodes[from];
+	const b = nodes[to];
 	const mid = (a.x + b.x) / 2;
 	return `M${a.x} ${a.y} C${mid} ${a.y} ${mid} ${b.y} ${b.x} ${b.y}`;
 }

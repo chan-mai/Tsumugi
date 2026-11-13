@@ -1,24 +1,30 @@
-import { createRest, type RestEnv } from './api/rest.js';
-import { configOf, createClient, type BindingConfig, type ClientEnv, type EnqueueHook } from './client/enqueue.js';
+import { createRest } from './api/rest.js';
+import { configOf, createClient } from './client/enqueue.js';
 import { configErrorMessage } from './config/fragment.js';
 import { cachedValidate } from './config/validate.js';
 import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
 import { DEFAULT_FAILED_RETENTION_MS } from './core/retention.js';
 import { TERMINAL_STATES } from './core/transitions.js';
 import { createLocalId } from './do/local-id.js';
-import { createRunClass, type RunClass, type RunSettings } from './do/run.js';
-import { createSchedulerClass, SCHEDULER_DO_NAME, type SchedulerClass } from './do/scheduler.js';
-import { sweepReadModel, type SweepOptions } from './projection/sweep.js';
-import { handleBatch, type ConsumerEnv, type PerformerRegistry, type PerformerSource } from './queue/consumer.js';
+import { createRunClass } from './do/run.js';
+import { createSchedulerClass, SCHEDULER_DO_NAME } from './do/scheduler.js';
+import { sweepReadModel } from './projection/sweep.js';
+import { handleBatch } from './queue/consumer.js';
 
 import type { MetricsResolver } from './analytics/reader.js';
 import type { AuthMiddleware } from './api/auth.js';
+import type { RestEnv } from './api/rest.js';
+import type { BindingConfig, ClientEnv, EnqueueHook } from './client/enqueue.js';
 import type { EnvOf, FailurePerformer, JobQueue, Performers, PerformersOf, SettledPerformer, TypedEnqueueInput } from './core/api.js';
 import type { Flows, InputOf } from './core/flow.js';
 import type { AnySchedules, ScheduleDefs } from './core/recurring.js';
 import type { SettledState } from './core/types.js';
 import type { RunControlStub, SchedulerControl, StartOptions } from './do/control.js';
 import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from './do/job-shard.js';
+import type { RunClass, RunSettings } from './do/run.js';
+import type { SchedulerClass } from './do/scheduler.js';
+import type { SweepOptions } from './projection/sweep.js';
+import type { ConsumerEnv, PerformerRegistry, PerformerSource } from './queue/consumer.js';
 import type { Ui } from './ui/serve.js';
 
 export type { BindingConfig, ClientEnv, RunControlStub, SchedulerControl, StartOptions };
@@ -61,6 +67,7 @@ export type TsumugiConfig<Env extends ConsumerEnv> = {
 	 * 指定時のみScheduler DOのエクスポートとbindingが必要(ADR-0040)
 	 * binding名とpayloadの型は`defineTsumugi`のインライン型で`performers`から強制
 	 */
+	// oxlint-disable-next-line typescript/no-explicit-any -- performers, flowsは`defineTsumugi`で強制
 	schedules?: ScheduleDefs<any, any>;
 	runs?: RunSettings;
 	bindings?: Record<string, BindingConfig>;
@@ -115,7 +122,7 @@ export async function enqueueMany<Env extends ConsumerEnv>(env: Env, inputs: rea
 }
 
 /** `M`と`Env`は`config.performers`から推論, 明示の型引数不要(ADR-0010) */
-export function defineTsumugi<const R extends PerformerRegistry<any>, const F extends Flows = {}>(
+export function defineTsumugi<const R extends PerformerRegistry<never>, const F extends Flows = {}>(
 	// schedules等はR/F参照でOmit不可, NoInferで推論対象外
 	config: {
 		performers: R;
@@ -123,6 +130,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		schedules?: ScheduleDefs<NoInfer<PerformersOf<R>>, NoInfer<F>>;
 		onFailure?: FailurePerformer<NoInfer<PerformersOf<R>>>;
 		onSettled?: { binding: SettledPerformer<NoInfer<PerformersOf<R>>>; states: readonly [SettledState, ...SettledState[]] };
+		// oxlint-disable-next-line typescript/no-explicit-any -- auth, metricsのenv推論
 	} & Omit<TsumugiConfig<any>, 'performers' | 'flows' | 'schedules' | 'onFailure' | 'onSettled'>,
 ): Tsumugi<EnvOf<R>, PerformersOf<R>, F> {
 	type Env = ConsumerEnv & RestEnv & RunNamespaceEnv & SchedulerNamespaceEnv;

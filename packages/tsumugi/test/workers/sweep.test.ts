@@ -2,7 +2,9 @@ import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest';
 import { sweepReadModel } from '../../src/projection/sweep.js';
 
+import type { Clock } from '../../src/do/clock.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { JobRepo } from '../../src/do/repo.js';
 
 const T0 = 2_400_000_000_000;
 const DAY = 24 * 60 * 60 * 1000;
@@ -20,18 +22,31 @@ function captureQueue() {
 	};
 }
 
+type ShardInternals = {
+	clock: Clock;
+	env: { TSUMUGI_QUEUE: unknown };
+	repo: JobRepo;
+};
+
+const internals = (instance: unknown) => instance as ShardInternals;
+
+const firstJobIdOf = (sent: DispatchMessage[]) => {
+	const [message] = sent;
+	if (message === undefined) throw new Error('dispatched message is missing');
+	return message.jobId;
+};
+
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 async function install(name: string, now: number, queue: unknown) {
 	await runInDurableObject(shard(name), instance => {
-		(instance as any).clock = { now: () => now };
-		(instance as any).env.TSUMUGI_QUEUE = queue;
+		internals(instance).clock = { now: () => now };
+		internals(instance).env.TSUMUGI_QUEUE = queue;
 	});
 }
 
-const countJobs = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countJobs() as number);
-const stateOf = (name: string, id: string) =>
-	runInDurableObject(shard(name), instance => (instance as any).repo.find(id)?.state as string | undefined);
+const countJobs = (name: string) => runInDurableObject(shard(name), instance => internals(instance).repo.countJobs());
+const stateOf = (name: string, id: string) => runInDurableObject(shard(name), instance => internals(instance).repo.find(id)?.state);
 
 describe('DOの終端ジョブ削除', () => {
 	it('保持期間を過ぎた終端ジョブを削除する', async () => {
@@ -42,7 +57,7 @@ describe('DOの終端ジョブ削除', () => {
 
 		const jobId = await shard('SWEEP#0').enqueue({ binding: 'SWEEP', payload: {} });
 		await runDurableObjectAlarm(shard('SWEEP#0'));
-		await shard('SWEEP#0').report(sent[0]!.jobId, { ok: true });
+		await shard('SWEEP#0').report(firstJobIdOf(sent), { ok: true });
 		expect(await stateOf('SWEEP#0', jobId)).toBe('COMPLETED');
 
 		await install('SWEEP#0', T0 + 5 * 60 * 1000, queue);
@@ -61,10 +76,10 @@ describe('DOの終端ジョブ削除', () => {
 		await shard('SWEEP5#0').enqueue({ binding: 'SWEEP5', payload: {} });
 		await runDurableObjectAlarm(shard('SWEEP5#0'));
 
-		const before = await runInDurableObject(shard('SWEEP5#0'), i => (i as any).repo.writes as number);
+		const before = await runInDurableObject(shard('SWEEP5#0'), i => internals(i).repo.writes);
 		await install('SWEEP5#0', T0 + 1_000, queue);
 		await runDurableObjectAlarm(shard('SWEEP5#0'));
-		const after = await runInDurableObject(shard('SWEEP5#0'), i => (i as any).repo.writes as number);
+		const after = await runInDurableObject(shard('SWEEP5#0'), i => internals(i).repo.writes);
 
 		expect(after - before).toBe(0);
 	});
@@ -110,7 +125,9 @@ describe('失敗ジョブは別の保持期間を持つ(ADR-0027)', () => {
 		await install(name, now, queue.queue);
 		const jobId = await shard(name).enqueue({ binding, payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard(name));
-		await shard(name).report(queue.sent[queue.sent.length - 1]!.jobId, { ok: false });
+		const last = queue.sent.at(-1);
+		if (last === undefined) throw new Error('dispatched message is missing');
+		await shard(name).report(last.jobId, { ok: false });
 		return jobId;
 	}
 
@@ -193,7 +210,7 @@ describe('状態を変える操作はalarmを設定する', () => {
 
 		const jobId = await shard('CANCEL2#0').enqueue({ binding: 'CANCEL2', payload: {} });
 		await runDurableObjectAlarm(shard('CANCEL2#0'));
-		await shard('CANCEL2#0').report(sent[0]!.jobId, { ok: true });
+		await shard('CANCEL2#0').report(firstJobIdOf(sent), { ok: true });
 
 		const before = await alarmOf('CANCEL2#0');
 		expect(await shard('CANCEL2#0').cancel(jobId)).toEqual({ ok: false, reason: 'invalid-state' });
@@ -281,8 +298,11 @@ describe('読み取りモデルの終端run削除', () => {
 			.bind(id, state, updatedAt, updatedAt)
 			.run();
 	};
-	const count = async (table: 'run' | 'run_node', column: 'id' | 'run_id', id: string) =>
-		(await env.TSUMUGI_DB.prepare(`SELECT count(*) AS c FROM ${table} WHERE ${column} = ?`).bind(id).first<{ c: number }>())!.c;
+	const count = async (table: 'run' | 'run_node', column: 'id' | 'run_id', id: string) => {
+		const row = await env.TSUMUGI_DB.prepare(`SELECT count(*) AS c FROM ${table} WHERE ${column} = ?`).bind(id).first<{ c: number }>();
+		if (row === null) throw new Error('count row is missing');
+		return row.c;
+	};
 
 	it('保持期間を過ぎた終端runとそのノードを削除する', async () => {
 		await insertRun('F:old', 'COMPLETED', T0 - 8 * DAY);

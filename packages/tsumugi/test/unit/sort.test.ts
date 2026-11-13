@@ -23,9 +23,9 @@ describe('一覧の並べ替え', () => {
 
 	it('プロトタイプ由来の名前は許可しない', () => {
 		// `in`判定ではconstructor等を除外不能、列の代わりに関数が渡り500
-		for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
-			expect(resolveSort(name, null).column, name).toBe('updated_at');
-		}
+		expect(
+			['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'].filter(name => resolveSort(name, null).column !== 'updated_at'),
+		).toEqual([]);
 	});
 
 	it('asc以外の向きは降順として扱う', () => {
@@ -49,14 +49,13 @@ describe('1回目で成功した試行の構築(ADR-0028)', () => {
 	});
 
 	it('実行に至っていないジョブは構築しない', () => {
-		for (const job of [
+		const jobs = [
 			{ state: 'QUEUED', attempts: 0, dispatchedAt: 1_000, updatedAt: 1_500 },
 			{ state: 'CANCELLED', attempts: 0, dispatchedAt: null, updatedAt: 1_500 },
 			{ state: 'STALLED', attempts: 1, dispatchedAt: 1_000, updatedAt: 1_500 },
 			{ state: 'FAILED', attempts: 1, dispatchedAt: 1_000, updatedAt: 1_500 },
-		]) {
-			expect(attemptsOf(job, []), job.state).toEqual([]);
-		}
+		];
+		expect(jobs.filter(job => attemptsOf(job, []).length > 0)).toEqual([]);
 	});
 });
 

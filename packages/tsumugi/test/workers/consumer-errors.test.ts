@@ -1,9 +1,10 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+import { handleBatch } from '../../src/queue/consumer.js';
 
 import type { JobContext } from '../../src/core/api.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { ConsumerEnv } from '../../src/queue/consumer.js';
 
 const consumerEnv: ConsumerEnv = env;
 
@@ -35,9 +36,9 @@ function message(body: unknown): FakeMessage {
 		timestamp: new Date(0),
 		body: body as DispatchMessage,
 		attempts: 1,
-		ack: vi.fn(),
+		ack: vi.fn<() => void>(),
 		// consumerはretry不使用, 呼び出し時はQueuesリトライ発生(ADR-0004)
-		retry: vi.fn(() => {
+		retry: vi.fn<() => void>(() => {
 			throw new Error('retry must not be called');
 		}),
 	};
@@ -84,7 +85,7 @@ describe('壊れたメッセージ(ADR-0004)', () => {
 
 describe('reportの失敗(ADR-0004)', () => {
 	it('reportがthrowしてもackは行われQueuesのリトライに乗らない', async () => {
-		const report = vi.fn(async () => {
+		const report = vi.fn<(jobId: string, outcome: unknown, attempt: number) => Promise<void>>(async () => {
 			throw new Error('DO unreachable');
 		});
 		const failingEnv = {

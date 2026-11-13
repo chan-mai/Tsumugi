@@ -47,7 +47,9 @@ describe('tick中に設定されたalarm', () => {
 
 		const jobId = await shard('CLOBBER#0').enqueue({ binding: 'CLOBBER', payload: {} });
 		await runDurableObjectAlarm(shard('CLOBBER#0'));
-		await shard('CLOBBER#0').report(sent[0]!.jobId, { ok: true });
+		const [message] = sent;
+		if (message === undefined) throw new Error('dispatched message is missing');
+		await shard('CLOBBER#0').report(message.jobId, { ok: true });
 
 		await runInDurableObject(shard('CLOBBER#0'), async instance => {
 			const inner = internals(instance);

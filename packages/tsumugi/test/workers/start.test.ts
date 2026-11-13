@@ -1,10 +1,11 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { fixedClock } from '../../src/do/clock.js';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+import { handleBatch } from '../../src/queue/consumer.js';
 
 import type { JobContext } from '../../src/core/api.js';
-import type { DispatchMessage, EnqueueInput } from '../../src/do/job-shard.js';
+import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from '../../src/do/job-shard.js';
+import type { ConsumerEnv } from '../../src/queue/consumer.js';
 
 const T0 = 2_600_000_000_000;
 
@@ -35,11 +36,15 @@ function makeBatch(bodies: DispatchMessage[]) {
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;
 }
 
+type ShardInternals = Pick<TsumugiJobShard, 'clock' | 'repo'> & { env: { TSUMUGI_QUEUE: ReturnType<typeof captureQueue>['queue'] } };
+const shardInternals = (instance: unknown) => instance as ShardInternals;
+
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 const rowOf = (name: string, id: string) =>
 	runInDurableObject(shard(name), instance => {
-		const row = (instance as any).repo.find(id);
-		return { state: row.state as string, progress: row.progress as number | null };
+		const row = shardInternals(instance).repo.find(id);
+		if (row === undefined) throw new Error(`job not found: ${id}`);
+		return { state: row.state, progress: row.progress };
 	});
 const projectedState = (id: string) =>
 	env.TSUMUGI_DB.prepare('SELECT state FROM job WHERE id = ?')
@@ -50,8 +55,8 @@ const projectedState = (id: string) =>
 async function dispatched(name: string, input: EnqueueInput) {
 	const { sent, queue } = captureQueue();
 	await runInDurableObject(shard(name), instance => {
-		(instance as any).clock = fixedClock(T0);
-		(instance as any).env.TSUMUGI_QUEUE = queue;
+		shardInternals(instance).clock = fixedClock(T0);
+		shardInternals(instance).env.TSUMUGI_QUEUE = queue;
 	});
 	const jobId = await shard(name).enqueue(input);
 	await runDurableObjectAlarm(shard(name));

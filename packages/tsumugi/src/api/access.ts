@@ -1,4 +1,6 @@
-import { readCookie, unauthorized, type AuthMiddleware } from './auth.js';
+import { readCookie, unauthorized } from './auth.js';
+
+import type { AuthMiddleware } from './auth.js';
 
 /**
  * Accessは`Cf-Access-Jwt-Assertion`ヘッダ付与で転送

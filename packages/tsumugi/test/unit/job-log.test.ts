@@ -6,7 +6,7 @@ afterEach(() => vi.useRealTimers());
 
 describe('実行ログの送信', () => {
 	it('最短間隔を満たす本文だけ送信する', async () => {
-		const send = vi.fn(async (_message: string) => true);
+		const send = vi.fn<(message: string) => Promise<boolean>>(async () => true);
 		let now = 0;
 		const log = createLog(send, () => now);
 		await log('started');
@@ -18,13 +18,13 @@ describe('実行ログの送信', () => {
 	});
 
 	it('RPC送信前に本文を2,000文字へ制限する', async () => {
-		const send = vi.fn(async (_message: string) => true);
+		const send = vi.fn<(message: string) => Promise<boolean>>(async () => true);
 		await createLog(send, () => 0)('a'.repeat(LOG_MAX_CHARS + 1));
 		expect(send).toHaveBeenCalledWith('a'.repeat(LOG_MAX_CHARS));
 	});
 
 	it('並行呼び出しも最短間隔を適用する', async () => {
-		const send = vi.fn(async (_message: string) => true);
+		const send = vi.fn<(message: string) => Promise<boolean>>(async () => true);
 		const log = createLog(send, () => 0);
 		await Promise.all([log('first'), log('second')]);
 		expect(send).toHaveBeenCalledTimes(1);

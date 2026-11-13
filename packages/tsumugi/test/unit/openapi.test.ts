@@ -67,9 +67,10 @@ describe('OpenAPI定義', () => {
 	});
 
 	it('並べ替えの選択肢が実装と一致する', () => {
-		const sort = (
-			openapiDocument().paths['/api/jobs']?.get as { parameters: { name: string; schema: { enum?: string[] } }[] }
-		).parameters.find(parameter => parameter.name === 'sort');
+		const operation = openapiDocument().paths['/api/jobs']?.get as
+			| { parameters: { name: string; schema: { enum?: string[] } }[] }
+			| undefined;
+		const sort = operation?.parameters.find(parameter => parameter.name === 'sort');
 		expect(sort?.schema.enum).toEqual([...SORTABLE_COLUMNS]);
 	});
 

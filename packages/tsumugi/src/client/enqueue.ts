@@ -16,6 +16,7 @@ export interface JobShardStub extends Rpc.DurableObjectBranded {
  * 引数型を広げ`shardOf`の1箇所で限定, 利用者のEnvをそのまま利用可能
  */
 export type ClientEnv = {
+	// oxlint-disable-next-line typescript/no-explicit-any -- 利用者のEnv受け入れ
 	JOB_SHARD: DurableObjectNamespace<any>;
 };
 
@@ -43,7 +44,7 @@ export const configOf = (bindings: Record<string, BindingConfig>, binding: strin
 	Object.hasOwn(bindings, binding) ? bindings[binding] : undefined;
 
 function settingsOf(config: BindingConfig | undefined, common: CommonSettings): ShardSettings | undefined {
-	const hasBinding = config?.policy || config?.sweepAfterMs !== undefined || config?.failedRetentionMs !== undefined;
+	const hasBinding = Boolean(config?.policy) || config?.sweepAfterMs !== undefined || config?.failedRetentionMs !== undefined;
 	if (!hasBinding && common.failureBinding === undefined && common.settled === undefined) return undefined;
 	return {
 		...(config?.policy ? { policy: config.policy } : {}),

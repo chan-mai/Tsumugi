@@ -1,4 +1,6 @@
-import { Performer, type JobContext } from 'tsumugi/performer';
+import { Performer } from 'tsumugi/performer';
+
+import type { JobContext } from 'tsumugi/performer';
 
 export class Slow extends Performer<{ steps: number }, void, {}, Env> {
 	async perform(payload: { steps: number }, ctx: JobContext): Promise<void> {
