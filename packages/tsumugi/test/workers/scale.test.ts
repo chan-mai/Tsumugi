@@ -14,8 +14,10 @@ function captureQueue() {
 			send: async (body: DispatchMessage) => void sent.push(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
 				const items = [...batch];
-				// プロデューサ側の100件上限, 超えると本番のsendBatchも失敗
+				// プロデューサ側の100件と256KBの上限, 超えると本番のsendBatchも失敗
 				if (items.length > 100) throw new Error(`sendBatch exceeded the limit of 100: ${items.length}`);
+				const bytes = items.reduce((sum, m) => sum + new TextEncoder().encode(JSON.stringify(m.body)).byteLength + 100, 0);
+				if (bytes > 256_000) throw new Error(`sendBatch exceeded the limit of 256KB: ${bytes}`);
 				batches.push(items.length);
 				for (const m of items) sent.push(m.body);
 			},
@@ -55,6 +57,50 @@ describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 		const a = await shard('UNIQ2#0').enqueue({ binding: 'UNIQ2', payload: {}, uniqueKey: 'a' });
 		const b = await shard('UNIQ2#0').enqueue({ binding: 'UNIQ2', payload: {}, uniqueKey: 'b' });
 		expect(a).not.toBe(b);
+	});
+
+	it('enqueueManyが途中で例外になった後、同じジョブIDで再投入しても別ジョブのoutbox行を上書きしない', async () => {
+		const { queue } = captureQueue();
+		await install('OUTBOXTX#0', T0, queue);
+		const fixed = 'OUTBOXTX#0:fixed';
+
+		await expect(
+			runInDurableObject(shard('OUTBOXTX#0'), (instance) =>
+				(instance as any).enqueueMany([
+					{ binding: 'OUTBOXTX', payload: {}, id: fixed },
+					{ binding: 'bad#name', payload: {} },
+				]),
+			),
+		).rejects.toThrow();
+		const other = await shard('OUTBOXTX#0').enqueue({ binding: 'OUTBOXTX', payload: {} });
+		await shard('OUTBOXTX#0').enqueue({ binding: 'OUTBOXTX', payload: {}, id: fixed });
+
+		const outbox = await runInDurableObject(shard('OUTBOXTX#0'), (instance) =>
+			((instance as any).repo.sql.exec('SELECT job_id FROM outbox').toArray() as { job_id: string }[]).map((row) => row.job_id),
+		);
+		expect(outbox).toEqual(expect.arrayContaining([other, fixed]));
+	});
+
+	it('enqueueManyが途中で例外になると予約とジョブ行を残さない', async () => {
+		const { queue } = captureQueue();
+		await install('UNIQTX#0', T0, queue);
+
+		// 2件目のbinding名がジョブIDとして不正, 1件目の予約と行の書き込み後に例外
+		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
+		await expect(
+			runInDurableObject(shard('UNIQTX#0'), (instance) =>
+				(instance as any).enqueueMany([
+					{ binding: 'UNIQTX', payload: {}, uniqueKey: 'tx' },
+					{ binding: 'bad#name', payload: {} },
+				]),
+			),
+		).rejects.toThrow();
+		const count = await runInDurableObject(shard('UNIQTX#0'), (instance) => (instance as any).repo.countActive() as number);
+		expect(count).toBe(0);
+
+		// 予約残存時は存在しないジョブIDが返却
+		const id = await shard('UNIQTX#0').enqueue({ binding: 'UNIQTX', payload: {}, uniqueKey: 'tx' });
+		expect(await stateOf('UNIQTX#0', id)).toBe('SCHEDULED');
 	});
 
 	it('予約期間を過ぎれば新しいジョブになる', async () => {
@@ -100,6 +146,66 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 		await runDurableObjectAlarm(shard('CKEY2#0'));
 
 		expect(sent).toHaveLength(2);
+	});
+
+	it('単一キーの滞留が読み取り範囲を埋めても別キーとキーがnullのジョブを投入する(ADR-0057)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('CKEY3#0', T0, queue);
+		await shard('CKEY3#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 1 } });
+
+		await shard('CKEY3#0').enqueueMany(Array.from({ length: 250 }, () => ({ binding: 'CKEY3', payload: {}, concurrencyKey: 'tenant-a' })));
+		await install('CKEY3#0', T0 + 1_000, queue);
+		const other = await shard('CKEY3#0').enqueue({ binding: 'CKEY3', payload: {}, concurrencyKey: 'tenant-b' });
+		const unkeyed = await shard('CKEY3#0').enqueue({ binding: 'CKEY3', payload: {} });
+		await runDurableObjectAlarm(shard('CKEY3#0'));
+
+		expect(sent).toHaveLength(3);
+		expect(sent.map((m) => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
+	});
+
+	it('perKeyRateのトークン不足でも範囲外の別キーを投入する(ADR-0057)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('CKEY4#0', T0, queue);
+		await shard('CKEY4#0').configure({
+			policy: { concurrency: 100, perKeyConcurrency: 10, perKeyRate: { tokens: 1, intervalMs: 60_000 } },
+		});
+
+		await shard('CKEY4#0').enqueueMany(Array.from({ length: 250 }, () => ({ binding: 'CKEY4', payload: {}, concurrencyKey: 'tenant-a' })));
+		await install('CKEY4#0', T0 + 1_000, queue);
+		const other = await shard('CKEY4#0').enqueue({ binding: 'CKEY4', payload: {}, concurrencyKey: 'tenant-b' });
+		const unkeyed = await shard('CKEY4#0').enqueue({ binding: 'CKEY4', payload: {} });
+		await runDurableObjectAlarm(shard('CKEY4#0'));
+
+		expect(sent).toHaveLength(3);
+		expect(sent.map((m) => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
+	});
+
+	it('範囲外キーの走査が途中終了した場合、次のtickを直ちに実行して残りキーのジョブを投入する(ADR-0057)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('CKEY5#0', T0, queue);
+		await shard('CKEY5#0').configure({ policy: { concurrency: 300, perKeyConcurrency: 1 } });
+
+		const keys = ['a', ...Array.from({ length: 199 }, (_, i) => `k${String(i).padStart(3, '0')}`)];
+		await shard('CKEY5#0').enqueueMany(keys.map((concurrencyKey) => ({ binding: 'CKEY5', payload: {}, concurrencyKey })));
+		await runDurableObjectAlarm(shard('CKEY5#0'));
+		expect(sent).toHaveLength(200);
+
+		sent.length = 0;
+		await install('CKEY5#0', T0 + 1_000, queue);
+		await shard('CKEY5#0').enqueueMany(keys.map((concurrencyKey) => ({ binding: 'CKEY5', payload: {}, concurrencyKey, delayMs: 500 })));
+		await runDurableObjectAlarm(shard('CKEY5#0'));
+		await install('CKEY5#0', T0 + 2_000, queue);
+		const last = await shard('CKEY5#0').enqueue({ binding: 'CKEY5', payload: {}, concurrencyKey: 'z' });
+		await runDurableObjectAlarm(shard('CKEY5#0'));
+		expect(sent).toHaveLength(0);
+		const alarm = await runInDurableObject(
+			shard('CKEY5#0'),
+			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,
+		);
+		expect(alarm).toBe(T0 + 2_000);
+
+		await runDurableObjectAlarm(shard('CKEY5#0'));
+		expect(sent.map((m) => m.jobId)).toEqual([last]);
 	});
 });
 
@@ -239,6 +345,97 @@ describe('enqueueMany', () => {
 		// 分割なしでは150件一括送信でcaptureQueueが例外
 		expect(sent).toHaveLength(150);
 		expect(batches).toEqual([100, 50]);
+	});
+});
+
+describe('Queuesのサイズ上限と送信失敗', () => {
+	type Row = { state: string; attempts: number; dispatched_at: number | null } | undefined;
+	const rowOf = (name: string, jobId: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.find(jobId) as Row);
+
+	it('sendBatchは合計256KBを超えないよう分割される', async () => {
+		const { sent, batches, queue } = captureQueue();
+		await install('BYTES#0', T0, queue);
+
+		// 1件3KB, 件数のみの分割では100件で約300KB
+		const ids = await shard('BYTES#0').enqueueMany(
+			Array.from({ length: 100 }, () => ({ binding: 'BYTES', payload: { text: 'x'.repeat(3_000) } })),
+		);
+		await runDurableObjectAlarm(shard('BYTES#0'));
+
+		expect(sent).toHaveLength(100);
+		expect(batches.length).toBeGreaterThan(1);
+		expect(await stateOf('BYTES#0', ids[99]!)).toBe('QUEUED');
+	});
+
+	it('送信に失敗したジョブは試行回数を消費せずSCHEDULEDへ戻る', async () => {
+		const failing = {
+			send: async () => {
+				throw new Error('queue unavailable');
+			},
+			sendBatch: async () => {
+				throw new Error('queue unavailable');
+			},
+		};
+		await install('SENDFAIL#0', T0, failing);
+		const jobId = await shard('SENDFAIL#0').enqueue({ binding: 'SENDFAIL', payload: {}, guarantee: 'at-most-once' });
+		await runDurableObjectAlarm(shard('SENDFAIL#0'));
+
+		expect(await rowOf('SENDFAIL#0', jobId)).toMatchObject({ state: 'SCHEDULED', attempts: 0, dispatched_at: null });
+		// 即時再実行なし, 障害中の反復防止
+		const alarm = await runInDurableObject(shard('SENDFAIL#0'), (_i, state) => state.storage.getAlarm());
+		expect(alarm).toBe(T0 + 5_000);
+
+		const { sent, queue } = captureQueue();
+		await install('SENDFAIL#0', T0 + 5_000, queue);
+		await runDurableObjectAlarm(shard('SENDFAIL#0'));
+		expect(sent.map((m) => [m.jobId, m.attempt])).toEqual([[jobId, 1]]);
+		expect((await rowOf('SENDFAIL#0', jobId))?.state).toBe('QUEUED');
+	});
+
+	it('上限を超えるpayloadは投入時に拒否し行を作らない', async () => {
+		const { queue } = captureQueue();
+		await install('BIGPAY#0', T0, queue);
+
+		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
+		await expect(
+			runInDurableObject(shard('BIGPAY#0'), (instance) =>
+				(instance as any).enqueueMany([
+					{ binding: 'BIGPAY', payload: {} },
+					{ binding: 'BIGPAY', payload: { text: 'x'.repeat(130_000) } },
+				]),
+			),
+		).rejects.toThrow(/payload is too large/);
+		const count = await runInDurableObject(shard('BIGPAY#0'), (instance) => (instance as any).repo.countActive() as number);
+		expect(count).toBe(0);
+	});
+
+	it('投入時の検証より前の送信不能なジョブはFAILEDにする', async () => {
+		const { sent, queue } = captureQueue();
+		await install('LEGACY#0', T0, queue);
+		const small = await shard('LEGACY#0').enqueue({ binding: 'LEGACY', payload: {} });
+		// 検証導入前に登録済みの行を再現
+		await runInDurableObject(shard('LEGACY#0'), (instance) => {
+			(instance as any).repo.insert({
+				id: 'LEGACY#0:oversized0000000000000000',
+				binding: 'LEGACY',
+				priority: 0,
+				maxAttempts: 3,
+				concurrencyKey: null,
+				uniqueKey: null,
+				guarantee: 'at-least-once',
+				timeoutMs: 60_000,
+				backoff: { kind: 'fixed', delayMs: 1_000 },
+				runAfter: T0,
+				expiresAt: null,
+				createdAt: T0,
+				payload: { text: 'x'.repeat(130_000) },
+			});
+		});
+		await runDurableObjectAlarm(shard('LEGACY#0'));
+
+		// 同じtickの他のジョブは送信
+		expect(sent.map((m) => m.jobId)).toEqual([small]);
+		expect(await stateOf('LEGACY#0', 'LEGACY#0:oversized0000000000000000')).toBe('FAILED');
 	});
 });
 

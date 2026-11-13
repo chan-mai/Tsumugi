@@ -36,6 +36,10 @@ const id = await tsumugi.enqueue(env, {
 payloadの型は、指定した`binding`の値から導出されます。
 必須キーを指定しない場合、コンパイルエラーが発生します。
 
+::callout{type="info"}
+payloadは、JSONに変換後の容量で120,000Byte(`PAYLOAD_MAX_BYTES`)以下にする必要があります。
+::
+
 ## enqueueMany
 
 `tsumugi.enqueueMany`は、複数のジョブを一括で投入します。

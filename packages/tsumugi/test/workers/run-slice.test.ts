@@ -212,6 +212,19 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('FAILED');
 	});
 
+	it('上限を超えるpayloadはノードのFAILEDになる', async () => {
+		const runId = 'GREETINGS:bigpayload';
+		const stub = runStub(runId);
+		await installQueues();
+		// 投入時の例外ではtickが毎回同じ位置で停止
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'x'.repeat(130_000) } });
+		await settleRun(runId);
+
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
+		expect(await errorOf(runId, 'list')).toMatch(/^input failed: payload is too large/);
+		expect(await stateOf(runId)).toBe('FAILED');
+	});
+
 	it('ノードの失敗で下流が中断されrunがFAILEDになる', async () => {
 		const runId = 'GREETINGS:fail1';
 		const stub = runStub(runId);
@@ -234,6 +247,36 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('RUNNING');
 		await settle(runId);
 		expect(await stateOf(runId)).toBe('COMPLETED');
+	});
+
+	it('runに属するジョブを個別にリトライしてもrunはFAILEDのまま', async () => {
+		performed.length = 0;
+		const runId = 'GREETINGS:jobretry';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'jr' } });
+		const failing = {
+			...performers,
+			ListNames: {
+				perform: async (_payload: unknown, ctx: JobContext) => {
+					ctx.fail({ retry: false });
+					throw new Error('intentional failure');
+				},
+			},
+		};
+		await settle(runId, failing);
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('FAILED');
+
+		const jobId = await jobIdOf(runId, 'list');
+		if (jobId === null) throw new Error('the first node has no job id');
+		expect(await shard('ListNames').retry(jobId)).toEqual({ ok: false, reason: 'in-run' });
+		await settle(runId);
+		await settleRun(runId);
+
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
+		expect(await stateOf(runId)).toBe('FAILED');
+		expect(performed.filter((entry) => entry.binding === 'Greet')).toEqual([]);
 	});
 
 	it('再開はfan-outで許容済みの子の失敗を再実行しない(ADR-0034)', async () => {
@@ -265,6 +308,184 @@ describe('縦串: runの開始から完了まで', () => {
 		await settleRun(runId);
 		expect(await stateOf(runId)).toBe('COMPLETED');
 		expect(await jobIdOf(runId, 'greet:0')).toBe(tolerated);
+	});
+
+	it('fan-outの集計値はspawnされた子孫の失敗を数える', async () => {
+		const runId = 'GREETINGS:fanspawnfail';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'fs' } });
+
+		const finish = async (
+			nodeId: string,
+			state: 'COMPLETED' | 'FAILED',
+			result: unknown = null,
+			spawns: { id: string; binding: string; payload: unknown }[] = [],
+		) => {
+			await settleRun(runId);
+			sent.length = 0;
+			const jobId = await jobIdOf(runId, nodeId);
+			if (jobId === null) throw new Error(`${nodeId} has no job id`);
+			await stub.notify([
+				{ nodeId, jobId, state, result: JSON.stringify(result), error: state === 'FAILED' ? 'intentional failure' : null, spawns },
+			]);
+		};
+		await finish('list', 'COMPLETED', { names: ['a', 'b'] });
+		await finish('greet:0', 'COMPLETED', null, [{ id: 'child', binding: 'Greet', payload: {} }]);
+		await finish('greet:1', 'COMPLETED');
+		await finish('greet:0:child', 'FAILED');
+		await settleRun(runId);
+
+		const greet = await runInDurableObject(stub, (instance) => (instance as any).repo.findNode('greet')?.result as string | null);
+		expect(greet === null ? null : JSON.parse(greet)).toEqual({ total: 2, succeeded: 1, failed: 1 });
+		await finish('report', 'COMPLETED');
+		await settleRun(runId);
+		// fan-outの子の失敗は非致命(ADR-0035)
+		expect(await stateOf(runId)).toBe('COMPLETED');
+	});
+
+	it('fan-outの子でノード数の上限を超えるとrunを中断してFAILEDにする(ADR-0035)', async () => {
+		const runId = 'GREETINGS:fanspawnlimit';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'fl' } });
+
+		const finish = async (
+			nodeId: string,
+			state: 'COMPLETED' | 'FAILED' | 'CANCELLED',
+			result: unknown = null,
+			spawns: { id: string; binding: string; payload: unknown }[] = [],
+		) => {
+			await settleRun(runId);
+			sent.length = 0;
+			const jobId = await jobIdOf(runId, nodeId);
+			if (jobId === null) throw new Error(`${nodeId} has no job id`);
+			await stub.notify([
+				{ nodeId, jobId, state, result: JSON.stringify(result), error: state === 'FAILED' ? 'intentional failure' : null, spawns },
+			]);
+		};
+		await finish('list', 'COMPLETED', { names: ['a', 'b'] });
+		const spawns = Array.from({ length: 10_001 }, (_, i) => ({ id: `c${i}`, binding: 'Greet', payload: {} }));
+		await finish('greet:0', 'COMPLETED', null, spawns);
+		await settleRun(runId);
+		const limit = 'node count exceeded the limit: 10000';
+		expect(await errorOf(runId, 'greet:0')).toBe(limit);
+		// 実行中の兄弟は取り消し要求後に終端通知を待機
+		expect(await stateOf(runId)).toBe('RUNNING');
+		await finish('greet:1', 'CANCELLED');
+		await settleRun(runId);
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({
+			list: 'COMPLETED',
+			greet: 'COMPLETED',
+			'greet:0': 'FAILED',
+			'greet:1': 'FAILED',
+			report: 'FAILED',
+		});
+		expect(await errorOf(runId, 'greet:1')).toBe(limit);
+		expect(await stateOf(runId)).toBe('FAILED');
+
+		// 再開で中断分を再実行
+		expect(await stub.retry()).toEqual({ ok: true });
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({ 'greet:0': 'PENDING', 'greet:1': 'PENDING' });
+		await finish('greet:0', 'COMPLETED');
+		await finish('greet:1', 'COMPLETED');
+		await finish('report', 'COMPLETED');
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('COMPLETED');
+	});
+
+	it('再開でspawnの子孫を未実行へ戻すと、COMPLETEDのfan-outノードも集約待ちへ戻る', async () => {
+		const runId = 'GREETINGS:spawnretry';
+		await runInDurableObject(runStub(runId), async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'GREETINGS', input: { prefix: 'sr' }, deadlineMs: 10_000 });
+			await inner.ctx.storage.deleteAlarm();
+			const now = Date.now();
+			inner.repo.insertNodes(
+				[
+					{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 },
+					{ id: 'greet:0:child', binding: 'Greet', container: false, parent: 'greet:0', origin: 'spawn', after: [], seq: 4 },
+				],
+				now,
+			);
+			inner.repo.updateNode('list', { state: 'COMPLETED', result: JSON.stringify({ names: ['a'] }) }, now);
+			inner.repo.updateNode('greet:0', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('greet:0:child', { state: 'FAILED', error: 'run deadline exceeded: 10000ms' }, now);
+			inner.repo.updateNode('greet', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('report', { state: 'FAILED', error: 'run deadline exceeded: 10000ms' }, now);
+			inner.repo.markExpired(runId, now);
+			inner.repo.setRunState(runId, 'FAILED', now);
+			expect(await inner.retry()).toEqual({ ok: true });
+			await inner.ctx.storage.deleteAlarm();
+		});
+
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({
+			greet: 'RUNNING',
+			'greet:0': 'COMPLETED',
+			'greet:0:child': 'PENDING',
+		});
+	});
+
+	it('取り消されたrunの再開では、CANCELLEDのfan-outの子も再実行する', async () => {
+		const runId = 'GREETINGS:cancelretry';
+		await runInDurableObject(runStub(runId), async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cr' } });
+			await inner.ctx.storage.deleteAlarm();
+			const now = Date.now();
+			inner.repo.insertNodes(
+				[
+					{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 },
+					{ id: 'greet:1', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 4 },
+				],
+				now,
+			);
+			inner.repo.updateNode('list', { state: 'COMPLETED', result: JSON.stringify({ names: ['a', 'b'] }) }, now);
+			inner.repo.updateNode('greet:0', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('greet:1', { state: 'CANCELLED' }, now);
+			inner.repo.updateNode('greet', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('report', { state: 'CANCELLED' }, now);
+			inner.repo.setRunState(runId, 'CANCELLED', now);
+			expect(await inner.retry({ cancelled: true })).toEqual({ ok: true });
+			await inner.ctx.storage.deleteAlarm();
+		});
+
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({
+			list: 'COMPLETED',
+			greet: 'RUNNING',
+			report: 'PENDING',
+			'greet:0': 'COMPLETED',
+			'greet:1': 'PENDING',
+		});
+	});
+
+	it('作成済みspawnを含む通知が再び届いても、ノード数上限超過とみなさない(ADR-0035)', async () => {
+		const runId = 'GREETINGS:spawndup';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'sd' } });
+		await settleRun(runId);
+		sent.length = 0;
+		const listJob = await jobIdOf(runId, 'list');
+		if (listJob === null) throw new Error('the first node has no job id');
+		await stub.notify([{ nodeId: 'list', jobId: listJob, state: 'COMPLETED', result: JSON.stringify({ names: ['a'] }), error: null }]);
+		await settleRun(runId);
+		sent.length = 0;
+		const jobId = await jobIdOf(runId, 'greet:0');
+		if (jobId === null) throw new Error('greet:0 has no job id');
+
+		const spawns = Array.from({ length: 9_996 }, (_, i) => ({ id: `c${i}`, binding: 'Greet', payload: {} }));
+		const event = { nodeId: 'greet:0', jobId, state: 'COMPLETED' as const, result: null, error: null, spawns };
+		await runInDurableObject(stub, async (instance) => {
+			const inner = instance as any;
+			await inner.notify([event]);
+			await inner.notify([event]);
+			await inner.ctx.storage.deleteAlarm();
+		});
+
+		expect(await errorOf(runId, 'greet:0')).toBeNull();
+		const aborted = await runInDurableObject(stub, (instance) => (instance as any).repo.findRun()?.abort_error as string | null);
+		expect(aborted).toBeNull();
 	});
 
 	it('取り消しは未起動を止めて終端を待つ', async () => {

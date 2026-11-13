@@ -8,6 +8,18 @@ const NODE_SELECT = columnList(RUN_COLUMNS.node);
 
 export const deadlineErrorOf = (deadlineMs: number | null) => `run deadline exceeded: ${deadlineMs}ms`;
 
+type HaltSource = Pick<RunRow, 'cancelling' | 'expired' | 'deadline_ms' | 'abort_error'>;
+
+// 中断ノード理由
+export const abortErrorOf = (run: HaltSource): string | null =>
+	run.cancelling === 1 ? null : (run.abort_error ?? (run.expired === 1 ? deadlineErrorOf(run.deadline_ms) : null));
+
+// 再開で復帰する中断理由
+export const abortErrorsOf = (run: HaltSource): string[] =>
+	run.cancelling === 1
+		? []
+		: [run.abort_error, run.expired === 1 ? deadlineErrorOf(run.deadline_ms) : null].filter((error) => error !== null);
+
 export type NewNode = {
 	id: string;
 	binding: string;
@@ -109,6 +121,7 @@ export class RunRepo {
 				deadline_ms: input.deadlineMs ?? null,
 				deadline_at: input.deadlineMs !== undefined ? input.now + input.deadlineMs : null,
 				expired: 0,
+				abort_error: null,
 				created_at: input.now,
 				updated_at: input.now,
 			}),
@@ -120,8 +133,8 @@ export class RunRepo {
 		this.sql.exec(`UPDATE run SET state = ?, updated_at = ? WHERE id = ?`, state, now, id);
 	}
 
-	markParentNotified(id: string, now: number): void {
-		this.sql.exec(`UPDATE run SET parent_notified = 1, updated_at = ? WHERE id = ?`, now, id);
+	markParentNotified(id: string, state: RunState, now: number): void {
+		this.sql.exec(`UPDATE run SET parent_notified = 1, updated_at = ? WHERE id = ? AND state = ?`, now, id, state);
 	}
 
 	markCancelling(id: string, now: number): void {
@@ -130,6 +143,11 @@ export class RunRepo {
 
 	markExpired(id: string, now: number): void {
 		this.sql.exec(`UPDATE run SET expired = 1, updated_at = ? WHERE id = ?`, now, id);
+	}
+
+	// 最初の理由を保持
+	markAborted(id: string, error: string, now: number): void {
+		this.sql.exec(`UPDATE run SET abort_error = ?, updated_at = ? WHERE id = ? AND abort_error IS NULL`, error, now, id);
 	}
 
 	insertNodes(nodes: readonly NewNode[], now: number): void {
@@ -219,33 +237,38 @@ export class RunRepo {
 	/**
 	 * fan-outノードは子を再作成せず集約待ちへ, 再作成では成功済みの子も消失(ADR-0034)
 	 * 子runIDも解除, 残すと旧い子の遅延通知が再開後を上書き
-	 * fan-outの子は期限超過で中断分のみ, 実行済み失敗は集計値で後段へ反映済み
+	 * fan-outの子は中断分と取り消しからの再開時のCANCELLEDのみ, 実行済み失敗は集計値で後段へ反映済み
 	 */
-	resetForRetry(now: number, aborted: string | null): string[] {
+	resetForRetry(now: number, aborted: readonly string[], resumeCancelled = false): string[] {
 		// 親への通知済みフラグ解除, 未解除では再開後の終端が親へ未通知
+		// 取り消し中フラグ解除, CANCELLEDの子runの再開用
 		// 期限の再計算と超過フラグ解除, 未解除では再開直後に再超過(ADR-0039)
 		this.sql.exec(
 			`UPDATE run SET
 				state = 'RUNNING',
+				cancelling = 0,
 				parent_notified = 0,
 				deadline_at = CASE WHEN deadline_ms IS NULL THEN deadline_at ELSE ? + deadline_ms END,
 				expired = 0,
+				abort_error = NULL,
 				updated_at = ?`,
 			now,
 			now,
 		);
-		// 子を戻すコンテナは集約待ちへ, COMPLETEDのままでは集計値が古いまま
-		const containers = this.sql.exec<{ id: string }>(
-			`UPDATE node SET state = 'RUNNING', updated_at = ?
-			WHERE container = 1 AND state = 'COMPLETED' AND EXISTS(
-				SELECT 1 FROM node child
-				WHERE child.parent = node.id AND child.origin = 'fanOut' AND child.state = 'FAILED' AND child.error = ?
-			)
-			RETURNING id`,
-			now,
-			aborted,
+		const reopenable = `state IN ('FAILED', 'STALLED', 'SKIPPED', 'CANCELLED')
+			AND (origin <> 'fanOut' OR (state = 'FAILED' AND error IN (${placeholders(aborted.length)}))${resumeCancelled ? ` OR state = 'CANCELLED'` : ''})`;
+		// 子孫を戻すコンテナは集約待ちへ, COMPLETEDのままでは集計値が古いまま
+		const parents = new Map(
+			this.#all<{ id: string; parent: string | null }>(`SELECT id, parent FROM node`).map((row) => [row.id, row.parent]),
 		);
-		const reopened = containers.toArray().map((row) => row.id);
+		const ancestors = new Set<string>();
+		for (const row of this.#all<{ parent: string }>(`SELECT parent FROM node WHERE parent IS NOT NULL AND ${reopenable}`, ...aborted)) {
+			for (let id: string | null | undefined = row.parent; id && !ancestors.has(id); id = parents.get(id)) ancestors.add(id);
+		}
+		const reopened = this.#all<{ id: string }>(`SELECT id FROM node WHERE container = 1 AND state = 'COMPLETED'`)
+			.map((row) => row.id)
+			.filter((id) => ancestors.has(id));
+		for (const id of reopened) this.updateNode(id, { state: 'RUNNING' }, now);
 		const cursor = this.sql.exec<{ id: string }>(
 			`UPDATE node SET
 				state = CASE WHEN container = 1 AND EXISTS(SELECT 1 FROM node child WHERE child.parent = node.id) THEN 'RUNNING' ELSE 'PENDING' END,
@@ -253,30 +276,37 @@ export class RunRepo {
 				child_run_id = NULL,
 				error = NULL,
 				updated_at = ?
-			WHERE state IN ('FAILED', 'STALLED', 'SKIPPED', 'CANCELLED')
-				AND (origin <> 'fanOut' OR (state = 'FAILED' AND error = ?))
+			WHERE ${reopenable}
 			RETURNING id`,
 			now,
-			aborted,
+			...aborted,
 		);
-		return [...reopened, ...cursor.toArray().map((row) => row.id)];
+		const reset = new Set([...reopened, ...cursor.toArray().map((row) => row.id)]);
+		const downstream = this.#all<{ id: string; after: string }>(
+			`SELECT id, "after" FROM node
+			WHERE state = 'COMPLETED' AND container = 0 AND subflow IS NULL
+				AND NOT EXISTS(SELECT 1 FROM node child WHERE child.parent = node.id)
+			ORDER BY seq ASC, id ASC`,
+		).filter((row) => {
+			if (!(JSON.parse(row.after) as string[]).some((id) => reset.has(id))) return false;
+			reset.add(row.id);
+			return true;
+		});
+		for (const row of downstream) this.updateNode(row.id, { state: 'PENDING', jobId: null, result: null, error: null }, now);
+		return [...reset];
+	}
+
+	existingNodeIds(ids: readonly string[]): Set<string> {
+		const existing = new Set<string>();
+		for (const part of chunk(ids, 1)) {
+			for (const row of this.#all<{ id: string }>(`SELECT id FROM node WHERE id IN (${placeholders(part.length)})`, ...part))
+				existing.add(row.id);
+		}
+		return existing;
 	}
 
 	countNodes(): number {
 		return this.sql.exec<{ c: number }>(`SELECT count(*) AS c FROM node`).one().c;
-	}
-
-	childSummary(parent: string): { total: number; succeeded: number; failed: number } {
-		const row = this.sql
-			.exec<{ total: number; succeeded: number }>(
-				`SELECT count(*) AS total, sum(CASE WHEN state = 'COMPLETED' THEN 1 ELSE 0 END) AS succeeded
-				 FROM node WHERE parent = ?`,
-				parent,
-			)
-			.one();
-		const total = row.total;
-		const succeeded = row.succeeded ?? 0;
-		return { total, succeeded, failed: total - succeeded };
 	}
 
 	progress(): { total: number; done: number; failed: number } {

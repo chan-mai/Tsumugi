@@ -189,3 +189,30 @@ describe('flowの通し実行', () => {
 		expect(ids(result)).toEqual(['list', 'greet:alice', 'greet:bob', 'greet']);
 	});
 });
+
+describe('subflow', () => {
+	const reporting = flow<{ ids: string[] }>((f) => {
+		f.node('report', 'REPORT', { input: (i) => ({ total: i.ids.length, failed: 0 }) });
+	});
+	const pipeline = flow<{ prefix: string }>((f) => {
+		const list = f.node('list', 'LIST', { input: (i) => ({ prefix: i.prefix }) });
+		const reported = f.subflow('reported', reporting, { after: { list }, input: (_i, d) => ({ ids: d.list.names }) });
+		f.node('greet', 'GREET', { after: { reported }, input: () => ({ name: 'done' }) });
+	});
+
+	it('subflowノードのpayloadは子runの入力, 子flowは非実行', () => {
+		const result = simulateFlow(pipeline, { prefix: 'p' }, { results: { list: { names: ['a', 'b'] }, reported: 'ignored' } });
+
+		expect(ids(result)).toEqual(['list', 'reported', 'greet']);
+		const reported = result.nodes.find((node) => node.id === 'reported');
+		expect(reported).toMatchObject({ payload: { ids: ['a', 'b'] }, state: 'COMPLETED', result: undefined });
+		expect(result.state).toBe('COMPLETED');
+	});
+
+	it('失敗させたsubflowノードの下流はSKIPPEDになる', () => {
+		const result = simulateFlow(pipeline, { prefix: 'p' }, { results: { list: { names: [] } }, fails: ['reported'] });
+
+		expect(stateOf(result, 'greet')).toBe('SKIPPED');
+		expect(result.state).toBe('FAILED');
+	});
+});

@@ -1,4 +1,5 @@
 import { InvalidJobIdError } from '../core/ids.js';
+import { PayloadTooLargeError } from '../core/message.js';
 import type { Job, JobListItem } from '../core/entity/job.entity.js';
 import { jobRetryable } from '../core/retention.js';
 import { mutateJob, mutateJobs, type BulkOutcome } from '../do/control.js';
@@ -63,7 +64,8 @@ export function createJobService<Env extends ServiceEnv>(
 					try {
 						return { ok: true, id: await enqueue(env, input) };
 					} catch (error) {
-						if (error instanceof InvalidJobIdError) return { ok: false, reason: 'invalid', message: error.message };
+						if (error instanceof InvalidJobIdError || error instanceof PayloadTooLargeError)
+							return { ok: false, reason: 'invalid', message: error.message };
 						throw error;
 					}
 				}

@@ -1,4 +1,4 @@
-import type { NodeJobOptions, NodeTrigger } from './flow.js';
+import type { FanOutSummary, NodeJobOptions, NodeTrigger } from './flow.js';
 import { TERMINAL_STATES } from './transitions.js';
 import type { JobState } from './types.js';
 
@@ -41,7 +41,7 @@ export type RunDecision =
 	/** fan-outノードの展開, overを評価して子を作成 */
 	| { type: 'expand'; id: string }
 	/** fan-outノードの集約, 子孫全ての終端到達後に自身を終端へ */
-	| { type: 'aggregate'; id: string }
+	| { type: 'aggregate'; id: string; summary: FanOutSummary }
 	/** 発火条件を満たさないノードの不実行, 理由はノードのerrorへ記録(ADR-0041) */
 	| { type: 'skip'; id: string; reason: string }
 	/** 取り消し, 未起動は即時終端, SCHEDULEDはJob DOへ取り消し送信 */
@@ -51,8 +51,8 @@ export type AdvanceInput = {
 	nodes: readonly NodeView[];
 	/** 取り消し要求中, 未起動を停止し実行中の終端を待機 */
 	cancelling: boolean;
-	/** 期限超過, 取り消しと同じ処理で結果はFAILED(ADR-0039) */
-	expired?: boolean;
+	/** 期限超過またはノード数上限超過, 取り消しと同じ処理で結果はFAILED(ADR-0035, ADR-0039) */
+	aborted?: boolean;
 };
 
 export type AdvanceOutput = { decisions: RunDecision[]; state: RunState };
@@ -92,7 +92,7 @@ export function isNodeTerminal(state: NodeState): boolean {
  * 待ち合わせ単位は自身と子孫全ての終端(ADR-0032)
  * 親を`after`に指定したノードは実行時追加の子孫の終端も待機
  */
-export function advance({ nodes, cancelling, expired = false }: AdvanceInput): AdvanceOutput {
+export function advance({ nodes, cancelling, aborted = false }: AdvanceInput): AdvanceOutput {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
 	const children = new Map<string, NodeView[]>();
 	for (const node of nodes) {
@@ -136,13 +136,15 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 		node.state === 'CANCELLED' ||
 		(children.get(node.id) ?? []).some((child) => child.origin !== 'fanOut' && failed(child));
 
-	const halting = cancelling || expired;
+	const halting = cancelling || aborted;
 
 	const decisions: RunDecision[] = [];
 	for (const node of nodes) {
 		// 取り消し中も集約継続, 停止時は子孫終了後もRUNNINGのまま残りrunが未完了
-		if (node.container && node.state === 'RUNNING' && (children.get(node.id) ?? []).every(settled)) {
-			decisions.push({ type: 'aggregate', id: node.id });
+		const kids = children.get(node.id) ?? [];
+		if (node.container && node.state === 'RUNNING' && kids.every(settled)) {
+			const ok = kids.filter(succeeded).length;
+			decisions.push({ type: 'aggregate', id: node.id, summary: { total: kids.length, succeeded: ok, failed: kids.length - ok } });
 			continue;
 		}
 
@@ -176,8 +178,8 @@ export function advance({ nodes, cancelling, expired = false }: AdvanceInput): A
 	const roots = nodes.filter((node) => node.parent === null);
 	// 全ノードはいずれかの根の子孫, 根の終端で全体も終端
 	const done = roots.every(settled);
-	// fan-outの子の失敗は非致命(ADR-0035), ノード状態から期限による中断は区別不能(ADR-0039)
-	const state: RunState = !done ? 'RUNNING' : cancelling ? 'CANCELLED' : expired ? 'FAILED' : roots.some(failed) ? 'FAILED' : 'COMPLETED';
+	// fan-outの子の失敗は非致命(ADR-0035), ノード状態から中断は区別不能(ADR-0039)
+	const state: RunState = !done ? 'RUNNING' : cancelling ? 'CANCELLED' : aborted ? 'FAILED' : roots.some(failed) ? 'FAILED' : 'COMPLETED';
 
 	return { decisions, state };
 }

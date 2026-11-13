@@ -21,7 +21,7 @@ const message = ref<string | null>(null);
 const loading = ref(false);
 let loadSequence = 0;
 
-const { busy, canRetry, canCancel, goneReason, act, reset } = useJobActions(job);
+const { busy, canRetry, canCancel, retryHint, act, reset } = useJobActions(job);
 
 async function load(id: string) {
 	const sequence = ++loadSequence;
@@ -165,7 +165,7 @@ const DT = 'text-ink-muted';
 		</div>
 
 		<template v-if="job" #footer>
-			<button type="button" :class="button('secondary')" :disabled="busy || loading || !canRetry" :title="goneReason" @click="run('retry')">
+			<button type="button" :class="button('secondary')" :disabled="busy || loading || !canRetry" :title="retryHint" @click="run('retry')">
 				{{ t('common.retry') }}
 			</button>
 			<button

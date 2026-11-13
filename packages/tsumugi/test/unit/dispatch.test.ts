@@ -12,6 +12,7 @@ const policy = (over: Partial<Policy> = {}): Policy => ({
 	perKeyRate: null,
 	agingIntervalMs: null,
 	reaperGraceMs: 30_000,
+	queueWaitMs: 0,
 	...over,
 });
 
@@ -435,17 +436,17 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 			policy: policy(),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toEqual([{ type: 'stall', id: 'a' }]);
+		expect(out.decisions).toEqual([{ type: 'stall', id: 'a', attempts: 1 }]);
 	});
 
-	it('試行回数を使い切っていればFAILEDにする', () => {
+	it('最終試行の無応答で試行回数を使い切ればFAILEDにする', () => {
 		const out = planDispatch({
 			now: T0 + 90_000,
-			jobs: [dispatched({ id: 'a', attempts: 3, maxAttempts: 3 })],
+			jobs: [dispatched({ id: 'a', attempts: 2, maxAttempts: 3 })],
 			policy: policy(),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toEqual([{ type: 'fail', id: 'a', reason: 'exhausted' }]);
+		expect(out.decisions).toEqual([{ type: 'fail', id: 'a', reason: 'exhausted', attempts: 3 }]);
 	});
 
 	it('回収で空いた分は,同じtickで他のジョブが使える', () => {
@@ -467,6 +468,23 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	it('回収予定がなければ,次の無応答判定時刻に起動する', () => {
 		const out = planDispatch({ now: T0, jobs: [dispatched({ id: 'a' })], policy: policy(), bucket: unlimited });
 		expect(out.nextAlarmAt).toBe(T0 + 60_000 + 30_000);
+	});
+
+	it('実行が始まっていないQUEUEDのジョブはqueueWaitMsを加えた期限まで回収しない', () => {
+		const jobs = [dispatched({ id: 'a' })];
+		const waiting = policy({ queueWaitMs: 600_000 });
+
+		expect(planDispatch({ now: T0 + 600_000 + 90_000 - 1, jobs, policy: waiting, bucket: unlimited }).decisions).toEqual([]);
+		expect(planDispatch({ now: T0 + 600_000 + 90_000, jobs, policy: waiting, bucket: unlimited }).decisions).toEqual([
+			{ type: 'reap', id: 'a', attempts: 1 },
+		]);
+		expect(planDispatch({ now: T0, jobs, policy: waiting, bucket: unlimited }).nextAlarmAt).toBe(T0 + 600_000 + 90_000);
+	});
+
+	it('実行が始まったRUNNINGのジョブの期限にはqueueWaitMsを加えない', () => {
+		const jobs = [dispatched({ id: 'a', state: 'RUNNING', heartbeatAt: T0 + 40_000 })];
+		const out = planDispatch({ now: T0 + 40_000 + 90_000, jobs, policy: policy({ queueWaitMs: 600_000 }), bucket: unlimited });
+		expect(out.decisions).toEqual([{ type: 'reap', id: 'a', attempts: 1 }]);
 	});
 
 	it('RUNNING中に落ちたジョブが滞留しない', () => {
@@ -586,7 +604,7 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			policy: policy({ reaperGraceMs: 30_000 }),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toEqual([{ type: 'cancel', id: 'a' }]);
+		expect(out.decisions).toEqual([{ type: 'cancel', id: 'a', attempts: 1 }]);
 	});
 
 	it('期限切れが要求より優先される', () => {
@@ -597,7 +615,7 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			policy: policy({ reaperGraceMs: 30_000 }),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toEqual([{ type: 'expire', id: 'a' }]);
+		expect(out.decisions).toEqual([{ type: 'expire', id: 'a', attempts: 1 }]);
 	});
 
 	it('at-most-onceも試行回数の枯渇も要求があればcancelで終了する', () => {
@@ -605,13 +623,13 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			now: T0 + 60_000 + 30_000,
 			jobs: [
 				dispatched({ id: 'amo', guarantee: 'at-most-once', cancelRequestedAt: T0 }),
-				dispatched({ id: 'spent', attempts: 3, cancelRequestedAt: T0 }),
+				dispatched({ id: 'spent', attempts: 2, cancelRequestedAt: T0 }),
 			],
 			policy: policy(),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'amo' });
-		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'spent' });
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'amo', attempts: 1 });
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'spent', attempts: 3 });
 	});
 
 	it('要求済みのSCHEDULEDは投入せずcancelで終了する', () => {
@@ -633,7 +651,7 @@ describe('取り消し要求(#95 / ADR-0052)', () => {
 			policy: policy({ concurrency: 1, reaperGraceMs: 30_000 }),
 			bucket: unlimited,
 		});
-		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'busy' });
+		expect(out.decisions).toContainEqual({ type: 'cancel', id: 'busy', attempts: 1 });
 		expect(ids(out.decisions, 'dispatch')).toEqual(['next']);
 	});
 });

@@ -11,6 +11,7 @@ import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 interface RunFace extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown }): Promise<{ id: string; created: boolean }>;
 	notify(events: readonly NodeEvent[]): Promise<void>;
+	retry(): Promise<{ ok: boolean }>;
 }
 
 const namespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
@@ -123,6 +124,27 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
+	it('記録済みジョブIDを持つノードはwhenを再評価しない', async () => {
+		const runId = 'BRANCHED:when-reserved';
+		const jobId = 'Report#0:whenreserved';
+		await installQueues();
+		await runInDurableObject(runStub(runId), async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'BRANCHED', input: { prefix: 'wr', verbose: false } });
+			await inner.ctx.storage.deleteAlarm();
+			inner.repo.updateNode('list', { state: 'COMPLETED', result: JSON.stringify({ names: ['wr-1'] }) }, Date.now());
+			inner.repo.updateNode('detail', { jobId }, Date.now());
+			await inner.ctx.storage.setAlarm(Date.now());
+		});
+		await runDurableObjectAlarm(runStub(runId));
+		await settleRun(runId);
+
+		expect((await nodesOf(runId))['detail']).not.toBe('SKIPPED');
+		expect(await jobIdOf(runId, 'detail')).toBe(jobId);
+		const job = await runInDurableObject(shard('Report'), (instance) => (instance as any).repo.find(jobId) as { id: string } | undefined);
+		expect(job?.id).toBe(jobId);
+	});
+
 	it('上流が失敗すると後始末が通りrunはFAILEDのまま', async () => {
 		const runId = 'BRANCHED:ng';
 		const stub = runStub(runId);
@@ -146,4 +168,56 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 		expect(await errorOf(runId, 'detail')).toBe('a dependency did not succeed');
 		expect(await stateOf(runId)).toBe('FAILED');
 	});
+
+	it('失敗したrunの再開で後始末と監査を再実行する', async () => {
+		const runId = 'BRANCHED:retry-ng';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'BRANCHED', input: { prefix: 'rn', verbose: true } });
+		await failList(runId);
+		const cleanup = await jobIdOf(runId, 'cleanup');
+		const audit = await jobIdOf(runId, 'audit');
+
+		expect(await stub.retry()).toEqual({ ok: true });
+		expect(await nodesOf(runId)).toEqual({ list: 'PENDING', cleanup: 'PENDING', audit: 'PENDING', detail: 'PENDING' });
+
+		await failList(runId);
+		expect(await nodesOf(runId)).toEqual({ list: 'FAILED', cleanup: 'COMPLETED', audit: 'COMPLETED', detail: 'SKIPPED' });
+		expect(await jobIdOf(runId, 'cleanup')).not.toBe(cleanup);
+		expect(await jobIdOf(runId, 'audit')).not.toBe(audit);
+		expect(await stateOf(runId)).toBe('FAILED');
+	});
+
+	it('再開で子を持つfan-outのノードはCOMPLETEDのまま残る', async () => {
+		const runId = 'GREETINGS:retry-container';
+		await runInDurableObject(runStub(runId), async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'GREETINGS', input: { prefix: 'rc' } });
+			await inner.ctx.storage.deleteAlarm();
+			const now = Date.now();
+			inner.repo.insertNodes(
+				[{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 }],
+				now,
+			);
+			inner.repo.updateNode('list', { state: 'FAILED' }, now);
+			inner.repo.updateNode('greet', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('greet:0', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('report', { state: 'COMPLETED' }, now);
+			inner.repo.setRunState(runId, 'FAILED', now);
+			expect(await inner.retry()).toEqual({ ok: true });
+			await inner.ctx.storage.deleteAlarm();
+		});
+
+		expect(await nodesOf(runId)).toEqual({ list: 'PENDING', greet: 'COMPLETED', 'greet:0': 'COMPLETED', report: 'COMPLETED' });
+	});
 });
+
+async function failList(runId: string): Promise<void> {
+	await settleRun(runId);
+	await runDurableObjectAlarm(shard('ListNames'));
+	sent.length = 0;
+	const jobId = await jobIdOf(runId, 'list');
+	if (jobId === null) throw new Error('the first node has no job id');
+	await runStub(runId).notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'intentional failure' }]);
+	await settle(runId);
+}

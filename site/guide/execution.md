@@ -85,9 +85,21 @@ await tsumugi.enqueue(env, {
 `timeoutMs`を過ぎた試行は、失敗として扱われます。
 試行のエラーには、`TsumugiTimeoutError`(`job timed out (<jobId>, <timeoutMs>ms)`)が記録されます。
 タイムアウト後も、performerの実行は停止されません。
+そのため、`at-most-once`のジョブはタイムアウトで`STALLED`へ遷移し、試行回数が残っていても再試行されません。
 処理を中断する方法は、[タイムアウトによる中断](/guide/performer#タイムアウトによる中断)を参照してください。
 
-`QUEUED`または`RUNNING`のジョブは、実行開始(または最後の`heartbeat`)から`timeoutMs`と`reaperGraceMs`(既定30秒)を過ぎても試行結果が記録されない場合に無応答と判定されます。
+Cloudflare Queuesのconsumerの1回の呼び出しは、実行時間(wall time)が15分に制限されています。
+そのため、Tsumugiでは、consumerの呼び出しの開始から14分を過ぎた試行を、`timeoutMs`の経過前であってもタイムアウトとして失敗します。
+試行のエラーには`job exceeded the consumer wall time limit (<jobId>, 900000ms)`が記録されます。
+失敗した後の扱いは、`timeoutMs`によるタイムアウトと同様です。
+再試行は試行回数が残っている場合に行われますが、`at-most-once`のジョブは`STALLED`へ遷移し、再試行されません。
+また、`ctx.deadlineAt`は、この期限よりも後の時刻になりません。
+
+`RUNNING`のジョブは、実行開始(または最後の`heartbeat`)から`timeoutMs`と`reaperGraceMs`(既定30秒)を過ぎても試行結果が記録されない場合に無応答と判定されます。
+`QUEUED`のジョブは、Queuesへの送信から`queueWaitMs`(既定15分), `timeoutMs`, `reaperGraceMs`の合計を超過後も実行が開始されない場合に無応答と判定されます。
+`QUEUED`のジョブで`heartbeat`が記録されている場合、最後の`heartbeat`から`timeoutMs`と`reaperGraceMs`を過ぎた場合に無応答と判定されます。
+`queueWaitMs`は、Queuesにメッセージが滞留している間に実行が始まっていないジョブが無応答と判定されないための時間です。
+`queueWaitMs`の値を大きくすると、Queuesのメッセージが失われた場合に、ジョブが再投入されるまでの時間が長くなります。
 `at-most-once`のジョブは、試行回数に関係なく`STALLED`へ遷移します。
 `at-least-once`のジョブは、試行回数が上限に達していなければ再投入され、達していれば`FAILED`に遷移します。
 
@@ -174,6 +186,10 @@ curl -X POST -H "authorization: Bearer $TOKEN" -H 'content-type: application/jso
 await tsumugi.shardFor(env, 'MAIL').configure({ policy: { concurrency: 5 } });
 ```
 
+shard数が2以上のbindingでは、`shardFor`で取得するstubは、`partitionKey`で選ばれる1つのshardのstubです。
+`configure`による変更は、そのshardに限定して適用されます。
+すべてのshardに適用するには、ダッシュボードまたは[`POST /api/bindings/:binding/policy`](/reference/rest-api#post-apibindingsbindingpolicy)を使用してください。
+
 実行時に変更した設定は、`bindings`の設定より優先されます。
 その後は、`bindings`の設定は適用されません。
 `bindings`の設定に戻すには、[`POST /api/bindings/:binding/policy/reset`](/reference/rest-api#post-apibindingsbindingpolicyreset)を呼び出してください。
@@ -202,6 +218,10 @@ shard数を2以上にすると、`partitionKey`が必須になり、省略する
 `concurrencyKey`と`uniqueKey`による制御の範囲は、shard数によって異なります。
 shard数が1の場合、binding内のすべてのジョブが対象です。
 2以上の場合、`partitionKey`で選ばれる同じshardのジョブに限られます。
+
+[実行量の制限](#実行量の制限)の`concurrency`と`rate`も、shardごとに適用されます。
+binding全体で同時に実行されるジョブ数の上限は`concurrency`の値にshard数を掛けた値です。
+`rate`の上限は、`rate`の値にshard数を掛けた値です。
 
 `concurrencyKey`または`uniqueKey`を使用する場合は、`partitionKey`にも同じキーを指定してください。
 異なる値を設定してもエラーにはなりませんが、同じキーを持つジョブが別々のshardに割り当てられる可能性があります。

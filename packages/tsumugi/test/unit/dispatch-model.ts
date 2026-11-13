@@ -13,7 +13,7 @@ export function expectedDispatchIds(input: DispatchInput): string[] {
 			.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && j.dispatchedAt !== null)
 			.filter(
 				(j) =>
-					now >= j.dispatchedAt! + j.timeoutMs + policy.reaperGraceMs ||
+					now >= j.dispatchedAt! + (j.state === 'QUEUED' ? policy.queueWaitMs : 0) + j.timeoutMs + policy.reaperGraceMs ||
 					(j.cancelRequestedAt !== null && now >= j.cancelRequestedAt + policy.reaperGraceMs),
 			)
 			.map((j) => j.id),

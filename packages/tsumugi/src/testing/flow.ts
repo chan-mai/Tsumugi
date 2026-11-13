@@ -42,11 +42,10 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 	const fails = new Set(options.fails ?? []);
 	const definitions = new Map(flow.nodes.map((node) => [node.id, node]));
 
-	const views: NodeView[] = shapeOf(flow).map((node) => ({
+	const views: NodeView[] = shapeOf(flow, () => 'simulated').map((node) => ({
 		id: node.id,
 		state: 'PENDING',
 		container: node.container,
-		// 子のrunを起動するsubflowノードは対象外
 		subflow: false,
 		parent: null,
 		origin: 'static',
@@ -101,7 +100,8 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 					const payload = child ? child.payload : definition?.input(input, depsOf(definition));
 					const base = { id: view.id, binding, payload, parent: view.parent };
 					const failed = fails.has(view.id);
-					settle(view, base, failed ? 'FAILED' : 'COMPLETED', failed ? undefined : resultOf(options.results, base));
+					const result = failed || definition?.subflow ? undefined : resultOf(options.results, base);
+					settle(view, base, failed ? 'FAILED' : 'COMPLETED', result);
 					break;
 				}
 

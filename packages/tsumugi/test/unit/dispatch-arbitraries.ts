@@ -68,6 +68,7 @@ const policy: fc.Arbitrary<Policy> = fc.record({
 	// effectivePriorityの<=0分岐も実行
 	agingIntervalMs: fc.oneof(fc.constant(null), fc.integer({ min: -1, max: 600_000 })),
 	reaperGraceMs: fc.integer({ min: 0, max: 60_000 }),
+	queueWaitMs: fc.integer({ min: 0, max: 600_000 }),
 });
 
 const bucket: fc.Arbitrary<Bucket> = fc.oneof(

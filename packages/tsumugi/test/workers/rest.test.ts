@@ -306,6 +306,7 @@ describe('REST API', () => {
 		expect((await post({ perKeyRate: { tokens: 1, intervalMs: 0 } })).status).toBe(400);
 		expect((await post({ perKeyRate: 5 })).status).toBe(400);
 		expect((await post({ agingIntervalMs: 0 })).status).toBe(400);
+		expect((await post({ queueWaitMs: -1 })).status).toBe(400);
 		// 変更項目なしは誤用扱い
 		expect((await post({})).status).toBe(400);
 		expect((await post({ paused: true }, 'NOPE')).status).toBe(404);
@@ -313,6 +314,7 @@ describe('REST API', () => {
 		expect((await post({ concurrency: 0 })).status).toBe(200);
 		expect((await post({ rate: null, agingIntervalMs: null })).status).toBe(200);
 		expect((await post({ perKeyRate: null })).status).toBe(200);
+		expect((await post({ queueWaitMs: 0 })).status).toBe(200);
 
 		// 変更はshardに残存, 後続テスト前に破棄
 		await withAuth.fetch!(
@@ -541,6 +543,12 @@ describe('ジョブの投入', () => {
 	it('未登録のbindingは400', async () => {
 		const res = await post({ binding: 'NOPE', payload: {} });
 		expect(res.status).toBe(400);
+	});
+
+	it('上限を超えるpayloadは400', async () => {
+		const res = await post({ binding: 'REST', payload: { text: 'x'.repeat(130_000) } });
+		expect(res.status).toBe(400);
+		expect((await res.json<{ error: string }>()).error).toContain('payload is too large');
 	});
 
 	it('壊れたJSONは400', async () => {
@@ -966,13 +974,13 @@ describe('一括リトライと一括取り消し', () => {
 		);
 
 	// DO側の状態判定込みでFAILEDジョブ作成
-	async function failedJob(): Promise<string> {
+	async function failedJob(run?: { runId: string; nodeId: string }): Promise<string> {
 		const stub = shard('REST#0');
 		await runInDurableObject(stub, (instance) => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 		});
-		const jobId = await stub.enqueue({ binding: 'REST', payload: {}, maxAttempts: 1 });
+		const jobId = await stub.enqueue({ binding: 'REST', payload: {}, maxAttempts: 1, ...run });
 		await runDurableObjectAlarm(stub);
 		await stub.report(jobId, { ok: false, error: 'intentional failure' });
 		await runDurableObjectAlarm(stub);
@@ -1056,6 +1064,35 @@ describe('一括リトライと一括取り消し', () => {
 
 		await runDurableObjectAlarm(shard('REST#0'));
 		expect(await stateOf(jobId)).not.toBe('FAILED');
+	});
+
+	it('runのジョブは個別リトライを409で拒否する(ADR-0034)', async () => {
+		const jobId = await failedJob({ runId: 'NORUN:single', nodeId: 'list' });
+
+		const res = await withAuth.fetch!(
+			new Request(`https://example.com/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST', headers: authorized }),
+			env as RestEnv,
+			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+		);
+		expect(res.status).toBe(409);
+		expect((await res.json<{ error: string }>()).error).toContain('resume the run');
+		const bulk = await post('retry', { ids: [jobId] });
+		expect(await bulk.json()).toEqual({
+			ok: [],
+			failed: [{ id: jobId, reason: 'in-run' }],
+			remaining: 0,
+		});
+		expect(await stateOf(jobId)).toBe('FAILED');
+	});
+
+	it('条件指定のbulk-retryはrunのジョブを対象にしない', async () => {
+		const jobId = await failedJob({ runId: 'NORUN:bulk', nodeId: 'list' });
+
+		const res = await post('retry', { binding: 'REST' });
+		const body = await res.json<{ ok: string[]; failed: { id: string }[]; remaining: number }>();
+		expect(body.ok).not.toContain(jobId);
+		expect(body.failed.map((f) => f.id)).not.toContain(jobId);
+		expect(body.remaining).toBe(0);
 	});
 
 	it('上限を超えた分を残り件数として返す', async () => {

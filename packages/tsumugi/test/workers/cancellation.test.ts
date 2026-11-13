@@ -233,6 +233,42 @@ describe('取り消し要求(#95)', () => {
 		expect(calls).toBe(1);
 	});
 
+	it('PENDINGノードがジョブIDを持つときrun取り消しでJob DOのジョブが取り消される', async () => {
+		await install('CX11#0');
+		await setClock('CX11#0', T0);
+		const jobId = await shard('CX11#0').enqueue({ binding: 'CX11', payload: {}, delayMs: 60_000 });
+		const runNamespace = env.RUN as unknown as DurableObjectNamespace<Rpc.DurableObjectBranded>;
+		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:cancel-pending'));
+		const states = await runInDurableObject(run as never, async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cancel-pending' } });
+			await inner.ctx.storage.deleteAlarm();
+			inner.repo.updateNode('list', { jobId }, T0);
+			await inner.cancel();
+			for (let i = 0; i < 3; i++) await inner.alarm();
+			return { node: inner.repo.findNode('list')?.state, run: inner.repo.findRun()?.state };
+		});
+
+		expect(states).toEqual({ node: 'CANCELLED', run: 'CANCELLED' });
+		expect((await rowOf('CX11#0', jobId))?.state).toBe('CANCELLED');
+	});
+
+	it('Job DOのジョブ不存在時、run取り消しでノードとrunがCANCELLEDになる', async () => {
+		const runNamespace = env.RUN as unknown as DurableObjectNamespace<Rpc.DurableObjectBranded>;
+		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:cancel-gone'));
+		const states = await runInDurableObject(run as never, async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cancel-gone' } });
+			await inner.ctx.storage.deleteAlarm();
+			inner.repo.updateNode('list', { jobId: 'CX12#0:missing00000000000000000' }, T0);
+			await inner.cancel();
+			for (let i = 0; i < 3; i++) await inner.alarm();
+			return { node: inner.repo.findNode('list')?.state, run: inner.repo.findRun()?.state };
+		});
+
+		expect(states).toEqual({ node: 'CANCELLED', run: 'CANCELLED' });
+	});
+
 	it('確定したCANCELLEDは終端の通知(onSettled)の対象になる', async () => {
 		const jobId = await queued('CX10#0');
 		await shard('CX10#0').configure({ settled: { binding: 'CXNOTIFY', states: ['CANCELLED'] } });

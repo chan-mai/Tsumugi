@@ -28,6 +28,6 @@ export type ServiceOptions<Env extends ServiceEnv> = {
 
 export type Unavailable = { ok: false; reason: 'unavailable' };
 
-export type MutationOutcome = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' | 'invalid-id' };
+export type MutationOutcome = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' | 'in-run' | 'invalid-id' };
 
 export type Retryable<T> = T & { retryable: boolean };

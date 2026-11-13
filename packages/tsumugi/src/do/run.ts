@@ -14,6 +14,7 @@ import {
 	shapeOf,
 } from '../core/flow.js';
 import { formatJobId, formatRunId, parseRunId, shardNameOf } from '../core/ids.js';
+import { assertPayloadSize } from '../core/message.js';
 import {
 	advance,
 	isNodeTerminal,
@@ -30,7 +31,7 @@ import { systemClock, type Clock } from './clock.js';
 import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
 import type { NodeRow, RunRow } from './run-schema.js';
-import { deadlineErrorOf, RunRepo, type NewNode } from './run-repo.js';
+import { abortErrorOf, abortErrorsOf, RunRepo, type NewNode } from './run-repo.js';
 
 export type RunEnv = ClientEnv & {
 	TSUMUGI_DB: D1Database;
@@ -90,12 +91,16 @@ export interface RunNotifyStub extends Rpc.DurableObjectBranded {
 	notify(events: readonly NodeEvent[]): Promise<void>;
 }
 
+export type RetryOptions = {
+	cancelled?: boolean;
+};
+
 // 型展開過多の回避で使用分のみ宣言
 export interface RunLifecycleStub extends Rpc.DurableObjectBranded {
 	start(input: StartInput): Promise<StartResult>;
 	state(): Promise<RunState | null>;
 	cancel(): Promise<MutationResult>;
-	retry(): Promise<MutationResult>;
+	retry(options?: RetryOptions): Promise<MutationResult>;
 	notifyChild(nodeId: string, childRunId: string, state: RunState): Promise<void>;
 }
 
@@ -107,7 +112,7 @@ export interface TsumugiRunInstance extends Rpc.DurableObjectBranded {
 	notify(events: readonly NodeEvent[]): Promise<void>;
 	notifyChild(nodeId: string, childRunId: string, state: RunState): Promise<void>;
 	cancel(): Promise<MutationResult>;
-	retry(): Promise<MutationResult>;
+	retry(options?: RetryOptions): Promise<MutationResult>;
 	state(): Promise<RunState | null>;
 	alarm(): Promise<void>;
 }
@@ -220,7 +225,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const now = this.clock.now();
 			const runId = this.runId;
 			// 削除後の通知は破棄, 再作成では保持期間が無意味
-			if (!this.repo.findRun()) return;
+			const run = this.repo.findRun();
+			if (!run) return;
+			// 中断中の取り消しは未投入ノード同様に中断理由で記録
+			const abortError = abortErrorOf(run);
 
 			const touched: string[] = [];
 			for (const event of events) {
@@ -237,9 +245,11 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				// 子の作成失敗時は親をFAILED, 成功扱いでは下流が子の完了前に実行
 				this.repo.updateNode(
 					event.nodeId,
-					spawned.error === null
-						? { state: event.state, result: event.result, error: event.error }
-						: { state: 'FAILED', error: spawned.error },
+					spawned.error !== null
+						? { state: 'FAILED', error: spawned.error }
+						: event.state === 'CANCELLED' && abortError !== null
+							? { state: 'FAILED', error: abortError }
+							: { state: event.state, result: event.result, error: event.error },
 					now,
 				);
 				touched.push(event.nodeId);
@@ -286,14 +296,15 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			return { ok: true };
 		}
 
-		async retry(): Promise<MutationResult> {
+		async retry(options: RetryOptions = {}): Promise<MutationResult> {
 			const now = this.clock.now();
 			const row = this.repo.findRun();
 			if (!row) return { ok: false, reason: 'gone' };
-			if (row.state !== 'FAILED') return { ok: false, reason: 'invalid-state' };
+			if (row.state !== 'FAILED' && !(options.cancelled === true && row.state === 'CANCELLED')) {
+				return { ok: false, reason: 'invalid-state' };
+			}
 
-			const aborted = row.expired === 1 && row.cancelling === 0 ? deadlineErrorOf(row.deadline_ms) : null;
-			const reset = this.repo.resetForRetry(now, aborted);
+			const reset = this.repo.resetForRetry(now, abortErrorsOf(row), row.state === 'CANCELLED');
 			this.#cancelSent.clear();
 			this.repo.appendRunOutbox();
 			this.repo.appendNodeOutbox(row.id, reset);
@@ -342,13 +353,11 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const cancelling = runRow.cancelling === 1;
 			// 期限超過は取り消しと同手順で中断(ADR-0039)
 			// 超過フラグはRUNNING中に一度だけ永続化, 毎tick時計判定では決着済みrunがFAILEDへ反転
-			let expired = runRow.expired === 1;
-			if (!expired && runRow.state === 'RUNNING' && runRow.deadline_at !== null && runRow.deadline_at <= now) {
+			if (runRow.expired === 0 && runRow.state === 'RUNNING' && runRow.deadline_at !== null && runRow.deadline_at <= now) {
 				this.repo.markExpired(runRow.id, now);
-				expired = true;
 			}
-			// 中断ノードの理由, runに理由の列なし, 取り消しはCANCELLEDのまま
-			const deadlineError = expired && !cancelling ? deadlineErrorOf(runRow.deadline_ms) : null;
+			// 上限超過はtick中にも記録, 判断ごとに再読み取り
+			const abortErrorNow = () => abortErrorOf(this.repo.findRun() ?? runRow);
 
 			const touched = new Set<string>();
 			const inputs: EnqueueInput[] = [];
@@ -362,7 +371,8 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			// 中断の連鎖はadvance1回で1段のみ, 新規決定が無くなるまで反復
 			for (let round = 0; round < ADVANCE_ROUNDS; round++) {
-				const output = advance({ nodes: this.repo.views(), cancelling, expired });
+				const abortError = abortErrorNow();
+				const output = advance({ nodes: this.repo.views(), cancelling, aborted: abortError !== null });
 				const fresh = output.decisions.filter((decision) => !handled.has(decision.id));
 				if (fresh.length === 0) break;
 
@@ -384,7 +394,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 						starting,
 						subflows,
 						waiting,
-						deadlineError,
+						abortError,
 					});
 					for (const id of applied) touched.add(id);
 				}
@@ -393,7 +403,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			for (const id of await this.#startPending(runRow, inputs, starting, subflows, now)) touched.add(id);
 
 			// 決定反映後の内容で状態決定, 反映前では1tick前の状態を投影
-			const settled = advance({ nodes: this.repo.views(), cancelling, expired });
+			const settled = advance({ nodes: this.repo.views(), cancelling, aborted: abortErrorNow() !== null });
 			if (settled.state !== runRow.state) {
 				this.repo.setRunState(runRow.id, settled.state, now);
 				this.repo.appendRunOutbox();
@@ -404,7 +414,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			this.repo.appendNodeOutbox(runRow.id, [...touched]);
 
 			const projected = await this.#project();
-			const notified = await this.#notifyParent(settled.state, now);
+			const notified = await this.#notifyParent(now);
 			if (notified && (await this.#sweep(now))) return;
 
 			// 通知待ちノードの決定は除外, 次の起動はnotify(ADR-0052)
@@ -426,7 +436,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			if (runRow.state === 'RUNNING') this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
 			const projected = await this.#project();
 			// 親への通知と削除は通常の決着と同手順, 省略時は親ノードとDOが残存
-			const notified = await this.#notifyParent(this.repo.findRun()?.state as RunState, now);
+			const notified = await this.#notifyParent(now);
 			if (notified && (await this.#sweep(now))) return;
 			if (projected >= PROJECTION_LIMIT || this.repo.hasOutbox()) await this.#armAlarm(now);
 			else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
@@ -486,15 +496,19 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				starting: string[];
 				subflows: SubflowStart[];
 				waiting: Set<string>;
-				deadlineError: string | null;
+				abortError: string | null;
 			},
 		): Promise<string[]> {
-			const { definitions, runInput, runId, now, inputs, starting, subflows, waiting, deadlineError } = context;
+			const { definitions, runInput, runId, now, inputs, starting, subflows, waiting, abortError } = context;
 			const row = this.repo.findNode(decision.id);
 			if (!row) return [];
 
 			// 起動直前に判定, 依存の戻り値が揃う時点(ADR-0041)
-			if (decision.type === 'start' || decision.type === 'startRun' || decision.type === 'expand') {
+			if (
+				(decision.type === 'start' || decision.type === 'startRun' || decision.type === 'expand') &&
+				row.job_id === null &&
+				row.child_run_id === null
+			) {
 				const gate = this.#gate(row, definitions, runInput, now);
 				if (gate !== null) return gate;
 			}
@@ -547,7 +561,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 				case 'aggregate': {
 					// fan-outノードはジョブなし, 戻り値は子の成否集計(ADR-0035)
-					this.repo.updateNode(row.id, { state: 'COMPLETED', result: JSON.stringify(this.repo.childSummary(row.id)) }, now);
+					this.repo.updateNode(row.id, { state: 'COMPLETED', result: JSON.stringify(decision.summary) }, now);
 					return [row.id];
 				}
 
@@ -557,17 +571,22 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					return [row.id];
 
 				case 'cancel': {
-					const terminal =
-						deadlineError !== null ? ({ state: 'FAILED', error: deadlineError } as const) : ({ state: 'CANCELLED' } as const);
+					const terminal = abortError !== null ? ({ state: 'FAILED', error: abortError } as const) : ({ state: 'CANCELLED' } as const);
 					if (row.child_run_id !== null) {
 						// 子のcancelは要求受理のみ, 終端は子からの通知で確定
 						const key = `${row.id}:${row.child_run_id}`;
-						if (!this.#cancelSent.has(key)) await this.#runStub(row.child_run_id).cancel();
+						if (!this.#cancelSent.has(key)) {
+							const result = await this.#runStub(row.child_run_id).cancel();
+							if (!result.ok && result.reason === 'gone') {
+								this.repo.updateNode(row.id, terminal, now);
+								return [row.id];
+							}
+						}
 						this.#cancelSent.add(key);
 						waiting.add(row.id);
 						return [];
 					}
-					if (row.job_id === null || row.state === 'PENDING') {
+					if (row.job_id === null) {
 						this.repo.updateNode(row.id, terminal, now);
 						return [row.id];
 					}
@@ -578,6 +597,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					}
 					// QUEUED以降は協調的取り消しの要求のみ, 終端はジョブの通知で確定(ADR-0052)
 					const result = await this.#jobStub(row.job_id).cancel(row.job_id);
+					if (!result.ok && result.reason === 'gone') {
+						this.repo.updateNode(row.id, terminal, now);
+						return [row.id];
+					}
 					if (!result.ok || result.requested) {
 						this.#cancelSent.add(key);
 						waiting.add(row.id);
@@ -599,7 +622,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			const items = this.#evaluate(row, 'over', now, () => definition.over!(runInput, this.#depsOf(definition)));
 			if (!items.ok) return [row.id];
-			const exceeded = this.#nodeLimitError(items.value.length);
+			const exceeded = this.#nodeLimitError(items.value.length, now);
 			if (exceeded) {
 				this.repo.updateNode(row.id, { state: 'FAILED', error: exceeded }, now);
 				return [row.id];
@@ -636,11 +659,6 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		// 作成不可は例外でなく理由を返却, 例外では通知滞留
 		#applySpawns(parentId: string, spawns: readonly SpawnRequest[], now: number): { ids: string[]; error: string | null } {
 			if (spawns.length === 0) return { ids: [], error: null };
-			const exceeded = this.#nodeLimitError(spawns.length);
-			if (exceeded) return { ids: [], error: exceeded };
-			const invalid = spawns.find((spawn) => !isNodeId(spawn.id));
-			if (invalid) return { ids: [], error: `invalid spawn id: ${JSON.stringify(invalid.id)}` };
-
 			const children = this.#childNodes(
 				parentId,
 				'spawn',
@@ -649,13 +667,23 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					return { key: spawn.id, binding: spawn.binding, payload: spawn.payload, job, concurrencyKey };
 				}),
 			);
+			const ids = [...new Set(children.map((child) => child.id))];
+			const existing = this.repo.existingNodeIds(ids);
+			const exceeded = this.#nodeLimitError(ids.length - existing.size, now);
+			if (exceeded) return { ids: [], error: exceeded };
+			const invalid = spawns.find((spawn) => !isNodeId(spawn.id));
+			if (invalid) return { ids: [], error: `invalid spawn id: ${JSON.stringify(invalid.id)}` };
 
 			this.repo.insertNodes(children, now);
-			return { ids: children.map((child) => child.id), error: null };
+			return { ids, error: null };
 		}
 
-		#nodeLimitError(adding: number): string | null {
-			return this.repo.countNodes() + adding > maxNodes ? `node count exceeded the limit: ${maxNodes}` : null;
+		// 超過時はrun全体を中断(ADR-0035)
+		#nodeLimitError(adding: number, now: number): string | null {
+			if (this.repo.countNodes() + adding <= maxNodes) return null;
+			const error = `node count exceeded the limit: ${maxNodes}`;
+			this.repo.markAborted(this.runId, error, now);
+			return error;
 		}
 
 		#childNodes(parent: string, origin: 'fanOut' | 'spawn', specs: readonly ChildSpec[]): NewNode[] {
@@ -674,8 +702,11 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		}
 
 		#buildJob(row: NodeRow, definitions: Map<string, FlowNode>, runInput: unknown): BuiltJob | null {
+			// 投入時の例外ではtickが毎回同じ位置で停止
 			if (row.payload !== null) {
-				return { payload: JSON.parse(row.payload), ...(JSON.parse(row.options ?? '{}') as NodeJobOptions) };
+				const payload: unknown = JSON.parse(row.payload);
+				assertPayloadSize(payload);
+				return { payload, ...(JSON.parse(row.options ?? '{}') as NodeJobOptions) };
 			}
 
 			const definition = definitions.get(row.id);
@@ -683,8 +714,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const deps = this.#depsOf(definition);
 			const concurrencyKey =
 				typeof definition.concurrencyKey === 'function' ? definition.concurrencyKey(runInput, deps) : definition.concurrencyKey;
+			const payload = definition.input(runInput, deps);
+			assertPayloadSize(payload);
 			return {
-				payload: definition.input(runInput, deps),
+				payload,
 				...definition.job,
 				...(concurrencyKey === undefined ? {} : { concurrencyKey }),
 			};
@@ -726,19 +759,21 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		// 終端済み子runは通知済みで再通知なし(ADR-0034)
 		async #resumeChild(stub: DurableObjectStub<RunLifecycleStub>, nodeId: string, now: number): Promise<boolean> {
 			const state = await stub.state();
-			if (state === 'FAILED') {
-				await stub.retry();
+			// CANCELLEDも再開
+			if (state === 'FAILED' || state === 'CANCELLED') {
+				await stub.retry({ cancelled: true });
 				return false;
 			}
-			if (state !== 'COMPLETED' && state !== 'CANCELLED') return false;
+			if (state !== 'COMPLETED') return false;
 			this.repo.updateNode(nodeId, { state }, now);
 			return true;
 		}
 
 		// 親なし, 非終端のrunはtrue(削除の阻害理由なし)
-		async #notifyParent(state: RunState, now: number): Promise<boolean> {
+		async #notifyParent(now: number): Promise<boolean> {
 			const row = this.repo.findRun();
 			if (!row || row.parent_run_id === null || row.parent_node_id === null) return true;
+			const state = row.state as RunState;
 			if (state === 'RUNNING') return true;
 			if (row.parent_notified === 1) return true;
 
@@ -748,7 +783,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				console.error('tsumugi: notifyParent failed', error);
 				return false;
 			}
-			this.repo.markParentNotified(row.id, now);
+			this.repo.markParentNotified(row.id, state, now);
 			return true;
 		}
 

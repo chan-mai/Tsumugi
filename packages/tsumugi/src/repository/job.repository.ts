@@ -179,6 +179,8 @@ export class JobReadRepository implements JobRepository {
 				inList('state', states),
 				action === 'cancel' ? condition('cancel_requested_at IS NULL') : undefined,
 				action === 'retry' ? retainedClause(retention, binding, now) : undefined,
+				// DOで拒否される行, 残すとremainingが減少せず
+				action === 'retry' ? condition('run_id IS NULL') : undefined,
 				...filtersOf(filter),
 			),
 		);

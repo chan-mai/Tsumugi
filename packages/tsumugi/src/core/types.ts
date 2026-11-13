@@ -22,6 +22,7 @@ export type JobView = {
 	createdAt: number;
 	/** QUEUEDへの遷移時刻, SCHEDULEDならnull */
 	dispatchedAt: number | null;
+	/** 実行開始/最終heartbeat時刻 */
 	heartbeatAt: number | null;
 	guarantee: DeliveryGuarantee;
 	timeoutMs: number;
@@ -43,6 +44,7 @@ export type Policy = {
 	agingIntervalMs: number | null;
 	/** timeoutMs経過後の回収猶予 */
 	reaperGraceMs: number;
+	queueWaitMs: number;
 };
 
 /** 失敗通知のpayload(#30), ジョブ明細は読み取りモデルから取得 */
@@ -95,15 +97,15 @@ export type KeyBuckets = Record<string, Bucket>;
 export type Decision =
 	| { type: 'dispatch'; id: string }
 	/** 期限切れでCANCELLEDへ, 無応答のQUEUED, RUNNINGも対象(ADR-0047) */
-	| { type: 'expire'; id: string }
+	| { type: 'expire'; id: string; attempts?: number }
 	/** 無応答のat-least-onceジョブの再投入, SCHEDULEDへ */
 	| { type: 'reap'; id: string; attempts: number }
 	/** 無応答のat-most-onceジョブ, 再投入せずSTALLEDへ */
-	| { type: 'stall'; id: string }
+	| { type: 'stall'; id: string; attempts: number }
 	/** 無応答かつ試行回数の枯渇, FAILEDへ */
-	| { type: 'fail'; id: string; reason: 'exhausted' }
+	| { type: 'fail'; id: string; reason: 'exhausted'; attempts: number }
 	/** 取り消し要求済み(#95), 実行や再投入をせずCANCELLEDへ */
-	| { type: 'cancel'; id: string };
+	| { type: 'cancel'; id: string; attempts?: number };
 
 export type DispatchInput = {
 	now: number;

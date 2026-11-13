@@ -150,7 +150,7 @@ describe('有効期限(ADR-0047)', () => {
 		expect(sent).toHaveLength(1);
 
 		// 報告なしでreaper判定時刻と期限を経過
-		await install('EXPG', fixedClock(T0 + 40_000), queue);
+		await install('EXPG', fixedClock(T0 + 15 * 60_000 + 40_000), queue);
 		await runDurableObjectAlarm(shard('EXPG'));
 
 		expect(await stateOf('EXPG', jobId)).toBe('CANCELLED');

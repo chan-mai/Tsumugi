@@ -119,7 +119,7 @@ export function validatePolicy(body: unknown): { input: UpdatePolicyInput } | { 
 	}
 
 	// 0は投入停止指定として有効, 負数, 小数のみ拒否
-	for (const name of ['concurrency', 'perKeyConcurrency', 'reaperGraceMs'] as const) {
+	for (const name of ['concurrency', 'perKeyConcurrency', 'reaperGraceMs', 'queueWaitMs'] as const) {
 		if (!(name in raw)) continue;
 		const value = raw[name];
 		if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return { error: `${name} must be a non-negative integer` };

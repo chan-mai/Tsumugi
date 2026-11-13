@@ -8,8 +8,11 @@ export function effectivePriority(job: JobView, now: number, agingIntervalMs: nu
 // heartbeat起点, 所要時間可変ジョブのtimeoutMs延長不要
 function silenceDeadline(job: JobView, policy: Policy): number | null {
 	if (job.dispatchedAt === null) return null;
-	const since = job.heartbeatAt === null ? job.dispatchedAt : Math.max(job.dispatchedAt, job.heartbeatAt);
-	return since + job.timeoutMs + policy.reaperGraceMs;
+	if (job.heartbeatAt === null) {
+		const waiting = job.state === 'QUEUED' ? policy.queueWaitMs : 0;
+		return job.dispatchedAt + waiting + job.timeoutMs + policy.reaperGraceMs;
+	}
+	return Math.max(job.dispatchedAt, job.heartbeatAt) + job.timeoutMs + policy.reaperGraceMs;
 }
 
 // 無応答判定より先に到来し得る(#95)
@@ -66,19 +69,20 @@ export function planDispatch(input: DispatchInput): DispatchOutput {
 		if (deadline === null || now < deadline) continue;
 
 		reaped.add(job.id);
+		const attempts = job.attempts + 1;
 		if (job.expiresAt !== null && now >= job.expiresAt) {
 			// 期限切れは回収せず終了, consumer報告失敗時の回復経路(ADR-0047)
-			decisions.push({ type: 'expire', id: job.id });
+			decisions.push({ type: 'expire', id: job.id, attempts });
 		} else if (job.cancelRequestedAt !== null) {
 			// 回収せず終了, 再投入と人手判断待ちは要求意図と不一致(#95)
-			decisions.push({ type: 'cancel', id: job.id });
+			decisions.push({ type: 'cancel', id: job.id, attempts });
 		} else if (job.guarantee === 'at-most-once') {
 			// 二重実行の恐れある再投入は人手判断(ADR-0006, ADR-0007)
-			decisions.push({ type: 'stall', id: job.id });
-		} else if (job.attempts >= job.maxAttempts) {
-			decisions.push({ type: 'fail', id: job.id, reason: 'exhausted' });
+			decisions.push({ type: 'stall', id: job.id, attempts });
+		} else if (attempts >= job.maxAttempts) {
+			decisions.push({ type: 'fail', id: job.id, reason: 'exhausted', attempts });
 		} else {
-			decisions.push({ type: 'reap', id: job.id, attempts: job.attempts + 1 });
+			decisions.push({ type: 'reap', id: job.id, attempts });
 		}
 	}
 

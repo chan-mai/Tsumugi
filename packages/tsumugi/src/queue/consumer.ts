@@ -104,6 +104,18 @@ export class TsumugiTimeoutError extends Error {
 	}
 }
 
+const CONSUMER_WALL_TIME_MS = 15 * 60_000;
+// 失敗報告とackの時間
+const WALL_TIME_MARGIN_MS = 60_000;
+
+// timeout扱い, at-most-onceはSTALLED(ADR-0007)
+class TsumugiWallTimeError extends TsumugiTimeoutError {
+	constructor(jobId: string, wallTimeMs: number) {
+		super(jobId, wallTimeMs);
+		this.message = `job exceeded the consumer wall time limit (${jobId}, ${wallTimeMs}ms)`;
+	}
+}
+
 function shardStub<Env extends ConsumerEnv>(env: Env, jobId: string): DurableObjectStub<TsumugiJobShard> {
 	return env.JOB_SHARD.get(env.JOB_SHARD.idFromName(shardNameOf(jobId)));
 }
@@ -111,21 +123,33 @@ function shardStub<Env extends ConsumerEnv>(env: Env, jobId: string): DurableObj
 // timeoutでの待機終了, performer実行自体は停止不可(ADR-0037)
 // 中断が必要なperformerは`ctx.deadlineAt`から自前でAbortSignal作成
 // `touch`は期限再計測, 生存報告受理ごとに呼びDO側reaper期限と起点を同期
-function withTimeout<T>(jobId: string, timeoutMs: number, run: (touch: () => void) => Promise<T>): Promise<T> {
-	if (timeoutMs <= 0) return run(() => {});
-
+// heartbeatでも`wall.deadline`は延長なし
+function withTimeout<T>(
+	jobId: string,
+	timeoutMs: number,
+	wall: { deadline: number; limitMs: number },
+	run: (touch: () => void) => Promise<T>,
+): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
 		let fired = false;
-		const fire = () => {
-			fired = true;
-			reject(new TsumugiTimeoutError(jobId, timeoutMs));
+		const arm = () => {
+			const now = Date.now();
+			const byWall = timeoutMs <= 0 || now + timeoutMs > wall.deadline;
+			const delay = byWall ? wall.deadline - now : timeoutMs;
+			return setTimeout(
+				() => {
+					fired = true;
+					reject(byWall ? new TsumugiWallTimeError(jobId, wall.limitMs) : new TsumugiTimeoutError(jobId, timeoutMs));
+				},
+				Math.max(0, delay),
+			);
 		};
-		let timer = setTimeout(fire, timeoutMs);
+		let timer = arm();
 		const touch = () => {
 			// 中断後の再計測は無視, 遅延した受理による期限復活防止
 			if (fired) return;
 			clearTimeout(timer);
-			timer = setTimeout(fire, timeoutMs);
+			timer = arm();
 		};
 		run(touch).then(
 			(value) => {
@@ -154,19 +178,28 @@ export async function handleBatch<Env extends ConsumerEnv>(
 	batch: MessageBatch<DispatchMessage>,
 	env: Env,
 	exports: PerformerSource = {},
+	wallTimeMs: number = CONSUMER_WALL_TIME_MS,
 ): Promise<void> {
-	const results = await Promise.allSettled(batch.messages.map((message) => handleOne(message, env, exports)));
+	const wall = { deadline: Date.now() + wallTimeMs - Math.min(WALL_TIME_MARGIN_MS, wallTimeMs / 2), limitMs: wallTimeMs };
+	const results = await Promise.allSettled(batch.messages.map((message) => handleOne(message, env, exports, wall)));
 	// 漏れた例外は再送出せずログのみ, 再送出は未ackでQueuesリトライ発生(ADR-0004)
 	for (const result of results) {
 		if (result.status === 'rejected') console.error('tsumugi: handleOne rejected', result.reason);
 	}
 }
 
-async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessage>, env: Env, exports: PerformerSource): Promise<void> {
+async function handleOne<Env extends ConsumerEnv>(
+	message: Message<DispatchMessage>,
+	env: Env,
+	exports: PerformerSource,
+	wall: { deadline: number; limitMs: number },
+): Promise<void> {
 	// 報告先特定用jobIdをtry外で保持, 本文不正時は未取得
 	let jobId: string | undefined;
+	let reportedAttempt: number | undefined;
 	let ok = false;
 	let failure: string | undefined;
+	let timedOut = false;
 	let result: unknown;
 	const spawns: SpawnRequest[] = [];
 	let fail: FailOptions | undefined;
@@ -178,6 +211,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
 		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt, traceparent } = body;
+		reportedAttempt = attempt;
 
 		// 期限切れは非実行, 滞留解消時の一括実行防止(ADR-0047)
 		// 報告失敗時はreaperが期限切れとしてCANCELLEDへ遷移
@@ -191,7 +225,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 			return;
 		}
 
-		if (claimRequired && !(await shardStub(env, jobId).claim(jobId))) {
+		if (claimRequired && !(await shardStub(env, jobId).claim(jobId, attempt))) {
 			// 重複配送で他方が実行権取得済み, 二重実行回避で終了(ADR-0007)
 			message.ack();
 			return;
@@ -223,12 +257,12 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 				});
 		}
 
-		result = await withTimeout(stableId, timeoutMs, (touch) => {
+		result = await withTimeout(stableId, timeoutMs, wall, (touch) => {
 			// DO受理の報告のみ期限再計測, timeoutMsを報告間隔として利用
 			const heartbeat = createHeartbeat(
 				(progress) =>
 					starting
-						.then(() => stub.heartbeat(stableId, progress))
+						.then(() => stub.heartbeat(stableId, progress, attempt))
 						.then((ack) => {
 							if (ack.accepted) touch();
 							return ack;
@@ -244,7 +278,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 				attempt,
 				idempotencyKey: stableId,
 				traceparent: traceparent ?? null,
-				deadlineAt: Date.now() + timeoutMs,
+				deadlineAt: timeoutMs > 0 ? Math.min(Date.now() + timeoutMs, wall.deadline) : wall.deadline,
 				spawn,
 				heartbeat,
 				log,
@@ -258,6 +292,7 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 	} catch (error) {
 		// エラー本文をDOへ送信, 失敗理由のダッシュボード表示用(ADR-0028)
 		failure = describeError(error);
+		timedOut = error instanceof TsumugiTimeoutError;
 		console.error(`tsumugi: perform failed (${jobId ?? 'unknown'})`, error);
 	}
 
@@ -272,9 +307,14 @@ async function handleOne<Env extends ConsumerEnv>(message: Message<DispatchMessa
 		// 失敗試行のspawnは非送信, 再実行時に再要求(ADR-0032)
 		const outcome = ok
 			? { ok: true, result, ...(spawns.length > 0 ? { spawns } : {}) }
-			: { ok: false, ...(failure === undefined ? {} : { error: failure }), ...(fail ? { fail } : {}) };
+			: {
+					ok: false,
+					...(failure === undefined ? {} : { error: failure }),
+					...(fail ? { fail } : {}),
+					...(timedOut ? { timedOut: true } : {}),
+				};
 		await starting;
-		await shardStub(env, jobId).report(jobId, outcome);
+		await shardStub(env, jobId).report(jobId, outcome, reportedAttempt);
 	} catch (error) {
 		// 報告喪失時はQUEUED / RUNNINGのまま, reaperが無応答として処理
 		console.error(`tsumugi: report failed (${jobId})`, error);

@@ -7,6 +7,7 @@ import { retentionOf } from '../core/retention.js';
 import { RETRYABLE_STATES } from '../core/transitions.js';
 import { planDispatch } from '../core/dispatch.js';
 import { normalizeTraceparent } from '../core/trace.js';
+import { assertPayloadSize, splitBatches } from '../core/message.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type {
 	Backoff,
@@ -14,6 +15,7 @@ import type {
 	Bucket,
 	DeliveryGuarantee,
 	FailureNotice,
+	JobView,
 	KeyBuckets,
 	Policy,
 	Retention,
@@ -73,9 +75,9 @@ export interface NoticeEnqueueStub extends Rpc.DurableObjectBranded {
  * `requested`は取り消し要求の受理(ADR-0052), 応答か期限で遷移確定
  * `gone`は保持期間経過でDOから削除済み, 一覧はD1由来で残存(ADR-0027)
  */
-export type MutationResult = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' };
+export type MutationResult = { ok: true; requested?: true } | { ok: false; reason: 'invalid-state' | 'gone' | 'in-run' };
 
-export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' };
+export type BulkFailure = { id: string; reason: 'invalid-state' | 'gone' | 'in-run' };
 type BulkResult = { ok: string[]; failed: BulkFailure[] };
 
 export type ShardSettings = {
@@ -128,6 +130,7 @@ export const DEFAULT_POLICY: Policy = {
 	perKeyRate: null,
 	agingIntervalMs: 60_000,
 	reaperGraceMs: 30_000,
+	queueWaitMs: 15 * 60_000,
 };
 
 const DEFAULTS: {
@@ -158,9 +161,6 @@ const PROGRESS_PROJECTION_DELAY_MS = 3_000;
 const PROJECTION_LIMIT = 200;
 
 const RUN_NOTIFY_LIMIT = 200;
-
-// Queuesプロデューサ側のsendBatch上限
-const SEND_BATCH_LIMIT = 100;
 
 const SWEEP_LIMIT = 200;
 
@@ -194,6 +194,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#policyLoaded = false;
 	#lastBlocked: BlockedBy = { paused: false, capacity: false, tokens: false, perKey: false, perKeyTokens: false };
 	#blockedLoaded = false;
+	// 範囲外候補のキー列挙位置, 再生成時は先頭から
+	#keyCursor: string | null = null;
 
 	get repo(): JobRepo {
 		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage);
@@ -225,6 +227,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	async configure(settings: ShardSettings): Promise<void> {
 		// 実行時設定, 静的設定より優先のpin付与(#6)
 		this.#applySettings(settings, true);
+		// 停止解除, concurrency引き上げの即時反映
+		await this.#armAlarm(this.clock.now());
 	}
 
 	/** configure()同様pin設定で静的設定より優先(#6) */
@@ -356,50 +360,60 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/** 個別RPCの逐次enqueueはDOの1,000 req/sソフト上限で実測78件/秒 */
 	async enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]> {
 		const traceparents = inputs.map((input) => normalizeTraceparent(input.traceparent));
+		// 書き込み前に全件検証, 送信不能なジョブの登録防止
+		for (const input of inputs) assertPayloadSize(input.payload);
 		const now = this.clock.now();
 		this.#loadPolicy();
 		// enqueue同梱は静的設定, configure()でpin済みなら無視(#6)
 		if (settings) this.#applySettings(settings, false);
 		const ids: string[] = [];
 
-		for (const [index, input] of inputs.entries()) {
-			const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createLocalId() });
+		// 途中の例外での予約残存と一部登録の防止
+		try {
+			this.ctx.storage.transactionSync(() => {
+				for (const [index, input] of inputs.entries()) {
+					const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createLocalId() });
 
-			// ID指定の再投入は既存ID返却, Run DO再送での重複防止
-			if (input.id !== undefined && this.repo.find(id)) {
-				ids.push(id);
-				continue;
-			}
+					// ID指定の再投入は既存ID返却, Run DO再送での重複防止
+					if (input.id !== undefined && this.repo.find(id)) {
+						ids.push(id);
+						continue;
+					}
 
-			if (input.uniqueKey !== undefined) {
-				const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
-				const existing = this.repo.reserveUniqueKey(input.uniqueKey, id, expiresAt, now);
-				// 衝突は正常系, 先行ジョブID返却で冪等(ADR-0021)
-				if (existing !== null) {
-					ids.push(existing);
-					continue;
+					if (input.uniqueKey !== undefined) {
+						const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
+						const existing = this.repo.reserveUniqueKey(input.uniqueKey, id, expiresAt, now);
+						// 衝突は正常系, 先行ジョブID返却で冪等(ADR-0021)
+						if (existing !== null) {
+							ids.push(existing);
+							continue;
+						}
+					}
+
+					this.repo.insert({
+						id,
+						binding: input.binding,
+						priority: input.priority ?? DEFAULTS.priority,
+						maxAttempts: input.maxAttempts ?? DEFAULTS.maxAttempts,
+						concurrencyKey: input.concurrencyKey ?? null,
+						uniqueKey: input.uniqueKey ?? null,
+						guarantee: input.guarantee ?? DEFAULTS.guarantee,
+						timeoutMs: input.timeoutMs ?? DEFAULTS.timeoutMs,
+						backoff: input.backoff ?? DEFAULTS.backoff,
+						runAfter: input.runAt ?? now + (input.delayMs ?? 0),
+						expiresAt: input.expiresAt ?? (input.expiresInMs !== undefined ? now + input.expiresInMs : null),
+						createdAt: now,
+						payload: input.payload,
+						traceparent: traceparents[index] ?? null,
+						runId: input.runId ?? null,
+						nodeId: input.nodeId ?? null,
+					});
+					ids.push(id);
 				}
-			}
-
-			this.repo.insert({
-				id,
-				binding: input.binding,
-				priority: input.priority ?? DEFAULTS.priority,
-				maxAttempts: input.maxAttempts ?? DEFAULTS.maxAttempts,
-				concurrencyKey: input.concurrencyKey ?? null,
-				uniqueKey: input.uniqueKey ?? null,
-				guarantee: input.guarantee ?? DEFAULTS.guarantee,
-				timeoutMs: input.timeoutMs ?? DEFAULTS.timeoutMs,
-				backoff: input.backoff ?? DEFAULTS.backoff,
-				runAfter: input.runAt ?? now + (input.delayMs ?? 0),
-				expiresAt: input.expiresAt ?? (input.expiresInMs !== undefined ? now + input.expiresInMs : null),
-				createdAt: now,
-				payload: input.payload,
-				traceparent: traceparents[index] ?? null,
-				runId: input.runId ?? null,
-				nodeId: input.nodeId ?? null,
 			});
-			ids.push(id);
+		} catch (error) {
+			this.repo.discardPendingOutbox();
+			throw error;
 		}
 
 		await this.#armAlarm(now);
@@ -412,17 +426,23 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 */
 	async report(
 		jobId: string,
-		outcome: { ok: boolean; error?: string; result?: unknown; spawns?: readonly SpawnRequest[]; fail?: FailOptions },
+		outcome: { ok: boolean; error?: string; result?: unknown; spawns?: readonly SpawnRequest[]; fail?: FailOptions; timedOut?: boolean },
+		attempt?: number,
 	): Promise<void> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
 		// 受理可否は事前判定, compareAndSet判定では記録が遷移後でoutboxに履歴欠落(ADR-0028)
 		if (!row || (row.state !== 'QUEUED' && row.state !== 'RUNNING')) return;
+		if (attempt !== undefined && row.attempts + 1 !== attempt) return;
 
 		const serialized = outcome.ok ? serializeResult(outcome.result) : null;
 		// runノードの戻り値は後段payload, 保存不能のまま成功では後段にnull(ADR-0035)
 		if (outcome.ok && row.run_id !== null && outcome.result !== undefined && serialized === null) {
-			await this.report(jobId, { ok: false, error: `cannot store the result (over ${RESULT_MAX_CHARS} chars or not serializable)` });
+			await this.report(
+				jobId,
+				{ ok: false, error: `cannot store the result (over ${RESULT_MAX_CHARS} chars or not serializable)` },
+				attempt,
+			);
 			return;
 		}
 
@@ -456,6 +476,13 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 取り消し要求後の失敗は中断由来, リトライ無しで確定(ADR-0052)
 		if (row.cancel_requested_at !== null) {
 			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'CANCELLED', { now, attempts, error: outcome.error ?? null });
+			await this.#armAlarm(now);
+			return;
+		}
+
+		// timeout後もperformerは実行継続で結果不明, 再投入は二重実行(ADR-0006, ADR-0007)
+		if (outcome.timedOut === true && row.guarantee === 'at-most-once') {
+			this.repo.compareAndSet(jobId, ['QUEUED', 'RUNNING'], 'STALLED', { now, attempts, error: outcome.error ?? null });
 			await this.#armAlarm(now);
 			return;
 		}
@@ -503,11 +530,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 所要時間が変動するジョブでもtimeoutMsの最長化不要
 	 * 進捗表示用に投影対象, 報告間隔はconsumer側で制限
 	 */
-	async heartbeat(jobId: string, progress?: number): Promise<{ accepted: boolean; cancelRequested: boolean }> {
+	async heartbeat(jobId: string, progress?: number, attempt?: number): Promise<{ accepted: boolean; cancelRequested: boolean }> {
 		const now = this.clock.now();
 		// 画面の進捗100%超過防止
 		const clamped = typeof progress === 'number' && Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : null;
-		const { accepted, cancelRequested, projected } = this.repo.heartbeat(jobId, now, clamped);
+		const { accepted, cancelRequested, projected } = this.repo.heartbeat(jobId, now, clamped, attempt);
 		// 投影用alarm, 無いと進捗表示がreaper期限まで遅延
 		if (projected) await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
 		return { accepted, cancelRequested };
@@ -525,14 +552,17 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * at-most-onceジョブの実行権, Queuesの重複配送下も条件付きUPDATEで1つに限定(ADR-0007)
 	 * 取り消し要求済みは実行せず終了, CAS条件に要求が無く事前確認(ADR-0052)
 	 */
-	async claim(jobId: string): Promise<boolean> {
+	async claim(jobId: string, attempt?: number): Promise<boolean> {
 		const now = this.clock.now();
 		const row = this.repo.find(jobId);
+		// 前試行のメッセージは実行権なし, 現在の試行のメッセージが取得
+		if (row && attempt !== undefined && row.attempts + 1 !== attempt) return false;
 		if (row && row.cancel_requested_at !== null) {
 			if (this.repo.compareAndSet(jobId, ['QUEUED'], 'CANCELLED', { now })) await this.#armAlarm(now);
 			return false;
 		}
-		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now });
+		// 無応答判定は実行開始起点, Queues滞留時間を除外
+		return this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now, heartbeatAt: now });
 	}
 
 	/**
@@ -544,7 +574,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const row = this.repo.find(jobId);
 		if (!row || row.state !== 'QUEUED' || row.attempts + 1 !== attempt) return;
 		// 投影用alarm, 無いと表示がreaper期限まで遅延
-		if (this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now })) await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
+		// 無応答判定は実行開始起点, Queues滞留時間を除外
+		if (this.repo.compareAndSet(jobId, ['QUEUED'], 'RUNNING', { now, heartbeatAt: now }))
+			await this.#armAlarm(now + PROGRESS_PROJECTION_DELAY_MS);
 	}
 
 	/** consumerからの実行開始前の期限切れ報告(ADR-0047), Queues滞留分も対象 */
@@ -563,6 +595,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	}
 
 	#retryOne(jobId: string, now: number): MutationResult {
+		// 個別リトライはrunの終端状態を上書き, 再実行はrunの再開経由(ADR-0034)
+		const row = this.repo.find(jobId);
+		if (row && row.run_id !== null) return { ok: false, reason: 'in-run' };
 		// 取り消し要求クリア, 残すと再投入直後にCANCELLED(#95)
 		const ok = this.repo.compareAndSet(jobId, RETRYABLE_STATES, 'SCHEDULED', {
 			now,
@@ -648,7 +683,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#loadPolicy();
 		this.#loadBucket();
 		// 実行中がconcurrency未満なら全件取得, 以上なら空き0で影響無し
-		const { jobs, readyCount } = this.repo.scheduleWindow(now, TICK_LIMIT, Math.max(TICK_LIMIT, this.policy.concurrency));
+		const window = this.repo.scheduleWindow(now, TICK_LIMIT, Math.max(TICK_LIMIT, this.policy.concurrency));
+		const { readyCount } = window;
+		const outside = readyCount >= TICK_LIMIT ? this.#outsideWindow(now, window.jobs) : { jobs: [], more: false };
+		const jobs = [...window.jobs, ...outside.jobs];
 
 		const readyKeys =
 			this.policy.perKeyRate === null
@@ -665,25 +703,23 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		this.#persistKeyBuckets(keyBuckets, output.keyBuckets, now);
 		this.#persistBlocked(output.blocked);
 
-		const messages: MessageSendRequest<DispatchMessage>[] = [];
+		const messages: DispatchMessage[] = [];
 		for (const decision of output.decisions) {
 			switch (decision.type) {
 				case 'dispatch': {
 					const row = this.repo.find(decision.id);
 					if (!row) break;
-					// 遷移後に投入, 投入失敗時はQUEUEDのままreaperが処理
+					// 遷移後に投入, 投入失敗時はSCHEDULEDへ復帰
 					if (!this.repo.compareAndSet(decision.id, ['SCHEDULED'], 'QUEUED', { now, dispatchedAt: now })) break;
 					messages.push({
-						body: {
-							jobId: row.id,
-							binding: row.binding,
-							attempt: row.attempts + 1,
-							payload: this.repo.payloadOf(row),
-							timeoutMs: row.timeout_ms,
-							claimRequired: row.guarantee === 'at-most-once',
-							...(row.traceparent !== null ? { traceparent: row.traceparent } : {}),
-							expiresAt: row.expires_at,
-						},
+						jobId: row.id,
+						binding: row.binding,
+						attempt: row.attempts + 1,
+						payload: this.repo.payloadOf(row),
+						timeoutMs: row.timeout_ms,
+						claimRequired: row.guarantee === 'at-most-once',
+						...(row.traceparent !== null ? { traceparent: row.traceparent } : {}),
+						expiresAt: row.expires_at,
 					});
 					break;
 				}
@@ -691,7 +727,10 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				case 'expire':
 				// cancelは取り消し要求の確定, 応答期限経過とreap後の残留(ADR-0052)
 				case 'cancel':
-					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', { now });
+					this.repo.compareAndSet(decision.id, ['SCHEDULED', 'QUEUED', 'RUNNING'], 'CANCELLED', {
+						now,
+						...(decision.attempts !== undefined ? { attempts: decision.attempts } : {}),
+					});
 					break;
 				case 'reap':
 					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'SCHEDULED', {
@@ -701,21 +740,34 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 					});
 					break;
 				case 'stall':
-					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'STALLED', { now });
+					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'STALLED', { now, attempts: decision.attempts });
 					break;
 				case 'fail':
-					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'FAILED', { now });
+					this.repo.compareAndSet(decision.id, ['QUEUED', 'RUNNING'], 'FAILED', { now, attempts: decision.attempts });
 					break;
 			}
 		}
 
-		// concurrency>100で1 tickの投入が上限超過(ADR-0009)
-		for (let i = 0; i < messages.length; i += SEND_BATCH_LIMIT) {
-			await this.env.TSUMUGI_QUEUE.sendBatch(messages.slice(i, i + SEND_BATCH_LIMIT));
+		// 件数とバイト数の上限で分割, concurrency>100で1 tickの投入が件数上限超過(ADR-0009)
+		const { batches, oversized } = splitBatches(messages);
+		for (const message of oversized) {
+			// 再試行でも送信不能
+			this.repo.compareAndSet(message.jobId, ['QUEUED'], 'FAILED', { now, error: 'dispatch message exceeds the Queues size limit' });
+		}
+		let sendFailed = false;
+		for (const batch of batches) {
+			try {
+				await this.env.TSUMUGI_QUEUE.sendBatch(batch.map((body) => ({ body })));
+			} catch (error) {
+				console.error('tsumugi: sendBatch failed', error);
+				sendFailed = true;
+				// 未実行の試行, attempts維持で再投入
+				for (const message of batch) this.repo.compareAndSet(message.jobId, ['QUEUED'], 'SCHEDULED', { now, dispatchedAt: null });
+			}
 		}
 
-		// 後段は相互独立
-		let failed = false;
+		// 後段は相互独立, 投入失敗とも独立
+		let failed = sendFailed;
 		const stage = async <T>(name: string, run: () => T | Promise<T>, fallback: T): Promise<T> => {
 			try {
 				return await run();
@@ -738,7 +790,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const blockedOnTokens = output.blocked.tokens || output.blocked.perKeyTokens;
 		const progressed = output.decisions.some((d) => d.type === 'dispatch' || d.type === 'expire' || d.type === 'cancel');
 		const hasMore =
-			(readyCount >= TICK_LIMIT && !blockedOnTokens && progressed) ||
+			// 投入失敗時は即時再実行せず, 障害中の反復防止
+			(readyCount >= TICK_LIMIT && !blockedOnTokens && progressed && !sendFailed) ||
+			(outside.more && !sendFailed) ||
 			projected >= PROJECTION_LIMIT ||
 			deleted >= SWEEP_LIMIT ||
 			notifiedRuns >= RUN_NOTIFY_LIMIT ||
@@ -753,6 +807,45 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// ハンドラ開始時にalarmは消去済み, 現存分はtick中の設定
 		// setAlarmで上書きすると投影が保持期間経過まで遅延
 		if (next !== null) await this.#armAlarm(next);
+	}
+
+	/**
+	 * 範囲内がキー上限で投入不能な場合の範囲外候補(ADR-0057)
+	 * 範囲は到来順, 単一キーの滞留が占有すると空き枠があっても他キーが範囲外
+	 */
+	#outsideWindow(now: number, jobs: readonly JobView[]): { jobs: JobView[]; more: boolean } {
+		const { concurrency, perKeyConcurrency, perKeyRate, paused } = this.policy;
+		const inFlight = new Map<string, number>();
+		const ready = new Map<string | null, number>();
+		let inFlightTotal = 0;
+		for (const job of jobs) {
+			if (job.state === 'QUEUED' || job.state === 'RUNNING') {
+				inFlightTotal++;
+				if (job.concurrencyKey !== null) inFlight.set(job.concurrencyKey, (inFlight.get(job.concurrencyKey) ?? 0) + 1);
+			} else if (job.state === 'SCHEDULED' && job.runAfter <= now) {
+				ready.set(job.concurrencyKey, (ready.get(job.concurrencyKey) ?? 0) + 1);
+			}
+		}
+		const budget = paused ? 0 : Math.min(TICK_LIMIT, concurrency - inFlightTotal);
+		if (budget <= 0) return { jobs: [], more: false };
+		const skip = new Set([...inFlight].filter(([, n]) => n >= perKeyConcurrency).map(([key]) => key));
+		// 範囲内の投入可能見込み, キートークンは未読のため不足扱い
+		let dispatchable = ready.get(null) ?? 0;
+		if (perKeyRate === null) {
+			for (const [key, n] of ready)
+				if (key !== null && !skip.has(key)) dispatchable += Math.min(n, perKeyConcurrency - (inFlight.get(key) ?? 0));
+		}
+		if (dispatchable >= budget) return { jobs: [], more: false };
+		const { jobs: extra, nextAfter } = this.repo.keyHeads(now, {
+			after: this.#keyCursor,
+			budget,
+			maxKeys: TICK_LIMIT,
+			perKey: perKeyConcurrency,
+			skip,
+			window: ready,
+		});
+		this.#keyCursor = nextAfter;
+		return { jobs: extra, more: nextAfter !== null };
 	}
 
 	async #project(): Promise<number> {

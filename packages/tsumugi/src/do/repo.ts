@@ -148,7 +148,7 @@ export class JobRepo {
 		// 終端の行は上書き対象外, 再試行時のメトリクス欠落防止
 		const terminal = TERMINAL_STATES.includes(row.state as JobState);
 		if (pending !== undefined) {
-			const updated = this.#all(`UPDATE outbox SET snapshot = ? WHERE seq = ? RETURNING seq`, snapshot, pending);
+			const updated = this.#all(`UPDATE outbox SET snapshot = ? WHERE seq = ? AND job_id = ? RETURNING seq`, snapshot, pending, id);
 			this.writes++;
 			if (updated.length > 0) {
 				if (terminal) this.#pendingOutbox.delete(id);
@@ -160,6 +160,10 @@ export class JobRepo {
 		if (inserted && !terminal) this.#pendingOutbox.set(id, inserted.seq);
 		else this.#pendingOutbox.delete(id);
 		return { row, attempts };
+	}
+
+	discardPendingOutbox(): void {
+		this.#pendingOutbox.clear();
 	}
 
 	attemptsOf(jobId: string): AttemptRow[] {
@@ -272,6 +276,59 @@ export class JobRepo {
 		return { jobs, readyCount: ready.length };
 	}
 
+	/**
+	 * 範囲外の実行可能ジョブをキー単位で取得(ADR-0057)
+	 * 上限到達キーの滞留が範囲を占有しても他キーとキーがnullのジョブを投入
+	 * windowは範囲内の実行可能ジョブ数, 各キーの先頭から連続するため件数分除外
+	 * キーはafterより後から列挙, 末尾到達時のnextAfterはnull, 次tickは先頭から
+	 */
+	keyHeads(
+		now: number,
+		opts: {
+			after: string | null;
+			budget: number;
+			maxKeys: number;
+			perKey: number;
+			skip: ReadonlySet<string>;
+			window: ReadonlyMap<string | null, number>;
+		},
+	): { jobs: JobView[]; nextAfter: string | null } {
+		const jobs: JobView[] = [];
+		const take = (keyCondition: string, key: string | null, limit: number, ...bindings: SqlStorageValue[]) => {
+			const offset = opts.window.get(key) ?? 0;
+			const rows = this.#all<JobRow>(
+				`SELECT ${JOB_COLUMNS} FROM job WHERE state = ? AND ${keyCondition} AND run_after <= ? ORDER BY run_after ASC, id ASC LIMIT ? OFFSET ?`,
+				'SCHEDULED',
+				...bindings,
+				now,
+				limit,
+				offset,
+			);
+			jobs.push(...rows.map(toView));
+			return rows.length;
+		};
+		// キーがnullとキー付きで別枠, 片方の滞留時も他方を評価
+		take('concurrency_key IS NULL', null, opts.budget);
+		// job_key_dueの飛び越し走査, 読み取り行数はキー数比例
+		const nextKey = (after: string | null) =>
+			this.#first<{ key: string | null }>(
+				`SELECT MIN(concurrency_key) AS key FROM job WHERE state = ? AND ${after === null ? 'concurrency_key IS NOT NULL' : 'concurrency_key > ?'}`,
+				'SCHEDULED',
+				...(after === null ? [] : [after]),
+			)?.key ?? null;
+		let last = opts.after;
+		let keyed = 0;
+		// 対象なしのキーも1行読むため列挙数に上限
+		for (let visited = 0; keyed < opts.budget && visited < opts.maxKeys; visited++) {
+			const key = nextKey(last);
+			if (key === null) return { jobs, nextAfter: null };
+			const remaining = Math.min(opts.perKey - (opts.window.get(key) ?? 0), opts.budget - keyed);
+			if (!opts.skip.has(key) && remaining > 0) keyed += take('concurrency_key = ?', key, remaining, key);
+			last = key;
+		}
+		return { jobs, nextAfter: last };
+	}
+
 	countActive(): number {
 		return (
 			this.#first<{ c: number }>(`SELECT count(*) AS c FROM job WHERE state IN (${placeholders(ACTIVE_STATES.length)})`, ...ACTIVE_STATES)
@@ -290,6 +347,7 @@ export class JobRepo {
 		patch: {
 			now: number;
 			dispatchedAt?: number | null;
+			heartbeatAt?: number;
 			attempts?: number;
 			runAfter?: number;
 			countAttempt?: boolean;
@@ -304,7 +362,12 @@ export class JobRepo {
 		for (const state of from) assertTransition(state, to);
 
 		// 生存報告消去, 前試行の報告でのreaper期限延長防止
-		const set: Record<string, SqlStorageValue> = { state: to, updated_at: patch.now, heartbeat_at: null, progress: null };
+		const set: Record<string, SqlStorageValue> = {
+			state: to,
+			updated_at: patch.now,
+			heartbeat_at: patch.heartbeatAt ?? null,
+			progress: null,
+		};
 		if (patch.dispatchedAt !== undefined) set.dispatched_at = patch.dispatchedAt;
 		if (patch.attempts !== undefined && !patch.countAttempt) set.attempts = patch.attempts;
 		if (patch.runAfter !== undefined) set.run_after = patch.runAfter;
@@ -344,18 +407,25 @@ export class JobRepo {
 	}
 
 	/** `projected`: outbox追記の有無, 進捗不変の場合省略 */
-	heartbeat(id: string, now: number, progress: number | null): { accepted: boolean; cancelRequested: boolean; projected: boolean } {
+	heartbeat(
+		id: string,
+		now: number,
+		progress: number | null,
+		attempt?: number,
+	): { accepted: boolean; cancelRequested: boolean; projected: boolean } {
 		const set: Record<string, SqlStorageValue> = { heartbeat_at: now };
 		if (progress !== null) set.progress = progress;
 		const previous =
 			progress === null ? undefined : this.#first<{ progress: number | null }>(`SELECT progress FROM job WHERE id = ?`, id)?.progress;
 
+		const current = attempt === undefined ? '' : ' AND attempts + 1 = ?';
 		const row = this.#first<{ cancel_requested_at: number | null }>(
-			`UPDATE job SET ${assignments(set)} WHERE id = ? AND state IN (${IN_FLIGHT}) RETURNING cancel_requested_at`,
+			`UPDATE job SET ${assignments(set)} WHERE id = ? AND state IN (${IN_FLIGHT})${current} RETURNING cancel_requested_at`,
 			...Object.values(set),
 			id,
 			'QUEUED',
 			'RUNNING',
+			...(attempt === undefined ? [] : [attempt]),
 		);
 		this.writes++;
 		if (!row) return { accepted: false, cancelRequested: false, projected: false };
