@@ -148,7 +148,7 @@ export class JobRepo {
 		// 終端の行は上書き対象外, 再試行時のメトリクス欠落防止
 		const terminal = TERMINAL_STATES.includes(row.state as JobState);
 		if (pending !== undefined) {
-			const updated = this.#all(`UPDATE outbox SET snapshot = ? WHERE seq = ? RETURNING seq`, snapshot, pending);
+			const updated = this.#all(`UPDATE outbox SET snapshot = ? WHERE seq = ? AND job_id = ? RETURNING seq`, snapshot, pending, id);
 			this.writes++;
 			if (updated.length > 0) {
 				if (terminal) this.#pendingOutbox.delete(id);
@@ -160,6 +160,10 @@ export class JobRepo {
 		if (inserted && !terminal) this.#pendingOutbox.set(id, inserted.seq);
 		else this.#pendingOutbox.delete(id);
 		return { row, attempts };
+	}
+
+	discardPendingOutbox(): void {
+		this.#pendingOutbox.clear();
 	}
 
 	attemptsOf(jobId: string): AttemptRow[] {

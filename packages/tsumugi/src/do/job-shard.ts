@@ -369,47 +369,52 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const ids: string[] = [];
 
 		// 途中の例外での予約残存と一部登録の防止
-		this.ctx.storage.transactionSync(() => {
-			for (const [index, input] of inputs.entries()) {
-				const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createLocalId() });
+		try {
+			this.ctx.storage.transactionSync(() => {
+				for (const [index, input] of inputs.entries()) {
+					const id = input.id ?? formatJobId({ binding: input.binding, shard: this.shardIndex, localId: createLocalId() });
 
-				// ID指定の再投入は既存ID返却, Run DO再送での重複防止
-				if (input.id !== undefined && this.repo.find(id)) {
-					ids.push(id);
-					continue;
-				}
-
-				if (input.uniqueKey !== undefined) {
-					const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
-					const existing = this.repo.reserveUniqueKey(input.uniqueKey, id, expiresAt, now);
-					// 衝突は正常系, 先行ジョブID返却で冪等(ADR-0021)
-					if (existing !== null) {
-						ids.push(existing);
+					// ID指定の再投入は既存ID返却, Run DO再送での重複防止
+					if (input.id !== undefined && this.repo.find(id)) {
+						ids.push(id);
 						continue;
 					}
-				}
 
-				this.repo.insert({
-					id,
-					binding: input.binding,
-					priority: input.priority ?? DEFAULTS.priority,
-					maxAttempts: input.maxAttempts ?? DEFAULTS.maxAttempts,
-					concurrencyKey: input.concurrencyKey ?? null,
-					uniqueKey: input.uniqueKey ?? null,
-					guarantee: input.guarantee ?? DEFAULTS.guarantee,
-					timeoutMs: input.timeoutMs ?? DEFAULTS.timeoutMs,
-					backoff: input.backoff ?? DEFAULTS.backoff,
-					runAfter: input.runAt ?? now + (input.delayMs ?? 0),
-					expiresAt: input.expiresAt ?? (input.expiresInMs !== undefined ? now + input.expiresInMs : null),
-					createdAt: now,
-					payload: input.payload,
-					traceparent: traceparents[index] ?? null,
-					runId: input.runId ?? null,
-					nodeId: input.nodeId ?? null,
-				});
-				ids.push(id);
-			}
-		});
+					if (input.uniqueKey !== undefined) {
+						const expiresAt = now + (input.uniqueForMs ?? DEFAULTS.uniqueForMs);
+						const existing = this.repo.reserveUniqueKey(input.uniqueKey, id, expiresAt, now);
+						// 衝突は正常系, 先行ジョブID返却で冪等(ADR-0021)
+						if (existing !== null) {
+							ids.push(existing);
+							continue;
+						}
+					}
+
+					this.repo.insert({
+						id,
+						binding: input.binding,
+						priority: input.priority ?? DEFAULTS.priority,
+						maxAttempts: input.maxAttempts ?? DEFAULTS.maxAttempts,
+						concurrencyKey: input.concurrencyKey ?? null,
+						uniqueKey: input.uniqueKey ?? null,
+						guarantee: input.guarantee ?? DEFAULTS.guarantee,
+						timeoutMs: input.timeoutMs ?? DEFAULTS.timeoutMs,
+						backoff: input.backoff ?? DEFAULTS.backoff,
+						runAfter: input.runAt ?? now + (input.delayMs ?? 0),
+						expiresAt: input.expiresAt ?? (input.expiresInMs !== undefined ? now + input.expiresInMs : null),
+						createdAt: now,
+						payload: input.payload,
+						traceparent: traceparents[index] ?? null,
+						runId: input.runId ?? null,
+						nodeId: input.nodeId ?? null,
+					});
+					ids.push(id);
+				}
+			});
+		} catch (error) {
+			this.repo.discardPendingOutbox();
+			throw error;
+		}
 
 		await this.#armAlarm(now);
 		return ids;
@@ -680,7 +685,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 実行中がconcurrency未満なら全件取得, 以上なら空き0で影響無し
 		const window = this.repo.scheduleWindow(now, TICK_LIMIT, Math.max(TICK_LIMIT, this.policy.concurrency));
 		const { readyCount } = window;
-		const jobs = readyCount >= TICK_LIMIT ? [...window.jobs, ...this.#outsideWindow(now, window.jobs)] : window.jobs;
+		const outside = readyCount >= TICK_LIMIT ? this.#outsideWindow(now, window.jobs) : { jobs: [], more: false };
+		const jobs = [...window.jobs, ...outside.jobs];
 
 		const readyKeys =
 			this.policy.perKeyRate === null
@@ -786,6 +792,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		const hasMore =
 			// 投入失敗時は即時再実行せず, 障害中の反復防止
 			(readyCount >= TICK_LIMIT && !blockedOnTokens && progressed && !sendFailed) ||
+			(outside.more && !sendFailed) ||
 			projected >= PROJECTION_LIMIT ||
 			deleted >= SWEEP_LIMIT ||
 			notifiedRuns >= RUN_NOTIFY_LIMIT ||
@@ -806,7 +813,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	 * 範囲内がキー上限で投入不能な場合の範囲外候補(ADR-0057)
 	 * 範囲は到来順, 単一キーの滞留が占有すると空き枠があっても他キーが範囲外
 	 */
-	#outsideWindow(now: number, jobs: readonly JobView[]): JobView[] {
+	#outsideWindow(now: number, jobs: readonly JobView[]): { jobs: JobView[]; more: boolean } {
 		const { concurrency, perKeyConcurrency, perKeyRate, paused } = this.policy;
 		const inFlight = new Map<string, number>();
 		const ready = new Map<string | null, number>();
@@ -820,7 +827,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			}
 		}
 		const budget = paused ? 0 : Math.min(TICK_LIMIT, concurrency - inFlightTotal);
-		if (budget <= 0) return [];
+		if (budget <= 0) return { jobs: [], more: false };
 		const skip = new Set([...inFlight].filter(([, n]) => n >= perKeyConcurrency).map(([key]) => key));
 		// 範囲内の投入可能見込み, キートークンは未読のため不足扱い
 		let dispatchable = ready.get(null) ?? 0;
@@ -828,7 +835,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			for (const [key, n] of ready)
 				if (key !== null && !skip.has(key)) dispatchable += Math.min(n, perKeyConcurrency - (inFlight.get(key) ?? 0));
 		}
-		if (dispatchable >= budget) return [];
+		if (dispatchable >= budget) return { jobs: [], more: false };
 		const { jobs: extra, nextAfter } = this.repo.keyHeads(now, {
 			after: this.#keyCursor,
 			budget,
@@ -838,7 +845,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			window: ready,
 		});
 		this.#keyCursor = nextAfter;
-		return extra;
+		return { jobs: extra, more: nextAfter !== null };
 	}
 
 	async #project(): Promise<number> {

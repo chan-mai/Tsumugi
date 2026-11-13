@@ -304,7 +304,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				return { ok: false, reason: 'invalid-state' };
 			}
 
-			const reset = this.repo.resetForRetry(now, abortErrorsOf(row));
+			const reset = this.repo.resetForRetry(now, abortErrorsOf(row), row.state === 'CANCELLED');
 			this.#cancelSent.clear();
 			this.repo.appendRunOutbox();
 			this.repo.appendNodeOutbox(row.id, reset);
@@ -659,11 +659,6 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		// 作成不可は例外でなく理由を返却, 例外では通知滞留
 		#applySpawns(parentId: string, spawns: readonly SpawnRequest[], now: number): { ids: string[]; error: string | null } {
 			if (spawns.length === 0) return { ids: [], error: null };
-			const exceeded = this.#nodeLimitError(spawns.length, now);
-			if (exceeded) return { ids: [], error: exceeded };
-			const invalid = spawns.find((spawn) => !isNodeId(spawn.id));
-			if (invalid) return { ids: [], error: `invalid spawn id: ${JSON.stringify(invalid.id)}` };
-
 			const children = this.#childNodes(
 				parentId,
 				'spawn',
@@ -672,9 +667,15 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 					return { key: spawn.id, binding: spawn.binding, payload: spawn.payload, job, concurrencyKey };
 				}),
 			);
+			const ids = [...new Set(children.map((child) => child.id))];
+			const existing = this.repo.existingNodeIds(ids);
+			const exceeded = this.#nodeLimitError(ids.length - existing.size, now);
+			if (exceeded) return { ids: [], error: exceeded };
+			const invalid = spawns.find((spawn) => !isNodeId(spawn.id));
+			if (invalid) return { ids: [], error: `invalid spawn id: ${JSON.stringify(invalid.id)}` };
 
 			this.repo.insertNodes(children, now);
-			return { ids: children.map((child) => child.id), error: null };
+			return { ids, error: null };
 		}
 
 		// 超過時はrun全体を中断(ADR-0035)

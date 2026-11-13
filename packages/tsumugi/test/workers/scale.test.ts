@@ -59,6 +59,28 @@ describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 		expect(a).not.toBe(b);
 	});
 
+	it('enqueueManyが途中で例外になった後、同じジョブIDで再投入しても別ジョブのoutbox行を上書きしない', async () => {
+		const { queue } = captureQueue();
+		await install('OUTBOXTX#0', T0, queue);
+		const fixed = 'OUTBOXTX#0:fixed';
+
+		await expect(
+			runInDurableObject(shard('OUTBOXTX#0'), (instance) =>
+				(instance as any).enqueueMany([
+					{ binding: 'OUTBOXTX', payload: {}, id: fixed },
+					{ binding: 'bad#name', payload: {} },
+				]),
+			),
+		).rejects.toThrow();
+		const other = await shard('OUTBOXTX#0').enqueue({ binding: 'OUTBOXTX', payload: {} });
+		await shard('OUTBOXTX#0').enqueue({ binding: 'OUTBOXTX', payload: {}, id: fixed });
+
+		const outbox = await runInDurableObject(shard('OUTBOXTX#0'), (instance) =>
+			((instance as any).repo.sql.exec('SELECT job_id FROM outbox').toArray() as { job_id: string }[]).map((row) => row.job_id),
+		);
+		expect(outbox).toEqual(expect.arrayContaining([other, fixed]));
+	});
+
 	it('enqueueManyが途中で例外になると予約とジョブ行を残さない', async () => {
 		const { queue } = captureQueue();
 		await install('UNIQTX#0', T0, queue);
@@ -156,6 +178,34 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 
 		expect(sent).toHaveLength(3);
 		expect(sent.map((m) => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
+	});
+
+	it('範囲外キーの走査が途中終了した場合、次のtickを直ちに実行して残りキーのジョブを投入する(ADR-0057)', async () => {
+		const { sent, queue } = captureQueue();
+		await install('CKEY5#0', T0, queue);
+		await shard('CKEY5#0').configure({ policy: { concurrency: 300, perKeyConcurrency: 1 } });
+
+		const keys = ['a', ...Array.from({ length: 199 }, (_, i) => `k${String(i).padStart(3, '0')}`)];
+		await shard('CKEY5#0').enqueueMany(keys.map((concurrencyKey) => ({ binding: 'CKEY5', payload: {}, concurrencyKey })));
+		await runDurableObjectAlarm(shard('CKEY5#0'));
+		expect(sent).toHaveLength(200);
+
+		sent.length = 0;
+		await install('CKEY5#0', T0 + 1_000, queue);
+		await shard('CKEY5#0').enqueueMany(keys.map((concurrencyKey) => ({ binding: 'CKEY5', payload: {}, concurrencyKey, delayMs: 500 })));
+		await runDurableObjectAlarm(shard('CKEY5#0'));
+		await install('CKEY5#0', T0 + 2_000, queue);
+		const last = await shard('CKEY5#0').enqueue({ binding: 'CKEY5', payload: {}, concurrencyKey: 'z' });
+		await runDurableObjectAlarm(shard('CKEY5#0'));
+		expect(sent).toHaveLength(0);
+		const alarm = await runInDurableObject(
+			shard('CKEY5#0'),
+			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,
+		);
+		expect(alarm).toBe(T0 + 2_000);
+
+		await runDurableObjectAlarm(shard('CKEY5#0'));
+		expect(sent.map((m) => m.jobId)).toEqual([last]);
 	});
 });
 

@@ -394,6 +394,100 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
+	it('再開でspawnの子孫を未実行へ戻すと、COMPLETEDのfan-outノードも集約待ちへ戻る', async () => {
+		const runId = 'GREETINGS:spawnretry';
+		await runInDurableObject(runStub(runId), async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'GREETINGS', input: { prefix: 'sr' }, deadlineMs: 10_000 });
+			await inner.ctx.storage.deleteAlarm();
+			const now = Date.now();
+			inner.repo.insertNodes(
+				[
+					{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 },
+					{ id: 'greet:0:child', binding: 'Greet', container: false, parent: 'greet:0', origin: 'spawn', after: [], seq: 4 },
+				],
+				now,
+			);
+			inner.repo.updateNode('list', { state: 'COMPLETED', result: JSON.stringify({ names: ['a'] }) }, now);
+			inner.repo.updateNode('greet:0', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('greet:0:child', { state: 'FAILED', error: 'run deadline exceeded: 10000ms' }, now);
+			inner.repo.updateNode('greet', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('report', { state: 'FAILED', error: 'run deadline exceeded: 10000ms' }, now);
+			inner.repo.markExpired(runId, now);
+			inner.repo.setRunState(runId, 'FAILED', now);
+			expect(await inner.retry()).toEqual({ ok: true });
+			await inner.ctx.storage.deleteAlarm();
+		});
+
+		expect(Object.fromEntries(await nodesOf(runId))).toMatchObject({
+			greet: 'RUNNING',
+			'greet:0': 'COMPLETED',
+			'greet:0:child': 'PENDING',
+		});
+	});
+
+	it('取り消されたrunの再開では、CANCELLEDのfan-outの子も再実行する', async () => {
+		const runId = 'GREETINGS:cancelretry';
+		await runInDurableObject(runStub(runId), async (instance) => {
+			const inner = instance as any;
+			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cr' } });
+			await inner.ctx.storage.deleteAlarm();
+			const now = Date.now();
+			inner.repo.insertNodes(
+				[
+					{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 },
+					{ id: 'greet:1', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 4 },
+				],
+				now,
+			);
+			inner.repo.updateNode('list', { state: 'COMPLETED', result: JSON.stringify({ names: ['a', 'b'] }) }, now);
+			inner.repo.updateNode('greet:0', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('greet:1', { state: 'CANCELLED' }, now);
+			inner.repo.updateNode('greet', { state: 'COMPLETED' }, now);
+			inner.repo.updateNode('report', { state: 'CANCELLED' }, now);
+			inner.repo.setRunState(runId, 'CANCELLED', now);
+			expect(await inner.retry({ cancelled: true })).toEqual({ ok: true });
+			await inner.ctx.storage.deleteAlarm();
+		});
+
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({
+			list: 'COMPLETED',
+			greet: 'RUNNING',
+			report: 'PENDING',
+			'greet:0': 'COMPLETED',
+			'greet:1': 'PENDING',
+		});
+	});
+
+	it('作成済みspawnを含む通知が再び届いても、ノード数上限超過とみなさない(ADR-0035)', async () => {
+		const runId = 'GREETINGS:spawndup';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'sd' } });
+		await settleRun(runId);
+		sent.length = 0;
+		const listJob = await jobIdOf(runId, 'list');
+		if (listJob === null) throw new Error('the first node has no job id');
+		await stub.notify([{ nodeId: 'list', jobId: listJob, state: 'COMPLETED', result: JSON.stringify({ names: ['a'] }), error: null }]);
+		await settleRun(runId);
+		sent.length = 0;
+		const jobId = await jobIdOf(runId, 'greet:0');
+		if (jobId === null) throw new Error('greet:0 has no job id');
+
+		const spawns = Array.from({ length: 9_996 }, (_, i) => ({ id: `c${i}`, binding: 'Greet', payload: {} }));
+		const event = { nodeId: 'greet:0', jobId, state: 'COMPLETED' as const, result: null, error: null, spawns };
+		await runInDurableObject(stub, async (instance) => {
+			const inner = instance as any;
+			await inner.notify([event]);
+			await inner.notify([event]);
+			await inner.ctx.storage.deleteAlarm();
+		});
+
+		expect(await errorOf(runId, 'greet:0')).toBeNull();
+		const aborted = await runInDurableObject(stub, (instance) => (instance as any).repo.findRun()?.abort_error as string | null);
+		expect(aborted).toBeNull();
+	});
+
 	it('取り消しは未起動を止めて終端を待つ', async () => {
 		const runId = 'GREETINGS:cancel1';
 		const stub = runStub(runId);
