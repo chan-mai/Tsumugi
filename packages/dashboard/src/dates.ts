@@ -10,6 +10,8 @@ export function fromDateInput(text: string, edge: 'start' | 'end'): number | nul
 	if (parts.length < 3) return null;
 	const [year, month, day] = parts;
 	if (![year, month, day].every(Number.isInteger)) return null;
-	const start = Temporal.PlainDate.from({ year, month, day }).toZonedDateTime(Temporal.Now.timeZoneId());
-	return edge === 'start' ? start.epochMilliseconds : start.add({ days: 1 }).epochMilliseconds - 1;
+	const date = Temporal.PlainDate.from({ year, month, day });
+	const timeZone = Temporal.Now.timeZoneId();
+	if (edge === 'start') return date.toZonedDateTime(timeZone).epochMilliseconds;
+	return date.add({ days: 1 }).toZonedDateTime(timeZone).epochMilliseconds - 1;
 }
