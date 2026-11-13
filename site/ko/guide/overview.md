@@ -22,12 +22,12 @@ Queues는 투입한 메시지의 상태를 조회하는 API를 제공하지 않�
 성공한 메시지도 보관되지 않으며, 과거의 실행을 나중에 확인할 수단이 마련되어 있지 않습니다.
 
 Tsumugi의 대시보드와 REST API는 실행 중인 잡과 종료된 잡 모두에 대해 목록 표시, 검색, 집계를 제공합니다.
-`TSUMUGI_METRICS` binding을 설정하면 실패율과 실행 시간이 메트릭으로 기록됩니다.
+`TSUMUGI_METRICS`의 binding을 설정하면 실패율과 실행 시간이 메트릭으로 기록됩니다.
 
 <h3 id="排他制御と重複排除を実装しづらい">배타 제어와 중복 제거를 구현하기 어렵다</h3>
 
 Queues는 메시지 간의 의존 관계나 연관성을 관리하지 않습니다.
-따라서 동일 고객에 대한 동시 실행 방지나 중복 투입 제거는 사용자가 개별적으로 구현해야 합니다.
+따라서 동일한 고객에 대한 동시 실행 방지나 중복 투입 제거는 사용자가 개별적으로 구현해야 합니다.
 
 Tsumugi에서는 `concurrencyKey`를 지정한 잡은 같은 키를 가진 잡끼리 한 건씩 순서대로 실행됩니다.
 `uniqueKey`를 지정하면 일정 기간 내에 같은 키로 투입된 잡은 중복으로 간주되며, 새 잡을 만들지 않고 기존 잡 ID를 반환값으로 돌려줍니다.
@@ -35,22 +35,22 @@ Tsumugi에서는 `concurrencyKey`를 지정한 잡은 같은 키를 가진 잡�
 <h3 id="ジョブの種類が増えるほど分岐が増える">잡의 종류가 늘어날수록 분기가 늘어난다</h3>
 
 Queues에서는 하나의 큐에 consumer를 하나만 설정할 수 있습니다.
-따라서 잡의 종류가 늘어나면 큐의 수를 늘리거나 consumer 내부의 분기 처리가 복잡해집니다.
+따라서 잡의 종류가 늘어나면 큐의 수를 늘리거나, consumer 내부의 분기 처리가 복잡해집니다.
 
-Tsumugi는 performer의 export 이름을 binding 이름으로 사용해 잡의 종류를 구분하므로, consumer에 분기를 작성할 필요가 없습니다.
-binding 이름과 payload 타입의 관계는 [binding名](/ko/guide/performer#binding名)에서 설명합니다.
+Tsumugi는 performer의 export 이름을 binding 이름으로 삼아 잡의 종류를 구분하므로, consumer에 분기를 작성할 필요가 없습니다.
+binding 이름과 payload 타입의 관계는 [binding 이름](/ko/guide/performer#binding名)에서 설명합니다.
 
 <h3 id="まれにメッセージが失われる">드물게 메시지가 유실된다</h3>
 
-Queues는 처리되지 않고 유실된 메시지를 감지할 수단을 제공하지 않습니다.
+Queues는 처리되지 못하고 유실된 메시지를 감지할 수단을 제공하지 않습니다.
 
 Tsumugi는 실행을 시작한 잡에서 결과가 보고되지 않으면 해당 잡을 무응답으로 판정합니다.
-`at-least-once` 시맨틱스의 경우, 무응답 잡은 다시 투입됩니다.
-`at-most-once` 시맨틱스의 경우, 무응답 잡은 `STALLED` 상태로 전이하며 수동으로 재시도하기 전까지 실행되지 않습니다.
+`at-least-once` 시맨틱스인 경우 무응답 잡은 다시 투입됩니다.
+`at-most-once` 시맨틱스인 경우 무응답 잡은 `STALLED` 상태로 전이하며, 수동으로 재시도하기 전까지 실행되지 않습니다.
 
 <h2 id="利用者が記述するコード">사용자가 작성하는 코드</h2>
 
-작성할 부분은 잡 처리의 정의와 투입, 단 두 곳뿐입니다.
+작성하는 것은 잡 처리의 정의와 투입, 단 두 곳뿐입니다.
 
 ```ts
 import { defineTsumugi } from 'tsumugi';
@@ -69,19 +69,20 @@ const tsumugi = defineTsumugi({ performers: { SendMail } });
 const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@example.com' } });
 ```
 
-큐의 구성, consumer의 분기, 상태 기록을 작성할 필요는 없습니다.
-각 기능은 [ジョブの投入](/ko/guide/enqueue), [実行の制御](/ko/guide/execution), [定期実行](/ko/guide/schedule), [ダッシュボードと認証](/ko/guide/dashboard)에서 설명합니다.
+큐 구성, consumer 분기, 상태 기록을 작성할 필요가 없습니다.
+각 기능은 [잡 투입](/ko/guide/enqueue), [실행 제어](/ko/guide/execution), [정기 실행](/ko/guide/schedule), [대시보드와 인증](/ko/guide/dashboard)에서 설명합니다.
 
 <h2 id="前提条件">전제 조건</h2>
 
-Workers Paid 플랜과 2025-11-17 이후의 `compatibility_date`가 필요합니다.
+Workers Paid 플랜이 필요합니다.
+2025-11-17 이후의 `compatibility_date`를 지정하고 `compatibility_flags`에 `temporal`을 설정하거나, `compatibility_date`를 2026-12-01 이후로 설정해야 합니다.
 필요한 리소스와 설정은 `npx tsumugi init`으로 생성합니다.
-절차는 [Getting Started](/ko/guide/getting-started)를 참조하십시오.
+절차는 [Getting Started](/ko/guide/getting-started)를 참조하세요.
 
 <h2 id="着想">착안</h2>
 
-Cloudflare 서비스만으로 완결되는 잡 큐에 대시보드를 함께 제공하는 구성은 [Kiribi](https://kiribi.pages.dev/)에서 착안했습니다.
-도입 절차를 최소한으로 줄이고 사용자가 내부 구성을 의식하지 않게 한다는 방침도 Kiribi와 같습니다.
+Cloudflare 서비스만으로 완결되는 잡 큐에 대시보드를 포함한다는 구성은 [Kiribi](https://kiribi.pages.dev/)에서 착안했습니다.
+도입 절차를 최소화하고 사용자가 내부 구성을 의식하지 않게 한다는 방침도 Kiribi와 같습니다.
 
-Tsumugi는 실행량 제한, 잡별 실행 보장, 재시도 제어, Flow를 통한 다단계 실행, 정기 실행을 갖추고 있습니다.
-이러한 기능 때문에 사용자가 준비해야 하는 리소스와 설정은 Kiribi보다 많아집니다.
+Tsumugi는 실행량 제한, 잡별 실행 보증, 재시도 제어, Flow를 통한 다단계 실행, 정기 실행을 갖추고 있습니다.
+이러한 기능 때문에 사용자가 준비해야 하는 리소스와 설정은 Kiribi보다 많습니다.
