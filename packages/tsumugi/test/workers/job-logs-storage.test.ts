@@ -1,19 +1,23 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../../src/core/log.js';
-import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from '../../src/do/job-shard.js';
-import type { JobRepo } from '../../src/do/repo.js';
+import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS } from '../../src/core/log.js';
 import { applySchema, COLUMNS, SCHEMA } from '../../src/do/schema.js';
 import { project } from '../../src/projection/projector.js';
+
+import type { JobLogEntry } from '../../src/core/log.js';
+import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from '../../src/do/job-shard.js';
 
 const T0 = 2_400_000_000_000;
 const TRACEPARENT = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
+type ShardInternals = Pick<TsumugiJobShard, 'clock' | 'repo'> & { env: { TSUMUGI_QUEUE: unknown } };
+const shardInternals = (instance: unknown) => instance as ShardInternals;
+
 async function install(name: string, now: number, sent: DispatchMessage[] = []): Promise<void> {
-	await runInDurableObject(shard(name), (instance) => {
-		(instance as any).clock = { now: () => now };
-		(instance as any).env.TSUMUGI_QUEUE = {
+	await runInDurableObject(shard(name), instance => {
+		shardInternals(instance).clock = { now: () => now };
+		shardInternals(instance).env.TSUMUGI_QUEUE = {
 			send: async (body: DispatchMessage) => void sent.push(body),
 			sendBatch: async (batch: Iterable<{ body: DispatchMessage }>) => {
 				for (const message of batch) sent.push(message.body);
@@ -25,19 +29,27 @@ async function install(name: string, now: number, sent: DispatchMessage[] = []):
 async function queued(name: string, input: Partial<EnqueueInput> = {}) {
 	const sent: DispatchMessage[] = [];
 	await install(name, T0, sent);
-	const jobId = await shard(name).enqueue({ binding: name.split('#')[0]!, payload: {}, ...input });
+	const [binding] = name.split('#');
+	if (binding === undefined) throw new Error(`invalid shard name: ${name}`);
+	const jobId = await shard(name).enqueue({ binding, payload: {}, ...input });
 	await runDurableObjectAlarm(shard(name));
 	return { jobId, sent };
 }
 
-const logsOf = (name: string, id: string) => runInDurableObject(shard(name), (instance) => ((instance as any).repo as JobRepo).logsOf(id));
+const logsOf = (name: string, id: string) => runInDurableObject(shard(name), instance => shardInternals(instance).repo.logsOf(id));
 
-const writesOf = (name: string) => runInDurableObject(shard(name), (instance) => ((instance as any).repo as JobRepo).writes);
+const writesOf = (name: string) => runInDurableObject(shard(name), instance => shardInternals(instance).repo.writes);
 
 const readModel = (id: string) =>
 	env.TSUMUGI_DB.prepare('SELECT logs, traceparent, state FROM job WHERE id = ?')
 		.bind(id)
 		.first<{ logs: string | null; traceparent: string | null; state: string }>();
+
+const projectedLogsOf = async (id: string): Promise<unknown> => {
+	const row = await readModel(id);
+	if (row === null || row.logs === null) throw new Error(`logs not projected: ${id}`);
+	return JSON.parse(row.logs);
+};
 
 describe('ジョブログの保存と投影', () => {
 	it('実行中のログを試行番号とサーバー時刻で保存しD1へ投影する', async () => {
@@ -107,7 +119,7 @@ describe('ジョブログの保存と投影', () => {
 		expect(logs[0]).toMatchObject({ attempt: 1, message: 'log-5' });
 		expect(logs.at(-1)).toMatchObject({ attempt: 2, message: 'retry-4' });
 		await runDurableObjectAlarm(shard(name));
-		expect(JSON.parse((await readModel(jobId))!.logs!)).toEqual(logs);
+		expect(await projectedLogsOf(jobId)).toEqual(logs);
 	});
 
 	it('未実行と終了済みのジョブにはログを追加しない', async () => {
@@ -133,7 +145,7 @@ describe('ジョブログの保存と投影', () => {
 		await runDurableObjectAlarm(shard(name));
 		expect(await shard(name).stateOf(jobId)).toBeNull();
 		expect(await logsOf(name, jobId)).toEqual([]);
-		expect(JSON.parse((await readModel(jobId))!.logs!)).toEqual([{ attempt: 1, timestamp: T0, message: '完了前' }]);
+		expect(await projectedLogsOf(jobId)).toEqual([{ attempt: 1, timestamp: T0, message: '完了前' }]);
 	});
 
 	it('既存DOへ列とログ表を追加する', async () => {
@@ -155,17 +167,19 @@ describe('ジョブログの保存と投影', () => {
 				row: state.storage.sql.exec<{ id: string; traceparent: string | null }>('SELECT id, traceparent FROM job').one(),
 			};
 		});
-		expect(actual.before.map((column) => column.name)).not.toContain('traceparent');
-		expect(actual.job.map((column) => column.name)).toContain('traceparent');
+		expect(actual.before.map(column => column.name)).not.toContain('traceparent');
+		expect(actual.job.map(column => column.name)).toContain('traceparent');
 		expect(actual.row).toEqual({ id: 'legacy', traceparent: null });
-		expect(actual.log.map((column) => column.name).sort()).toEqual([...COLUMNS.job_log].sort());
+		expect(actual.log.map(column => column.name).sort()).toEqual([...COLUMNS.job_log].sort());
 	});
 
 	it('旧スナップショットの投影で追加列をnullにする', async () => {
 		const name = 'LOGSTORE8#0';
 		const { jobId } = await queued(name);
-		const snapshot = await runInDurableObject(shard(name), (instance) => {
-			const { traceparent: _traceparent, ...row } = ((instance as any).repo as JobRepo).find(jobId)!;
+		const snapshot = await runInDurableObject(shard(name), instance => {
+			const found = shardInternals(instance).repo.find(jobId);
+			if (found === undefined) throw new Error(`job not found: ${jobId}`);
+			const { traceparent: _traceparent, ...row } = found;
 			return row;
 		});
 		await project(env.TSUMUGI_DB, [{ seq: 100, job_id: jobId, snapshot: JSON.stringify(snapshot) }]);
@@ -175,7 +189,7 @@ describe('ジョブログの保存と投影', () => {
 	it('無効なtraceparentを含む一括投入ではジョブを作成しない', async () => {
 		const name = 'LOGSTORE9#0';
 		await install(name, T0);
-		const error = await runInDurableObject(shard(name), async (instance) => {
+		const error = await runInDurableObject(shard(name), async instance => {
 			try {
 				await (instance as TsumugiJobShard).enqueueMany([
 					{ binding: 'LOGSTORE9', payload: {}, traceparent: TRACEPARENT },
@@ -187,7 +201,7 @@ describe('ジョブログの保存と投影', () => {
 			}
 		});
 		expect(error).toContain('traceparent');
-		const count = await runInDurableObject(shard(name), (instance) => ((instance as any).repo as JobRepo).countJobs());
+		const count = await runInDurableObject(shard(name), instance => shardInternals(instance).repo.countJobs());
 		expect(count).toBe(0);
 	});
 });

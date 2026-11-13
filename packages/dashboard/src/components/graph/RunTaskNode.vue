@@ -3,7 +3,9 @@ import { Handle, Position } from '@vue-flow/core';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import StatusCell from '../StatusCell.vue';
-import { HANDLE_TOP, type TaskData } from './runLayout';
+import { HANDLE_TOP } from './runLayout';
+
+import type { TaskData } from './runLayout';
 
 const props = defineProps<{ data: TaskData }>();
 const emit = defineEmits<{

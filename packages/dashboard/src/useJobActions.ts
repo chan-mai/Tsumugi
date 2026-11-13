@@ -1,7 +1,9 @@
-import { computed, ref, type Ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { cancelJob, retryJob } from './api';
 import { confirmAction } from './composables/useConfirm';
+
+import type { Ref } from 'vue';
 
 export function useJobActions(source: Ref<{ state: string; retryable?: boolean; run_id?: string | null } | null>) {
 	const { t } = useI18n();

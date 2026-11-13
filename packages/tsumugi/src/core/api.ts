@@ -65,28 +65,32 @@ export type PerformerLike<Payload = unknown, Result = unknown, Req extends Requi
 	readonly __requirements?: Req;
 };
 
-export type Performers = Record<string, PerformerLike<any, any, any>>;
+export type AnyPerformer = PerformerLike<unknown, unknown, Requirements>;
+
+export type Performers = Record<string, AnyPerformer>;
 
 /**
  * 実行時はservice bindingで解決, ここは型の伝達のみ(ADR-0037)
  * binding名は`performers`のキー
  */
-export type RemoteRef<P extends PerformerLike<any, any, any> = PerformerLike<any, any, any>> = {
+// oxlint-disable-next-line typescript/no-explicit-any -- 型引数省略時はpayload, result非検査
+export type RemoteRef<P extends AnyPerformer = PerformerLike<any, any, any>> = {
 	readonly kind: 'remote';
 	/** 型専用, 実体なし */
 	readonly __performer?: P;
 };
 
 /** performerの別Worker配置, 型引数に実装の型を指定するとpayloadを型検査 */
-export function remote<P extends PerformerLike<any, any, any> = PerformerLike<any, any, any>>(): RemoteRef<P> {
+// oxlint-disable-next-line typescript/no-explicit-any -- 型引数省略時はpayload, result非検査
+export function remote<P extends AnyPerformer = PerformerLike<any, any, any>>(): RemoteRef<P> {
 	return { kind: 'remote' };
 }
 
 export function isRemoteRef(value: unknown): value is RemoteRef {
-	return typeof value === 'object' && value !== null && (value as RemoteRef).kind === 'remote';
+	return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'remote';
 }
 
-export type PayloadOf<P> = P extends PerformerLike<infer T, any, any> ? T : never;
+export type PayloadOf<P> = P extends PerformerLike<infer T, unknown, Requirements> ? T : never;
 
 /**
  * 失敗通知先に指定可能なbinding(#30)
@@ -105,8 +109,8 @@ export type SettledPerformer<M extends Performers> = {
 	[K in keyof M]: SettledNotice extends PayloadOf<M[K]> ? K : never;
 }[keyof M] &
 	string;
-export type ReqOf<P> = P extends PerformerLike<any, any, infer R> ? R : {};
-export type ResultOf<P> = P extends PerformerLike<any, infer R, any> ? Awaited<R> : never;
+export type ReqOf<P> = P extends PerformerLike<unknown, unknown, infer R> ? R : {};
+export type ResultOf<P> = P extends PerformerLike<unknown, infer R, Requirements> ? Awaited<R> : never;
 
 type HasRequired<R extends Requirements> = true extends R[keyof R] ? true : false;
 
@@ -152,8 +156,8 @@ export interface JobQueue<M extends Performers> {
 export type PerformersOf<R extends Record<string, unknown>> = {
 	[K in keyof R]: R[K] extends RemoteRef<infer P>
 		? P
-		: R[K] extends new (ctx: any, env: any) => infer I
-			? I extends PerformerLike<any, any, any>
+		: R[K] extends new (ctx: never, env: never) => infer I
+			? I extends AnyPerformer
 				? I
 				: never
 			: never;
@@ -167,7 +171,7 @@ type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) exten
  * unionでは一部performerのbindingのみ満たす環境も検査を通過
  */
 export type EnvOf<R extends Record<string, unknown>> = UnionToIntersection<
-	{ [K in keyof R]: R[K] extends new (ctx: any, env: infer E) => any ? E : never }[keyof R]
+	{ [K in keyof R]: R[K] extends new (ctx: never, env: infer E) => unknown ? E : never }[keyof R]
 >;
 
 type ExtraInputFields = {

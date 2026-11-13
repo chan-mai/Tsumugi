@@ -1,16 +1,16 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { COLUMNS } from '../../src/do/schema.js';
 import { RUN_COLUMNS } from '../../src/do/run-schema.js';
 import { SCHEDULER_COLUMNS } from '../../src/do/scheduler-schema.js';
+import { COLUMNS } from '../../src/do/schema.js';
 import { READ_MODEL_COLUMNS } from '../../src/projection/columns.js';
 
 // DDLとクエリの取得列の二重管理, 片方のみの修正では実行時に列欠落
 const columnsIn = (instance: unknown, table: string) =>
-	((instance as any).repo.sql as SqlStorage)
+	(instance as { repo: { sql: SqlStorage } }).repo.sql
 		.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
 		.toArray()
-		.map((r) => r.name)
+		.map(r => r.name)
 		.sort();
 
 describe('Job DOのDDLと取得列の一致', () => {
@@ -18,7 +18,7 @@ describe('Job DOのDDLと取得列の一致', () => {
 
 	for (const [table, declared] of Object.entries(COLUMNS)) {
 		it(`${table}の列が一致する`, async () => {
-			const actual = await runInDurableObject(shard, (instance) => columnsIn(instance, table));
+			const actual = await runInDurableObject(shard, instance => columnsIn(instance, table));
 			expect(actual.length).toBeGreaterThan(0);
 			expect(actual).toEqual([...declared].sort());
 		});
@@ -33,7 +33,7 @@ describe('Scheduler DOのDDLと取得列の一致', () => {
 
 	for (const [table, declared] of Object.entries(SCHEDULER_COLUMNS)) {
 		it(`${table}の列が一致する`, async () => {
-			const actual = await runInDurableObject(stub, (instance) => columnsIn(instance, table));
+			const actual = await runInDurableObject(stub, instance => columnsIn(instance, table));
 			expect(actual.length).toBeGreaterThan(0);
 			expect(actual).toEqual([...declared].sort());
 		});
@@ -48,7 +48,7 @@ describe('Run DOのDDLと取得列の一致', () => {
 
 	for (const [table, declared] of Object.entries(RUN_COLUMNS)) {
 		it(`${table}の列が一致する`, async () => {
-			const actual = await runInDurableObject(stub, (instance) => columnsIn(instance, table));
+			const actual = await runInDurableObject(stub, instance => columnsIn(instance, table));
 			expect(actual.length).toBeGreaterThan(0);
 			expect(actual).toEqual([...declared].sort());
 		});
@@ -60,7 +60,7 @@ describe('D1のDDLと列定義の一致', () => {
 	for (const [table, declared] of Object.entries(READ_MODEL_COLUMNS)) {
 		it(`${table}の列が一致する`, async () => {
 			const { results } = await env.TSUMUGI_DB.prepare(`SELECT name FROM pragma_table_info(?)`).bind(table).all<{ name: string }>();
-			const actual = results.map((r) => r.name).sort();
+			const actual = results.map(r => r.name).sort();
 			expect(actual.length).toBeGreaterThan(0);
 			expect(actual).toEqual([...declared].sort());
 		});

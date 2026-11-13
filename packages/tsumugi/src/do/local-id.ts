@@ -10,7 +10,7 @@ export function createLocalId(): string {
 			const range = chars.length === 0 ? LETTERS : ALPHABET.length;
 			// 剰余の偏り回避
 			if (byte >= 256 - (256 % range)) continue;
-			chars.push(ALPHABET[byte % range]!);
+			chars.push(ALPHABET.charAt(byte % range));
 			if (chars.length === LENGTH) break;
 		}
 	}

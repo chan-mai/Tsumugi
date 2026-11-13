@@ -26,7 +26,7 @@ describe('traceparentの検証', () => {
 		valid.replace(/^00/, '01'),
 		valid.replace('4bf92f3577b34da6a3ce929d0e0e4736', '0'.repeat(32)),
 		valid.replace('00f067aa0ba902b7', '0'.repeat(16)),
-	])('不正な値を受け付けない(%j)', (value) => {
+	])('不正な値を受け付けない(%j)', value => {
 		expect(() => normalizeTraceparent(value)).toThrow(/traceparent/);
 	});
 });

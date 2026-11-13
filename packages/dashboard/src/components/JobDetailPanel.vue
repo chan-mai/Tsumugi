@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { getJob, type Attempt, type Job } from '../api';
+import { getJob } from '../api';
 import { formatTimestamp } from '../time';
 import { button, CODE, ERROR_TEXT, LINK } from '../ui';
 import { useJobActions } from '../useJobActions';
@@ -9,6 +9,8 @@ import AttemptLog from './AttemptLog.vue';
 import LoadingState from './LoadingState.vue';
 import SidePanel from './SidePanel.vue';
 import StatusCell from './StatusCell.vue';
+
+import type { Attempt, Job } from '../api';
 
 const props = defineProps<{ jobId: string | null }>();
 const emit = defineEmits<{ close: []; changed: []; run: [string] }>();
@@ -42,7 +44,7 @@ async function load(id: string) {
 
 watch(
 	() => props.jobId,
-	async (id) => {
+	async id => {
 		loadSequence++;
 		loading.value = false;
 		if (!id) return;

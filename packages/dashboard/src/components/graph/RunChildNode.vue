@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import StatusCell from '../StatusCell.vue';
+
 import type { ChildData } from './runLayout';
 
 defineProps<{ data: ChildData }>();

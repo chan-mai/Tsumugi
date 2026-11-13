@@ -1,7 +1,7 @@
-import { externalsIn } from './externals.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { externalsIn } from './externals.mjs';
 
 const BUDGETS = {
 	'dist/ui.js': 400 * 1024,
@@ -36,10 +36,12 @@ const ALLOWED_EXTERNALS = {
 	'dist/cli.js': ['tsumugi'],
 };
 
+const compareCodeUnits = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
 function externalsOf(files) {
 	const found = new Set();
 	for (const path of files) for (const spec of externalsIn(readFileSync(path, 'utf8'))) found.add(spec);
-	return [...found].sort();
+	return [...found].sort(compareCodeUnits);
 }
 
 function closureOf(entry) {
@@ -57,10 +59,10 @@ function closureOf(entry) {
 		seen.add(path);
 		for (const [, spec] of source.matchAll(IMPORT)) stack.push(normalize(join(dirname(path), spec)));
 	}
-	return [...seen].sort();
+	return [...seen].sort(compareCodeUnits);
 }
 
-const fmt = (n) => `${(n / 1024).toFixed(1)}KB`;
+const fmt = n => `${(n / 1024).toFixed(1)}KB`;
 
 let failed = false;
 for (const [path, budget] of Object.entries(BUDGETS)) {
@@ -71,7 +73,7 @@ for (const [path, budget] of Object.entries(BUDGETS)) {
 		continue;
 	}
 
-	const source = files.map((f) => readFileSync(f, 'utf8')).join('\n');
+	const source = files.map(f => readFileSync(f, 'utf8')).join('\n');
 	const size = gzipSync(Buffer.from(source)).length;
 	const pct = Math.round((size / budget) * 100);
 	const externals = externalsOf(files);

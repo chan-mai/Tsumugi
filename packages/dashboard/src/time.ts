@@ -42,7 +42,7 @@ function formattersFor(timeZone: string): ZonedFormatters {
 export function formatTimestamp(value: number, timeZone = BROWSER_TIME_ZONE): string {
 	const formatter = formattersFor(timeZone);
 	const instant = Temporal.Instant.fromEpochMilliseconds(value);
-	const part = formatter.offset.formatToParts(instant).find((entry) => entry.type === 'timeZoneName')?.value;
+	const part = formatter.offset.formatToParts(instant).find(entry => entry.type === 'timeZoneName')?.value;
 	const offset = part === 'GMT' || part === 'UTC' ? 'GMT+00:00' : (part ?? 'GMT+00:00');
 	return `${formatter.local.format(instant)} ${offset} [${formatter.timeZone}]`;
 }

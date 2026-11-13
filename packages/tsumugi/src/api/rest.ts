@@ -1,16 +1,13 @@
-import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
 import { parseMetricsQuery } from '../analytics/reader.js';
+import { cachedCheck, migrationErrorMessage } from '../projection/migrations.js';
 import { createBindingService } from '../service/bindings.service.js';
 import { createJobService } from '../service/jobs.service.js';
 import { createMetricsService } from '../service/metrics.service.js';
 import { createRunService } from '../service/runs.service.js';
 import { createScheduleService } from '../service/schedules.service.js';
-import type { MutationOutcome, ServiceEnv, ServiceOptions } from '../service/types.js';
-import type { Ui } from '../ui/serve.js';
-import type { AuthMiddleware } from './auth.js';
-import { createRouter, type Route } from './router.js';
 import { SORT_KEYS, toJobDetail, toJobSummary, toRunDetail, toRunNode, toRunSummary } from './mapper.js';
 import { openapiDocument } from './openapi.js';
+import { createRouter } from './router.js';
 import { resolveSort } from './sort.js';
 import {
 	parseJobFilters,
@@ -21,6 +18,11 @@ import {
 	validateReschedule,
 	validateStartRun,
 } from './validate.js';
+
+import type { MutationOutcome, ServiceEnv, ServiceOptions } from '../service/types.js';
+import type { Ui } from '../ui/serve.js';
+import type { AuthMiddleware } from './auth.js';
+import type { Route } from './router.js';
 import type {
 	BindingsResponse,
 	CreateJobResponse,
@@ -97,15 +99,15 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 
 	const app = createRouter<Env>();
 	// HTMLはデータを含まず, 未認証で返却しSPAでトークン入力欄を表示(ADR-0013)
-	app.use('/api/*', (c) => auth(c.req.raw, c.env));
+	app.use('/api/*', c => auth(c.req.raw, c.env));
 
 	// D1不使用, マイグレーション検査前に配置し適用漏れ環境でも取得可能
 	const document = openapiDocument();
-	app.get('/api/openapi.json', (c) => c.json(document));
+	app.get('/api/openapi.json', c => c.json(document));
 
 	// マイグレーション適用漏れの検出, 未検査ではD1のraw errorのみで原因判別不能
 	const checkSchema = cachedCheck();
-	app.use('/api/*', async (c) => {
+	app.use('/api/*', async c => {
 		const status = await checkSchema(c.env.TSUMUGI_DB);
 		if (!status.ok) {
 			// 適用漏れ時のみ復旧コマンド案内, 一時障害で適用済み環境への誤案内回避(#8)
@@ -115,7 +117,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return undefined;
 	});
 
-	app.get('/api/jobs', async (c) => {
+	app.get('/api/jobs', async c => {
 		const url = new URL(c.req.url);
 		const { column, desc } = resolveSort(url.searchParams.get('sort'), url.searchParams.get('order'));
 		const { jobs: found, total } = await jobs.list(c.env, {
@@ -129,9 +131,9 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return c.json({ jobs: found.map(toJobSummary), total } satisfies JobListResponse);
 	});
 
-	app.get('/api/bindings', async (c) => c.json({ bindings: await bindingService.list(c.env) } satisfies BindingsResponse));
+	app.get('/api/bindings', async c => c.json({ bindings: await bindingService.list(c.env) } satisfies BindingsResponse));
 
-	app.post('/api/jobs', async (c) => {
+	app.post('/api/jobs', async c => {
 		const create = jobs.create;
 		if (!create) return c.json(error('job creation is not available'), 501);
 
@@ -146,7 +148,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return c.json(error(created.message), 400);
 	});
 
-	app.get('/api/metrics', async (c) => {
+	app.get('/api/metrics', async c => {
 		const config = metrics.configOf(c.env);
 		if (!config) return c.json(error('metrics is not configured'), 501);
 
@@ -160,7 +162,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 	});
 
 	for (const action of ['retry', 'cancel'] as const) {
-		app.post(`/api/jobs/bulk-${action}`, async (c) => {
+		app.post(`/api/jobs/bulk-${action}`, async c => {
 			const body = await readJson(c.req);
 			if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
@@ -170,11 +172,11 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		});
 	}
 
-	app.get('/api/stats', async (c) => c.json((await jobs.stats(c.env)) satisfies StatsResponse));
+	app.get('/api/stats', async c => c.json((await jobs.stats(c.env)) satisfies StatsResponse));
 
-	app.get('/api/diagnostics', async (c) => c.json((await bindingService.diagnostics(c.env)) satisfies DiagnosticsResponse));
+	app.get('/api/diagnostics', async c => c.json((await bindingService.diagnostics(c.env)) satisfies DiagnosticsResponse));
 
-	app.post('/api/bindings/:binding/policy', async (c) => {
+	app.post('/api/bindings/:binding/policy', async c => {
 		const binding = c.req.param('binding');
 		if (!bindingService.isKnown(binding)) return c.json(error(`unknown binding: ${binding}`), 404);
 
@@ -189,7 +191,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return c.json(partial(binding, result.shards, result.failed), 500);
 	});
 
-	app.post('/api/bindings/:binding/policy/reset', async (c) => {
+	app.post('/api/bindings/:binding/policy/reset', async c => {
 		const binding = c.req.param('binding');
 		if (!bindingService.isKnown(binding)) return c.json(error(`unknown binding: ${binding}`), 404);
 
@@ -198,7 +200,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return c.json(partial(binding, result.shards, result.failed), 500);
 	});
 
-	app.get('/api/schedules', async (c) => {
+	app.get('/api/schedules', async c => {
 		const result = await schedules.list(c.env);
 		if (!result.ok) return c.json(error('schedules are not available'), 501);
 		return c.json({ schedules: result.schedules } satisfies SchedulesResponse);
@@ -208,7 +210,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		['pause', true],
 		['resume', false],
 	] as const) {
-		app.post(`/api/schedules/:name/${action}`, async (c) => {
+		app.post(`/api/schedules/:name/${action}`, async c => {
 			const name = c.req.param('name');
 			const result = await schedules.setPaused(c.env, name, paused);
 			if (result.ok) return c.json({ ok: true } satisfies MutationResponse, 200);
@@ -217,7 +219,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		});
 	}
 
-	app.post('/api/schedules/:name/trigger', async (c) => {
+	app.post('/api/schedules/:name/trigger', async c => {
 		const name = c.req.param('name');
 		const result = await schedules.trigger(c.env, name);
 		if (result.ok) return c.json({ id: result.id, kind: result.kind } satisfies TriggerScheduleResponse, 201);
@@ -227,20 +229,20 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return c.json(error(result.error), 500);
 	});
 
-	app.get('/api/jobs/:id', async (c) => {
+	app.get('/api/jobs/:id', async c => {
 		const job = await jobs.detail(c.env, c.req.param('id'));
 		if (!job) return c.json(error('not found'), 404);
 		return c.json({ job: toJobDetail(job) } satisfies JobDetailResponse);
 	});
 
 	for (const action of ['retry', 'cancel'] as const) {
-		app.post(`/api/jobs/:id/${action}`, async (c) => {
+		app.post(`/api/jobs/:id/${action}`, async c => {
 			const { body, status } = mutationResponse(await jobs.mutate(c.env, c.req.param('id'), { kind: action }), 'job');
 			return c.json(body, status);
 		});
 	}
 
-	app.post('/api/jobs/:id/reschedule', async (c) => {
+	app.post('/api/jobs/:id/reschedule', async c => {
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
@@ -254,7 +256,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return c.json(result, status);
 	});
 
-	app.get('/api/runs', async (c) => {
+	app.get('/api/runs', async c => {
 		const url = new URL(c.req.url);
 		const { runs: found, total } = await runs.list(c.env, {
 			state: url.searchParams.get('state'),
@@ -264,9 +266,9 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return c.json({ runs: found.map(toRunSummary), total } satisfies RunListResponse);
 	});
 
-	app.get('/api/flows', (c) => c.json({ flows: runs.flows() } satisfies FlowsResponse));
+	app.get('/api/flows', c => c.json({ flows: runs.flows() } satisfies FlowsResponse));
 
-	app.post('/api/runs', async (c) => {
+	app.post('/api/runs', async c => {
 		const start = runs.start;
 		if (!start) return c.json(error('run creation is not available'), 501);
 
@@ -281,14 +283,14 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		return c.json(error('invalid run id'), 400);
 	});
 
-	app.get('/api/runs/:id', async (c) => {
+	app.get('/api/runs/:id', async c => {
 		const detail = await runs.detail(c.env, c.req.param('id'));
 		if (!detail) return c.json(error('not found'), 404);
 		return c.json({ run: toRunDetail(detail.run), nodes: detail.nodes.map(toRunNode) } satisfies RunDetailResponse);
 	});
 
 	for (const action of ['cancel', 'retry'] as const) {
-		app.post(`/api/runs/:id/${action}`, async (c) => {
+		app.post(`/api/runs/:id/${action}`, async c => {
 			const outcome = await runs.mutate(c.env, c.req.param('id'), action);
 			if (!outcome.ok && outcome.reason === 'unavailable') return c.json(error('run control is not available'), 501);
 			const { body, status } = mutationResponse(outcome, 'run');
@@ -298,7 +300,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 
 	// API以外のGETはSPAのHTMLを返却, ルーティングはクライアント側
 	if (dashboard) {
-		app.get('*', (c) => c.html(dashboard.render()));
+		app.get('*', c => c.html(dashboard.render()));
 	}
 
 	return { routes: app.routes, fetch: (request, env) => app.fetch(request, env) };

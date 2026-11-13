@@ -7,7 +7,7 @@ export class MemoryFs implements CliFs {
 	exists(path: string): boolean {
 		if (this.files.has(path) || this.dirs.has(path)) return true;
 		const prefix = `${path}/`;
-		return [...this.files.keys(), ...this.dirs].some((key) => key.startsWith(prefix));
+		return [...this.files.keys(), ...this.dirs].some(key => key.startsWith(prefix));
 	}
 
 	read(path: string): string {
@@ -46,12 +46,12 @@ export function makeDeps(script: WranglerScript = () => ok()): Harness {
 	const calls: string[][] = [];
 	const deps: CliDeps = {
 		fs,
-		wrangler: (args) => {
+		wrangler: args => {
 			calls.push([...args]);
 			return script(args) ?? ok();
 		},
-		log: (line) => logs.push(line),
-		error: (line) => errors.push(line),
+		log: line => logs.push(line),
+		error: line => errors.push(line),
 		cwd: '/proj',
 		version: '0.0.0-test',
 		isTty: false,

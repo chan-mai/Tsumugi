@@ -25,19 +25,19 @@ type FragmentBlock = {
 
 const durableObjects = (entries: MissingBinding[], values: FragmentValues): FragmentBlock[] => {
 	if (entries.length === 0) return [];
-	const bindings = entries.map((entry) => ({ name: entry.name, class_name: entry.className ?? entry.name }));
+	const bindings = entries.map(entry => ({ name: entry.name, class_name: entry.className ?? entry.name }));
 	return [
 		{ key: 'durable_objects', value: { bindings } },
 		{
 			...(values.migrationTag ? {} : { comment: 'renumber tag so it does not collide with existing ones' }),
 			key: 'migrations',
-			value: [{ tag: values.migrationTag ?? DO_MIGRATION_TAG, new_sqlite_classes: bindings.map((b) => b.class_name) }],
+			value: [{ tag: values.migrationTag ?? DO_MIGRATION_TAG, new_sqlite_classes: bindings.map(b => b.class_name) }],
 		},
 	];
 };
 
 const d1 = (entries: MissingBinding[], values: FragmentValues): FragmentBlock[] =>
-	entries.map((entry) => ({
+	entries.map(entry => ({
 		...(values.databaseId ? {} : { comment: 'paste database_id from the output of `wrangler d1 create <name>`' }),
 		key: 'd1_databases',
 		value: [
@@ -51,7 +51,7 @@ const d1 = (entries: MissingBinding[], values: FragmentValues): FragmentBlock[] 
 	}));
 
 const queues = (entries: MissingBinding[], values: FragmentValues): FragmentBlock[] =>
-	entries.map((entry) => ({
+	entries.map(entry => ({
 		key: 'queues',
 		value: {
 			producers: [{ binding: entry.name, queue: values.queueName ?? '<queue>' }],
@@ -60,16 +60,16 @@ const queues = (entries: MissingBinding[], values: FragmentValues): FragmentBloc
 	}));
 
 const analytics = (entries: MissingBinding[]): FragmentBlock[] =>
-	entries.map((entry) => ({ key: 'analytics_engine_datasets', value: [{ binding: entry.name, dataset: '<dataset>' }] }));
+	entries.map(entry => ({ key: 'analytics_engine_datasets', value: [{ binding: entry.name, dataset: '<dataset>' }] }));
 
 const services = (entries: MissingBinding[], values: FragmentValues): FragmentBlock[] => {
 	if (entries.length === 0) return [];
-	const list = entries.map((entry) => ({
+	const list = entries.map(entry => ({
 		binding: entry.name,
 		service: values.serviceWorker ?? '<worker>',
 		entrypoint: entry.className ?? '<PerformerClass>',
 	}));
-	const filled = values.serviceWorker !== undefined && entries.every((entry) => entry.className);
+	const filled = values.serviceWorker !== undefined && entries.every(entry => entry.className);
 	const comment = filled ? {} : { comment: 'set service and entrypoint to the target Worker name and class name' };
 	return [{ ...comment, key: 'services', value: list }];
 };
@@ -85,9 +85,9 @@ const BUILDERS: Record<BindingKind, (entries: MissingBinding[], values: Fragment
 const ORDER: readonly BindingKind[] = ['durable-object', 'd1', 'queue', 'analytics', 'service'];
 
 const blocksOf = (missing: readonly MissingBinding[], values: FragmentValues): FragmentBlock[] =>
-	ORDER.flatMap((kind) =>
+	ORDER.flatMap(kind =>
 		BUILDERS[kind](
-			missing.filter((entry) => entry.kind === kind),
+			missing.filter(entry => entry.kind === kind),
 			values,
 		),
 	);
@@ -109,7 +109,7 @@ const tomlValue = (value: unknown): string => {
 };
 
 const tomlTables = (path: string, items: Record<string, unknown>[]): string[] =>
-	items.map((item) => [`[[${path}]]`, ...Object.entries(item).map(([key, value]) => `${key} = ${tomlValue(value)}`)].join('\n'));
+	items.map(item => [`[[${path}]]`, ...Object.entries(item).map(([key, value]) => `${key} = ${tomlValue(value)}`)].join('\n'));
 
 const renderToml = (block: FragmentBlock): string => {
 	const tables = Array.isArray(block.value)
@@ -139,17 +139,17 @@ const LABELS: Record<BindingKind, string> = {
 
 /** `migrationErrorMessage`と同形式 */
 export function configErrorMessage(missing: readonly MissingBinding[]): string {
-	const lines = missing.map((entry) => {
+	const lines = missing.map(entry => {
 		const detail = entry.reason === 'invalid' ? 'has no performer' : 'is not configured';
 		return `✗ ${entry.name} (${LABELS[entry.kind]}) ${detail}`;
 	});
 
 	const next = ['append the following fragment to wrangler.jsonc'];
-	if (missing.some((entry) => entry.kind === 'd1')) {
+	if (missing.some(entry => entry.kind === 'd1')) {
 		next.push('run wrangler d1 create <database> to create the database');
 		next.push('run wrangler d1 migrations apply <database> --remote to set up the read model');
 	}
-	if (missing.some((entry) => entry.kind === 'queue')) next.push('run wrangler queues create <queue> to create the queue');
+	if (missing.some(entry => entry.kind === 'queue')) next.push('run wrangler queues create <queue> to create the queue');
 
 	return [
 		'tsumugi: the wrangler configuration is incomplete',

@@ -118,17 +118,18 @@ const packageVersion = (): string => {
 
 const nodeDeps = (): CliDeps => ({
 	fs: {
-		exists: (path) => existsSync(path),
-		read: (path) => readFileSync(path, 'utf8'),
+		exists: path => existsSync(path),
+		read: path => readFileSync(path, 'utf8'),
 		write: (path, content) => writeFileSync(path, content),
-		mkdir: (path) => void mkdirSync(path, { recursive: true }),
+		mkdir: path => void mkdirSync(path, { recursive: true }),
 	},
-	wrangler: (args) => {
+	wrangler: args => {
 		const result = spawnSync('npx', ['wrangler', ...args], { encoding: 'utf8' });
-		return { ok: result.status === 0 && result.error === undefined, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+		if (result.error !== undefined) return { ok: false, stdout: '', stderr: '' };
+		return { ok: result.status === 0, stdout: result.stdout, stderr: result.stderr };
 	},
-	log: (line) => console.log(line),
-	error: (line) => console.error(line),
+	log: line => console.log(line),
+	error: line => console.error(line),
 	cwd: process.cwd(),
 	version: packageVersion(),
 	isTty: process.stdin.isTTY === true && process.stdout.isTTY === true,

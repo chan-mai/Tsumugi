@@ -33,7 +33,7 @@ function isMissingLedger(error: unknown): boolean {
 async function appliedMigrations(db: D1Database): Promise<string[] | null> {
 	try {
 		const { results } = await db.prepare(`SELECT name FROM d1_migrations`).all<{ name: string }>();
-		return results.map((row) => row.name);
+		return results.map(row => row.name);
 	} catch (error) {
 		if (isMissingLedger(error)) return null;
 		throw error;
@@ -49,7 +49,7 @@ export async function checkMigrations(db: D1Database): Promise<MigrationStatus> 
 	}
 	if (applied === null) return { ok: false, missing: [...EXPECTED_MIGRATIONS] };
 
-	const missing = EXPECTED_MIGRATIONS.filter((name) => !applied.includes(name));
+	const missing = EXPECTED_MIGRATIONS.filter(name => !applied.includes(name));
 	return missing.length === 0 ? { ok: true } : { ok: false, missing };
 }
 
@@ -69,7 +69,7 @@ export function cachedCheck(
 	let settledAt = 0;
 	let inFlight: Promise<MigrationStatus> | undefined;
 
-	return async (db) => {
+	return async db => {
 		if (settled?.ok) return settled;
 		if (settled && 'unavailable' in settled && now() - settledAt < UNAVAILABLE_TTL_MS) return settled;
 		inFlight ??= checkMigrations(db).finally(() => {

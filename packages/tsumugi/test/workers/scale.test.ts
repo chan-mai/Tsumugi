@@ -1,6 +1,9 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
+
+import type { Clock } from '../../src/do/clock.js';
+import type { DispatchMessage, EnqueueInput } from '../../src/do/job-shard.js';
+import type { JobRepo } from '../../src/do/repo.js';
 
 const T0 = 2_000_000_000_000;
 
@@ -25,19 +28,28 @@ function captureQueue() {
 	};
 }
 
+type ShardInternals = {
+	clock: Clock;
+	env: { TSUMUGI_QUEUE: unknown };
+	ctx: DurableObjectState;
+	repo: JobRepo;
+	enqueueMany(inputs: readonly EnqueueInput[]): Promise<string[]>;
+};
+
+const internals = (instance: unknown) => instance as ShardInternals;
+
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 async function install(name: string, now: number, queue: unknown) {
-	await runInDurableObject(shard(name), (instance) => {
-		(instance as any).clock = { now: () => now };
-		(instance as any).env.TSUMUGI_QUEUE = queue;
+	await runInDurableObject(shard(name), instance => {
+		internals(instance).clock = { now: () => now };
+		internals(instance).env.TSUMUGI_QUEUE = queue;
 	});
 }
 
-const stateOf = (name: string, jobId: string) =>
-	runInDurableObject(shard(name), (instance) => (instance as any).repo.find(jobId)?.state as string | undefined);
+const stateOf = (name: string, jobId: string) => runInDurableObject(shard(name), instance => internals(instance).repo.find(jobId)?.state);
 
-const writesOf = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.writes as number);
+const writesOf = (name: string) => runInDurableObject(shard(name), instance => internals(instance).repo.writes);
 
 describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 	it('衝突すると既存のジョブIDが返る', async () => {
@@ -65,18 +77,21 @@ describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 		const fixed = 'OUTBOXTX#0:fixed';
 
 		await expect(
-			runInDurableObject(shard('OUTBOXTX#0'), (instance) =>
-				(instance as any).enqueueMany([
+			runInDurableObject(shard('OUTBOXTX#0'), instance =>
+				internals(instance).enqueueMany([
 					{ binding: 'OUTBOXTX', payload: {}, id: fixed },
 					{ binding: 'bad#name', payload: {} },
 				]),
 			),
-		).rejects.toThrow();
+		).rejects.toThrow('invalid binding name');
 		const other = await shard('OUTBOXTX#0').enqueue({ binding: 'OUTBOXTX', payload: {} });
 		await shard('OUTBOXTX#0').enqueue({ binding: 'OUTBOXTX', payload: {}, id: fixed });
 
-		const outbox = await runInDurableObject(shard('OUTBOXTX#0'), (instance) =>
-			((instance as any).repo.sql.exec('SELECT job_id FROM outbox').toArray() as { job_id: string }[]).map((row) => row.job_id),
+		const outbox = await runInDurableObject(shard('OUTBOXTX#0'), instance =>
+			internals(instance)
+				.repo.sql.exec<{ job_id: string }>('SELECT job_id FROM outbox')
+				.toArray()
+				.map(row => row.job_id),
 		);
 		expect(outbox).toEqual(expect.arrayContaining([other, fixed]));
 	});
@@ -88,14 +103,14 @@ describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 		// 2件目のbinding名がジョブIDとして不正, 1件目の予約と行の書き込み後に例外
 		// RPC越し例外はvitest-pluginで未処理rejection扱い、DO内で実行
 		await expect(
-			runInDurableObject(shard('UNIQTX#0'), (instance) =>
-				(instance as any).enqueueMany([
+			runInDurableObject(shard('UNIQTX#0'), instance =>
+				internals(instance).enqueueMany([
 					{ binding: 'UNIQTX', payload: {}, uniqueKey: 'tx' },
 					{ binding: 'bad#name', payload: {} },
 				]),
 			),
-		).rejects.toThrow();
-		const count = await runInDurableObject(shard('UNIQTX#0'), (instance) => (instance as any).repo.countActive() as number);
+		).rejects.toThrow('invalid binding name');
+		const count = await runInDurableObject(shard('UNIQTX#0'), instance => internals(instance).repo.countActive());
 		expect(count).toBe(0);
 
 		// 予約残存時は存在しないジョブIDが返却
@@ -160,7 +175,7 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 		await runDurableObjectAlarm(shard('CKEY3#0'));
 
 		expect(sent).toHaveLength(3);
-		expect(sent.map((m) => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
+		expect(sent.map(m => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
 	});
 
 	it('perKeyRateのトークン不足でも範囲外の別キーを投入する(ADR-0057)', async () => {
@@ -177,7 +192,7 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 		await runDurableObjectAlarm(shard('CKEY4#0'));
 
 		expect(sent).toHaveLength(3);
-		expect(sent.map((m) => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
+		expect(sent.map(m => m.jobId)).toEqual(expect.arrayContaining([other, unkeyed]));
 	});
 
 	it('範囲外キーの走査が途中終了した場合、次のtickを直ちに実行して残りキーのジョブを投入する(ADR-0057)', async () => {
@@ -186,26 +201,23 @@ describe('concurrencyKey単位の同時実行上限(ADR-0009)', () => {
 		await shard('CKEY5#0').configure({ policy: { concurrency: 300, perKeyConcurrency: 1 } });
 
 		const keys = ['a', ...Array.from({ length: 199 }, (_, i) => `k${String(i).padStart(3, '0')}`)];
-		await shard('CKEY5#0').enqueueMany(keys.map((concurrencyKey) => ({ binding: 'CKEY5', payload: {}, concurrencyKey })));
+		await shard('CKEY5#0').enqueueMany(keys.map(concurrencyKey => ({ binding: 'CKEY5', payload: {}, concurrencyKey })));
 		await runDurableObjectAlarm(shard('CKEY5#0'));
 		expect(sent).toHaveLength(200);
 
 		sent.length = 0;
 		await install('CKEY5#0', T0 + 1_000, queue);
-		await shard('CKEY5#0').enqueueMany(keys.map((concurrencyKey) => ({ binding: 'CKEY5', payload: {}, concurrencyKey, delayMs: 500 })));
+		await shard('CKEY5#0').enqueueMany(keys.map(concurrencyKey => ({ binding: 'CKEY5', payload: {}, concurrencyKey, delayMs: 500 })));
 		await runDurableObjectAlarm(shard('CKEY5#0'));
 		await install('CKEY5#0', T0 + 2_000, queue);
 		const last = await shard('CKEY5#0').enqueue({ binding: 'CKEY5', payload: {}, concurrencyKey: 'z' });
 		await runDurableObjectAlarm(shard('CKEY5#0'));
 		expect(sent).toHaveLength(0);
-		const alarm = await runInDurableObject(
-			shard('CKEY5#0'),
-			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,
-		);
+		const alarm = await runInDurableObject(shard('CKEY5#0'), instance => internals(instance).ctx.storage.getAlarm());
 		expect(alarm).toBe(T0 + 2_000);
 
 		await runDurableObjectAlarm(shard('CKEY5#0'));
-		expect(sent.map((m) => m.jobId)).toEqual([last]);
+		expect(sent.map(m => m.jobId)).toEqual([last]);
 	});
 });
 
@@ -287,18 +299,15 @@ describe('運用診断(#10)', () => {
 		]);
 		await runDurableObjectAlarm(shard('DIAGP#0'));
 
-		const raw = await runInDurableObject(
-			shard('DIAGP#0'),
-			(instance) => (instance as any).repo.readSetting('last_blocked') as string | undefined,
-		);
+		const raw = await runInDurableObject(shard('DIAGP#0'), instance => internals(instance).repo.readSetting('last_blocked'));
 		expect(raw).toBeDefined();
 		expect(JSON.parse(raw as string)).toMatchObject({ capacity: true });
 	});
 
 	it('退避で消えても永続化したblockedをdiagnosticsが返す', async () => {
 		// tick前shardのblocked既定はfalse, 退避後の再ロードを模して直接書き込み
-		await runInDurableObject(shard('DIAGR#0'), (instance) =>
-			(instance as any).repo.writeSetting('last_blocked', JSON.stringify({ capacity: true, tokens: false, perKey: false })),
+		await runInDurableObject(shard('DIAGR#0'), instance =>
+			internals(instance).repo.writeSetting('last_blocked', JSON.stringify({ capacity: true, tokens: false, perKey: false })),
 		);
 
 		const diag = await shard('DIAGR#0').diagnostics();
@@ -316,8 +325,11 @@ describe('enqueueMany', () => {
 
 		expect(ids).toHaveLength(1_000);
 		expect(new Set(ids).size).toBe(1_000);
-		expect(await stateOf('BULK#0', ids[0]!)).toBe('SCHEDULED');
-		expect(await stateOf('BULK#0', ids[999]!)).toBe('SCHEDULED');
+		const first = ids[0];
+		const last = ids[999];
+		if (first === undefined || last === undefined) throw new Error('enqueued ids are missing');
+		expect(await stateOf('BULK#0', first)).toBe('SCHEDULED');
+		expect(await stateOf('BULK#0', last)).toBe('SCHEDULED');
 	});
 
 	it('tickは有界で,上限を超える分は次のtickへ送る', async () => {
@@ -350,7 +362,7 @@ describe('enqueueMany', () => {
 
 describe('Queuesのサイズ上限と送信失敗', () => {
 	type Row = { state: string; attempts: number; dispatched_at: number | null } | undefined;
-	const rowOf = (name: string, jobId: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.find(jobId) as Row);
+	const rowOf = (name: string, jobId: string) => runInDurableObject(shard(name), instance => internals(instance).repo.find(jobId) as Row);
 
 	it('sendBatchは合計256KBを超えないよう分割される', async () => {
 		const { sent, batches, queue } = captureQueue();
@@ -364,7 +376,9 @@ describe('Queuesのサイズ上限と送信失敗', () => {
 
 		expect(sent).toHaveLength(100);
 		expect(batches.length).toBeGreaterThan(1);
-		expect(await stateOf('BYTES#0', ids[99]!)).toBe('QUEUED');
+		const last = ids[99];
+		if (last === undefined) throw new Error('enqueued id is missing');
+		expect(await stateOf('BYTES#0', last)).toBe('QUEUED');
 	});
 
 	it('送信に失敗したジョブは試行回数を消費せずSCHEDULEDへ戻る', async () => {
@@ -388,7 +402,7 @@ describe('Queuesのサイズ上限と送信失敗', () => {
 		const { sent, queue } = captureQueue();
 		await install('SENDFAIL#0', T0 + 5_000, queue);
 		await runDurableObjectAlarm(shard('SENDFAIL#0'));
-		expect(sent.map((m) => [m.jobId, m.attempt])).toEqual([[jobId, 1]]);
+		expect(sent.map(m => [m.jobId, m.attempt])).toEqual([[jobId, 1]]);
 		expect((await rowOf('SENDFAIL#0', jobId))?.state).toBe('QUEUED');
 	});
 
@@ -398,14 +412,14 @@ describe('Queuesのサイズ上限と送信失敗', () => {
 
 		// RPC越し例外はvitest-pluginで未処理rejection扱い、DO内で実行
 		await expect(
-			runInDurableObject(shard('BIGPAY#0'), (instance) =>
-				(instance as any).enqueueMany([
+			runInDurableObject(shard('BIGPAY#0'), instance =>
+				internals(instance).enqueueMany([
 					{ binding: 'BIGPAY', payload: {} },
 					{ binding: 'BIGPAY', payload: { text: 'x'.repeat(130_000) } },
 				]),
 			),
 		).rejects.toThrow(/payload is too large/);
-		const count = await runInDurableObject(shard('BIGPAY#0'), (instance) => (instance as any).repo.countActive() as number);
+		const count = await runInDurableObject(shard('BIGPAY#0'), instance => internals(instance).repo.countActive());
 		expect(count).toBe(0);
 	});
 
@@ -414,8 +428,8 @@ describe('Queuesのサイズ上限と送信失敗', () => {
 		await install('LEGACY#0', T0, queue);
 		const small = await shard('LEGACY#0').enqueue({ binding: 'LEGACY', payload: {} });
 		// 検証導入前に登録済みの行を再現
-		await runInDurableObject(shard('LEGACY#0'), (instance) => {
-			(instance as any).repo.insert({
+		await runInDurableObject(shard('LEGACY#0'), instance => {
+			internals(instance).repo.insert({
 				id: 'LEGACY#0:oversized0000000000000000',
 				binding: 'LEGACY',
 				priority: 0,
@@ -434,7 +448,7 @@ describe('Queuesのサイズ上限と送信失敗', () => {
 		await runDurableObjectAlarm(shard('LEGACY#0'));
 
 		// 同じtickの他のジョブは送信
-		expect(sent.map((m) => m.jobId)).toEqual([small]);
+		expect(sent.map(m => m.jobId)).toEqual([small]);
 		expect(await stateOf('LEGACY#0', 'LEGACY#0:oversized0000000000000000')).toBe('FAILED');
 	});
 });
@@ -456,7 +470,7 @@ describe('投入候補の読み取り範囲(ADR-0019 / ADR-0020, #4)', () => {
 		await runDurableObjectAlarm(shard('WIN#0'));
 
 		// 作成順の単一読み取り範囲では201件目は選考対象外
-		expect(sent.map((m) => m.jobId)).toContain(late);
+		expect(sent.map(m => m.jobId)).toContain(late);
 		expect(await stateOf('WIN#0', late)).toBe('QUEUED');
 	});
 
@@ -481,8 +495,7 @@ describe('投入候補の読み取り範囲(ADR-0019 / ADR-0020, #4)', () => {
 });
 
 describe('同時実行数待ちでの即時の再実行(#103)', () => {
-	const alarmOf = (name: string) =>
-		runInDurableObject(shard(name), (instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>);
+	const alarmOf = (name: string) => runInDurableObject(shard(name), instance => internals(instance).ctx.storage.getAlarm());
 
 	it('concurrencyが埋まり候補が残っていても即時の再実行はしない', async () => {
 		const { queue, sent } = captureQueue();
@@ -521,14 +534,15 @@ describe('同時実行数待ちでの即時の再実行(#103)', () => {
 
 		// 再試行時刻のalarmではバックオフ中の空き枠へ投入なし
 		await install('CAP3#0', T0 + 1_000, queue);
-		await shard('CAP3#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
+		const [message] = sent;
+		if (message === undefined) throw new Error('dispatched message is missing');
+		await shard('CAP3#0').report(message.jobId, { ok: false, error: 'boom' });
 		expect(await alarmOf('CAP3#0')).toBe(T0 + 1_000);
 	});
 });
 
 describe('トークンバケットの永続化(ADR-0009)', () => {
-	const bucketOf = (name: string) =>
-		runInDurableObject(shard(name), (instance) => (instance as any).repo.readSetting('rate_bucket') as string | undefined);
+	const bucketOf = (name: string) => runInDurableObject(shard(name), instance => internals(instance).repo.readSetting('rate_bucket'));
 
 	it('消費した残りをSQLiteへ保存する', async () => {
 		// メモリのみ保持ではDO退避で上限へ復帰、設定流量超過の投入が発生
@@ -565,8 +579,8 @@ describe('トークンバケットの永続化(ADR-0009)', () => {
 		// DO退避は再現不可, 初回tick前にSQLiteへ直接書き込み
 		const { queue, sent } = captureQueue();
 		await install('BUCKET4#0', T0, queue);
-		await runInDurableObject(shard('BUCKET4#0'), (instance) =>
-			(instance as any).repo.writeSetting('rate_bucket', JSON.stringify({ tokens: 0, refilledAt: T0 })),
+		await runInDurableObject(shard('BUCKET4#0'), instance =>
+			internals(instance).repo.writeSetting('rate_bucket', JSON.stringify({ tokens: 0, refilledAt: T0 })),
 		);
 		await shard('BUCKET4#0').configure({ policy: { rate: { tokens: 2, intervalMs: 60_000 } } });
 		for (let i = 0; i < 3; i++) await shard('BUCKET4#0').enqueue({ binding: 'BUCKET4', payload: { i } });
@@ -578,11 +592,8 @@ describe('トークンバケットの永続化(ADR-0009)', () => {
 
 describe('キー別トークンバケットの永続化(ADR-0045)', () => {
 	const keyBucketsOf = (name: string, keys: string[]) =>
-		runInDurableObject(
-			shard(name),
-			(instance) => (instance as any).repo.readKeyBuckets(keys) as Record<string, { tokens: number; refilledAt: number }>,
-		);
-	const countOf = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countKeyBuckets() as number);
+		runInDurableObject(shard(name), instance => internals(instance).repo.readKeyBuckets(keys));
+	const countOf = (name: string) => runInDurableObject(shard(name), instance => internals(instance).repo.countKeyBuckets());
 
 	it('消費した残りをキーごとの行へ保存する', async () => {
 		const { queue, sent } = captureQueue();
@@ -620,8 +631,8 @@ describe('キー別トークンバケットの永続化(ADR-0045)', () => {
 		// DO退避は再現不可, 初回tick前に行を直接書き込み
 		const { queue, sent } = captureQueue();
 		await install('KB3#0', T0, queue);
-		await runInDurableObject(shard('KB3#0'), (instance) =>
-			(instance as any).repo.writeKeyBuckets({ 'cust-a': { tokens: 0, refilledAt: T0 } }),
+		await runInDurableObject(shard('KB3#0'), instance =>
+			internals(instance).repo.writeKeyBuckets({ 'cust-a': { tokens: 0, refilledAt: T0 } }),
 		);
 		await shard('KB3#0').configure({ policy: { concurrency: 100, perKeyConcurrency: 10, perKeyRate: { tokens: 2, intervalMs: 60_000 } } });
 		for (let i = 0; i < 3; i++) await shard('KB3#0').enqueue({ binding: 'KB3', payload: { i }, concurrencyKey: 'cust-a' });
@@ -658,10 +669,7 @@ describe('キー別トークンバケットの永続化(ADR-0045)', () => {
 
 		expect(sent).toHaveLength(1);
 		// readyCount上限でも候補は不変, nowで再実行すると回復まで無駄なtick反復
-		const alarm = await runInDurableObject(
-			shard('KB6#0'),
-			(instance) => (instance as any).ctx.storage.getAlarm() as Promise<number | null>,
-		);
+		const alarm = await runInDurableObject(shard('KB6#0'), instance => internals(instance).ctx.storage.getAlarm());
 		expect(alarm).toBe(T0 + 60_000);
 	});
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SORT_KEYS, toJobDetail, toRunNode } from '../../src/api/mapper.js';
 import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
+
 import type { Job } from '../../src/core/entity/job.entity.js';
 import type { RunNode } from '../../src/core/entity/run.entity.js';
 
@@ -8,7 +9,7 @@ const attempt = { attempt: 1, state: 'FAILED', startedAt: 10, finishedAt: 20, er
 
 describe('レスポンスへの変換', () => {
 	it('並べ替えの列名を全てエンティティのキーへ対応させる', () => {
-		for (const column of SORTABLE_COLUMNS) expect(SORT_KEYS[column], column).toBeDefined();
+		expect(SORTABLE_COLUMNS.map(column => SORT_KEYS[column])).not.toContain(undefined);
 	});
 
 	it('ジョブ詳細は試行のエラー本文を含めsnake_caseで返す', () => {

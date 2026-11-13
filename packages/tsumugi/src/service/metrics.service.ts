@@ -1,4 +1,6 @@
-import { MetricsQueryError, readMetrics, type MetricsResolver } from '../analytics/reader.js';
+import { MetricsQueryError, readMetrics } from '../analytics/reader.js';
+
+import type { MetricsResolver } from '../analytics/reader.js';
 import type { ServiceEnv, ServiceOptions } from './types.js';
 
 type MetricsConfig = NonNullable<ReturnType<MetricsResolver>>;

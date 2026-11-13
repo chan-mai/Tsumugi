@@ -3,7 +3,7 @@ import { Plus } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
-import { isUnauthorized, listRuns, type Run } from '../api';
+import { isUnauthorized, listRuns } from '../api';
 import FilterMenu from '../components/FilterMenu.vue';
 import NewRunModal from '../components/NewRunModal.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -15,6 +15,8 @@ import { flows, definitionsReady } from '../composables/useDefinitions';
 import { useDetail } from '../composables/useDetail';
 import { useQueryChoice, useQueryInteger, useQueryText } from '../composables/useQueryState';
 import { button, ERROR_TEXT, MUTED_TEXT } from '../ui';
+
+import type { Run } from '../api';
 
 const STATES = ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;
 
@@ -112,7 +114,7 @@ onMounted(load);
 				:title="t('common.status')"
 				:options="[...STATES]"
 				:selected="state"
-				:label-of="(value) => t(`state.${value}`)"
+				:label-of="value => t(`state.${value}`)"
 				@select="filter(() => (state = $event as typeof state))"
 			/>
 			<button

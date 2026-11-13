@@ -1,8 +1,10 @@
-import { toFailOptions, type FailOptions, type JobContext, type PerformerLike, type Requirements } from '../core/api.js';
+import { toFailOptions } from '../core/api.js';
 import { assertNodeId } from '../core/flow.js';
 import { LOG_KEEP, LOG_MAX_CHARS } from '../core/log.js';
-import type { SpawnRequest } from '../core/run.js';
 import { normalizeTraceparent } from '../core/trace.js';
+
+import type { FailOptions, JobContext, PerformerLike, Requirements } from '../core/api.js';
+import type { SpawnRequest } from '../core/run.js';
 
 // DOを含む検証は`@cloudflare/vitest-plugin`の対象
 
@@ -42,7 +44,7 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 		jobId,
 		traceparent: normalizeTraceparent(options.traceparent),
 		logs,
-		log: async (message) => {
+		log: async message => {
 			logs.push(message.slice(0, LOG_MAX_CHARS));
 			if (logs.length > LOG_KEEP) logs.shift();
 		},
@@ -52,7 +54,7 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 		deadlineAt: options.deadlineAt ?? Temporal.Now.instant().epochMilliseconds + 60_000,
 		spawns,
 		heartbeats,
-		heartbeat: async (progress) => {
+		heartbeat: async progress => {
 			heartbeats.push(progress);
 			return { cancelRequested };
 		},
@@ -66,7 +68,7 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 		},
 		fails,
 		// consumerと同じ形式検証
-		fail: (options) => {
+		fail: options => {
 			fails.push(toFailOptions(options));
 		},
 	};

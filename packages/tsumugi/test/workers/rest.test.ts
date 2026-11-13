@@ -1,13 +1,16 @@
 import { env, listDurableObjectIds, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createRest } from '../../src/api/rest.js';
+import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
+import { hashToShard } from '../../src/core/shard.js';
+import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
 // 公開エントリ経由で再エクスポート欠落も検出
 import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
-import { createRest, type Rest, type RestEnv } from '../../src/api/rest.js';
-import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
-import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
-import { hashToShard } from '../../src/core/shard.js';
+
+import type { Rest, RestEnv } from '../../src/api/rest.js';
+import type { TsumugiJobShard } from '../../src/do/job-shard.js';
 import type { ScheduleView } from '../../src/do/scheduler.js';
 
 const T0 = 2_200_000_000_000;
@@ -40,8 +43,19 @@ const ROUTES: [method: string, path: string][] = [
 	['GET', '/api/unknown'],
 ];
 
+function fetchWith<A extends unknown[], R>(handler: { fetch?: (...args: A) => R }, ...args: NoInfer<A>): R {
+	if (handler.fetch === undefined) throw new Error('fetch handler is not defined');
+	return handler.fetch(...args);
+}
+
+type ShardInternals = Pick<TsumugiJobShard, 'clock' | 'repo'> & {
+	env: { TSUMUGI_QUEUE: { send(): Promise<void>; sendBatch(): Promise<void> } };
+};
+const shardInternals = (instance: unknown) => instance as ShardInternals;
+
 const call = (handler: ExportedHandler<RestEnv>, method: string, path: string, headers: Record<string, string> = {}) =>
-	handler.fetch!(
+	fetchWith(
+		handler,
 		new Request(`https://example.com${path}`, { method, headers }),
 		env as RestEnv,
 		{
@@ -56,9 +70,9 @@ const request = (rest: Rest<RestEnv>, path: string, init: RequestInit, target: R
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 async function seedJob(): Promise<string> {
-	await runInDurableObject(shard('REST#0'), (instance) => {
-		(instance as any).clock = { now: () => T0 };
-		(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+	await runInDurableObject(shard('REST#0'), instance => {
+		shardInternals(instance).clock = { now: () => T0 };
+		shardInternals(instance).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 	});
 	const jobId = await shard('REST#0').enqueue({ binding: 'REST', payload: { n: 1 } });
 	await runDurableObjectAlarm(shard('REST#0'));
@@ -95,7 +109,7 @@ describe('fail-closed認証(ADR-0013)', () => {
 	});
 
 	it('空のトークンは設定時点で拒否する', () => {
-		expect(() => bearerAuth('')).toThrow();
+		expect(() => bearerAuth('')).toThrow('bearerAuth token is empty');
 	});
 });
 
@@ -138,7 +152,8 @@ describe('secretからのトークン解決', () => {
 	});
 
 	const get = (envOverride: Record<string, unknown>, headers: Record<string, string> = {}) =>
-		fromEnv.fetch!(
+		fetchWith(
+			fromEnv,
 			new Request('https://example.com/api/jobs', { headers }),
 			{ ...env, ...envOverride } as RestEnv,
 			{
@@ -177,7 +192,7 @@ describe('REST API', () => {
 
 		const list = await call(withAuth, 'GET', '/api/jobs', authorized);
 		const { jobs } = await list.json<{ jobs: { id: string }[] }>();
-		expect(jobs.some((job) => job.id === jobId)).toBe(true);
+		expect(jobs.some(job => job.id === jobId)).toBe(true);
 
 		const detail = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`, authorized);
 		expect(detail.status).toBe(200);
@@ -241,7 +256,8 @@ describe('REST API', () => {
 	it('流量を実行時に変えられる(#27)', async () => {
 		await seedJob();
 		const post = (body: unknown, path = '/api/bindings/REST/policy') =>
-			withAuth.fetch!(
+			fetchWith(
+				withAuth,
 				new Request(`https://example.com${path}`, {
 					method: 'POST',
 					headers: { ...authorized, 'content-type': 'application/json' },
@@ -289,7 +305,8 @@ describe('REST API', () => {
 
 	it('流量の指定を検証する(#27)', async () => {
 		const post = (body: unknown, binding = 'REST') =>
-			withAuth.fetch!(
+			fetchWith(
+				withAuth,
 				new Request(`https://example.com/api/bindings/${binding}/policy`, {
 					method: 'POST',
 					headers: { ...authorized, 'content-type': 'application/json' },
@@ -317,7 +334,8 @@ describe('REST API', () => {
 		expect((await post({ queueWaitMs: 0 })).status).toBe(200);
 
 		// 変更はshardに残存, 後続テスト前に破棄
-		await withAuth.fetch!(
+		await fetchWith(
+			withAuth,
 			new Request('https://example.com/api/bindings/REST/policy/reset', { method: 'POST', headers: authorized }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -348,7 +366,8 @@ describe('REST API', () => {
 		} as unknown as RestEnv;
 
 		const call = (path: string) =>
-			sharded.fetch!(
+			fetchWith(
+				sharded,
 				new Request(`https://example.com${path}`, {
 					method: 'POST',
 					headers: { ...authorized, 'content-type': 'application/json' },
@@ -387,7 +406,7 @@ describe('REST API', () => {
 		}>();
 		expect(body.shard).toBe(0);
 		expect(typeof body.bindings.REST?.active).toBe('number');
-		expect(typeof body.bindings.REST?.blocked?.capacity).toBe('boolean');
+		expect(typeof body.bindings.REST?.blocked.capacity).toBe('boolean');
 	});
 
 	it('存在しないジョブは404', async () => {
@@ -524,7 +543,8 @@ describe('ジョブの投入', () => {
 	const authorized = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
 
 	const post = (body: unknown, headers: Record<string, string> = authorized) =>
-		withAuth.fetch!(
+		fetchWith(
+			withAuth,
 			new Request('https://example.com/api/jobs', { method: 'POST', headers, body: JSON.stringify(body) }),
 			env as RestEnv,
 			{
@@ -552,7 +572,8 @@ describe('ジョブの投入', () => {
 	});
 
 	it('壊れたJSONは400', async () => {
-		const res = await withAuth.fetch!(
+		const res = await fetchWith(
+			withAuth,
 			new Request('https://example.com/api/jobs', { method: 'POST', headers: authorized, body: '{' }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -568,7 +589,8 @@ describe('ジョブの投入', () => {
 	it('分割したbindingへはpartitionKeyで投入先を決定する(ADR-0011)', async () => {
 		const sharded = defineTsumugi({ performers: { REST: Noop }, auth: bearerAuth(TOKEN), bindings: { REST: { shards: 2 } } });
 		const postTo = (body: unknown) =>
-			sharded.fetch!(
+			fetchWith(
+				sharded,
 				new Request('https://example.com/api/jobs', { method: 'POST', headers: authorized, body: JSON.stringify(body) }),
 				env as RestEnv,
 				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -611,7 +633,8 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 	}
 
 	const post = (handler: ExportedHandler<RestEnv>, path: string) =>
-		handler.fetch!(
+		fetchWith(
+			handler,
 			new Request(`https://example.com${path}`, { method: 'POST', headers: authorized }),
 			env as RestEnv,
 			{
@@ -632,7 +655,8 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 	it('条件指定のbulk-retryは保持期間を過ぎた行を対象にしない', async () => {
 		await orphan('GONE#0:bulk-old', 'FAILED', Temporal.Now.instant().epochMilliseconds - 10 * 60 * 1000);
 		for (const body of [{ binding: 'GONE' }, {}]) {
-			const res = await shortLived.fetch!(
+			const res = await fetchWith(
+				shortLived,
 				new Request('https://example.com/api/jobs/bulk-retry', {
 					method: 'POST',
 					headers: { ...authorized, 'content-type': 'application/json' },
@@ -642,7 +666,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 			);
 			const result = await res.json<{ failed: { id: string }[]; remaining: number }>();
-			expect(result.failed.map((f) => f.id)).not.toContain('GONE#0:bulk-old');
+			expect(result.failed.map(f => f.id)).not.toContain('GONE#0:bulk-old');
 		}
 	});
 
@@ -657,13 +681,14 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 	it('保持期間を過ぎた行はretryable=falseで返る', async () => {
 		// retryableは実時刻で判定、T0(未来の固定値)は使用不可
 		await orphan('GONE#0:old', 'FAILED', Temporal.Now.instant().epochMilliseconds - 10 * 60 * 1000);
-		const res = await shortLived.fetch!(
+		const res = await fetchWith(
+			shortLived,
 			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 		);
 		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
-		expect(jobs.find((j) => j.id === 'GONE#0:old')?.retryable).toBe(false);
+		expect(jobs.find(j => j.id === 'GONE#0:old')?.retryable).toBe(false);
 	});
 
 	it('保持期間内の失敗ジョブはretryable=true', async () => {
@@ -673,24 +698,26 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 			bindings: { GONE: { failedRetentionMs: 7 * 24 * 60 * 60 * 1000 } },
 		});
 		await orphan('GONE#0:fresh', 'FAILED', Temporal.Now.instant().epochMilliseconds);
-		const res = await generous.fetch!(
+		const res = await fetchWith(
+			generous,
 			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 		);
 		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
-		expect(jobs.find((j) => j.id === 'GONE#0:fresh')?.retryable).toBe(true);
+		expect(jobs.find(j => j.id === 'GONE#0:fresh')?.retryable).toBe(true);
 	});
 
 	it('終端でない状態はretryable=false', async () => {
 		await orphan('GONE#0:running', 'RUNNING', Temporal.Now.instant().epochMilliseconds);
-		const res = await shortLived.fetch!(
+		const res = await fetchWith(
+			shortLived,
 			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 		);
 		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
-		expect(jobs.find((j) => j.id === 'GONE#0:running')?.retryable).toBe(false);
+		expect(jobs.find(j => j.id === 'GONE#0:running')?.retryable).toBe(false);
 	});
 });
 
@@ -699,9 +726,9 @@ describe('一覧の並べ替え', () => {
 
 	// 全て同時刻では並び順検証不成立、時刻をずらして投入
 	async function seedAt(now: number): Promise<void> {
-		await runInDurableObject(shard('SORT#0'), (instance) => {
-			(instance as any).clock = { now: () => now };
-			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+		await runInDurableObject(shard('SORT#0'), instance => {
+			shardInternals(instance).clock = { now: () => now };
+			shardInternals(instance).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 		});
 		await shard('SORT#0').enqueue({ binding: 'SORT', payload: {} });
 		await runDurableObjectAlarm(shard('SORT#0'));
@@ -727,7 +754,7 @@ describe('一覧の並べ替え', () => {
 
 		const times = async (order: string) => {
 			const body = await (await list(`binding=SORT&sort=created_at&order=${order}`)).json<{ jobs: { created_at: number }[] }>();
-			return body.jobs.map((j) => j.created_at);
+			return body.jobs.map(j => j.created_at);
 		};
 
 		const asc = await times('asc');
@@ -744,9 +771,9 @@ describe('試行履歴(ADR-0028)', () => {
 	const q = { send: async () => {}, sendBatch: async () => {} };
 
 	async function runFailing(name: string, binding: string, maxAttempts: number) {
-		await runInDurableObject(shard(name), (instance) => {
-			(instance as any).clock = { now: () => T0 };
-			(instance as any).env.TSUMUGI_QUEUE = q;
+		await runInDurableObject(shard(name), instance => {
+			shardInternals(instance).clock = { now: () => T0 };
+			shardInternals(instance).env.TSUMUGI_QUEUE = q;
 		});
 		const jobId = await shard(name).enqueue({ binding, payload: {}, maxAttempts });
 		await runDurableObjectAlarm(shard(name));
@@ -787,9 +814,9 @@ describe('試行履歴(ADR-0028)', () => {
 
 	it('1回目で成功したジョブは履歴を持たない', async () => {
 		// ジョブ行から導出可能な情報の保存は1ジョブあたり書き込み1回増加
-		await runInDurableObject(shard('LOG3#0'), (instance) => {
-			(instance as any).clock = { now: () => T0 };
-			(instance as any).env.TSUMUGI_QUEUE = q;
+		await runInDurableObject(shard('LOG3#0'), instance => {
+			shardInternals(instance).clock = { now: () => T0 };
+			shardInternals(instance).env.TSUMUGI_QUEUE = q;
 		});
 		const jobId = await shard('LOG3#0').enqueue({ binding: 'LOG3', payload: {} });
 		await runDurableObjectAlarm(shard('LOG3#0'));
@@ -805,24 +832,24 @@ describe('試行履歴(ADR-0028)', () => {
 
 	it('失敗の後に成功すれば両方残る', async () => {
 		// 失敗のみではCOMPLETEDの経緯が履歴から不明
-		await runInDurableObject(shard('LOG6#0'), (instance) => {
-			(instance as any).clock = { now: () => T0 };
-			(instance as any).env.TSUMUGI_QUEUE = q;
+		await runInDurableObject(shard('LOG6#0'), instance => {
+			shardInternals(instance).clock = { now: () => T0 };
+			shardInternals(instance).env.TSUMUGI_QUEUE = q;
 		});
 		const jobId = await shard('LOG6#0').enqueue({ binding: 'LOG6', payload: {}, maxAttempts: 3 });
 		await runDurableObjectAlarm(shard('LOG6#0'));
 		await shard('LOG6#0').report(jobId, { ok: false, error: 'first failure' });
 
 		// リトライ待ち経過後の再投入
-		await runInDurableObject(shard('LOG6#0'), (instance) => {
-			(instance as any).clock = { now: () => T0 + 10 * 60 * 1000 };
+		await runInDurableObject(shard('LOG6#0'), instance => {
+			shardInternals(instance).clock = { now: () => T0 + 10 * 60 * 1000 };
 		});
 		await runDurableObjectAlarm(shard('LOG6#0'));
 		await shard('LOG6#0').report(jobId, { ok: true });
 		await runDurableObjectAlarm(shard('LOG6#0'));
 
 		const { job } = await detail(jobId);
-		expect(job.attempts_log.map((a) => [a.attempt, a.state])).toEqual([
+		expect(job.attempts_log.map(a => [a.attempt, a.state])).toEqual([
 			[2, 'COMPLETED'],
 			[1, 'FAILED'],
 		]);
@@ -830,9 +857,9 @@ describe('試行履歴(ADR-0028)', () => {
 
 	it('エラー本文を上限で切り詰める', async () => {
 		// performer例外はHTMLページ全体の場合あり, 無制限ではDOとD1の容量を圧迫
-		await runInDurableObject(shard('LOG4#0'), (instance) => {
-			(instance as any).clock = { now: () => T0 };
-			(instance as any).env.TSUMUGI_QUEUE = q;
+		await runInDurableObject(shard('LOG4#0'), instance => {
+			shardInternals(instance).clock = { now: () => T0 };
+			shardInternals(instance).env.TSUMUGI_QUEUE = q;
 		});
 		const jobId = await shard('LOG4#0').enqueue({ binding: 'LOG4', payload: {}, maxAttempts: 1 });
 		await runDurableObjectAlarm(shard('LOG4#0'));
@@ -848,7 +875,7 @@ describe('試行履歴(ADR-0028)', () => {
 		const jobId = await runFailing('LOG5#0', 'LOG5', 1);
 		const res = await call(withAuth, 'GET', '/api/jobs?binding=LOG5', authorized);
 		const { jobs } = await res.json<{ jobs: Record<string, unknown>[] }>();
-		const row = jobs.find((j) => j.id === jobId);
+		const row = jobs.find(j => j.id === jobId);
 		expect(row).toBeDefined();
 		expect(row).not.toHaveProperty('attempts_log');
 	});
@@ -931,7 +958,7 @@ describe('一覧の抽出条件', () => {
 	const idsOf = async (query: string) => {
 		const res = await call(withAuth, 'GET', `/api/jobs?binding=FILTER&${query}`, authorized);
 		const { jobs } = await res.json<{ jobs: { id: string }[] }>();
-		return jobs.map((job) => job.id).sort();
+		return jobs.map(job => job.id).sort();
 	};
 
 	it('ID, キー, 期間で抽出できる', async () => {
@@ -967,7 +994,8 @@ describe('一括リトライと一括取り消し', () => {
 	const authorized = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
 
 	const post = (action: 'retry' | 'cancel', body: unknown) =>
-		withAuth.fetch!(
+		fetchWith(
+			withAuth,
 			new Request(`https://example.com/api/jobs/bulk-${action}`, { method: 'POST', headers: authorized, body: JSON.stringify(body) }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -976,9 +1004,9 @@ describe('一括リトライと一括取り消し', () => {
 	// DO側の状態判定込みでFAILEDジョブ作成
 	async function failedJob(run?: { runId: string; nodeId: string }): Promise<string> {
 		const stub = shard('REST#0');
-		await runInDurableObject(stub, (instance) => {
-			(instance as any).clock = { now: () => T0 };
-			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+		await runInDurableObject(stub, instance => {
+			shardInternals(instance).clock = { now: () => T0 };
+			shardInternals(instance).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 		});
 		const jobId = await stub.enqueue({ binding: 'REST', payload: {}, maxAttempts: 1, ...run });
 		await runDurableObjectAlarm(stub);
@@ -1069,7 +1097,8 @@ describe('一括リトライと一括取り消し', () => {
 	it('runのジョブは個別リトライを409で拒否する(ADR-0034)', async () => {
 		const jobId = await failedJob({ runId: 'NORUN:single', nodeId: 'list' });
 
-		const res = await withAuth.fetch!(
+		const res = await fetchWith(
+			withAuth,
 			new Request(`https://example.com/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST', headers: authorized }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -1091,7 +1120,7 @@ describe('一括リトライと一括取り消し', () => {
 		const res = await post('retry', { binding: 'REST' });
 		const body = await res.json<{ ok: string[]; failed: { id: string }[]; remaining: number }>();
 		expect(body.ok).not.toContain(jobId);
-		expect(body.failed.map((f) => f.id)).not.toContain(jobId);
+		expect(body.failed.map(f => f.id)).not.toContain(jobId);
 		expect(body.remaining).toBe(0);
 	});
 
@@ -1127,7 +1156,8 @@ describe('一括リトライと一括取り消し', () => {
 	});
 
 	it('壊れたJSONは400', async () => {
-		const res = await withAuth.fetch!(
+		const res = await fetchWith(
+			withAuth,
 			new Request('https://example.com/api/jobs/bulk-retry', { method: 'POST', headers: authorized, body: '{' }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -1140,16 +1170,17 @@ describe('予約済みジョブの実行時刻の変更', () => {
 	const authorized = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
 
 	const post = (path: string, body: unknown) =>
-		withAuth.fetch!(
+		fetchWith(
+			withAuth,
 			new Request(`https://example.com${path}`, { method: 'POST', headers: authorized, body: JSON.stringify(body) }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 		);
 
 	async function scheduled(runAt: number): Promise<string> {
-		await runInDurableObject(shard('REST#0'), (instance) => {
-			(instance as any).clock = { now: () => T0 };
-			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
+		await runInDurableObject(shard('REST#0'), instance => {
+			shardInternals(instance).clock = { now: () => T0 };
+			shardInternals(instance).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 		});
 		const jobId = await shard('REST#0').enqueue({ binding: 'REST', payload: {}, runAt });
 		await runDurableObjectAlarm(shard('REST#0'));
@@ -1220,8 +1251,8 @@ describe('runの開始', () => {
 	const alarms = new Set<Promise<void>>();
 	let restoreAlarm = () => {};
 	beforeAll(async () => {
-		await runInDurableObject(runs.get(runs.idFromName('rest-alarm-probe')), (instance) => {
-			const proto = Object.getPrototypeOf(instance) as { alarm(): Promise<void> };
+		await runInDurableObject(runs.get(runs.idFromName('rest-alarm-probe')), instance => {
+			const proto = Object.getPrototypeOf(instance) as { alarm: (this: unknown) => Promise<void> };
 			const alarm = proto.alarm;
 			proto.alarm = function (this: unknown) {
 				const pending = alarm.call(this).finally(() => alarms.delete(pending));
@@ -1245,12 +1276,13 @@ describe('runの開始', () => {
 	const flow = createFlow({ REST: Noop });
 	const withFlows = defineTsumugi({
 		performers: { REST: Noop },
-		flows: { GREETINGS: flow<{ prefix: string }>((f) => void f.node('only', 'REST', { input: (i) => i })) },
+		flows: { GREETINGS: flow<{ prefix: string }>(f => void f.node('only', 'REST', { input: i => i })) },
 		auth: bearerAuth(TOKEN),
 	});
 
 	const post = (body: unknown) =>
-		withFlows.fetch!(
+		fetchWith(
+			withFlows,
 			new Request('https://example.com/api/runs', {
 				method: 'POST',
 				headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
@@ -1282,7 +1314,7 @@ describe('runの開始', () => {
 		// Run DOは失敗後failedRetentionMsで削除, D1の行は残り再開は410
 		const shortLived = defineTsumugi({
 			performers: { REST: Noop },
-			flows: { GREETINGS: flow<{ prefix: string }>((f) => void f.node('only', 'REST', { input: (i) => i })) },
+			flows: { GREETINGS: flow<{ prefix: string }>(f => void f.node('only', 'REST', { input: i => i })) },
 			auth: bearerAuth(TOKEN),
 			runs: { failedRetentionMs: 60_000 },
 		});
@@ -1294,7 +1326,8 @@ describe('runの開始', () => {
 				.bind(id, updatedAt, updatedAt)
 				.run();
 		const detail = async (id: string) => {
-			const res = await shortLived.fetch!(
+			const res = await fetchWith(
+				shortLived,
 				new Request(`https://example.com/api/runs/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${TOKEN}` } }),
 				env as RestEnv,
 				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -1336,7 +1369,8 @@ describe('runの開始', () => {
 			).bind(runId, runId, JSON.stringify([{ attempt: 1, state: 'FAILED', started_at: 150, finished_at: 200, error: 'boom' }])),
 		]);
 
-		const res = await withFlows.fetch!(
+		const res = await fetchWith(
+			withFlows,
 			new Request(`https://example.com/api/runs/${encodeURIComponent(runId)}`, { headers: { authorization: `Bearer ${TOKEN}` } }),
 			env as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -1374,7 +1408,8 @@ describe('runの開始', () => {
 
 	it('runの取り消しと再開をRun DOへ送信する', async () => {
 		const control = (id: string, action: 'cancel' | 'retry') =>
-			withFlows.fetch!(
+			fetchWith(
+				withFlows,
 				new Request(`https://example.com/api/runs/${encodeURIComponent(id)}/${action}`, {
 					method: 'POST',
 					headers: { authorization: `Bearer ${TOKEN}` },

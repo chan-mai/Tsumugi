@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { eachShard, groupByShard, mutateJobs } from '../../src/do/control.js';
 import { BULK_LIMIT_MAX, validateBulk } from '../../src/api/validate.js';
+import { eachShard, groupByShard, mutateJobs } from '../../src/do/control.js';
 
 describe('一括操作の対象の検証', () => {
 	it('IDの列挙をそのまま対象にする', () => {
@@ -108,7 +108,7 @@ const namespace = (handlers: Record<string, (ids?: readonly string[]) => Promise
 describe('DOへの一括送信', () => {
 	it('shard毎の結果を集約し到達不能と不正なIDを理由付きで返す', async () => {
 		const env = namespace({
-			'MAIL#0': async (ids) => ({ ok: [ids?.[0]], failed: [{ id: ids?.[1], reason: 'gone' }] }),
+			'MAIL#0': async ids => ({ ok: [ids?.[0]], failed: [{ id: ids?.[1], reason: 'gone' }] }),
 		});
 		const result = await mutateJobs(env, 'retry', ['MAIL#0:a', 'MAIL#0:b', 'MAIL#1:c', 'broken']);
 
@@ -122,6 +122,6 @@ describe('DOへの一括送信', () => {
 
 	it('全shardへ送信し未到達のshard番号を返す', async () => {
 		const env = namespace({ 'MAIL#0': async () => 'ok0', 'MAIL#2': async () => 'ok2' });
-		expect(await eachShard(env, 'MAIL', 3, (stub) => stub.resetPolicy())).toEqual({ failed: [1], applied: ['ok0', 'ok2'] });
+		expect(await eachShard(env, 'MAIL', 3, stub => stub.resetPolicy())).toEqual({ failed: [1], applied: ['ok0', 'ok2'] });
 	});
 });

@@ -7,9 +7,9 @@ const KEEP = 60_000;
 
 describe('ジョブのretryable(ADR-0027)', () => {
 	it('FAILEDとSTALLEDのみ対象', () => {
-		for (const state of ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'CANCELLED']) {
-			expect(jobRetryable({ state, updatedAt: NOW }, NOW, KEEP), state).toBe(false);
-		}
+		expect(
+			['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'CANCELLED'].filter(state => jobRetryable({ state, updatedAt: NOW }, NOW, KEEP)),
+		).toEqual([]);
 		expect(jobRetryable({ state: 'FAILED', updatedAt: NOW }, NOW, KEEP)).toBe(true);
 		expect(jobRetryable({ state: 'STALLED', updatedAt: NOW }, NOW, KEEP)).toBe(true);
 	});
@@ -27,9 +27,7 @@ describe('ジョブのretryable(ADR-0027)', () => {
 
 describe('runのretryable(ADR-0034)', () => {
 	it('FAILEDのみ対象', () => {
-		for (const state of ['RUNNING', 'COMPLETED', 'CANCELLED']) {
-			expect(runRetryable({ state, updatedAt: NOW }, NOW, KEEP), state).toBe(false);
-		}
+		expect(['RUNNING', 'COMPLETED', 'CANCELLED'].filter(state => runRetryable({ state, updatedAt: NOW }, NOW, KEEP))).toEqual([]);
 		expect(runRetryable({ state: 'FAILED', updatedAt: NOW }, NOW, KEEP)).toBe(true);
 	});
 
@@ -41,10 +39,10 @@ describe('runのretryable(ADR-0034)', () => {
 
 describe('操作の受理状態', () => {
 	it('リトライの受理状態はSCHEDULEDへ遷移可能', () => {
-		for (const state of RETRYABLE_STATES) expect(canTransition(state, 'SCHEDULED'), state).toBe(true);
+		expect(RETRYABLE_STATES.filter(state => !canTransition(state, 'SCHEDULED'))).toEqual([]);
 	});
 
 	it('取り消しの受理状態はCANCELLEDへ遷移可能', () => {
-		for (const state of CANCELLABLE_STATES) expect(canTransition(state, 'CANCELLED'), state).toBe(true);
+		expect(CANCELLABLE_STATES.filter(state => !canTransition(state, 'CANCELLED'))).toEqual([]);
 	});
 });

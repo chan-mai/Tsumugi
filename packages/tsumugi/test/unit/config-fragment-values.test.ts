@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { requiredAsMissing } from '../../src/config/validate.js';
 import { configFragment, configFragmentToml, DEFAULT_MIGRATIONS_DIR } from '../../src/config/fragment.js';
+import { requiredAsMissing } from '../../src/config/validate.js';
 
 // 断片は起動時検証とCLIの2経路で使用(ADR-0036)
 
@@ -17,7 +17,7 @@ describe('必須bindingの不足化', () => {
 
 	it('flowを使う構成ではRUNが加わる', () => {
 		const missing = requiredAsMissing(true);
-		expect(missing.map((entry) => entry.name)).toEqual(['JOB_SHARD', 'TSUMUGI_DB', 'TSUMUGI_QUEUE', 'RUN']);
+		expect(missing.map(entry => entry.name)).toEqual(['JOB_SHARD', 'TSUMUGI_DB', 'TSUMUGI_QUEUE', 'RUN']);
 		expect(missing[3]).toEqual({ kind: 'durable-object', name: 'RUN', reason: 'absent', className: 'TsumugiRun' });
 	});
 });

@@ -1,5 +1,6 @@
-import type { MetricsResponse } from '../api/types.js';
 import { FAILURE_STATES } from '../core/transitions.js';
+
+import type { MetricsResponse } from '../api/types.js';
 
 // `writeDataPoint`の値はWorker bindingから読込不可, アカウントのAPIトークンが必要
 // トークンはsecretで`env`経由のみ読込可, 設定形式は`bearerAuth`と同一
@@ -21,6 +22,7 @@ type MetricsConfig = {
 };
 
 /** secretは実行時に`env`から取得 */
+// oxlint-disable-next-line typescript/no-explicit-any -- コールバックのenv推論
 export type MetricsResolver<Env = any> = (env: Env) => MetricsConfig | undefined;
 
 type MetricsQuery = {
@@ -45,7 +47,8 @@ export function parseMetricsQuery(url: URL): { query: MetricsQuery } | { error: 
 	if (!Number.isInteger(hours) || hours < 1) return { error: 'hours must be an integer of at least 1' };
 	if (hours > 720) return { error: 'hours must not exceed 720' };
 
-	const binding = url.searchParams.get('binding') || undefined;
+	const rawBinding = url.searchParams.get('binding');
+	const binding = rawBinding === null || rawBinding === '' ? undefined : rawBinding;
 	// SQLへ直接埋め込み, binding名として有効な文字のみ許可
 	if (binding !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding)) return { error: 'binding is not a valid name' };
 
@@ -144,7 +147,7 @@ export async function readMetrics(
 
 	return {
 		hours: input.hours,
-		bindings: byBinding.map((row) => {
+		bindings: byBinding.map(row => {
 			const total = num(row.total);
 			const failed = num(row.failed);
 			return {
@@ -158,7 +161,7 @@ export async function readMetrics(
 				avgAttempts: num(row.avg_attempts),
 			};
 		}),
-		series: overTime.map((row) => ({
+		series: overTime.map(row => ({
 			// SQL APIはUTC文字列, 画面はepochミリ秒
 			at: utcEpochOf(String(row.at ?? '')),
 			total: num(row.total),

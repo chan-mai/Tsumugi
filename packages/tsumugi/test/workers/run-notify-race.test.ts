@@ -1,7 +1,9 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { EnqueueInput } from '../../src/do/job-shard.js';
+
 import type { NodeEvent } from '../../src/core/run.js';
+import type { EnqueueInput } from '../../src/do/job-shard.js';
+import type { RunRepo } from '../../src/do/run-repo.js';
 
 // ジョブ投入はRPC、await中にJob DOの完了通知が割り込み(#33)
 // 投入後の更新で終端ノードを起動中へ戻すと通知が再送されずrunがRUNNINGのまま
@@ -11,22 +13,29 @@ interface RunFace extends Rpc.DurableObjectBranded {
 	start(input: { flow: string; input: unknown }): Promise<{ id: string; created: boolean }>;
 }
 
+type RunInternals = {
+	repo: RunRepo;
+	env: { JOB_SHARD: { idFromName(name: string): DurableObjectId; get(id: DurableObjectId): unknown } };
+	notify(events: readonly NodeEvent[]): Promise<void>;
+};
+const internals = (instance: unknown) => instance as RunInternals;
+
 const namespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
 const runStub = (runId: string) => namespace.get(namespace.idFromName(runId));
 
 const nodesOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) =>
-		Object.fromEntries(((instance as any).repo.views() as { id: string; state: string }[]).map((n) => [n.id, n.state])),
+	runInDurableObject(runStub(runId), instance =>
+		Object.fromEntries((internals(instance).repo.views() as { id: string; state: string }[]).map(n => [n.id, n.state])),
 	);
 
 const stateOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun()?.state as string | undefined);
+	runInDurableObject(runStub(runId), instance => internals(instance).repo.findRun()?.state as string | undefined);
 
 // 実Job DOでも投入ジョブ即完了時は同じ順序
 // DOストレージはテスト間で残存、前回の行も削除して開始
 async function installEagerShard(runId: string): Promise<void> {
-	await runInDurableObject(runStub(runId), (instance) => {
-		const self = instance as any;
+	await runInDurableObject(runStub(runId), instance => {
+		const self = internals(instance);
 		for (const table of ['run', 'node', 'run_outbox']) self.repo.sql.exec(`DELETE FROM ${table}`);
 
 		const original = self.env.JOB_SHARD;
@@ -36,7 +45,7 @@ async function installEagerShard(runId: string): Promise<void> {
 				id,
 				enqueueMany: async (inputs: readonly EnqueueInput[]) => {
 					// 投入応答前に完了通知, Run DOのノードは起動中へ未遷移
-					const events: NodeEvent[] = inputs.map((input) => ({
+					const events: NodeEvent[] = inputs.map(input => ({
 						nodeId: input.nodeId as string,
 						jobId: input.id as string,
 						state: 'COMPLETED',
@@ -44,7 +53,7 @@ async function installEagerShard(runId: string): Promise<void> {
 						error: null,
 					}));
 					await self.notify(events);
-					return inputs.map((input) => input.id);
+					return inputs.map(input => input.id);
 				},
 			}),
 		};

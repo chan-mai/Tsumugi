@@ -1,16 +1,13 @@
 import { InvalidJobIdError } from '../core/ids.js';
 import { PayloadTooLargeError } from '../core/message.js';
-import type { Job, JobListItem } from '../core/entity/job.entity.js';
 import { jobRetryable } from '../core/retention.js';
-import { mutateJob, mutateJobs, type BulkOutcome } from '../do/control.js';
+import { mutateJob, mutateJobs } from '../do/control.js';
+import { JobReadRepository } from '../repository/job.repository.js';
+
+import type { Job, JobListItem } from '../core/entity/job.entity.js';
+import type { BulkOutcome } from '../do/control.js';
 import type { MutationResult, TsumugiJobShard } from '../do/job-shard.js';
-import {
-	JobReadRepository,
-	type BulkFilter,
-	type JobListQuery,
-	type JobRepository,
-	type RetainedFailures,
-} from '../repository/job.repository.js';
+import type { BulkFilter, JobListQuery, JobRepository, RetainedFailures } from '../repository/job.repository.js';
 import type { CreateJobInput } from './inputs.js';
 import type { MutationOutcome, Retryable, ServiceEnv, ServiceOptions } from './types.js';
 
@@ -25,7 +22,7 @@ type JobStats = { byState: Record<string, number>; oldestScheduledMs: number | n
 
 export function createJobService<Env extends ServiceEnv>(
 	{ bindings, enqueue, failedRetentionMs }: ServiceOptions<Env>,
-	repositoryOf: (env: Env) => JobRepository = (env) => new JobReadRepository(env.TSUMUGI_DB),
+	repositoryOf: (env: Env) => JobRepository = env => new JobReadRepository(env.TSUMUGI_DB),
 ) {
 	const withRetryable = <T extends Pick<Job, 'state' | 'binding' | 'updatedAt'>>(job: T, now: number): Retryable<T> => ({
 		...job,
@@ -50,7 +47,7 @@ export function createJobService<Env extends ServiceEnv>(
 		async list(env: Env, query: JobListQuery): Promise<{ jobs: Retryable<JobListItem>[]; total: number }> {
 			const { jobs, total } = await repositoryOf(env).list(query);
 			const now = Temporal.Now.instant().epochMilliseconds;
-			return { jobs: jobs.map((job) => withRetryable(job, now)), total };
+			return { jobs: jobs.map(job => withRetryable(job, now)), total };
 		},
 
 		async detail(env: Env, id: string): Promise<Retryable<Job> | null> {

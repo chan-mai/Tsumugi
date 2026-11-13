@@ -1,14 +1,21 @@
 {
   "name": "tsumugi",
   "version": "0.13.0",
-  "type": "module",
-  "license": "MIT",
   "description": "A job management system built on the Cloudflare stack",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chan-mai/Tsumugi.git",
     "directory": "packages/tsumugi"
   },
+  "bin": {
+    "tsumugi": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "type": "module",
   "sideEffects": false,
   "exports": {
     ".": {
@@ -37,13 +44,6 @@
     },
     "./package.json": "./package.json"
   },
-  "bin": {
-    "tsumugi": "./dist/cli.js"
-  },
-  "files": [
-    "dist",
-    "migrations"
-  ],
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.cli.json",
     "build": "tsdown",
@@ -56,12 +56,12 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "@clack/prompts": "^1.8.1",
+    "@clack/prompts": "^1.9.0",
     "@cloudflare/workers-types": "^5.20261113.1",
     "@tsumugi/dashboard": "workspace:*",
     "@tsumugi/spec": "workspace:*",
     "publint": "^0.3.25",
-    "tsdown": "^0.23.4",
+    "tsdown": "^0.23.7",
     "unrun": "^0.3.1"
   }
 }

@@ -1,10 +1,11 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
-import type { RestEnv } from '../../src/api/rest.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { cachedCheck, checkMigrations, EXPECTED_MIGRATIONS } from '../../src/projection/migrations.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { RestEnv } from '../../src/api/rest.js';
 
 const TOKEN = 'secret-token';
 
@@ -14,8 +15,9 @@ class Noop extends Performer<unknown, void, {}, RestEnv> {
 
 const app = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
 
-const call = (path: string, database: D1Database) =>
-	app.fetch!(
+const call = (path: string, database: D1Database) => {
+	if (app.fetch === undefined) throw new Error('fetch handler is missing');
+	return app.fetch(
 		new Request(`https://example.com${path}`, { headers: { authorization: `Bearer ${TOKEN}` } }),
 		{
 			...env,
@@ -23,6 +25,7 @@ const call = (path: string, database: D1Database) =>
 		} as RestEnv,
 		{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 	);
+};
 
 // D1メソッドはプロトタイプ上で展開時に欠落, `batch`実行時のみ失敗
 function proxyD1(onMigrationsQuery: () => D1PreparedStatement): D1Database {
@@ -55,7 +58,7 @@ function withError(message: string): D1Database {
 
 describe('マイグレーション適用漏れの検出', () => {
 	it('全て適用済みなら通る', async () => {
-		const status = await checkMigrations(withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
+		const status = await checkMigrations(withLedger(EXPECTED_MIGRATIONS.map(name => ({ name }))));
 		expect(status).toEqual({ ok: true });
 	});
 
@@ -81,7 +84,8 @@ describe('マイグレーション適用漏れの検出', () => {
 	it('一時障害では適用漏れの復旧手順を案内しない(#8)', async () => {
 		// unavailableはTTL内再利用、共有appのキャッシュへの影響回避で専用app
 		const isolated = defineTsumugi({ performers: { MIG: Noop }, auth: bearerAuth(TOKEN) });
-		const res = await isolated.fetch!(
+		if (isolated.fetch === undefined) throw new Error('fetch handler is missing');
+		const res = await isolated.fetch(
 			new Request('https://example.com/api/jobs', { headers: { authorization: `Bearer ${TOKEN}` } }),
 			{ ...env, TSUMUGI_DB: withError('D1_ERROR: Network connection lost') } as RestEnv,
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
@@ -117,7 +121,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		let clock = 1_000;
 		const flipping = proxyD1(() => {
 			if (down) throw new Error('D1_ERROR: down');
-			return ledgerOf(EXPECTED_MIGRATIONS.map((name) => ({ name })));
+			return ledgerOf(EXPECTED_MIGRATIONS.map(name => ({ name })));
 		});
 		const check = cachedCheck(() => clock);
 
@@ -137,13 +141,13 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('適用済みならAPIが通る', async () => {
-		const res = await call('/api/stats', withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
+		const res = await call('/api/stats', withLedger(EXPECTED_MIGRATIONS.map(name => ({ name }))));
 		expect(res.status).toBe(200);
 	});
 
 	it('batchを使う経路も通る', async () => {
 		// 展開でのモック作成ではプロトタイプのメソッドが欠落、ここで初めて失敗
-		const res = await call('/api/jobs', withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
+		const res = await call('/api/jobs', withLedger(EXPECTED_MIGRATIONS.map(name => ({ name }))));
 		expect(res.status).toBe(200);
 	});
 
@@ -151,7 +155,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		let calls = 0;
 		const counting = proxyD1(() => {
 			calls++;
-			return ledgerOf(EXPECTED_MIGRATIONS.map((name) => ({ name })));
+			return ledgerOf(EXPECTED_MIGRATIONS.map(name => ({ name })));
 		});
 
 		const check = cachedCheck();
@@ -164,7 +168,7 @@ describe('マイグレーション適用漏れの検出', () => {
 	it('未適用の結果は再利用しない, 適用後に自動で復帰する', async () => {
 		let applied = false;
 		const flipping = proxyD1(() =>
-			ledgerOf(applied ? EXPECTED_MIGRATIONS.map((name) => ({ name })) : [{ name: '0001_create_job_read_model.sql' }]),
+			ledgerOf(applied ? EXPECTED_MIGRATIONS.map(name => ({ name })) : [{ name: '0001_create_job_read_model.sql' }]),
 		);
 
 		const check = cachedCheck();

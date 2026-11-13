@@ -2,7 +2,7 @@
 import { useStorage } from '@vueuse/core';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { cancelRun, getRun, retryRun, type Run, type RunNode } from '../api';
+import { cancelRun, getRun, retryRun } from '../api';
 import { onRefresh } from '../composables/useAutoRefresh';
 import { confirmAction } from '../composables/useConfirm';
 import { formatTimestamp } from '../time';
@@ -12,6 +12,8 @@ import RunGraph from './RunGraph.vue';
 import SidePanel from './SidePanel.vue';
 import StatusCell from './StatusCell.vue';
 import RunWaterfall from './waterfall/RunWaterfall.vue';
+
+import type { Run, RunNode } from '../api';
 
 const props = defineProps<{ runId: string | null }>();
 const emit = defineEmits<{ close: []; changed: []; job: [jobId: string]; run: [runId: string] }>();
@@ -50,7 +52,7 @@ async function load(id: string) {
 
 watch(
 	() => props.runId,
-	async (id) => {
+	async id => {
 		loadSequence++;
 		loading = false;
 		if (!id) return;

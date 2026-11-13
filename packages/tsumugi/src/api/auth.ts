@@ -4,6 +4,7 @@
  * 設定漏れ時は無警告の公開より動作停止が安全
  * undefinedで認証成功, Responseで拒否
  */
+// oxlint-disable-next-line typescript/no-explicit-any -- コールバックのenv推論
 export type AuthMiddleware<Env = any> = (request: Request, env: Env) => Response | undefined | Promise<Response | undefined>;
 
 export const unauthorized = () => Response.json({ error: 'unauthorized' }, { status: 401 });
@@ -66,6 +67,7 @@ export function unsafeNoAuth(): AuthMiddleware {
 }
 
 /** secretはモジュール初期化時に読込不可 */
+// oxlint-disable-next-line typescript/no-explicit-any -- コールバックのenv推論
 export type TokenResolver = (env: any) => string | undefined;
 
 /**

@@ -11,14 +11,14 @@ export const useQueryText = (name: string) => useRouteQuery<string, string>(name
 export const useQueryChoice = <T extends string>(name: string, choices: readonly T[], fallback: T) =>
 	useRouteQuery<string, T>(name, fallback, {
 		...OPTIONS,
-		transform: { get: (raw) => choices.find((choice) => choice === first(raw)) ?? fallback },
+		transform: { get: raw => choices.find(choice => choice === first(raw)) ?? fallback },
 	});
 
 export const useQueryInteger = (name: string, fallback: number, min: number) =>
 	useRouteQuery<string, number>(name, String(fallback), {
 		...OPTIONS,
 		transform: {
-			get: (raw) => {
+			get: raw => {
 				const value = Number(first(raw));
 				return Number.isInteger(value) && value >= min ? value : fallback;
 			},
@@ -30,5 +30,5 @@ export const useQueryInteger = (name: string, fallback: number, min: number) =>
 export const useQueryDate = (name: string, edge: 'start' | 'end') =>
 	useRouteQuery<string, number | null>(name, '', {
 		...OPTIONS,
-		transform: { get: (raw) => fromDateInput(first(raw), edge), set: (value) => toDateInput(value) },
+		transform: { get: raw => fromDateInput(first(raw), edge), set: value => toDateInput(value) },
 	});

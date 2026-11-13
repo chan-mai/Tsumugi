@@ -1,6 +1,6 @@
-import type en from './en';
+import type { en } from './en';
 
-export default {
+export const ja = {
 	app: {
 		notAuthorized: '認証されていません。IDプロバイダでサインインしてから再読み込みしてください。',
 		failedToLoad: '読み込みに失敗しました: {error}',

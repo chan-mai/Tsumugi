@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const { tm, rt } = useI18n();
-const builtin = computed(() => (tm('home.features.builtin') as string[]).map((name) => rt(name)));
+const builtin = computed(() => (tm('home.features.builtin') as string[]).map(name => rt(name)));
 const card =
 	'flex flex-col overflow-hidden rounded-3xl border border-glass-border bg-glass-bg p-6 sm:p-8 shadow-[0_12px_48px_-24px_rgb(0_0_0/0.18)] backdrop-blur-xl';
 </script>

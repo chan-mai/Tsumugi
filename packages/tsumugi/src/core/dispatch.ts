@@ -110,8 +110,8 @@ export function planDispatch(input: DispatchInput): DispatchOutput {
 	}
 
 	const ready = jobs
-		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now && !expired.has(j.id))
-		.map((j) => ({ job: j, ep: effectivePriority(j, now, policy.agingIntervalMs) }))
+		.filter(j => j.state === 'SCHEDULED' && j.runAfter <= now && !expired.has(j.id))
+		.map(j => ({ job: j, ep: effectivePriority(j, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 
 	// 一時停止中も回収とエージング継続, 再開後も順序維持(#27)
@@ -159,11 +159,11 @@ export function planDispatch(input: DispatchInput): DispatchOutput {
 		if (dispatchedSilence === null || deadline < dispatchedSilence) dispatchedSilence = deadline;
 	}
 
-	const futureRunAfter = minOf(jobs.filter((j) => j.state === 'SCHEDULED' && j.runAfter > now).map((j) => j.runAfter));
+	const futureRunAfter = minOf(jobs.filter(j => j.state === 'SCHEDULED' && j.runAfter > now).map(j => j.runAfter));
 	const nextSilence = minOf(
 		jobs
-			.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id))
-			.map((j) => minOf([silenceDeadline(j, policy), cancelDeadline(j, policy)])),
+			.filter(j => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id))
+			.map(j => minOf([silenceDeadline(j, policy), cancelDeadline(j, policy)])),
 	);
 	const nextAlarmAt = minOf([
 		reaped.size > 0 ? now : null,

@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import PageHeader from '../components/PageHeader.vue';
-import { getMetrics, isUnauthorized, type Metrics } from '../api';
-import LoadingState from '../components/LoadingState.vue';
+import { getMetrics, isUnauthorized } from '../api';
 import FilterMenu from '../components/FilterMenu.vue';
+import LoadingState from '../components/LoadingState.vue';
+import PageHeader from '../components/PageHeader.vue';
 import { onRefresh } from '../composables/useAutoRefresh';
 import { bindings, definitionsReady } from '../composables/useDefinitions';
 import { useQueryChoice, useQueryText } from '../composables/useQueryState';
 import { formatTimestamp } from '../time';
 import { CARD, EMPTY_ROW, ERROR_TEXT, TABLE, TABLE_WRAP, TBODY, TD, TH, THEAD } from '../ui';
+
+import type { Metrics } from '../api';
 
 const WINDOWS = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 } as const;
 type Window = keyof typeof WINDOWS;
@@ -53,7 +55,7 @@ watch(
 );
 onRefresh(() => void load());
 
-const peak = computed(() => Math.max(1, ...(metrics.value?.series ?? []).map((point) => point.total)));
+const peak = computed(() => Math.max(1, ...(metrics.value?.series ?? []).map(point => point.total)));
 
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
 const ms = (value: number) => (value >= 1_000 ? `${(value / 1_000).toFixed(1)} s` : `${Math.round(value)} ms`);

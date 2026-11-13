@@ -24,7 +24,7 @@ describe('ジョブIDの往復', () => {
 
 describe('不正なbindingを拒否する', () => {
 	// 区切り文字混入でparse不能, ID体系全体の前提
-	it.each(['MA#IL', 'MA:IL', 'MAIL#0', '', '1MAIL', 'MA IL', 'MA-IL', 'メール'])('%oを拒否する', (binding) => {
+	it.each(['MA#IL', 'MA:IL', 'MAIL#0', '', '1MAIL', 'MA IL', 'MA-IL', 'メール'])('%oを拒否する', binding => {
 		expect(() => formatJobId({ binding, shard: 0, localId: 'abc' })).toThrow(InvalidJobIdError);
 	});
 
@@ -36,13 +36,13 @@ describe('不正なbindingを拒否する', () => {
 });
 
 describe('不正なshardを拒否する', () => {
-	it.each([-1, 1.5, NaN, Infinity])('%oを拒否する', (shard) => {
+	it.each([-1, 1.5, NaN, Infinity])('%oを拒否する', shard => {
 		expect(() => formatJobId({ binding: 'MAIL', shard, localId: 'abc' })).toThrow(InvalidJobIdError);
 	});
 });
 
 describe('不正なlocalIdを拒否する', () => {
-	it.each(['', 'a:b', 'a#b', 'a b', 'あ'])('%oを拒否する', (localId) => {
+	it.each(['', 'a:b', 'a#b', 'a b', 'あ'])('%oを拒否する', localId => {
 		expect(() => formatJobId({ binding: 'MAIL', shard: 0, localId })).toThrow(InvalidJobIdError);
 	});
 });
@@ -57,7 +57,7 @@ describe('parseの入力検証', () => {
 		['MA#IL#0:abc', 'bindingに#が入っている'],
 		['MAIL#0:a:b', 'localIdに:が入っている'],
 		['MAIL#0:', 'localIdが空'],
-	])('%oを拒否する(%s)', (jobId) => {
+	])('%oを拒否する(%s)', jobId => {
 		expect(() => parseJobId(jobId)).toThrow(InvalidJobIdError);
 	});
 });

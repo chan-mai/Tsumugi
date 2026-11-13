@@ -13,12 +13,12 @@ describe('assertPayloadSize', () => {
 describe('splitBatches', () => {
 	it('100件ごとに分割する', () => {
 		const { batches } = splitBatches(Array.from({ length: 250 }, (_, i) => ({ i })));
-		expect(batches.map((b) => b.length)).toEqual([100, 100, 50]);
+		expect(batches.map(b => b.length)).toEqual([100, 100, 50]);
 	});
 
 	it('合計256KBを超えないよう分割する', () => {
 		const { batches } = splitBatches(Array.from({ length: 10 }, () => 'x'.repeat(60_000)));
-		expect(batches.map((b) => b.length)).toEqual([4, 4, 2]);
+		expect(batches.map(b => b.length)).toEqual([4, 4, 2]);
 	});
 
 	it('単独で128KBを超えるメッセージは分離する', () => {

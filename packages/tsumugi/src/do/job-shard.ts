@@ -1,13 +1,18 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createLocalId } from './local-id.js';
-import { embedJobId, formatJobId, shardName } from '../core/ids.js';
-import type { FailOptions } from '../core/api.js';
+import { writeMetrics } from '../analytics/writer.js';
 import { nextAttempt } from '../core/backoff.js';
-import { retentionOf } from '../core/retention.js';
-import { RETRYABLE_STATES } from '../core/transitions.js';
 import { planDispatch } from '../core/dispatch.js';
+import { embedJobId, formatJobId, shardName } from '../core/ids.js';
+import { assertPayloadSize, splitBatches, stringifyJson } from '../core/message.js';
+import { retentionOf } from '../core/retention.js';
 import { normalizeTraceparent } from '../core/trace.js';
-import { assertPayloadSize, splitBatches } from '../core/message.js';
+import { RETRYABLE_STATES } from '../core/transitions.js';
+import { project } from '../projection/projector.js';
+import { systemClock } from './clock.js';
+import { createLocalId } from './local-id.js';
+import { JobRepo, RESULT_MAX_CHARS } from './repo.js';
+
+import type { FailOptions } from '../core/api.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type {
 	Backoff,
@@ -22,18 +27,15 @@ import type {
 	SettledNotice,
 	SettledTarget,
 } from '../core/types.js';
+import type { Clock } from './clock.js';
 import type { RunNotifyStub } from './run.js';
-import { systemClock, type Clock } from './clock.js';
-import { writeMetrics } from '../analytics/writer.js';
-import { project } from '../projection/projector.js';
-import { JobRepo, RESULT_MAX_CHARS } from './repo.js';
 import type { JobRow } from './schema.js';
 
 function serializeResult(value: unknown): string | null {
 	if (value === undefined) return null;
 	let text: string | undefined;
 	try {
-		text = JSON.stringify(value);
+		text = stringifyJson(value);
 	} catch {
 		return null;
 	}
@@ -198,7 +200,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	#keyCursor: string | null = null;
 
 	get repo(): JobRepo {
-		if (!this.#repo) this.#repo = new JobRepo(this.ctx.storage);
+		this.#repo ??= new JobRepo(this.ctx.storage);
 		return this.#repo;
 	}
 
@@ -308,7 +310,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			this.#keyBucketsMaybePresent = false;
 			return;
 		}
-		this.repo.deleteKeyBuckets(Object.keys(read).filter((key) => !Object.hasOwn(out, key)));
+		this.repo.deleteKeyBuckets(Object.keys(read).filter(key => !Object.hasOwn(out, key)));
 		this.repo.writeKeyBuckets(out);
 		if (Object.keys(out).length > 0) this.#keyBucketsMaybePresent = true;
 		this.repo.sweepKeyBuckets(now - rate.intervalMs);
@@ -359,7 +361,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	/** 個別RPCの逐次enqueueはDOの1,000 req/sソフト上限で実測78件/秒 */
 	async enqueueMany(inputs: readonly EnqueueInput[], settings?: ShardSettings): Promise<string[]> {
-		const traceparents = inputs.map((input) => normalizeTraceparent(input.traceparent));
+		const traceparents = inputs.map(input => normalizeTraceparent(input.traceparent));
 		// 書き込み前に全件検証, 送信不能なジョブの登録防止
 		for (const input of inputs) assertPayloadSize(input.payload);
 		const now = this.clock.now();
@@ -693,7 +695,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 				? []
 				: [
 						...new Set(
-							jobs.flatMap((j) => (j.state === 'SCHEDULED' && j.runAfter <= now && j.concurrencyKey !== null ? [j.concurrencyKey] : [])),
+							jobs.flatMap(j => (j.state === 'SCHEDULED' && j.runAfter <= now && j.concurrencyKey !== null ? [j.concurrencyKey] : [])),
 						),
 					];
 		const keyBuckets = this.repo.readKeyBuckets(readyKeys);
@@ -757,7 +759,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		let sendFailed = false;
 		for (const batch of batches) {
 			try {
-				await this.env.TSUMUGI_QUEUE.sendBatch(batch.map((body) => ({ body })));
+				await this.env.TSUMUGI_QUEUE.sendBatch(batch.map(body => ({ body })));
 			} catch (error) {
 				console.error('tsumugi: sendBatch failed', error);
 				sendFailed = true;
@@ -788,7 +790,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		// 投入も期限切れも無いtickは同時実行数待ち, 完了報告で再実行(#103)
 		// tickのawait中の報告やclaimの投影待ちも確認
 		const blockedOnTokens = output.blocked.tokens || output.blocked.perKeyTokens;
-		const progressed = output.decisions.some((d) => d.type === 'dispatch' || d.type === 'expire' || d.type === 'cancel');
+		const progressed = output.decisions.some(d => d.type === 'dispatch' || d.type === 'expire' || d.type === 'cancel');
 		const hasMore =
 			// 投入失敗時は即時再実行せず, 障害中の反復防止
 			(readyCount >= TICK_LIMIT && !blockedOnTokens && progressed && !sendFailed) ||
@@ -822,7 +824,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 			if (job.state === 'QUEUED' || job.state === 'RUNNING') {
 				inFlightTotal++;
 				if (job.concurrencyKey !== null) inFlight.set(job.concurrencyKey, (inFlight.get(job.concurrencyKey) ?? 0) + 1);
-			} else if (job.state === 'SCHEDULED' && job.runAfter <= now) {
+			} else if (job.runAfter <= now) {
 				ready.set(job.concurrencyKey, (ready.get(job.concurrencyKey) ?? 0) + 1);
 			}
 		}
@@ -850,17 +852,18 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 
 	async #project(): Promise<number> {
 		const rows = this.repo.outboxBatch(PROJECTION_LIMIT);
-		if (rows.length === 0) return 0;
+		const last = rows.at(-1);
+		if (last === undefined) return 0;
 		await project(this.env.TSUMUGI_DB, rows);
 		// 投影は冪等で再処理可(#7)
-		this.repo.deleteOutboxThrough(rows[rows.length - 1]!.seq);
+		this.repo.deleteOutboxThrough(last.seq);
 		// メトリクスは非冪等でカーソル前進後, 失敗分は欠落しat-most-once(ADR-0016 / #7)
 		// 任意機能で失敗は捕捉, tick継続
 		try {
 			// 明細と同じ行から時系列を記録, sweep後も残存(ADR-0016)
 			writeMetrics(
 				this.env.TSUMUGI_METRICS,
-				rows.map((row) => JSON.parse(row.snapshot) as JobRow),
+				rows.map(row => JSON.parse(row.snapshot) as JobRow),
 			);
 		} catch (error) {
 			console.error('tsumugi: writeMetrics failed', error);
@@ -871,7 +874,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	// 失敗時は次tickで再送, Run DO側は重複通知に冪等
 	async #notifyRuns(): Promise<number> {
 		const rows = this.repo.runNotifyBatch(RUN_NOTIFY_LIMIT);
-		if (rows.length === 0) return 0;
+		const last = rows.at(-1);
+		if (last === undefined) return 0;
 
 		const namespace = this.env.RUN;
 		if (!namespace) {
@@ -889,7 +893,7 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		}
 
 		await Promise.all([...groups].map(([runId, events]) => namespace.get(namespace.idFromName(runId)).notify(events)));
-		this.repo.deleteRunNotifyThrough(rows[rows.length - 1]!.seq);
+		this.repo.deleteRunNotifyThrough(last.seq);
 		return rows.length;
 	}
 
@@ -898,11 +902,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return this.#sendNotices<FailureNotice>({
 			rows: this.repo.failureBatch(FAILURE_NOTIFY_LIMIT),
 			target: () => this.#failureBinding,
-			deleteThrough: (seq) => this.repo.deleteFailureThrough(seq),
+			deleteThrough: seq => this.repo.deleteFailureThrough(seq),
 			// 通知ジョブ自身の失敗は対象外, 循環防止(#30)
 			skip: (notice, target) => notice.binding === target,
 			// 元ID全体を埋め込み形式へ変換, ローカル部のみではbinding間で衝突
-			localIdOf: (notice) => `failure-${embedJobId(notice.jobId)}-${notice.attempts}`,
+			localIdOf: notice => `failure-${embedJobId(notice.jobId)}-${notice.attempts}`,
 			label: 'failure',
 		});
 	}
@@ -912,11 +916,11 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		return this.#sendNotices<SettledNotice>({
 			rows: this.repo.settledBatch(SETTLED_NOTIFY_LIMIT),
 			target: () => this.repo.settledTarget()?.binding ?? null,
-			deleteThrough: (seq) => this.repo.deleteSettledThrough(seq),
+			deleteThrough: seq => this.repo.deleteSettledThrough(seq),
 			// 宛先自身とonFailure宛先の遷移は対象外, 相互通知の連鎖防止(#96)
 			skip: (notice, target) => notice.binding === target || notice.binding === this.#failureBinding,
 			// 状態もIDに含有, リトライ後の同attemptsの別終端を区別
-			localIdOf: (notice) => `settled-${embedJobId(notice.jobId)}-${notice.attempts}-${notice.state.toLowerCase()}`,
+			localIdOf: notice => `settled-${embedJobId(notice.jobId)}-${notice.attempts}-${notice.state.toLowerCase()}`,
 			label: 'settled job',
 		});
 	}
@@ -930,8 +934,8 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		label: string;
 	}): Promise<number> {
 		const { rows } = spec;
-		if (rows.length === 0) return 0;
-		const last = rows[rows.length - 1]!.seq;
+		const last = rows.at(-1)?.seq;
+		if (last === undefined) return 0;
 
 		const target = spec.target();
 		if (target === null) {
@@ -941,9 +945,9 @@ export class TsumugiJobShard extends DurableObject<ShardEnv> {
 		}
 
 		const inputs: EnqueueInput[] = rows
-			.map((row) => JSON.parse(row.payload) as N)
-			.filter((notice) => !spec.skip(notice, target))
-			.map((notice) => ({
+			.map(row => JSON.parse(row.payload) as N)
+			.filter(notice => !spec.skip(notice, target))
+			.map(notice => ({
 				binding: target,
 				payload: notice,
 				// 固定IDで再送時の二重投入防止(ADR-0029)

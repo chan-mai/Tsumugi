@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { JobContext } from '../../src/core/api.js';
 import { createTestContext, fixedClock, nextAttempt, runPerformer, planDispatch } from '../../src/entries/testing.js';
+
+import type { JobContext } from '../../src/core/api.js';
 
 const greet = {
 	perform: (payload: { name: string }): string => `hello, ${payload.name}`,
@@ -17,7 +18,7 @@ const interruptible = {
 		const remain = ctx.deadlineAt - Temporal.Now.instant().epochMilliseconds;
 		if (remain <= 0) return 'expired';
 		const signal = AbortSignal.timeout(remain);
-		return new Promise((resolve) => {
+		return new Promise(resolve => {
 			signal.addEventListener('abort', () => resolve('expired'), { once: true });
 		});
 	},
@@ -78,18 +79,18 @@ describe('performerのハーネス', () => {
 		expect(result).toEqual({ ok: true, value: 'c1' });
 	});
 
-	it('failの指定を順に記録し本番と同じ条件で検証する', () => {
+	it('failの指定を順に記録し本番と同じ条件で検証する', async () => {
 		const ctx = createTestContext();
-		ctx.fail({ retry: false });
-		ctx.fail({ retryAt: 1_000 });
+		await ctx.fail({ retry: false });
+		await ctx.fail({ retryAt: 1_000 });
 		expect(ctx.fails).toEqual([{ retry: false }, { retryAt: 1_000 }]);
 		expect(() => ctx.fail({ retryAt: Number.NaN })).toThrow(TypeError);
 		expect(() => ctx.fail({ retry: true } as never)).toThrow(TypeError);
 	});
 
-	it('spawnのIDを本番と同じ条件で検証する', () => {
+	it('spawnのIDを本番と同じ条件で検証する', async () => {
 		const ctx = createTestContext();
-		ctx.spawn('child', 'Greet', {});
+		await ctx.spawn('child', 'Greet', {});
 		expect(ctx.spawns).toEqual([{ id: 'child', binding: 'Greet', payload: {} }]);
 		expect(() => ctx.spawn('bad id', 'Greet', {})).toThrow(/invalid node id/);
 	});

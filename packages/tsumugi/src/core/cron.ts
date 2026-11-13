@@ -34,10 +34,10 @@ const SEARCH_DAYS = 366 * 5;
 
 function parseRange(text: string, min: number, max: number, label: string): [number, number] {
 	if (text === '*') return [min, max];
-	const bounds = text.split('-');
-	if (bounds.length > 2) throw new InvalidCronError(`invalid ${label} range: ${text}`);
-	const from = parseValue(bounds[0]!, min, max, label);
-	const to = bounds.length === 2 ? parseValue(bounds[1]!, min, max, label) : from;
+	const [fromText, toText, ...extra] = text.split('-');
+	if (fromText === undefined || extra.length > 0) throw new InvalidCronError(`invalid ${label} range: ${text}`);
+	const from = parseValue(fromText, min, max, label);
+	const to = toText !== undefined ? parseValue(toText, min, max, label) : from;
 	if (from > to) throw new InvalidCronError(`${label} range is reversed: ${text}`);
 	return [from, to];
 }
@@ -53,14 +53,14 @@ function parseField(text: string, min: number, max: number, label: string): Set<
 	const values = new Set<number>();
 	for (const part of text.split(',')) {
 		if (part === '') throw new InvalidCronError(`empty ${label} entry: ${text}`);
-		const [range, ...rest] = part.split('/');
-		if (rest.length > 1) throw new InvalidCronError(`invalid ${label} step: ${part}`);
+		const [range, stepText, ...extra] = part.split('/');
+		if (range === undefined || extra.length > 0) throw new InvalidCronError(`invalid ${label} step: ${part}`);
 		// ステップは範囲と`*`のみ, 単一値は範囲の記述漏れと区別不能
-		if (rest.length === 1 && range !== '*' && !range!.includes('-')) {
+		if (stepText !== undefined && range !== '*' && !range.includes('-')) {
 			throw new InvalidCronError(`step requires a range: ${part}`);
 		}
-		const step = rest.length === 1 ? parseValue(rest[0]!, 1, max - min + 1, `${label} step`) : 1;
-		const [from, to] = parseRange(range!, min, max, label);
+		const step = stepText !== undefined ? parseValue(stepText, 1, max - min + 1, `${label} step`) : 1;
+		const [from, to] = parseRange(range, min, max, label);
 		for (let value = from; value <= to; value += step) values.add(value);
 	}
 	return values;
@@ -68,26 +68,34 @@ function parseField(text: string, min: number, max: number, label: string): Set<
 
 export function parseCron(expression: string): CronSpec {
 	const fields = expression.trim().split(/\s+/);
-	if (fields.length !== FIELDS.length) {
+	const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+	if (
+		fields.length !== FIELDS.length ||
+		minute === undefined ||
+		hour === undefined ||
+		dayOfMonth === undefined ||
+		month === undefined ||
+		dayOfWeek === undefined
+	) {
 		throw new InvalidCronError(`expected 5 fields (minute hour day month weekday): ${expression}`);
 	}
 
-	const parsed = fields.map((text, index) => {
-		const { label, min, max } = FIELDS[index]!;
-		return parseField(text, min, max, label);
-	});
-
+	const parse = (text: string, { label, min, max }: (typeof FIELDS)[number]) => parseField(text, min, max, label);
+	const minutes = parse(minute, FIELDS[0]);
+	const hours = parse(hour, FIELDS[1]);
+	const daysOfMonth = parse(dayOfMonth, FIELDS[2]);
+	const months = parse(month, FIELDS[3]);
 	// 曜日7は日曜, 0へ統一
-	const daysOfWeek = new Set([...parsed[4]!].map((value) => (value === 7 ? 0 : value)));
+	const daysOfWeek = new Set([...parse(dayOfWeek, FIELDS[4])].map(value => (value === 7 ? 0 : value)));
 
 	return {
-		minutes: parsed[0]!,
-		hours: parsed[1]!,
-		daysOfMonth: parsed[2]!,
-		months: parsed[3]!,
+		minutes,
+		hours,
+		daysOfMonth,
+		months,
 		daysOfWeek,
-		restrictedDayOfMonth: !fields[2]!.startsWith('*'),
-		restrictedDayOfWeek: !fields[4]!.startsWith('*'),
+		restrictedDayOfMonth: !dayOfMonth.startsWith('*'),
+		restrictedDayOfWeek: !dayOfWeek.startsWith('*'),
 	};
 }
 

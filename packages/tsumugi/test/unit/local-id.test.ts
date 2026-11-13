@@ -21,7 +21,7 @@ describe('localIdの生成', () => {
 	});
 
 	it('2文字目以降に全文字種が出現する', () => {
-		const seen = new Set(ids.flatMap((id) => [...id.slice(1)]));
+		const seen = new Set(ids.flatMap(id => Array.from(id.slice(1))));
 		expect(seen.size).toBe(36);
 	});
 });

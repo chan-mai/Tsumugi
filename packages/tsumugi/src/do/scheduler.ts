@@ -1,25 +1,24 @@
 import { DurableObject } from 'cloudflare:workers';
-import { configOf, createClient, type BindingConfig, type ClientEnv, type EnqueueHook } from '../client/enqueue.js';
+import { configOf, createClient } from '../client/enqueue.js';
 import { formatJobId, formatRunId, shardNameOf } from '../core/ids.js';
-import {
-	normalizeSchedules,
-	nextOccurrence,
-	type AnyScheduleDef,
-	type AnySchedules,
-	type NormalizedSchedule,
-	type ScheduleContext,
-} from '../core/recurring.js';
+import { normalizeSchedules, nextOccurrence } from '../core/recurring.js';
 import { resolveShard } from '../core/shard.js';
 import { ACTIVE_STATES } from '../core/transitions.js';
+import { systemClock } from './clock.js';
+import { SchedulerRepo } from './scheduler-repo.js';
+
+import type { BindingConfig, ClientEnv, EnqueueHook } from '../client/enqueue.js';
+import type { AnyScheduleDef, AnySchedules, NormalizedSchedule, ScheduleContext } from '../core/recurring.js';
 import type { SettledTarget } from '../core/types.js';
-import { systemClock, type Clock } from './clock.js';
+import type { Clock } from './clock.js';
 import type { EnqueueInput } from './job-shard.js';
 import type { RunLifecycleStub } from './run.js';
-import { SchedulerRepo, type FiredPatch } from './scheduler-repo.js';
+import type { FiredPatch } from './scheduler-repo.js';
 import type { ScheduleRow } from './scheduler-schema.js';
 
 export type SchedulerEnv = ClientEnv & {
 	/** flowのschedule使用時のみ必要 */
+	// oxlint-disable-next-line typescript/no-explicit-any -- 利用者のEnv受け入れ
 	RUN?: DurableObjectNamespace<any>;
 };
 
@@ -55,7 +54,9 @@ export type ScheduleView = {
 export type ScheduleMutationResult = { ok: true } | { ok: false; reason: 'unknown' };
 
 export type ScheduleTriggerResult =
-	{ ok: true; kind: 'job' | 'flow'; id: string } | { ok: false; reason: 'unknown' } | { ok: false; reason: 'failed'; error: string };
+	| { ok: true; kind: 'job' | 'flow'; id: string }
+	| { ok: false; reason: 'unknown' }
+	| { ok: false; reason: 'failed'; error: string };
 
 // DOクラス非参照でDO実装不要(ADR-0023)
 interface SchedulerJobStub extends Rpc.DurableObjectBranded {
@@ -106,7 +107,7 @@ export function createSchedulerClass({
 	const { schedules: normalized, fingerprint } = normalizeSchedules(schedules, {
 		bindings: targets.bindings,
 		flows: targets.flows,
-		shardsOf: (binding) => configOf(bindings, binding)?.shards ?? 1,
+		shardsOf: binding => configOf(bindings, binding)?.shards ?? 1,
 	});
 	const client = createClient<SchedulerEnv>(
 		bindings,
@@ -125,7 +126,7 @@ export function createSchedulerClass({
 		#ticking = false;
 
 		get repo(): SchedulerRepo {
-			if (!this.#repo) this.#repo = new SchedulerRepo(this.ctx.storage);
+			this.#repo ??= new SchedulerRepo(this.ctx.storage);
 			return this.#repo;
 		}
 
@@ -136,7 +137,7 @@ export function createSchedulerClass({
 		}
 
 		async list(): Promise<ScheduleView[]> {
-			return this.repo.rows().map((row) => ({
+			return this.repo.rows().map(row => ({
 				name: row.name,
 				kind: row.kind as 'job' | 'flow',
 				target: row.target,
@@ -188,7 +189,9 @@ export function createSchedulerClass({
 				// 定期のlocalIdは数字終端, -manual終端と衝突なし
 				const fired = await this.#dispatch(row, def, now, `${name}-${now}-${seq}-manual`);
 				this.repo.markFired(name, fired, null, now);
-				return { ok: true, kind: row.kind as 'job' | 'flow', id: (fired.jobId ?? fired.runId)! };
+				const id = fired.jobId ?? fired.runId;
+				if (id === undefined) throw new Error(`schedule fired without a job or run id: ${name}`);
+				return { ok: true, kind: row.kind as 'job' | 'flow', id };
 			} catch (error) {
 				const message = messageOf(error);
 				this.repo.markError(name, message, null, now);
@@ -237,11 +240,11 @@ export function createSchedulerClass({
 		}
 
 		#reconcile(now: number): void {
-			const rows = new Map(this.repo.rows().map((row) => [row.name, row]));
+			const rows = new Map(this.repo.rows().map(row => [row.name, row]));
 			if (
 				this.repo.readSetting(FINGERPRINT_KEY) === fingerprint &&
 				rows.size === normalized.length &&
-				normalized.every((spec) => {
+				normalized.every(spec => {
 					const row = rows.get(spec.name);
 					return row !== undefined && rowMatchesSpec(row, spec);
 				})

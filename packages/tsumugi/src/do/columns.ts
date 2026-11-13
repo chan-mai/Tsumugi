@@ -4,7 +4,7 @@ export function ensureColumns(sql: SqlStorage, table: string, columns: readonly 
 		sql
 			.exec<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
 			.toArray()
-			.map((row) => row.name),
+			.map(row => row.name),
 	);
 	const added = new Set<string>();
 	for (const [name, type] of columns) {

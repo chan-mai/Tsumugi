@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { Check, ChevronDown, X } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import { Check, ChevronDown, X } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { SEARCH_FIELDS as FIELDS, type SearchField } from '../search';
+import { SEARCH_FIELDS as FIELDS } from '../search';
 import { MENU_ITEM, MENU_ITEM_HOVER, MENU_PANEL } from '../ui';
+
+import type { SearchField } from '../search';
 
 const props = defineProps<{ field: SearchField; value: string }>();
 const emit = defineEmits<{ 'update:field': [value: SearchField]; 'update:value': [value: string] }>();
@@ -13,7 +15,7 @@ const { t } = useI18n();
 const draft = ref(props.value);
 watch(
 	() => props.value,
-	(next) => {
+	next => {
 		draft.value = next;
 	},
 );

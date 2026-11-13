@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const { tm, rt } = useI18n();
 const items = computed(() =>
-	(tm('home.problems.items') as Record<'title' | 'queues' | 'tsumugi', string>[]).map((item) => ({
+	(tm('home.problems.items') as Record<'title' | 'queues' | 'tsumugi', string>[]).map(item => ({
 		title: rt(item.title),
 		queues: rt(item.queues),
 		tsumugi: rt(item.tsumugi),

@@ -6,7 +6,7 @@ const SIDE_EFFECT = /^[ \t]*import\s*["']([^"']+)["']/gm;
 const DYNAMIC = /(?<![.\w$])import\s*\(\s*["']([^"']+)["']/g;
 
 // 利用者バンドル対象外
-const isBuiltin = (spec) => spec.startsWith('cloudflare:') || spec.startsWith('node:');
+const isBuiltin = spec => spec.startsWith('cloudflare:') || spec.startsWith('node:');
 
 function packageOf(spec) {
 	const parts = spec.split('/');

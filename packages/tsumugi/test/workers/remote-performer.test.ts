@@ -2,8 +2,12 @@ import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest';
 import { createClient } from '../../src/client/enqueue.js';
 import { fixedClock } from '../../src/do/clock.js';
+import { handleBatch } from '../../src/queue/consumer.js';
+
+import type { Clock } from '../../src/do/clock.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+import type { JobRepo } from '../../src/do/repo.js';
+import type { ConsumerEnv } from '../../src/queue/consumer.js';
 
 const T0 = 2_500_000_000_000;
 
@@ -34,14 +38,21 @@ function makeBatch(bodies: DispatchMessage[]) {
 	return { queue: 'test', messages, ackAll: () => {}, retryAll: () => {} } as unknown as MessageBatch<DispatchMessage>;
 }
 
+type ShardInternals = {
+	clock: Clock;
+	env: { TSUMUGI_QUEUE: unknown };
+	repo: JobRepo;
+};
+
+const internals = (instance: unknown) => instance as ShardInternals;
+
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
-const stateOf = (name: string, id: string) =>
-	runInDurableObject(shard(name), (instance) => (instance as any).repo.find(id)?.state as string | undefined);
+const stateOf = (name: string, id: string) => runInDurableObject(shard(name), instance => internals(instance).repo.find(id)?.state);
 
 async function install(name: string, queue: unknown) {
-	await runInDurableObject(shard(name), (instance) => {
-		(instance as any).clock = fixedClock(T0);
-		(instance as any).env.TSUMUGI_QUEUE = queue;
+	await runInDurableObject(shard(name), instance => {
+		internals(instance).clock = fixedClock(T0);
+		internals(instance).env.TSUMUGI_QUEUE = queue;
 	});
 }
 
@@ -65,8 +76,10 @@ describe('別Workerのperformer(ADR-0026)', () => {
 		await handleBatch(makeBatch(sent), consumerEnv);
 
 		expect(calls).toHaveLength(1);
-		expect(calls[0]!.payload).toEqual({ to: 'a@example.com' });
-		expect(calls[0]!.ctx).toMatchObject({ jobId, attempt: 1, idempotencyKey: jobId });
+		const [call] = calls;
+		if (call === undefined) throw new Error('perform was not called');
+		expect(call.payload).toEqual({ to: 'a@example.com' });
+		expect(call.ctx).toMatchObject({ jobId, attempt: 1, idempotencyKey: jobId });
 		expect(await stateOf('MAIL#0', jobId)).toBe('COMPLETED');
 	});
 
@@ -84,7 +97,7 @@ describe('別Workerのperformer(ADR-0026)', () => {
 });
 
 describe('実際のservice binding越し', () => {
-	it.each([false, true])('traceparentとログ関数が別Workerへ渡り記録が残る(fail=%s)', async (fail) => {
+	it.each([false, true])('traceparentとログ関数が別Workerへ渡り記録が残る(fail=%s)', async fail => {
 		const { sent, queue } = captureQueue();
 		await install('MAIL#0', queue);
 		const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
@@ -101,8 +114,10 @@ describe('実際のservice binding越し', () => {
 			.first<{ state: string; traceparent: string; logs: string; result: string | null }>();
 		expect(row?.traceparent).toBe(traceparent);
 		expect(row?.state).toBe(fail ? 'SCHEDULED' : 'COMPLETED');
-		expect(JSON.parse(row!.logs)).toEqual([{ attempt: 1, timestamp: T0, message: 'mail started' }]);
-		if (!fail) expect(JSON.parse(row!.result!)).toMatchObject({ traceparent });
+		if (row === null) throw new Error('projected job row is missing');
+		expect(JSON.parse(row.logs)).toEqual([{ attempt: 1, timestamp: T0, message: 'mail started' }]);
+		const result: unknown = row.result === null ? null : JSON.parse(row.result);
+		expect({ result }).toMatchObject(fail ? {} : { result: { traceparent } });
 	});
 
 	it('別Workerのentrypointが呼ばれ完了する', async () => {
@@ -159,7 +174,9 @@ describe('投入だけを行うclient(ADR-0023)', () => {
 		]);
 
 		expect(ids).toHaveLength(2);
-		expect(await stateOf('CLIENT#0', ids[0]!)).toBe('SCHEDULED');
+		const [first] = ids;
+		if (first === undefined) throw new Error('enqueued id is missing');
+		expect(await stateOf('CLIENT#0', first)).toBe('SCHEDULED');
 	});
 
 	it('複数シャードに散っても入力の並び順でIDが返る', async () => {
@@ -171,7 +188,10 @@ describe('投入だけを行うclient(ADR-0023)', () => {
 		expect(new Set(ids).size).toBe(12);
 		// 宛先別集約投入, 返却順誤りでIDと入力が不一致
 		for (const [i, id] of ids.entries()) {
-			const state = await runInDurableObject(shard(id.split(':')[0]!), (instance) => (instance as any).repo.find(id)?.payload as string);
+			const [shardName] = id.split(':');
+			if (shardName === undefined) throw new Error(`invalid job id: ${id}`);
+			const state = await runInDurableObject(shard(shardName), instance => internals(instance).repo.find(id)?.payload);
+			if (state === undefined) throw new Error(`job not found: ${id}`);
 			expect(JSON.parse(state)).toEqual({ i });
 		}
 	});

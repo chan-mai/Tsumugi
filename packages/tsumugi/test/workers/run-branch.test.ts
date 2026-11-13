@@ -1,8 +1,13 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
+import { handleBatch } from '../../src/queue/consumer.js';
+
 import type { NodeEvent } from '../../src/core/run.js';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { JobRepo } from '../../src/do/repo.js';
+import type { RunRepo } from '../../src/do/run-repo.js';
+import type { TsumugiRunInstance } from '../../src/do/run.js';
+import type { ConsumerEnv } from '../../src/queue/consumer.js';
 
 // flow定義はexamples/basic(BRANCHED), Run DOが参照(ADR-0030, ADR-0041)
 // cleanupはtrigger=failure, auditはtrigger=always, detailはwhenで経路選択
@@ -13,6 +18,13 @@ interface RunFace extends Rpc.DurableObjectBranded {
 	notify(events: readonly NodeEvent[]): Promise<void>;
 	retry(): Promise<{ ok: boolean }>;
 }
+
+type RunInternals = TsumugiRunInstance & {
+	ctx: DurableObjectState;
+	repo: RunRepo;
+};
+
+const runInternals = (instance: unknown) => instance as RunInternals;
 
 const namespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
 const runStub = (runId: string) => namespace.get(namespace.idFromName(runId));
@@ -50,8 +62,8 @@ function makeBatch(bodies: DispatchMessage[]) {
 
 async function installQueues(): Promise<void> {
 	for (const binding of BINDINGS) {
-		await runInDurableObject(shard(binding), (instance) => {
-			(instance as any).env.TSUMUGI_QUEUE = queue;
+		await runInDurableObject(shard(binding), instance => {
+			(instance as unknown as { env: { TSUMUGI_QUEUE: unknown } }).env.TSUMUGI_QUEUE = queue;
 		});
 	}
 }
@@ -70,18 +82,21 @@ async function settle(runId: string): Promise<void> {
 }
 
 const nodesOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) =>
-		Object.fromEntries(((instance as any).repo.views() as { id: string; state: string }[]).map((node) => [node.id, node.state])),
+	runInDurableObject(runStub(runId), instance =>
+		Object.fromEntries(
+			runInternals(instance)
+				.repo.views()
+				.map(node => [node.id, node.state]),
+		),
 	);
 
 const errorOf = (runId: string, nodeId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.error as string | null);
+	runInDurableObject(runStub(runId), instance => runInternals(instance).repo.findNode(nodeId)?.error as string | null);
 
-const stateOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun()?.state as string | undefined);
+const stateOf = (runId: string) => runInDurableObject(runStub(runId), instance => runInternals(instance).repo.findRun()?.state);
 
 const jobIdOf = (runId: string, nodeId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.job_id as string | null);
+	runInDurableObject(runStub(runId), instance => runInternals(instance).repo.findNode(nodeId)?.job_id as string | null);
 
 async function settleRun(runId: string): Promise<void> {
 	let previous = '';
@@ -128,8 +143,8 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 		const runId = 'BRANCHED:when-reserved';
 		const jobId = 'Report#0:whenreserved';
 		await installQueues();
-		await runInDurableObject(runStub(runId), async (instance) => {
-			const inner = instance as any;
+		await runInDurableObject(runStub(runId), async instance => {
+			const inner = runInternals(instance);
 			await inner.start({ flow: 'BRANCHED', input: { prefix: 'wr', verbose: false } });
 			await inner.ctx.storage.deleteAlarm();
 			inner.repo.updateNode(
@@ -145,7 +160,7 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 
 		expect((await nodesOf(runId))['detail']).not.toBe('SKIPPED');
 		expect(await jobIdOf(runId, 'detail')).toBe(jobId);
-		const job = await runInDurableObject(shard('Report'), (instance) => (instance as any).repo.find(jobId) as { id: string } | undefined);
+		const job = await runInDurableObject(shard('Report'), instance => (instance as unknown as { repo: JobRepo }).repo.find(jobId));
 		expect(job?.id).toBe(jobId);
 	});
 
@@ -194,8 +209,8 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 
 	it('再開で子を持つfan-outのノードはCOMPLETEDのまま残る', async () => {
 		const runId = 'GREETINGS:retry-container';
-		await runInDurableObject(runStub(runId), async (instance) => {
-			const inner = instance as any;
+		await runInDurableObject(runStub(runId), async instance => {
+			const inner = runInternals(instance);
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'rc' } });
 			await inner.ctx.storage.deleteAlarm();
 			const now = Temporal.Now.instant().epochMilliseconds;

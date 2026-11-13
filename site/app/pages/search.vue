@@ -3,7 +3,7 @@ import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headless
 
 const { t, locale } = useI18n();
 const localePath = useLocalePath();
-const scopes = computed<SearchScope[]>(() => [
+const scopes = computed<[SearchScope, ...SearchScope[]]>(() => [
 	{ value: 'all', label: t('search.all'), prefix: '/' },
 	{ value: 'guide', label: t('nav.guide'), prefix: `${localePath('/guide')}/` },
 	{ value: 'reference', label: t('nav.reference'), prefix: `${localePath('/reference')}/` },
@@ -17,13 +17,13 @@ const route = useRoute();
 const router = useRouter();
 
 const q = computed(() => String(route.query.q ?? '').trim());
-const scope = computed(() => scopes.value.find((item) => item.value === route.query.scope) ?? scopes.value[0]!);
+const scope = computed(() => scopes.value.find(item => item.value === route.query.scope) ?? scopes.value[0]);
 const requestedPage = computed(() => Math.max(1, Math.trunc(Number(route.query.page)) || 1));
 
 const draft = ref(q.value);
 const draftScope = ref<SearchScope>(scope.value);
-watch(q, (value) => (draft.value = value));
-watch(scope, (value) => (draftScope.value = value));
+watch(q, value => (draft.value = value));
+watch(scope, value => (draftScope.value = value));
 
 const sections = ref<SearchSection[]>([]);
 const loaded = ref(false);
@@ -38,10 +38,10 @@ onMounted(async () => {
 
 // ページ自体の項目とh1見出しの項目を1件に統合
 function mergePageSections(list: SearchSection[]): SearchSection[] {
-	const roots = new Map(list.filter((s) => !s.id.includes('#')).map((s) => [s.id, s]));
+	const roots = new Map(list.filter(s => !s.id.includes('#')).map(s => [s.id, s]));
 	const merged: SearchSection[] = [];
 	for (const section of list) {
-		const path = section.id.split('#')[0]!;
+		const [path = ''] = section.id.split('#');
 		const root = roots.get(path);
 		if (section.level === 1 && section.id.includes('#') && root) {
 			root.content = [root.content, section.content].filter(Boolean).join(' ');
@@ -52,16 +52,16 @@ function mergePageSections(list: SearchSection[]): SearchSection[] {
 	return merged;
 }
 
-const pageTitles = computed(() => new Map(sections.value.filter((s) => !s.id.includes('#')).map((s) => [s.id, s.title])));
+const pageTitles = computed(() => new Map(sections.value.filter(s => !s.id.includes('#')).map(s => [s.id, s.title])));
 
 const terms = computed(() => q.value.toLowerCase().split(/\s+/).filter(Boolean));
 
 const matches = computed(() => {
 	if (!terms.value.length) return [];
-	return sections.value.filter((section) => {
+	return sections.value.filter(section => {
 		if (!section.id.startsWith(scope.value.prefix)) return false;
 		const text = `${section.titles.join(' ')} ${section.title} ${section.content}`.toLowerCase();
-		return terms.value.every((term) => text.includes(term));
+		return terms.value.every(term => text.includes(term));
 	});
 });
 
@@ -69,8 +69,9 @@ const pageCount = computed(() => Math.max(1, Math.ceil(matches.value.length / pe
 const page = computed(() => Math.min(requestedPage.value, pageCount.value));
 const from = computed(() => (page.value - 1) * perPage);
 const results = computed(() =>
-	matches.value.slice(from.value, from.value + perPage).map((section) => {
-		const pageTitle = pageTitles.value.get(section.id.split('#')[0]!);
+	matches.value.slice(from.value, from.value + perPage).map(section => {
+		const [path = ''] = section.id.split('#');
+		const pageTitle = pageTitles.value.get(path);
 		return {
 			id: section.id,
 			title: highlight(pageTitle && pageTitle !== section.title ? `${section.title} | ${pageTitle}` : section.title),
@@ -89,7 +90,7 @@ function highlight(text: string): HighlightSegment[] {
 	return text
 		.split(pattern)
 		.filter(Boolean)
-		.map((part) => ({ text: part, hit: terms.value.includes(part.toLowerCase()) }));
+		.map(part => ({ text: part, hit: terms.value.includes(part.toLowerCase()) }));
 }
 
 // 一致箇所の前後を最大3か所連結

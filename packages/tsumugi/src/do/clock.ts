@@ -15,10 +15,10 @@ export function fixedClock(start: number): Clock & { advance(ms: number): void; 
 	let current = start;
 	return {
 		now: () => current,
-		advance: (ms) => {
+		advance: ms => {
 			current += ms;
 		},
-		set: (at) => {
+		set: at => {
 			current = at;
 		},
 	};
