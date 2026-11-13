@@ -78,13 +78,13 @@ export function upsertOf<Table extends keyof typeof READ_MODEL_COLUMNS>(
 	const columns: readonly string[] = READ_MODEL_COLUMNS[table];
 	const fixed: readonly string[] = [...keys, ...immutable];
 	const set = columns
-		.filter((column) => !fixed.includes(column))
-		.map((column) => `"${column}" = excluded."${column}"`)
+		.filter(column => !fixed.includes(column))
+		.map(column => `"${column}" = excluded."${column}"`)
 		.join(', ');
 	return {
-		sql: `INSERT INTO ${table} (${columns.map((column) => `"${column}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})
+		sql: `INSERT INTO ${table} (${columns.map(column => `"${column}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})
 			ON CONFLICT (${keys.join(', ')}) DO UPDATE SET ${set} WHERE excluded.seq > ${table}.seq`,
 		// 旧スナップショットの欠落列はnullへ統一
-		params: columns.map((column) => (values as Record<string, SqlValue | undefined>)[column] ?? null),
+		params: columns.map(column => (values as Record<string, SqlValue | undefined>)[column] ?? null),
 	};
 }

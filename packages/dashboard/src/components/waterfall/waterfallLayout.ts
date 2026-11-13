@@ -51,18 +51,21 @@ function timedSegments(node: RunNode, now: number): Segment[] {
 
 	// 最新試行は開始時刻が一致, 1回目成功の導出分も同様
 	const previous = node.attempts_log
-		.filter((a) => a.started_at !== null && a.started_at !== node.started_at)
-		.map<Segment>((a) => ({ kind: 'attempt', start: a.started_at!, end: a.finished_at, state: a.state, attempt: a.attempt, open: false }))
+		.flatMap<Segment>(a =>
+			a.started_at !== null && a.started_at !== node.started_at
+				? [{ kind: 'attempt', start: a.started_at, end: a.finished_at, state: a.state, attempt: a.attempt, open: false }]
+				: [],
+		)
 		.sort((x, y) => x.start - y.start);
 
 	const segments: Segment[] = [...previous];
 	// 再試行待ちは直前の試行終了から
-	const queueStart = Math.max(node.queued_at, ...previous.map((s) => s.end));
+	const queueStart = Math.max(node.queued_at, ...previous.map(s => s.end));
 	const queueEnd = node.started_at ?? latestEnd;
 	if (queueEnd > queueStart)
 		segments.push({ kind: 'queued', start: queueStart, end: queueEnd, state: node.state, open: active && node.started_at === null });
 	if (node.started_at !== null) {
-		const current = node.attempts_log.find((a) => a.started_at === node.started_at);
+		const current = node.attempts_log.find(a => a.started_at === node.started_at);
 		segments.push({
 			kind: 'running',
 			start: node.started_at,
@@ -76,7 +79,7 @@ function timedSegments(node: RunNode, now: number): Segment[] {
 }
 
 export function waterfallLayout(nodes: RunNode[], now: number, options: WaterfallOptions = {}): Waterfall {
-	const ids = new Set(nodes.map((node) => node.id));
+	const ids = new Set(nodes.map(node => node.id));
 	const children = new Map<string | null, RunNode[]>();
 	for (const node of nodes) {
 		const parent = node.parent !== null && ids.has(node.parent) ? node.parent : null;
@@ -102,10 +105,10 @@ export function waterfallLayout(nodes: RunNode[], now: number, options: Waterfal
 					? [
 							{
 								kind: 'span',
-								start: Math.min(...nested.map((s) => s.start)),
-								end: Math.max(...nested.map((s) => s.end)),
+								start: Math.min(...nested.map(s => s.start)),
+								end: Math.max(...nested.map(s => s.end)),
 								state: node.state,
-								open: nested.some((s) => s.open),
+								open: nested.some(s => s.open),
 							},
 						]
 					: [];
@@ -116,8 +119,8 @@ export function waterfallLayout(nodes: RunNode[], now: number, options: Waterfal
 	nodes.forEach(resolve);
 
 	const all = [...segments.values()].flat();
-	const start = all.length > 0 ? Math.min(...all.map((s) => s.start)) : 0;
-	const end = all.length > 0 ? Math.max(...all.map((s) => s.end)) : 0;
+	const start = all.length > 0 ? Math.min(...all.map(s => s.start)) : 0;
+	const end = all.length > 0 ? Math.max(...all.map(s => s.end)) : 0;
 
 	const rows: Row[] = [];
 	const visit = (parent: string | null, depth: number) => {
@@ -137,7 +140,7 @@ export function waterfallLayout(nodes: RunNode[], now: number, options: Waterfal
 }
 
 export function tickStep(duration: number): number {
-	return TICK_STEPS.find((step) => duration / step <= TICK_TARGET) ?? TICK_STEPS[TICK_STEPS.length - 1]!;
+	return TICK_STEPS.find(step => duration / step <= TICK_TARGET) ?? TICK_STEPS[TICK_STEPS.length - 1];
 }
 
 function ticks(duration: number): Tick[] {

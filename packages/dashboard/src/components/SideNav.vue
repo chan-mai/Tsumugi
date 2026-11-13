@@ -12,7 +12,7 @@ const router = useRouter();
 const available = { flows: () => flows.value.length > 0, schedules: () => hasSchedules.value, metrics: () => hasMetrics.value };
 
 const items = computed(() =>
-	router.getRoutes().filter((route) => route.name && route.meta.title && (!route.meta.feature || available[route.meta.feature]())),
+	router.getRoutes().filter(route => route.name && route.meta.title && (!route.meta.feature || available[route.meta.feature]())),
 );
 </script>
 

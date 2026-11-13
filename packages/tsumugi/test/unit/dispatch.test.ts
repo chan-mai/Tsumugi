@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planDispatch } from '../../src/core/dispatch.js';
+
 import type { Bucket, Decision, JobView, Policy } from '../../src/core/types.js';
 
 const T0 = 1_700_000_000_000;
@@ -34,7 +35,7 @@ const job = (over: Partial<JobView> & { id: string }): JobView => ({
 });
 
 const unlimited: Bucket = { tokens: Number.POSITIVE_INFINITY, refilledAt: T0 };
-const ids = (ds: Decision[], type: Decision['type']) => ds.filter((d) => d.type === type).map((d) => d.id);
+const ids = (ds: Decision[], type: Decision['type']) => ds.filter(d => d.type === type).map(d => d.id);
 
 describe('dispatchの基本', () => {
 	it('実行可能なジョブを投入する', () => {

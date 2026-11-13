@@ -1,5 +1,6 @@
-import type { FanOutSummary, NodeJobOptions, NodeTrigger } from './flow.js';
 import { TERMINAL_STATES } from './transitions.js';
+
+import type { FanOutSummary, NodeJobOptions, NodeTrigger } from './flow.js';
 import type { JobState } from './types.js';
 
 // runの進行判断, 依存解決と中断判断はここで完結(ADR-0018)
@@ -93,7 +94,7 @@ export function isNodeTerminal(state: NodeState): boolean {
  * 親を`after`に指定したノードは実行時追加の子孫の終端も待機
  */
 export function advance({ nodes, cancelling, aborted = false }: AdvanceInput): AdvanceOutput {
-	const byId = new Map(nodes.map((node) => [node.id, node]));
+	const byId = new Map(nodes.map(node => [node.id, node]));
 	const children = new Map<string, NodeView[]>();
 	for (const node of nodes) {
 		if (node.parent === null) continue;
@@ -121,7 +122,7 @@ export function advance({ nodes, cancelling, aborted = false }: AdvanceInput): A
 			settled(node) &&
 			node.state === 'COMPLETED' &&
 			// fanOutの子の失敗は要約で後段へ, 親の成否に不算入(ADR-0035)
-			(children.get(node.id) ?? []).every((child) => child.origin === 'fanOut' || succeeded(child));
+			(children.get(node.id) ?? []).every(child => child.origin === 'fanOut' || succeeded(child));
 		succeededMemo.set(node.id, value);
 		return value;
 	};
@@ -134,7 +135,7 @@ export function advance({ nodes, cancelling, aborted = false }: AdvanceInput): A
 		node.state === 'FAILED' ||
 		node.state === 'STALLED' ||
 		node.state === 'CANCELLED' ||
-		(children.get(node.id) ?? []).some((child) => child.origin !== 'fanOut' && failed(child));
+		(children.get(node.id) ?? []).some(child => child.origin !== 'fanOut' && failed(child));
 
 	const halting = cancelling || aborted;
 
@@ -157,14 +158,14 @@ export function advance({ nodes, cancelling, aborted = false }: AdvanceInput): A
 		}
 
 		if (node.state === 'PENDING') {
-			const deps = node.after.map((id) => byId.get(id));
+			const deps = node.after.map(id => byId.get(id));
 			// flowから消えた依存は成否不明, 発火条件に関わらずSKIPPED(ADR-0030)
-			const missing = deps.some((dep) => dep === undefined);
+			const missing = deps.some(dep => dep === undefined);
 			if (missing) {
 				decisions.push({ type: 'skip', id: node.id, reason: 'a dependency is missing from the flow' });
 				continue;
 			}
-			const settledDeps = deps.filter((dep) => dep !== undefined);
+			const settledDeps = deps.filter(dep => dep !== undefined);
 			if (!settledDeps.every(settled)) continue;
 
 			// failureは1つ以上の失敗が条件, SKIPPEDは経路の不選択で後処理不要(ADR-0041)
@@ -175,7 +176,7 @@ export function advance({ nodes, cancelling, aborted = false }: AdvanceInput): A
 		}
 	}
 
-	const roots = nodes.filter((node) => node.parent === null);
+	const roots = nodes.filter(node => node.parent === null);
 	// 全ノードはいずれかの根の子孫, 根の終端で全体も終端
 	const done = roots.every(settled);
 	// fan-outの子の失敗は非致命(ADR-0035), ノード状態から中断は区別不能(ADR-0039)

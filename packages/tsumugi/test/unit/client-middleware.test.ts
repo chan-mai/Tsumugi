@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient } from '../../src/client/enqueue.js';
+
 import type { EnqueueInput } from '../../src/do/job-shard.js';
 
 function capture() {
@@ -15,6 +16,12 @@ function capture() {
 	return { calls, env };
 }
 
+function firstInput(calls: readonly { inputs: readonly EnqueueInput[] }[]): EnqueueInput {
+	const input = calls[0]?.inputs[0];
+	if (input === undefined) throw new Error('enqueue input not captured');
+	return input;
+}
+
 describe('onEnqueueによる既定値の付与(#96)', () => {
 	it('フックの戻り値がundefinedのキーへ適用される', async () => {
 		const { calls, env } = capture();
@@ -22,7 +29,7 @@ describe('onEnqueueによる既定値の付与(#96)', () => {
 
 		await client.enqueue(env, { binding: 'A', payload: {} });
 
-		expect(calls[0]!.inputs[0]).toMatchObject({ binding: 'A', timeoutMs: 45_000, priority: 5 });
+		expect(firstInput(calls)).toMatchObject({ binding: 'A', timeoutMs: 45_000, priority: 5 });
 	});
 
 	it('呼び出し側の明示値が優先される', async () => {
@@ -31,7 +38,7 @@ describe('onEnqueueによる既定値の付与(#96)', () => {
 
 		await client.enqueue(env, { binding: 'A', payload: {}, timeoutMs: 1_000 });
 
-		expect(calls[0]!.inputs[0]).toMatchObject({ timeoutMs: 1_000, maxAttempts: 9 });
+		expect(firstInput(calls)).toMatchObject({ timeoutMs: 1_000, maxAttempts: 9 });
 	});
 
 	it('明示のundefinedはフックの値を消さない', async () => {
@@ -41,7 +48,7 @@ describe('onEnqueueによる既定値の付与(#96)', () => {
 		// 型上不可の明示undefinedもJSからは渡り得る
 		await client.enqueue(env, { binding: 'A', payload: {}, priority: undefined } as unknown as EnqueueInput);
 
-		expect(calls[0]!.inputs[0]).toMatchObject({ priority: 5 });
+		expect(firstInput(calls)).toMatchObject({ priority: 5 });
 	});
 
 	it('排他のオプションは片方が決まればもう片方を適用しない', async () => {
@@ -50,7 +57,7 @@ describe('onEnqueueによる既定値の付与(#96)', () => {
 
 		await client.enqueue(env, { binding: 'A', payload: {}, runAt: 123 });
 
-		const input = calls[0]!.inputs[0]!;
+		const input = firstInput(calls);
 		expect(input.runAt).toBe(123);
 		expect(input.delayMs).toBeUndefined();
 		expect(input.expiresAt).toBe(10);
@@ -64,13 +71,13 @@ describe('onEnqueueによる既定値の付与(#96)', () => {
 
 		await client.enqueue(env, { binding: 'A', payload: {} });
 
-		expect(calls[0]!.inputs[0]).toMatchObject({ binding: 'A', payload: {} });
-		expect(calls[0]!.inputs[0]!.id).toBeUndefined();
+		expect(firstInput(calls)).toMatchObject({ binding: 'A', payload: {} });
+		expect(firstInput(calls).id).toBeUndefined();
 	});
 
 	it('フック由来の不正なtraceparentも送信前に拒否される', async () => {
-		const idFromName = vi.fn();
-		const get = vi.fn();
+		const idFromName = vi.fn<(name: string) => unknown>();
+		const get = vi.fn<(id: unknown) => unknown>();
 		const client = createClient({}, {}, { onEnqueue: () => ({ traceparent: 'invalid' }) });
 
 		await expect(client.enqueueMany({ JOB_SHARD: { idFromName, get } } as never, [{ binding: 'A', payload: {} }])).rejects.toThrow(

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Ellipsis } from '@lucide/vue';
 import { Menu, MenuButton, MenuItem, MenuItems, TransitionRoot } from '@headlessui/vue';
+import { Ellipsis } from '@lucide/vue';
 import { computed, toRef } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MENU_CAPTION, MENU_ITEM, MENU_PANEL } from '../ui';

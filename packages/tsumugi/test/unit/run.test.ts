@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { advance } from '../../src/core/run.js';
+
 import type { NodeTrigger } from '../../src/core/flow.js';
-import { advance, type NodeState, type NodeView } from '../../src/core/run.js';
+import type { NodeState, NodeView } from '../../src/core/run.js';
 
 type NodeSpec = {
 	id: string;
@@ -26,8 +28,8 @@ const node = (n: NodeSpec): NodeView => ({
 
 const ids = (nodes: NodeView[], type: string) =>
 	advance({ nodes, cancelling: false })
-		.decisions.filter((d) => d.type === type)
-		.map((d) => d.id);
+		.decisions.filter(d => d.type === type)
+		.map(d => d.id);
 
 describe('runの進行判断', () => {
 	it('依存の無いノードだけを起動する', () => {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidScheduleError, nextOccurrence, normalizeSchedules, type AnySchedules } from '../../src/core/recurring.js';
+import { InvalidScheduleError, nextOccurrence, normalizeSchedules } from '../../src/core/recurring.js';
+
+import type { AnySchedules } from '../../src/core/recurring.js';
 
 const context = { bindings: ['Greet', 'Wide'], flows: ['GREETINGS'], shardsOf: (binding: string) => (binding === 'Wide' ? 4 : 1) };
 

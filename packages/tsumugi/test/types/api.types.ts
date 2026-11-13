@@ -1,8 +1,9 @@
 // 型レベル検証, vitest対象外で`tsc --noEmit`で検査
 // 不要になった@ts-expect-errorはTS2578で失敗、検査の形骸化防止
 import { Performer } from '../../src/performer/entrypoint.js';
-import type { JobContext } from '../../src/core/api.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { JobContext } from '../../src/core/api.js';
 
 class SendMail extends Performer<{ to: string; subject: string }> {
 	async perform(payload: { to: string; subject: string }, _ctx: JobContext) {
@@ -24,42 +25,42 @@ declare const env: never;
 const q = tsumugi.jobs(env);
 
 export function typeChecks() {
-	q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' });
+	void q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' });
 
 	// @ts-expect-error subjectが無い
-	q.enqueue('MAIL', { to: 'a@example.com' });
+	void q.enqueue('MAIL', { to: 'a@example.com' });
 	// @ts-expect-error amountJpyはnumber
-	q.enqueue('CHARGE', { customerId: 'c1', amountJpy: '100' }, { concurrencyKey: 'c1' });
+	void q.enqueue('CHARGE', { customerId: 'c1', amountJpy: '100' }, { concurrencyKey: 'c1' });
 
 	// @ts-expect-error未定義のbinding
-	q.enqueue('NOPE', {});
+	void q.enqueue('NOPE', {});
 
-	q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' }, { priority: 5 });
+	void q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' }, { priority: 5 });
 
-	q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { concurrencyKey: 'cust:c1' });
+	void q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { concurrencyKey: 'cust:c1' });
 	// @ts-expect-error optionsごとの省略は不可
-	q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 });
+	void q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 });
 	// @ts-expect-error concurrencyKeyが無い
-	q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { priority: 1 });
+	void q.enqueue('CHARGE', { customerId: 'c1', amountJpy: 1200 }, { priority: 1 });
 
-	q.enqueue('SYNC', { sku: 'X-1' }, { uniqueKey: 'sku:X-1' });
+	void q.enqueue('SYNC', { sku: 'X-1' }, { uniqueKey: 'sku:X-1' });
 	// @ts-expect-error uniqueKeyが無い
-	q.enqueue('SYNC', { sku: 'X-1' }, {});
+	void q.enqueue('SYNC', { sku: 'X-1' }, {});
 
-	q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' }, { concurrencyKey: 'domain:example.com' });
+	void q.enqueue('MAIL', { to: 'a@example.com', subject: 'hi' }, { concurrencyKey: 'domain:example.com' });
 
 	// バルクのbinding別推論はスパイクの測定結果で必須化
-	q.enqueueMany([
+	void q.enqueueMany([
 		{ binding: 'MAIL', payload: { to: 'a@example.com', subject: 'hi' } },
 		{ binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 }, options: { concurrencyKey: 'cust:c1' } },
 	]);
 
-	q.enqueueMany([
+	void q.enqueueMany([
 		// @ts-expect-error concurrencyKeyが無い
 		{ binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 } },
 	]);
 
-	q.enqueueMany([
+	void q.enqueueMany([
 		// @ts-expect-error MAILにCHARGEのpayload
 		{ binding: 'MAIL', payload: { customerId: 'c1', amountJpy: 1200 } },
 	]);
@@ -69,17 +70,17 @@ export function typeChecks() {
 	void many;
 	void one;
 
-	tsumugi.enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com', subject: 'hi' } });
+	void tsumugi.enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com', subject: 'hi' } });
 	// @ts-expect-error subjectが無い
-	tsumugi.enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com' } });
-	tsumugi.enqueue(env, { binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 }, concurrencyKey: 'cust:c1' });
+	void tsumugi.enqueue(env, { binding: 'MAIL', payload: { to: 'a@example.com' } });
+	void tsumugi.enqueue(env, { binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 }, concurrencyKey: 'cust:c1' });
 	// @ts-expect-error concurrencyKeyが無い
-	tsumugi.enqueue(env, { binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 } });
+	void tsumugi.enqueue(env, { binding: 'CHARGE', payload: { customerId: 'c1', amountJpy: 1200 } });
 	// @ts-expect-error payloadの取り違え
-	tsumugi.enqueue(env, { binding: 'MAIL', payload: { customerId: 'c1', amountJpy: 1200 } });
-	tsumugi.enqueueMany(env, [{ binding: 'SYNC', payload: { sku: 'X-1' }, uniqueKey: 'sku:X-1' }]);
+	void tsumugi.enqueue(env, { binding: 'MAIL', payload: { customerId: 'c1', amountJpy: 1200 } });
+	void tsumugi.enqueueMany(env, [{ binding: 'SYNC', payload: { sku: 'X-1' }, uniqueKey: 'sku:X-1' }]);
 	// @ts-expect-error uniqueKeyが無い
-	tsumugi.enqueueMany(env, [{ binding: 'SYNC', payload: { sku: 'X-1' } }]);
+	void tsumugi.enqueueMany(env, [{ binding: 'SYNC', payload: { sku: 'X-1' } }]);
 }
 
 // 全performerは同一Worker環境で初期化(#5)

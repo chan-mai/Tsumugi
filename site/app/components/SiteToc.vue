@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const props = defineProps<{ links: TocLink[] }>();
 
-const flat = computed(() => props.links.flatMap((link) => [link, ...(link.children ?? [])]));
+const flat = computed(() => props.links.flatMap(link => [link, ...(link.children ?? [])]));
 const active = ref('');
 
 let observer: IntersectionObserver | undefined;
@@ -9,9 +9,10 @@ let observer: IntersectionObserver | undefined;
 function observe() {
 	observer?.disconnect();
 	observer = new IntersectionObserver(
-		(entries) => {
-			const visible = entries.filter((entry) => entry.isIntersecting).map((entry) => entry.target.id);
-			if (visible.length) active.value = visible[0]!;
+		entries => {
+			const visible = entries.filter(entry => entry.isIntersecting).map(entry => entry.target.id);
+			const [first] = visible;
+			if (first !== undefined) active.value = first;
 		},
 		{ rootMargin: '-80px 0px -70% 0px' },
 	);

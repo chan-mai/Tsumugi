@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
+
 import type { JobContext, PerformerLike, Requirements } from '../core/api.js';
 
 /**

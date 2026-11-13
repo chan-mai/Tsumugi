@@ -24,7 +24,10 @@ describe('hashToShard', () => {
 
 	it('偏りすぎない', () => {
 		const counts = [0, 0, 0, 0];
-		for (let i = 0; i < 1000; i++) counts[hashToShard(`cust-${i}`, 4)]!++;
+		for (let i = 0; i < 1000; i++) {
+			const shard = hashToShard(`cust-${i}`, 4);
+			counts[shard] = (counts[shard] ?? 0) + 1;
+		}
 		for (const count of counts) expect(count).toBeGreaterThan(150);
 	});
 });

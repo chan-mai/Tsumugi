@@ -1,11 +1,13 @@
-import { toFailOptions, type FailOptions, type JobContext, type PerformerLike, type RemoteRef } from '../core/api.js';
+import { toFailOptions } from '../core/api.js';
 import { assertNodeId } from '../core/flow.js';
 import { shardNameOf } from '../core/ids.js';
 import { LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS } from '../core/log.js';
+
+import type { AnyPerformer, FailOptions, JobContext, RemoteRef } from '../core/api.js';
 import type { SpawnRequest } from '../core/run.js';
 import type { DispatchMessage, TsumugiJobShard } from '../do/job-shard.js';
 
-export type PerformerCtor<Env> = new (ctx: ExecutionContext, env: Env) => PerformerLike<any, any, any>;
+export type PerformerCtor<Env> = new (ctx: ExecutionContext, env: Env) => AnyPerformer;
 
 export type PerformerService = {
 	perform(payload: unknown, ctx: JobContext): Promise<unknown>;
@@ -33,7 +35,7 @@ export function createHeartbeat(
 ): (progress?: number) => Promise<{ cancelRequested: boolean }> {
 	let lastAt = Number.NEGATIVE_INFINITY;
 	let cancelRequested = false;
-	return async (progress) => {
+	return async progress => {
 		const at = now();
 		if (at - lastAt < minIntervalMs) return { cancelRequested };
 		lastAt = at;
@@ -43,7 +45,7 @@ export function createHeartbeat(
 			const sending = Promise.resolve()
 				.then(() => send(progress))
 				.then(
-					(ack) => {
+					ack => {
 						if (ack.cancelRequested || !ack.accepted) cancelRequested = true;
 					},
 					(error: unknown) => {
@@ -52,7 +54,7 @@ export function createHeartbeat(
 				);
 			await Promise.race([
 				sending,
-				new Promise<void>((resolve) => {
+				new Promise<void>(resolve => {
 					timer = setTimeout(resolve, sendTimeoutMs);
 				}),
 			]);
@@ -70,7 +72,7 @@ export function createLog(
 	sendTimeoutMs = 1_000,
 ): (message: string) => Promise<void> {
 	let lastAt = Number.NEGATIVE_INFINITY;
-	return async (message) => {
+	return async message => {
 		if (typeof message !== 'string') return;
 		const at = now();
 		if (at - lastAt < minIntervalMs) return;
@@ -84,7 +86,7 @@ export function createLog(
 				});
 			await Promise.race([
 				sending,
-				new Promise<void>((resolve) => {
+				new Promise<void>(resolve => {
 					timer = setTimeout(resolve, sendTimeoutMs);
 				}),
 			]);
@@ -152,7 +154,7 @@ function withTimeout<T>(
 			timer = arm();
 		};
 		run(touch).then(
-			(value) => {
+			value => {
 				clearTimeout(timer);
 				resolve(value);
 			},
@@ -181,7 +183,7 @@ export async function handleBatch<Env extends ConsumerEnv>(
 	wallTimeMs: number = CONSUMER_WALL_TIME_MS,
 ): Promise<void> {
 	const wall = { deadline: Date.now() + wallTimeMs - Math.min(WALL_TIME_MARGIN_MS, wallTimeMs / 2), limitMs: wallTimeMs };
-	const results = await Promise.allSettled(batch.messages.map((message) => handleOne(message, env, exports, wall)));
+	const results = await Promise.allSettled(batch.messages.map(message => handleOne(message, env, exports, wall)));
 	// 漏れた例外は再送出せずログのみ, 再送出は未ackでQueuesリトライ発生(ADR-0004)
 	for (const result of results) {
 		if (result.status === 'rejected') console.error('tsumugi: handleOne rejected', result.reason);
@@ -207,7 +209,7 @@ async function handleOne<Env extends ConsumerEnv>(
 
 	try {
 		// 分割代入もtry内, 本文null等の例外でのack欠落防止(ADR-0004)
-		const body = message.body;
+		const body = message.body as DispatchMessage | null | undefined;
 		if (typeof body?.jobId !== 'string') throw new Error('invalid dispatch message: jobId is missing');
 		jobId = body.jobId;
 		const { binding, attempt, payload, timeoutMs, claimRequired, expiresAt, traceparent } = body;
@@ -257,20 +259,20 @@ async function handleOne<Env extends ConsumerEnv>(
 				});
 		}
 
-		result = await withTimeout(stableId, timeoutMs, wall, (touch) => {
+		result = await withTimeout(stableId, timeoutMs, wall, touch => {
 			// DO受理の報告のみ期限再計測, timeoutMsを報告間隔として利用
 			const heartbeat = createHeartbeat(
-				(progress) =>
+				progress =>
 					starting
 						.then(() => stub.heartbeat(stableId, progress, attempt))
-						.then((ack) => {
+						.then(ack => {
 							if (ack.accepted) touch();
 							return ack;
 						}),
 				() => Date.now(),
 			);
 			const log = createLog(
-				(message) => starting.then(() => stub.log(stableId, attempt, message)),
+				message => starting.then(() => stub.log(stableId, attempt, message)),
 				() => Date.now(),
 			);
 			const ctx: JobContext = {
@@ -282,7 +284,7 @@ async function handleOne<Env extends ConsumerEnv>(
 				spawn,
 				heartbeat,
 				log,
-				fail: (options) => {
+				fail: options => {
 					fail = toFailOptions(options);
 				},
 			};

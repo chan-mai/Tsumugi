@@ -1,9 +1,11 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { clearJwksCache, cloudflareAccess, verifyAccessJwt, type Jwks } from '../../src/api/access.js';
+import { clearJwksCache, cloudflareAccess, verifyAccessJwt } from '../../src/api/access.js';
 import { Performer } from '../../src/performer/entrypoint.js';
-import type { RestEnv } from '../../src/api/rest.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { Jwks } from '../../src/api/access.js';
+import type { RestEnv } from '../../src/api/rest.js';
 
 const TEAM = 'acme';
 const AUD = 'aud-tag-123';
@@ -166,8 +168,10 @@ describe('cloudflareAccessミドルウェア', () => {
 
 	const handler = () => defineTsumugi({ performers: { ACC: Noop }, auth: cloudflareAccess(options()) });
 
-	const call = (headers: Record<string, string>) =>
-		handler().fetch!(
+	const call = (headers: Record<string, string>) => {
+		const app = handler();
+		if (app.fetch === undefined) throw new Error('fetch handler is missing');
+		return app.fetch(
 			new Request('https://example.com/api/jobs', { headers }),
 			env as RestEnv,
 			{
@@ -175,6 +179,7 @@ describe('cloudflareAccessミドルウェア', () => {
 				passThroughOnException: () => {},
 			} as unknown as ExecutionContext,
 		);
+	};
 
 	it('ヘッダが無ければ401', async () => {
 		expect((await call({})).status).toBe(401);
@@ -196,7 +201,7 @@ describe('cloudflareAccessミドルウェア', () => {
 	});
 
 	it('設定が空なら構築時点で拒否する', () => {
-		expect(() => cloudflareAccess({ teamDomain: '', aud: AUD })).toThrow();
-		expect(() => cloudflareAccess({ teamDomain: TEAM, aud: '' })).toThrow();
+		expect(() => cloudflareAccess({ teamDomain: '', aud: AUD })).toThrow('cloudflareAccess requires teamDomain and aud');
+		expect(() => cloudflareAccess({ teamDomain: TEAM, aud: '' })).toThrow('cloudflareAccess requires teamDomain and aud');
 	});
 });

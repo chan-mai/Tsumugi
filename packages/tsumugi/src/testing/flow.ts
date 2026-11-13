@@ -1,5 +1,8 @@
-import { assertNodeId, shapeOf, type AnyFlow, type FlowNode, type InputOf } from '../core/flow.js';
-import { advance, type NodeState, type NodeView } from '../core/run.js';
+import { assertNodeId, shapeOf } from '../core/flow.js';
+import { advance } from '../core/run.js';
+
+import type { AnyFlow, FlowNode, InputOf } from '../core/flow.js';
+import type { NodeState, NodeView } from '../core/run.js';
 
 // performは非実行で結果は呼び出し側指定, spawnは対象外
 
@@ -40,9 +43,9 @@ const resultOf = (source: ResultSource | undefined, node: { id: string; binding:
 
 export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, options: SimulateOptions = {}): SimulationResult {
 	const fails = new Set(options.fails ?? []);
-	const definitions = new Map(flow.nodes.map((node) => [node.id, node]));
+	const definitions = new Map(flow.nodes.map(node => [node.id, node]));
 
-	const views: NodeView[] = shapeOf(flow, () => 'simulated').map((node) => ({
+	const views: NodeView[] = shapeOf(flow, () => 'simulated').map(node => ({
 		id: node.id,
 		state: 'PENDING',
 		container: node.container,
@@ -52,7 +55,7 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 		after: node.after,
 		trigger: node.trigger,
 	}));
-	const byId = new Map(views.map((view) => [view.id, view]));
+	const byId = new Map(views.map(view => [view.id, view]));
 	const children = new Map<string, { binding: string; payload: unknown }>();
 	const results = new Map<string, unknown>();
 	const executed: SimulatedNode[] = [];
@@ -132,8 +135,8 @@ export function simulateFlow<F extends AnyFlow>(flow: F, input: InputOf<F>, opti
 
 				case 'aggregate': {
 					// fan-outノードはジョブ非実行, 子の成否集計値が戻り値(ADR-0035)
-					const kids = views.filter((node) => node.parent === view.id);
-					const succeeded = kids.filter((node) => node.state === 'COMPLETED').length;
+					const kids = views.filter(node => node.parent === view.id);
+					const succeeded = kids.filter(node => node.state === 'COMPLETED').length;
 					const summary = { total: kids.length, succeeded, failed: kids.length - succeeded };
 					settle(view, { id: view.id, binding: definition?.binding ?? '', payload: undefined, parent: null }, 'COMPLETED', summary);
 					break;

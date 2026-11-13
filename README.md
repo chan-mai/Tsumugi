@@ -179,7 +179,8 @@ pnpm test
 | `pnpm test`         | Typecheck and all test projects                |
 | `pnpm test:unit`    | Pure functions, runs without workerd           |
 | `pnpm test:workers` | Tests running on workerd                       |
-| `pnpm format`       | Formats with Prettier                          |
+| `pnpm format`       | Formats with oxfmt                             |
+| `pnpm lint`         | Lints with oxlint                              |
 
 To run the documentation site or an example locally, use the workspace filter.
 

@@ -4,8 +4,9 @@ defineProps<{ heading: string; lead?: string }>();
 const root = ref<HTMLElement | null>(null);
 
 useMotion(({ gsap }) => {
+	if (!root.value) throw new Error('section root is not mounted');
 	gsap.fromTo(
-		root.value!.querySelectorAll('[data-reveal]'),
+		root.value.querySelectorAll('[data-reveal]'),
 		{ y: 28, opacity: 0 },
 		{
 			y: 0,

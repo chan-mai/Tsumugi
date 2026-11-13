@@ -1,4 +1,5 @@
 import fc from 'fast-check';
+
 import type { Bucket, JobView, KeyBuckets, Policy, DispatchInput } from '../../src/core/types.js';
 
 // 以下の制約違反は偽陽性の原因
@@ -93,7 +94,7 @@ const keyBuckets: fc.Arbitrary<KeyBuckets | undefined> = fc.oneof(
 
 export const dispatchInput: fc.Arbitrary<DispatchInput> = fc
 	.uniqueArray(fc.string({ minLength: 1, maxLength: 8 }), { minLength: 0, maxLength: 12 })
-	.chain((ids) => fc.tuple(fc.tuple(...ids.map(jobOf)), policy, bucket, keyBuckets))
+	.chain(ids => fc.tuple(fc.tuple(...ids.map(jobOf)), policy, bucket, keyBuckets))
 	// プロパティ省略時の既定(全キーtokens上限)も検査
 	.map(([jobs, policy, bucket, keyBuckets]) =>
 		keyBuckets === undefined ? { now: NOW, jobs, policy, bucket } : { now: NOW, jobs, policy, bucket, keyBuckets },

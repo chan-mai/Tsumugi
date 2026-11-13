@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import ModalShell from './ModalShell.vue';
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { startRun } from '../api';
 import { button, ERROR_TEXT, INPUT as FIELD, LABEL } from '../ui';
+import ModalShell from './ModalShell.vue';
 
 const props = defineProps<{ open: boolean; flows: string[] }>();
 const emit = defineEmits<{ close: []; created: [id: string] }>();
@@ -17,7 +17,7 @@ const busy = ref(false);
 
 watch(
 	() => props.open,
-	(open) => {
+	open => {
 		if (!open) return;
 		flow.value = props.flows[0] ?? '';
 		input.value = '{}';

@@ -7,8 +7,8 @@ const parse = (query: string) => parseMetricsQuery(new URL(`https://example.test
 function stub(responses: unknown[], status = 200) {
 	const sent: string[] = [];
 	let at = 0;
-	const impl = (async (_url: string, init: RequestInit) => {
-		sent.push(String(init.body));
+	const impl = (async (_url: string, init: { body: string }) => {
+		sent.push(init.body);
 		const body = responses[at++] ?? { data: [] };
 		return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 	}) as unknown as typeof globalThis.fetch;
@@ -33,9 +33,10 @@ describe('集計の区間と抽出条件', () => {
 
 	it('binding名として成立しない値を拒否する', () => {
 		// SQLへ直接埋め込む値、受付時に文字種を限定
-		for (const binding of ["MAIL' OR '1'='1", 'MAIL;DROP', '1MAIL', 'MA IL']) {
-			expect(parse(`?binding=${encodeURIComponent(binding)}`), binding).toEqual({ error: 'binding is not a valid name' });
-		}
+		const bindings = ["MAIL' OR '1'='1", 'MAIL;DROP', '1MAIL', 'MA IL'];
+		expect(bindings.map(binding => parse(`?binding=${encodeURIComponent(binding)}`))).toEqual(
+			bindings.map(() => ({ error: 'binding is not a valid name' })),
+		);
 		expect(parse('?binding=MAIL_2')).toEqual({ query: { hours: 24, binding: 'MAIL_2' } });
 	});
 });
@@ -129,6 +130,6 @@ describe('応答の読み取り', () => {
 
 		await readMetrics(config, { hours: 24 }, impl);
 		expect(sent[0]?.url).toBe('https://api.cloudflare.com/client/v4/accounts/acct/analytics_engine/sql');
-		expect((sent[0]?.init.headers as Record<string, string>).authorization).toBe('Bearer token');
+		expect(sent[0]?.init.headers).toMatchObject({ authorization: 'Bearer token' });
 	});
 });

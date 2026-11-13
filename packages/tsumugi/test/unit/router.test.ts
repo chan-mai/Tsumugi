@@ -4,17 +4,17 @@ import { createRouter } from '../../src/api/router.js';
 function appWith(options: { fallback?: boolean } = {}) {
 	const passed: string[] = [];
 	const app = createRouter<{}>();
-	app.use('/api/*', (c) => {
+	app.use('/api/*', c => {
 		passed.push(new URL(c.req.url).pathname);
 		return undefined;
 	});
-	app.get('/api/jobs', (c) => c.json({ jobs: [] }));
-	app.get('/api/jobs/:id', (c) => c.json({ id: c.req.param('id') }));
-	app.post('/api/jobs/:id/retry', (c) => c.json({ id: c.req.param('id') }, 201));
+	app.get('/api/jobs', c => c.json({ jobs: [] }));
+	app.get('/api/jobs/:id', c => c.json({ id: c.req.param('id') }));
+	app.post('/api/jobs/:id/retry', c => c.json({ id: c.req.param('id') }, 201));
 	app.post('/api/boom', () => {
 		throw new Error('boom');
 	});
-	if (options.fallback) app.get('*', (c) => c.html('<html></html>'));
+	if (options.fallback) app.get('*', c => c.html('<html></html>'));
 	return { app, passed };
 }
 
@@ -84,9 +84,9 @@ describe('ルーティング', () => {
 
 	it('前処理のResponseで後続を中断', async () => {
 		const app = createRouter<{}>();
-		const reached = vi.fn();
-		app.use('/api/*', (c) => c.json({ error: 'unauthorized' }, 401));
-		app.get('/api/jobs', (c) => {
+		const reached = vi.fn<() => void>();
+		app.use('/api/*', c => c.json({ error: 'unauthorized' }, 401));
+		app.get('/api/jobs', c => {
 			reached();
 			return c.json({});
 		});

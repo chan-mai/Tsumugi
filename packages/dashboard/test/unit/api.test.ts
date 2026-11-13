@@ -34,7 +34,7 @@ describe('共通の応答処理', () => {
 	it('トークン保存前に発行した要求の401ではフラグを立てない', async () => {
 		unauthorized.value = false;
 		let respond: (res: Response) => void = () => {};
-		vi.stubGlobal('fetch', () => new Promise<Response>((resolve) => (respond = resolve)));
+		vi.stubGlobal('fetch', () => new Promise<Response>(resolve => (respond = resolve)));
 		vi.stubGlobal('window', { __TSUMUGI__: { tokenCookie: null } });
 		const pending = listSchedules();
 		saveToken('new-token');

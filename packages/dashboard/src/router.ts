@@ -1,5 +1,4 @@
 import { ChartColumn, Clock, ListTodo, Plug, Workflow } from '@lucide/vue';
-import type { Component } from 'vue';
 import { createRouter, createWebHistory } from 'vue-router';
 import DefaultLayout from './layouts/DefaultLayout.vue';
 import BindingsPage from './pages/BindingsPage.vue';
@@ -7,6 +6,8 @@ import JobsPage from './pages/JobsPage.vue';
 import MetricsPage from './pages/MetricsPage.vue';
 import RunsPage from './pages/RunsPage.vue';
 import SchedulesPage from './pages/SchedulesPage.vue';
+
+import type { Component } from 'vue';
 
 declare module 'vue-router' {
 	interface RouteMeta {

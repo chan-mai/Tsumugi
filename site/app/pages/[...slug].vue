@@ -40,7 +40,7 @@ defineOgImage('Page', {
 const pager = computed(() => surroundings(path.value));
 const editLink = computed(() => `${config.public.repo}/edit/main/site${sourcePath.value}.md`);
 const dateFormat = computed(
-	() => new Intl.DateTimeFormat(locales.value.find((item) => item.code === locale.value)?.language, { dateStyle: 'long', timeZone: 'UTC' }),
+	() => new Intl.DateTimeFormat(locales.value.find(item => item.code === locale.value)?.language, { dateStyle: 'long', timeZone: 'UTC' }),
 );
 const publishedAt = computed(() => (page.value ? dateFormat.value.format(new Date(page.value.publishedAt)) : ''));
 const updatedAt = computed(() => (page.value ? dateFormat.value.format(new Date(page.value.updatedAt)) : ''));
@@ -60,12 +60,8 @@ useMotion(({ gsap }) => {
 	<div v-if="page" class="flex gap-10 px-6 py-10 sm:px-10 xl:pr-6">
 		<article ref="article" class="min-w-0 max-w-3xl flex-1">
 			<SiteBreadcrumb :items="crumbs" class="mb-8" />
-			<Callout v-if="untranslated" type="info"
-				><p>{{ $t('doc.untranslated') }}</p></Callout
-			>
-			<Callout v-if="translated" type="info"
-				><p>{{ $t('doc.machineTranslated') }}</p></Callout
-			>
+			<Callout v-if="untranslated" type="info"><p>{{ $t('doc.untranslated') }}</p></Callout>
+			<Callout v-if="translated" type="info"><p>{{ $t('doc.machineTranslated') }}</p></Callout>
 			<ContentRenderer :value="page" class="leading-[1.9] wrap-anywhere" />
 
 			<div class="mt-16 flex flex-wrap items-center justify-between gap-4 text-sm text-text-3">
@@ -79,12 +75,8 @@ useMotion(({ gsap }) => {
 					{{ $t('doc.edit') }}
 				</a>
 				<p class="flex flex-wrap gap-x-4">
-					<span
-						>{{ $t('doc.publishedAt') }}: <time :datetime="page.publishedAt">{{ publishedAt }}</time></span
-					>
-					<span
-						>{{ $t('doc.updatedAt') }}: <time :datetime="page.updatedAt">{{ updatedAt }}</time></span
-					>
+					<span>{{ $t('doc.publishedAt') }}: <time :datetime="page.publishedAt">{{ publishedAt }}</time></span>
+					<span>{{ $t('doc.updatedAt') }}: <time :datetime="page.updatedAt">{{ updatedAt }}</time></span>
 				</p>
 			</div>
 

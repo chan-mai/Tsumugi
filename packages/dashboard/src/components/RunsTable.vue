@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
-import type { Run } from '../api';
 import { at, columnClass } from '../columns';
-import LoadingState from './LoadingState.vue';
 import { EMPTY_ROW, TABLE, TABLE_WRAP, TBODY, TD, TH, THEAD } from '../ui';
+import LoadingState from './LoadingState.vue';
 import StatusCell from './StatusCell.vue';
+
+import type { Run } from '../api';
 
 defineProps<{ runs: Run[]; loading: boolean }>();
 const emit = defineEmits<{ select: [id: string] }>();

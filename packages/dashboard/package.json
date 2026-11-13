@@ -1,10 +1,16 @@
 {
   "name": "@tsumugi/dashboard",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "vite build && node scripts/emit-module.mjs",
     "dev": "vite",
@@ -30,11 +36,5 @@
     "typescript": "^6.0.3",
     "vite": "^8.3.7",
     "vite-plugin-singlefile": "^2.3.4"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
   }
 }

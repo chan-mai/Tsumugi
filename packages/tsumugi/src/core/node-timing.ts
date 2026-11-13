@@ -1,4 +1,5 @@
 import { isActive } from './transitions.js';
+
 import type { JobState } from './types.js';
 
 type NodeJobTimes = { state: string; createdAt: number; runAfter: number | null; dispatchedAt: number | null; updatedAt: number };

@@ -1,6 +1,7 @@
 import { isRemoteRef } from '../core/api.js';
-import type { PerformerRegistry } from '../queue/consumer.js';
+
 import type { Flows } from '../core/flow.js';
+import type { PerformerRegistry } from '../queue/consumer.js';
 
 export type BindingKind = 'durable-object' | 'd1' | 'queue' | 'analytics' | 'service';
 
@@ -15,7 +16,7 @@ export type MissingBinding = {
 type ConfigStatus = { ok: true } | { ok: false; missing: MissingBinding[] };
 
 type ValidateInput = {
-	performers: PerformerRegistry<any>;
+	performers: PerformerRegistry<never>;
 	flows?: Flows;
 	schedules?: Record<string, unknown>;
 };
@@ -36,7 +37,7 @@ const absent = (value: unknown): boolean => value === undefined || value === nul
 /** CLIの新規生成の断片入力用(ADR-0036) */
 export function requiredAsMissing(withFlows = false, withSchedules = false): MissingBinding[] {
 	const required = [...REQUIRED, ...(withFlows ? [RUN_BINDING] : []), ...(withSchedules ? [SCHEDULER_BINDING] : [])];
-	return required.map((entry) => ({
+	return required.map(entry => ({
 		kind: entry.kind,
 		name: entry.name,
 		reason: 'absent' as const,
@@ -75,7 +76,7 @@ export function validateConfig(env: Record<string, unknown>, config: ValidateInp
 export function cachedValidate(config: ValidateInput): (env: Record<string, unknown>) => ConfigStatus {
 	let settled: ConfigStatus | undefined;
 
-	return (env) => {
+	return env => {
 		if (settled?.ok) return settled;
 		const status = validateConfig(env, config);
 		if (status.ok) settled = status;

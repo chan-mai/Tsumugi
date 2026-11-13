@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { runTui, type Prompts } from '../../src/cli/tui.js';
+import { runTui } from '../../src/cli/tui.js';
 import { makeDeps, ok } from './cli-harness.js';
+
+import type { Prompts } from '../../src/cli/tui.js';
 
 const DATABASE_ID = '9945ba53-b1cb-45a2-8f01-c650518c2f2a';
 const d1Script = (args: readonly string[]) => (args[0] === 'd1' && args[1] === 'create' ? ok(`{ "database_id": "${DATABASE_ID}" }`) : ok());

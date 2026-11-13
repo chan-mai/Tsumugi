@@ -1,5 +1,5 @@
-import type { BlockedBy, Policy } from '../core/types.js';
 import type { JobLogEntry } from '../core/log.js';
+import type { BlockedBy, Policy } from '../core/types.js';
 import type { CreateJobInput, StartRunInput } from '../service/inputs.js';
 
 export type { JobLogEntry };

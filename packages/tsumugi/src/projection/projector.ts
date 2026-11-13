@@ -1,10 +1,17 @@
+import { upsertOf } from './columns.js';
+
 import type { JobLogEntry } from '../core/log.js';
 import type { AttemptRow, JobRow } from '../do/schema.js';
-import { upsertOf, type ReadModelRow, type Upsert } from './columns.js';
+import type { ReadModelRow, Upsert } from './columns.js';
 
 export type OutboxRow = { seq: number; job_id: string; snapshot: string };
 
-type JobSnapshot = Omit<JobRow, 'traceparent'> & { traceparent?: string | null; attempts_log?: AttemptRow[]; logs?: JobLogEntry[] };
+type JobSnapshot = Omit<JobRow, 'traceparent' | 'run_after'> & {
+	run_after?: number;
+	traceparent?: string | null;
+	attempts_log?: AttemptRow[];
+	logs?: JobLogEntry[];
+};
 
 // 衝突時の非更新列, キーの`id`と`created_at`はジョブの同一性
 // `binding`と`guarantee`は投入時確定で不変
@@ -53,12 +60,12 @@ export function latestPerKey<T extends { seq: number }>(rows: readonly T[], keyO
 }
 
 export function toUpserts(rows: readonly OutboxRow[]): Upsert[] {
-	return latestPerKey(rows, (row) => row.job_id).map((outbox) =>
+	return latestPerKey(rows, row => row.job_id).map(outbox =>
 		upsertOf('job', toValues(JSON.parse(outbox.snapshot) as JobSnapshot, outbox.seq), ['id'], IMMUTABLE),
 	);
 }
 
 export async function project(db: D1Database, rows: readonly OutboxRow[]): Promise<void> {
 	if (rows.length === 0) return;
-	await db.batch(toUpserts(rows).map((upsert) => db.prepare(upsert.sql).bind(...upsert.params)));
+	await db.batch(toUpserts(rows).map(upsert => db.prepare(upsert.sql).bind(...upsert.params)));
 }

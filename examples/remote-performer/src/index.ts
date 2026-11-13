@@ -1,4 +1,6 @@
-import { Performer, type JobContext } from 'tsumugi/performer';
+import { Performer } from 'tsumugi/performer';
+
+import type { JobContext } from 'tsumugi/performer';
 
 export class SendMail extends Performer<{ to: string; subject: string }, void, {}, Env> {
 	async perform(payload: { to: string; subject: string }, ctx: JobContext): Promise<void> {

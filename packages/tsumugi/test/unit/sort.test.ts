@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { attemptsOf } from '../../src/core/attempts.js';
 import { resolveSort, SORTABLE_COLUMNS } from '../../src/api/sort.js';
+import { attemptsOf } from '../../src/core/attempts.js';
 import { describeError } from '../../src/queue/consumer.js';
 
 describe('一覧の並べ替え', () => {
@@ -23,9 +23,9 @@ describe('一覧の並べ替え', () => {
 
 	it('プロトタイプ由来の名前は許可しない', () => {
 		// `in`判定ではconstructor等を除外不能、列の代わりに関数が渡り500
-		for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
-			expect(resolveSort(name, null).column, name).toBe('updated_at');
-		}
+		expect(
+			['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'].filter(name => resolveSort(name, null).column !== 'updated_at'),
+		).toEqual([]);
 	});
 
 	it('asc以外の向きは降順として扱う', () => {
@@ -49,14 +49,13 @@ describe('1回目で成功した試行の構築(ADR-0028)', () => {
 	});
 
 	it('実行に至っていないジョブは構築しない', () => {
-		for (const job of [
+		const jobs = [
 			{ state: 'QUEUED', attempts: 0, dispatchedAt: 1_000, updatedAt: 1_500 },
 			{ state: 'CANCELLED', attempts: 0, dispatchedAt: null, updatedAt: 1_500 },
 			{ state: 'STALLED', attempts: 1, dispatchedAt: 1_000, updatedAt: 1_500 },
 			{ state: 'FAILED', attempts: 1, dispatchedAt: 1_000, updatedAt: 1_500 },
-		]) {
-			expect(attemptsOf(job, []), job.state).toEqual([]);
-		}
+		];
+		expect(jobs.filter(job => attemptsOf(job, []).length > 0)).toEqual([]);
 	});
 });
 
@@ -65,7 +64,7 @@ describe('例外の文字列化(ADR-0028)', () => {
 		// stack1行目にName: message含む, 連結すると同じ行が重複
 		const error = new Error('boom');
 		const text = describeError(error);
-		expect(text.split('\n').filter((l) => l.includes('Error: boom'))).toHaveLength(1);
+		expect(text.split('\n').filter(l => l.includes('Error: boom'))).toHaveLength(1);
 	});
 
 	it('stackが無ければ名前とメッセージで構築する', () => {

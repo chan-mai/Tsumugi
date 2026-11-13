@@ -1,6 +1,9 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { project, toUpserts, type OutboxRow } from '../../src/projection/projector.js';
+import { project, toUpserts } from '../../src/projection/projector.js';
+
+import type { TsumugiJobShard } from '../../src/do/job-shard.js';
+import type { OutboxRow } from '../../src/projection/projector.js';
 
 const T0 = 2_100_000_000_000;
 
@@ -9,17 +12,26 @@ const noopQueue = {
 	sendBatch: async () => {},
 };
 
+type ShardInternals = Pick<TsumugiJobShard, 'clock' | 'repo'> & { env: { TSUMUGI_QUEUE: typeof noopQueue; TSUMUGI_DB: unknown } };
+const shardInternals = (instance: unknown) => instance as ShardInternals;
+
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 async function install(name: string, now: number, db?: unknown) {
-	await runInDurableObject(shard(name), (instance) => {
-		(instance as any).clock = { now: () => now };
-		(instance as any).env.TSUMUGI_QUEUE = noopQueue;
-		if (db !== undefined) (instance as any).env.TSUMUGI_DB = db;
+	await runInDurableObject(shard(name), instance => {
+		shardInternals(instance).clock = { now: () => now };
+		const internals = instance as unknown as ShardInternals;
+		internals.env.TSUMUGI_QUEUE = noopQueue;
+		if (db !== undefined) internals.env.TSUMUGI_DB = db;
 	});
 }
 
-const outboxCount = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countOutbox() as number);
+const outboxCount = (name: string) => runInDurableObject(shard(name), instance => shardInternals(instance).repo.countOutbox());
+
+function present<T>(value: T | null | undefined): T {
+	if (value === null || value === undefined) throw new Error('row not found');
+	return value;
+}
 
 const readD1 = async (jobId: string) =>
 	env.TSUMUGI_DB.prepare('SELECT id, seq, state, attempts FROM job WHERE id = ?').bind(jobId).first<{
@@ -45,9 +57,9 @@ describe('D1への投影(ADR-0008)', () => {
 		await install('PROJ2#0', T0);
 		const jobId = await shard('PROJ2#0').enqueue({ binding: 'PROJ2', payload: {} });
 		await runDurableObjectAlarm(shard('PROJ2#0'));
-		const first = await readD1(jobId);
+		const first = present(await readD1(jobId));
 
-		const rows: OutboxRow[] = [{ seq: first!.seq, job_id: jobId, snapshot: JSON.stringify({ ...(await snapshotOf('PROJ2#0', jobId)) }) }];
+		const rows: OutboxRow[] = [{ seq: first.seq, job_id: jobId, snapshot: JSON.stringify({ ...(await snapshotOf('PROJ2#0', jobId)) }) }];
 		await project(env.TSUMUGI_DB, rows);
 		await project(env.TSUMUGI_DB, rows);
 
@@ -58,14 +70,14 @@ describe('D1への投影(ADR-0008)', () => {
 		await install('PROJ3#0', T0);
 		const jobId = await shard('PROJ3#0').enqueue({ binding: 'PROJ3', payload: {} });
 		await runDurableObjectAlarm(shard('PROJ3#0'));
-		const current = await readD1(jobId);
+		const current = present(await readD1(jobId));
 
 		const stale = await snapshotOf('PROJ3#0', jobId);
 		await project(env.TSUMUGI_DB, [{ seq: 1, job_id: jobId, snapshot: JSON.stringify({ ...stale, state: 'SCHEDULED' }) }]);
 
-		const after = await readD1(jobId);
-		expect(after!.state).toBe(current!.state);
-		expect(after!.seq).toBe(current!.seq);
+		const after = present(await readD1(jobId));
+		expect(after.state).toBe(current.state);
+		expect(after.seq).toBe(current.seq);
 	});
 
 	it('同じジョブの複数スナップショットは最大seqの1件のみ書き込む', async () => {
@@ -73,7 +85,7 @@ describe('D1への投影(ADR-0008)', () => {
 		const jobId = await shard('PROJ5#0').enqueue({ binding: 'PROJ5', payload: {} });
 		await runDurableObjectAlarm(shard('PROJ5#0'));
 		const snapshot = await snapshotOf('PROJ5#0', jobId);
-		const base = (await readD1(jobId))!.seq;
+		const base = present(await readD1(jobId)).seq;
 
 		const rows: OutboxRow[] = [
 			{ seq: base + 2, job_id: jobId, snapshot: JSON.stringify({ ...snapshot, state: 'COMPLETED' }) },
@@ -106,5 +118,5 @@ describe('D1への投影(ADR-0008)', () => {
 });
 
 async function snapshotOf(name: string, jobId: string) {
-	return runInDurableObject(shard(name), (instance) => (instance as any).repo.find(jobId) as Record<string, unknown>);
+	return runInDurableObject(shard(name), instance => present(shardInternals(instance).repo.find(jobId)));
 }

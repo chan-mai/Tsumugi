@@ -1,9 +1,10 @@
 import { join } from 'node:path';
 import { configFragment, configFragmentToml } from '../config/fragment.js';
-import type { MissingBinding } from '../config/validate.js';
 import { detectWranglerConfig, readWorkerName } from './config-file.js';
-import type { CliDeps } from './index.js';
 import { BARREL_HEADER, exportLine, performerFile } from './templates.js';
+
+import type { MissingBinding } from '../config/validate.js';
+import type { CliDeps } from './index.js';
 
 // バレル既存行とwrangler設定は非変更(ADR-0037)
 
@@ -11,17 +12,17 @@ import { BARREL_HEADER, exportLine, performerFile } from './templates.js';
 export function performerNames(raw: string): { className: string; fileBase: string } | undefined {
 	const words = raw
 		.split(/[-_\s]+/)
-		.flatMap((part) =>
+		.flatMap(part =>
 			part
 				.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
 				.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
 				.split(' '),
 		)
-		.filter((word) => word.length > 0);
+		.filter(word => word.length > 0);
 	if (words.length === 0) return undefined;
-	const className = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join('');
+	const className = words.map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join('');
 	if (!/^[A-Z][A-Za-z0-9]*$/.test(className)) return undefined;
-	return { className, fileBase: words.map((word) => word.toLowerCase()).join('-') };
+	return { className, fileBase: words.map(word => word.toLowerCase()).join('-') };
 }
 
 const barrelHas = (barrel: string, names: { className: string; fileBase: string }): boolean =>

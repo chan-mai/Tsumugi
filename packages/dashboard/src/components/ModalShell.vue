@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { X } from '@lucide/vue';
 import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue';
+import { X } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps<{ open: boolean; title: string; width: 'md' | 'lg' }>();

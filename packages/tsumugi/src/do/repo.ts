@@ -1,5 +1,9 @@
+import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS } from '../core/log.js';
 import { ACTIVE_STATES, assertTransition, FAILURE_STATES, TERMINAL_STATES } from '../core/transitions.js';
-import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../core/log.js';
+import { assignments, chunk, columnList, placeholders, valuesOf } from './bind.js';
+import { applySchema, COLUMNS, TERMINAL_INDEX_WHERE } from './schema.js';
+
+import type { JobLogEntry } from '../core/log.js';
 import type { NodeEvent, SpawnRequest } from '../core/run.js';
 import type {
 	Backoff,
@@ -13,8 +17,7 @@ import type {
 	SettledState,
 	SettledTarget,
 } from '../core/types.js';
-import { assignments, chunk, columnList, placeholders, valuesOf } from './bind.js';
-import { applySchema, COLUMNS, TERMINAL_INDEX_WHERE, type AttemptRow, type JobRow } from './schema.js';
+import type { AttemptRow, JobRow } from './schema.js';
 
 /** HTMLページ全体等によるDOとD1の圧迫防止 */
 export const ERROR_MAX_CHARS = 2_000;

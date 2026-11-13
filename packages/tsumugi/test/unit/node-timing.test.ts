@@ -9,9 +9,7 @@ describe('ノードの時刻', () => {
 	});
 
 	it('実行中のジョブは終了時刻なし', () => {
-		for (const state of ['SCHEDULED', 'QUEUED', 'RUNNING']) {
-			expect(nodeTiming(job(state), null).finishedAt, state).toBeNull();
-		}
+		expect(['SCHEDULED', 'QUEUED', 'RUNNING'].filter(state => nodeTiming(job(state), null).finishedAt !== null)).toEqual([]);
 	});
 
 	it('subflowは子runの作成から終端まで', () => {

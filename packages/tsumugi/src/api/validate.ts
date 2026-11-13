@@ -1,7 +1,8 @@
-import { CANCELLABLE_STATES, RETRYABLE_STATES } from '../core/transitions.js';
 import { normalizeTraceparent } from '../core/trace.js';
-import type { BulkTarget, JobFilters } from '../service/jobs.service.js';
+import { CANCELLABLE_STATES, RETRYABLE_STATES } from '../core/transitions.js';
+
 import type { CreateJobInput, StartRunInput } from '../service/inputs.js';
+import type { BulkTarget, JobFilters } from '../service/jobs.service.js';
 import type { UpdatePolicyRequest } from './types.js';
 
 export type { CreateJobInput, StartRunInput };
@@ -173,14 +174,14 @@ export function validateBulk(body: unknown, action: 'retry' | 'cancel'): { input
 	const allowed: readonly string[] = BULK_STATES[action];
 
 	// 綴り違いの無視で全件対象化
-	const unknown = Object.keys(raw).find((key) => !BULK_KEYS.includes(key));
+	const unknown = Object.keys(raw).find(key => !BULK_KEYS.includes(key));
 	if (unknown !== undefined) return { error: `unknown field: ${unknown}` };
 
 	if (raw.ids !== undefined) {
 		if (!Array.isArray(raw.ids)) return { error: 'ids must be an array' };
 		if (raw.ids.length === 0) return { error: 'ids must not be empty' };
 		if (raw.ids.length > BULK_LIMIT_MAX) return { error: `ids must not exceed ${BULK_LIMIT_MAX} entries` };
-		if (raw.ids.some((id) => typeof id !== 'string' || id.length === 0)) return { error: 'ids must be non-empty strings' };
+		if (raw.ids.some(id => typeof id !== 'string' || id.length === 0)) return { error: 'ids must be non-empty strings' };
 		return { input: { kind: 'ids', ids: raw.ids as string[] } };
 	}
 
@@ -233,7 +234,10 @@ export function parsePaging(url: URL): { limit: number; offset: number } {
  * 完全一致のみ, 部分一致はインデックス不使用で件数増加時に全表走査
  */
 export function parseJobFilters(url: URL): JobFilters {
-	const text = (name: string) => url.searchParams.get(name) || undefined;
+	const text = (name: string) => {
+		const raw = url.searchParams.get(name);
+		return raw === null || raw === '' ? undefined : raw;
+	};
 	const time = (name: string) => {
 		const raw = url.searchParams.get(name);
 		// 空文字は指定なし扱い, Number('')は0で上限が1970年

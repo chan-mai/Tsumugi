@@ -1,12 +1,16 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { JobRepo } from '../../src/do/repo.js';
 import { columnList } from '../../src/do/bind.js';
 import { applySchema, COLUMNS } from '../../src/do/schema.js';
+
+import type { TsumugiJobShard } from '../../src/do/job-shard.js';
 
 const T0 = 2_400_000_000_000;
 const N = 2_000;
 const LIMIT = 200;
+
+type RepoInternals = { sql: unknown };
+const shardInternals = (instance: unknown) => instance as Pick<TsumugiJobShard, 'repo'>;
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
@@ -25,8 +29,8 @@ function seed(sql: SqlStorage, state: string, runAfter: number, updatedAt: numbe
 // tickごとの滞留全件読み取りでは総読み取り行数が件数の2乗に比例(#104)
 describe('tickの読み取り行数', () => {
 	it('実行可能ジョブの滞留中もreadyの読み取りはlimit程度', async () => {
-		await runInDurableObject(shard('READS1#0'), (instance) => {
-			const repo = (instance as any).repo as JobRepo;
+		await runInDurableObject(shard('READS1#0'), instance => {
+			const repo = shardInternals(instance).repo;
 			seed(repo.sql, 'SCHEDULED', T0, T0);
 
 			// scheduleWindowのreadyと同形
@@ -36,7 +40,7 @@ describe('tickの読み取り行数', () => {
 			const plan = repo.sql
 				.exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${text}`, ...params)
 				.toArray()
-				.map((r) => r.detail)
+				.map(r => r.detail)
 				.join('\n');
 			expect(plan).toContain('job_due');
 			expect(plan).not.toContain('TEMP B-TREE');
@@ -48,19 +52,19 @@ describe('tickの読み取り行数', () => {
 			// seedのcreated_atはIDの逆順, 作成順ソートを検出
 			const { jobs, readyCount } = repo.scheduleWindow(T0, LIMIT);
 			expect(readyCount).toBe(LIMIT);
-			const ids = jobs.map((j) => j.id);
-			expect(ids).toEqual([...ids].sort());
+			const ids = jobs.map(j => j.id);
+			expect(ids).toEqual([...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
 		});
 	});
 
 	it('終端ジョブが多くてもsweepStateの読み取りは件数に比例しない', async () => {
-		await runInDurableObject(shard('READS2#0'), (instance) => {
-			const repo = (instance as any).repo as JobRepo;
+		await runInDurableObject(shard('READS2#0'), instance => {
+			const repo = shardInternals(instance).repo;
 			seed(repo.sql, 'FAILED', T0, T0);
 
 			const original = repo.sql;
 			const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
-			(repo as any).sql = {
+			(repo as unknown as RepoInternals).sql = {
 				exec: (query: string, ...bindings: SqlStorageValue[]) => {
 					const cursor = original.exec(query, ...bindings);
 					cursors.push(cursor);
@@ -71,16 +75,18 @@ describe('tickの読み取り行数', () => {
 				const state = repo.sweepState(T0 + 1, { sweepAfterMs: 60_000, failedRetentionMs: 60_000 });
 				expect(state).toEqual({ jobs: false, uniqueKeys: false, nextDueAt: T0 + 60_000 });
 			} finally {
-				(repo as any).sql = original;
+				(repo as unknown as RepoInternals).sql = original;
 			}
 			expect(cursors).toHaveLength(1);
-			expect(cursors[0]!.rowsRead).toBeLessThan(N / 2);
+			const [cursor] = cursors;
+			if (cursor === undefined) throw new Error('no cursor recorded');
+			expect(cursor.rowsRead).toBeLessThan(N / 2);
 		});
 	});
 
 	it('next_dueは状態ごとの保持期間で最小を取る', async () => {
-		await runInDurableObject(shard('READS3#0'), (instance) => {
-			const repo = (instance as any).repo as JobRepo;
+		await runInDurableObject(shard('READS3#0'), instance => {
+			const repo = shardInternals(instance).repo;
 			seed(repo.sql, 'COMPLETED', T0, T0);
 			seed(repo.sql, 'STALLED', T0, T0 - 1_000);
 
@@ -91,8 +97,8 @@ describe('tickの読み取り行数', () => {
 	});
 
 	it('既存DOの旧インデックスを置き換える', async () => {
-		await runInDurableObject(shard('READS4#0'), (instance) => {
-			const sql = ((instance as any).repo as JobRepo).sql;
+		await runInDurableObject(shard('READS4#0'), instance => {
+			const sql = shardInternals(instance).repo.sql;
 			sql.exec(`DROP INDEX IF EXISTS job_due`);
 			sql.exec(`DROP INDEX IF EXISTS job_terminal`);
 			sql.exec(`CREATE INDEX job_active ON job (state, run_after)`);
@@ -102,7 +108,7 @@ describe('tickの読み取り行数', () => {
 			const names = sql
 				.exec<{ name: string }>(`SELECT name FROM pragma_index_list('job')`)
 				.toArray()
-				.map((r) => r.name);
+				.map(r => r.name);
 			expect(names).toEqual(expect.arrayContaining(['job_due', 'job_terminal']));
 			expect(names).not.toContain('job_active');
 		});

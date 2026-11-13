@@ -108,8 +108,8 @@ describe('initと既存ファイル', () => {
 		expect(logs.join('\n')).toContain(`"database_id": "${DATABASE_ID}"`);
 		expect(calls[1]).toEqual(['queues', 'create', 'existing-app']);
 		// TSUMUGI_DBの設定記載が未保証、適用とtypesは非実行
-		expect(calls.some((args) => args.includes('migrations'))).toBe(false);
-		expect(calls.some((args) => args[0] === 'types')).toBe(false);
+		expect(calls.some(args => args.includes('migrations'))).toBe(false);
+		expect(calls.some(args => args[0] === 'types')).toBe(false);
 	});
 
 	it('既存のwrangler.tomlにはTOMLの断片を出力する', () => {
@@ -137,7 +137,7 @@ describe('initと既存ファイル', () => {
 
 describe('initの失敗', () => {
 	it('wranglerが無ければ何も書かない', () => {
-		const { deps, fs, calls } = makeDeps((args) => (args[0] === '--version' ? fail('not found') : ok()));
+		const { deps, fs, calls } = makeDeps(args => (args[0] === '--version' ? fail('not found') : ok()));
 		expect(init({ name: 'my-jobs' }, deps)).toBe(1);
 		expect(fs.files.size).toBe(0);
 		expect(calls).toEqual([['--version']]);
@@ -145,7 +145,7 @@ describe('initの失敗', () => {
 
 	it('d1 createが失敗したらプレースホルダで生成して非0を返す', () => {
 		// 生成は継続, 残作業の存在をexit codeで通知
-		const { deps, fs, errors } = makeDeps((args) => (args[0] === 'd1' && args[1] === 'create' ? fail('already exists') : ok()));
+		const { deps, fs, errors } = makeDeps(args => (args[0] === 'd1' && args[1] === 'create' ? fail('already exists') : ok()));
 		expect(init({ name: 'my-jobs' }, deps)).toBe(1);
 
 		const config = fs.read('/proj/wrangler.jsonc');

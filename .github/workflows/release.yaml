@@ -40,6 +40,7 @@ jobs:
 
       # CIと同じ検査, タグを打った時点で壊れていないことを確かめてから公開する
       - run: pnpm format:check
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:unit
       - run: pnpm test:workers

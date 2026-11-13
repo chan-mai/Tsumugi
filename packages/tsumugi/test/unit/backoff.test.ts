@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { nextAttempt } from '../../src/core/backoff.js';
+
 import type { Backoff } from '../../src/core/types.js';
 
 const T0 = 1_700_000_000_000;
@@ -18,7 +19,7 @@ describe('nextAttempt', () => {
 
 	it('指数遅延は試行ごとに伸びる', () => {
 		const backoff: Backoff = { kind: 'exponential', baseMs: 1_000, factor: 2, maxMs: 3_600_000 };
-		const delays = [1, 2, 3, 4].map((attempts) => {
+		const delays = [1, 2, 3, 4].map(attempts => {
 			const r = nextAttempt({ attempts, maxAttempts: 10, backoff, now: T0 });
 			return r.kind === 'retry' ? r.delayMs : -1;
 		});

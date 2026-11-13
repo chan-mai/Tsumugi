@@ -6,16 +6,16 @@ const document = JSON.parse(readFileSync(new URL('../dist/openapi.json', import.
 
 // 生成器出力を公開済み文書の表現へ正規化, 利用者のクライアント生成物の差分防止
 // `additionalProperties`は対応生成器が多い
-const isNullUnion = (value) =>
+const isNullUnion = value =>
 	Array.isArray(value?.anyOf) &&
 	value.anyOf.length === 2 &&
-	value.anyOf.some((entry) => entry?.type === 'null' && Object.keys(entry).length === 1) &&
-	value.anyOf.some((entry) => typeof entry?.type === 'string' && entry.type !== 'null');
+	value.anyOf.some(entry => entry?.type === 'null' && Object.keys(entry).length === 1) &&
+	value.anyOf.some(entry => typeof entry?.type === 'string' && entry.type !== 'null');
 
 // explodeは配列, オブジェクトの直列化に影響, スカラーのみ削除
-const scalarSchema = (schema) => typeof schema?.type === 'string' && schema.type !== 'array' && schema.type !== 'object';
+const scalarSchema = schema => typeof schema?.type === 'string' && schema.type !== 'array' && schema.type !== 'object';
 
-const normalize = (value) => {
+const normalize = value => {
 	if (Array.isArray(value)) return value.map(normalize);
 	if (value === null || typeof value !== 'object') return value;
 
@@ -25,7 +25,7 @@ const normalize = (value) => {
 		if (key === 'required' && entry === false) continue;
 		if (key === 'parameters' && Array.isArray(entry) && entry.length === 0) continue;
 		if (key === 'anyOf' && isNullUnion(value)) {
-			const { type, ...rest } = entry.find((option) => option.type !== 'null');
+			const { type, ...rest } = entry.find(option => option.type !== 'null');
 			out.type = [type, 'null'];
 			for (const [name, constraint] of Object.entries(rest)) out[name] = normalize(constraint);
 			continue;

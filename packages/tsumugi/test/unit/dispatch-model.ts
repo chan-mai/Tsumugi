@@ -1,4 +1,4 @@
-import type { DispatchInput } from '../../src/core/types.js';
+import type { DispatchInput, RateLimit } from '../../src/core/types.js';
 
 /**
  * planDispatch()のdispatch決定の参照モデル, 仕様の用語(同時実行数 / トークン / キー上限 / 優先度)のみで記述
@@ -10,16 +10,17 @@ export function expectedDispatchIds(input: DispatchInput): string[] {
 
 	const reaped = new Set(
 		jobs
-			.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && j.dispatchedAt !== null)
 			.filter(
-				(j) =>
-					now >= j.dispatchedAt! + (j.state === 'QUEUED' ? policy.queueWaitMs : 0) + j.timeoutMs + policy.reaperGraceMs ||
-					(j.cancelRequestedAt !== null && now >= j.cancelRequestedAt + policy.reaperGraceMs),
+				j =>
+					(j.state === 'QUEUED' || j.state === 'RUNNING') &&
+					j.dispatchedAt !== null &&
+					(now >= j.dispatchedAt + (j.state === 'QUEUED' ? policy.queueWaitMs : 0) + j.timeoutMs + policy.reaperGraceMs ||
+						(j.cancelRequestedAt !== null && now >= j.cancelRequestedAt + policy.reaperGraceMs)),
 			)
-			.map((j) => j.id),
+			.map(j => j.id),
 	);
 
-	const inFlight = jobs.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id));
+	const inFlight = jobs.filter(j => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id));
 
 	const keyInFlight = new Map<string, number>();
 	for (const j of inFlight) {
@@ -27,13 +28,13 @@ export function expectedDispatchIds(input: DispatchInput): string[] {
 	}
 
 	const ready = jobs
-		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now && (j.expiresAt === null || now < j.expiresAt))
-		.filter((j) => j.cancelRequestedAt === null)
-		.map((j) => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
+		.filter(j => j.state === 'SCHEDULED' && j.runAfter <= now && (j.expiresAt === null || now < j.expiresAt))
+		.filter(j => j.cancelRequestedAt === null)
+		.map(j => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 
 	let slots = policy.paused ? 0 : Math.max(0, policy.concurrency - inFlight.length);
-	let tokens = policy.rate === null ? Number.POSITIVE_INFINITY : refilledTokens(input);
+	let tokens = policy.rate === null ? Number.POSITIVE_INFINITY : refilledTokens(input, policy.rate);
 	const keyTokens = new Map<string, number>();
 	const keyTokensOf = (key: string): number => {
 		if (policy.perKeyRate === null) return Number.POSITIVE_INFINITY;
@@ -68,8 +69,7 @@ function agedPriority(priority: number, createdAt: number, now: number, agingInt
 }
 
 // スケジューラのrefillと同式
-function refilledTokens(input: DispatchInput): number {
-	const rate = input.policy.rate!;
+function refilledTokens(input: DispatchInput, rate: RateLimit): number {
 	const elapsed = Math.max(0, input.now - input.bucket.refilledAt);
 	return Math.min(rate.tokens, input.bucket.tokens + elapsed * (rate.tokens / rate.intervalMs));
 }

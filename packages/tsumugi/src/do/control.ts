@@ -1,8 +1,9 @@
 import { shardName, shardNameOf } from '../core/ids.js';
+
+import type { ConsumerEnv } from '../queue/consumer.js';
 import type { BulkFailure, MutationResult, TsumugiJobShard } from './job-shard.js';
 import type { StartResult } from './run.js';
 import type { ScheduleMutationResult, ScheduleTriggerResult, ScheduleView } from './scheduler.js';
-import type { ConsumerEnv } from '../queue/consumer.js';
 
 type ShardEnv = Pick<ConsumerEnv, 'JOB_SHARD'>;
 type ShardStub = DurableObjectStub<TsumugiJobShard>;
@@ -48,18 +49,14 @@ export async function mutateJobs(env: ShardEnv, action: 'retry' | 'cancel', jobI
 		if (result.status === 'rejected') console.error(`tsumugi: bulk ${action} failed on ${entries[index]?.[0]}`, result.reason);
 	}
 
-	const applied = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+	const applied = settled.flatMap(result => (result.status === 'fulfilled' ? [result.value] : []));
 	const unreachable = settled.flatMap((result, index) =>
-		result.status === 'rejected' ? (entries[index]?.[1] ?? []).map((id) => ({ id, reason: 'unreachable' as const })) : [],
+		result.status === 'rejected' ? (entries[index]?.[1] ?? []).map(id => ({ id, reason: 'unreachable' as const })) : [],
 	);
 
 	return {
-		ok: applied.flatMap((result) => result.ok),
-		failed: [
-			...applied.flatMap((result) => result.failed),
-			...invalid.map((id) => ({ id, reason: 'invalid-id' as const })),
-			...unreachable,
-		],
+		ok: applied.flatMap(result => result.ok),
+		failed: [...applied.flatMap(result => result.failed), ...invalid.map(id => ({ id, reason: 'invalid-id' as const })), ...unreachable],
 	};
 }
 
@@ -77,7 +74,7 @@ export async function eachShard<T>(
 	for (const [shard, result] of settled.entries()) {
 		if (result.status === 'rejected') console.error(`tsumugi: policy update failed on ${shardName(binding, shard)}`, result.reason);
 	}
-	const applied = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+	const applied = settled.flatMap(result => (result.status === 'fulfilled' ? [result.value] : []));
 	return { failed, applied };
 }
 

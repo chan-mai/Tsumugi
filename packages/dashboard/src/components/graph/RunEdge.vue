@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { BaseEdge } from '@vue-flow/core';
 import { computed } from 'vue';
+
 import type { Point } from './runLayout';
 
 const props = defineProps<{
@@ -15,11 +16,11 @@ const path = computed(() => {
 	const points = props.data.route;
 	if (points.length < 2) return '';
 
-	let d = `M${points[0]!.x} ${points[0]!.y}`;
+	let d = `M${points[0].x} ${points[0].y}`;
 	for (let i = 1; i < points.length - 1; i++) {
-		const previous = points[i - 1]!;
-		const corner = points[i]!;
-		const next = points[i + 1]!;
+		const previous = points[i - 1];
+		const corner = points[i];
+		const next = points[i + 1];
 		const incoming = Math.hypot(corner.x - previous.x, corner.y - previous.y);
 		const outgoing = Math.hypot(next.x - corner.x, next.y - corner.y);
 		const r = Math.min(RADIUS, incoming / 2, outgoing / 2);
@@ -28,7 +29,7 @@ const path = computed(() => {
 		const leave = { x: corner.x + (Math.sign(next.x - corner.x) * r || 0), y: corner.y + (Math.sign(next.y - corner.y) * r || 0) };
 		d += ` L${enter.x} ${enter.y} Q${corner.x} ${corner.y} ${leave.x} ${leave.y}`;
 	}
-	const last = points[points.length - 1]!;
+	const last = points[points.length - 1];
 	return `${d} L${last.x} ${last.y}`;
 });
 </script>

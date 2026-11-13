@@ -1,6 +1,6 @@
 import type { MetricsResolver } from '../analytics/reader.js';
-import type { ConsumerEnv } from '../queue/consumer.js';
 import type { RunControlStub, SchedulerControl, StartOptions } from '../do/control.js';
+import type { ConsumerEnv } from '../queue/consumer.js';
 import type { CreateJobInput } from './inputs.js';
 
 export type ServiceEnv = ConsumerEnv & { TSUMUGI_DB: D1Database };

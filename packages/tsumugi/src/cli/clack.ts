@@ -1,5 +1,7 @@
-import { confirm, isCancel, select, text, type Option } from '@clack/prompts';
+import { confirm, isCancel, select, text } from '@clack/prompts';
+
 import type { Prompts } from './tui.js';
+import type { Option } from '@clack/prompts';
 
 export const clackPrompts = (): Prompts => ({
 	select: async <T extends string>(message: string, options: readonly { value: T; label: string }[]) => {
@@ -11,7 +13,7 @@ export const clackPrompts = (): Prompts => ({
 		const result = await text({ message, placeholder: initial, defaultValue: initial });
 		return isCancel(result) ? undefined : result;
 	},
-	confirm: async (message) => {
+	confirm: async message => {
 		const result = await confirm({ message });
 		return isCancel(result) ? undefined : result;
 	},
