@@ -249,6 +249,36 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(await stateOf(runId)).toBe('COMPLETED');
 	});
 
+	it('runに属するジョブを個別にリトライしてもrunはFAILEDのまま', async () => {
+		performed.length = 0;
+		const runId = 'GREETINGS:jobretry';
+		const stub = runStub(runId);
+		await installQueues();
+		await stub.start({ flow: 'GREETINGS', input: { prefix: 'jr' } });
+		const failing = {
+			...performers,
+			ListNames: {
+				perform: async (_payload: unknown, ctx: JobContext) => {
+					ctx.fail({ retry: false });
+					throw new Error('intentional failure');
+				},
+			},
+		};
+		await settle(runId, failing);
+		await settleRun(runId);
+		expect(await stateOf(runId)).toBe('FAILED');
+
+		const jobId = await jobIdOf(runId, 'list');
+		if (jobId === null) throw new Error('the first node has no job id');
+		expect(await shard('ListNames').retry(jobId)).toEqual({ ok: false, reason: 'in-run' });
+		await settle(runId);
+		await settleRun(runId);
+
+		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
+		expect(await stateOf(runId)).toBe('FAILED');
+		expect(performed.filter((entry) => entry.binding === 'Greet')).toEqual([]);
+	});
+
 	it('再開はfan-outで許容済みの子の失敗を再実行しない(ADR-0034)', async () => {
 		const runId = 'GREETINGS:fanretry';
 		const stub = runStub(runId);
