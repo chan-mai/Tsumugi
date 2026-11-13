@@ -60,3 +60,4 @@
 - [ADR-0055](0055-no-runtime-dependencies.md) - ランタイム依存を持たない
 - [ADR-0056](0056-auth-as-request-function.md) - authをRequestを受け取る関数で表す
 - [ADR-0057](0057-key-heads-outside-window.md) - 読み取り範囲外の実行可能ジョブをキー単位で補う
+- [ADR-0058](0058-rerun-downstream-on-resume.md) - 再開では未実行へ戻したノードの下流の成功済みノードも再実行する
