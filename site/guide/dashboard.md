@@ -103,6 +103,8 @@ const tsumugi = defineTsumugi({
 `tsumugi/ui`の`ui()`を`defineTsumugi`の`ui`に渡すと、`/api`以外のパスへのGETリクエストに対してダッシュボードのHTMLで応答します。
 `ui`を指定しない場合、ダッシュボードはバンドルに含まれません。
 APIが401で応答すると、ダッシュボードはトークンの入力欄を表示します。
+ダッシュボードはTemporal APIに対応したブラウザ(Chrome 144以降, Edge 144以降, Firefox 139以降, Safari 27.3以降)で動作します。
+
 
 ```ts
 import { ui } from 'tsumugi/ui';

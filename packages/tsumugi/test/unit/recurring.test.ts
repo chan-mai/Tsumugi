@@ -129,13 +129,15 @@ describe('次回時刻の前進', () => {
 
 	it('cronは前回と今の遅い方から次を引く', () => {
 		const timing = { everyMs: null, cron: '0 3 * * *' };
-		const previous = Date.parse('2026-01-05T03:00:00Z');
-		const lateNow = Date.parse('2026-01-07T12:00:00Z');
-		expect(nextOccurrence(timing, previous, lateNow)).toBe(Date.parse('2026-01-08T03:00:00Z'));
+		const previous = Temporal.Instant.from('2026-01-05T03:00:00Z').epochMilliseconds;
+		const lateNow = Temporal.Instant.from('2026-01-07T12:00:00Z').epochMilliseconds;
+		expect(nextOccurrence(timing, previous, lateNow)).toBe(Temporal.Instant.from('2026-01-08T03:00:00Z').epochMilliseconds);
 	});
 
 	it('cronはタイムゾーンを引き継ぐ', () => {
 		const timing = { everyMs: null, cron: '0 9 * * *', timeZone: 'Asia/Tokyo' };
-		expect(nextOccurrence(timing, null, Date.parse('2026-01-04T23:30:00Z'))).toBe(Date.parse('2026-01-05T00:00:00Z'));
+		expect(nextOccurrence(timing, null, Temporal.Instant.from('2026-01-04T23:30:00Z').epochMilliseconds)).toBe(
+			Temporal.Instant.from('2026-01-05T00:00:00Z').epochMilliseconds,
+		);
 	});
 });

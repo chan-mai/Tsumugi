@@ -74,7 +74,8 @@ const id = await tsumugi.enqueue(env, { binding: 'SendMail', payload: { to: 'a@e
 
 ## 前提条件
 
-Workers Paidプランと、2025-11-17以降の`compatibility_date`が必要です。
+Workers Paidプランが必要です。
+2025-11-17以降の`compatibility_date`を指定し、`compatibility_flags`に`temporal`を設定するか、`compatibility_date`を2026-12-01以降に設定する必要があります。
 必要なリソースと設定は`npx tsumugi init`で作成します。
 手順は[Getting Started](/guide/getting-started)を参照してください。
 

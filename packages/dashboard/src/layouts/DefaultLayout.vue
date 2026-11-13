@@ -13,7 +13,7 @@ const { t } = useI18n();
 const navigationOpen = ref(false);
 
 const REPOSITORY = 'https://github.com/chan-mai/Tsumugi';
-const year = new Date().getFullYear();
+const year = Temporal.Now.plainDateISO().year;
 const FOOTER_LINK = 'text-ink-subtle underline-offset-2 hover:text-ink hover:underline';
 
 useAutoRefresh();

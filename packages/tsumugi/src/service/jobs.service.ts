@@ -46,13 +46,13 @@ export function createJobService<Env extends ServiceEnv>(
 	return {
 		async list(env: Env, query: JobListQuery): Promise<{ jobs: Retryable<JobListItem>[]; total: number }> {
 			const { jobs, total } = await repositoryOf(env).list(query);
-			const now = Date.now();
+			const now = Temporal.Now.instant().epochMilliseconds;
 			return { jobs: jobs.map(job => withRetryable(job, now)), total };
 		},
 
 		async detail(env: Env, id: string): Promise<Retryable<Job> | null> {
 			const found = await repositoryOf(env).find(id);
-			return found ? withRetryable(found, Date.now()) : null;
+			return found ? withRetryable(found, Temporal.Now.instant().epochMilliseconds) : null;
 		},
 
 		// 分割構成のpartitionKey欠落, binding名の不正は`invalid`
@@ -86,14 +86,17 @@ export function createJobService<Env extends ServiceEnv>(
 			const { ids, remaining } =
 				target.kind === 'ids'
 					? { ids: target.ids, remaining: 0 }
-					: await repositoryOf(env).selectBulkTargets(action, target, retention, Date.now());
+					: await repositoryOf(env).selectBulkTargets(action, target, retention, Temporal.Now.instant().epochMilliseconds);
 			return { ...(await mutateJobs(env, action, ids)), remaining };
 		},
 
 		// 読み取りモデル経由で数秒遅延, 傾向把握用
 		async stats(env: Env): Promise<JobStats> {
 			const { byState, oldestScheduledAt } = await repositoryOf(env).stats();
-			return { byState, oldestScheduledMs: oldestScheduledAt === null ? null : Math.max(0, Date.now() - oldestScheduledAt) };
+			return {
+				byState,
+				oldestScheduledMs: oldestScheduledAt === null ? null : Math.max(0, Temporal.Now.instant().epochMilliseconds - oldestScheduledAt),
+			};
 		},
 	};
 }

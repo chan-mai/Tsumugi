@@ -35,7 +35,7 @@ async function makeJwt(claims: Record<string, unknown>, options: { key?: CryptoK
 const validClaims = (over: Record<string, unknown> = {}) => ({
 	aud: AUD,
 	iss: ISSUER,
-	exp: Math.floor(Date.now() / 1000) + 600,
+	exp: Math.floor(Temporal.Now.instant().epochMilliseconds / 1000) + 600,
 	email: 'someone@example.com',
 	...over,
 });
@@ -69,94 +69,94 @@ beforeEach(() => {
 describe('Access JWTの検証', () => {
 	it('正しい署名とクレームなら成功する', async () => {
 		const token = await makeJwt(validClaims());
-		const claims = await verifyAccessJwt(token, options(), Date.now());
+		const claims = await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds);
 		expect(claims).toMatchObject({ aud: AUD, iss: ISSUER, email: 'someone@example.com' });
 	});
 
 	it('別の鍵で署名されていれば拒否する', async () => {
 		const token = await makeJwt(validClaims(), { key: attackerKey });
-		expect(await verifyAccessJwt(token, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('署名が改竄されていれば拒否する', async () => {
 		const token = await makeJwt(validClaims());
 		const tampered = `${token.slice(0, -4)}AAAA`;
-		expect(await verifyAccessJwt(tampered, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(tampered, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('ペイロードを差し替えると署名が合わず拒否する', async () => {
 		const token = await makeJwt(validClaims());
 		const [header, , signature] = token.split('.') as [string, string, string];
 		const forged = encodeSegment(validClaims({ email: 'attacker@example.com' }));
-		expect(await verifyAccessJwt(`${header}.${forged}.${signature}`, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(`${header}.${forged}.${signature}`, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('audが違えば拒否する', async () => {
 		const token = await makeJwt(validClaims({ aud: 'other-app' }));
-		expect(await verifyAccessJwt(token, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('issが違えば拒否する', async () => {
 		const token = await makeJwt(validClaims({ iss: 'https://evil.cloudflareaccess.com' }));
-		expect(await verifyAccessJwt(token, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('期限切れなら拒否する', async () => {
-		const token = await makeJwt(validClaims({ exp: Math.floor(Date.now() / 1000) - 1 }));
-		expect(await verifyAccessJwt(token, options(), Date.now())).toBeNull();
+		const token = await makeJwt(validClaims({ exp: Math.floor(Temporal.Now.instant().epochMilliseconds / 1000) - 1 }));
+		expect(await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('nbfが未来なら拒否する', async () => {
-		const token = await makeJwt(validClaims({ nbf: Math.floor(Date.now() / 1000) + 600 }));
-		expect(await verifyAccessJwt(token, options(), Date.now())).toBeNull();
+		const token = await makeJwt(validClaims({ nbf: Math.floor(Temporal.Now.instant().epochMilliseconds / 1000) + 600 }));
+		expect(await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('expが無ければ拒否する', async () => {
 		const { exp: _exp, ...rest } = validClaims();
 		const token = await makeJwt(rest);
-		expect(await verifyAccessJwt(token, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('algをnoneに差し替えても拒否する', async () => {
 		// ヘッダalg採用時は署名検証迂回が可能
 		const header = encodeSegment({ alg: 'none', kid: KID, typ: 'JWT' });
 		const payload = encodeSegment(validClaims());
-		expect(await verifyAccessJwt(`${header}.${payload}.`, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(`${header}.${payload}.`, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('知らないkidなら拒否する', async () => {
 		const token = await makeJwt(validClaims(), { kid: 'unknown-key' });
-		expect(await verifyAccessJwt(token, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('形式が壊れていれば拒否する', async () => {
 		for (const bad of ['', 'a.b', 'a.b.c.d', 'not-a-jwt']) {
-			expect(await verifyAccessJwt(bad, options(), Date.now())).toBeNull();
+			expect(await verifyAccessJwt(bad, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 		}
 	});
 
 	it('署名部がbase64でなければ拒否する', async () => {
 		const token = await makeJwt(validClaims());
 		const [header, payload] = token.split('.') as [string, string, string];
-		expect(await verifyAccessJwt(`${header}.${payload}.not base64!`, options(), Date.now())).toBeNull();
+		expect(await verifyAccessJwt(`${header}.${payload}.not base64!`, options(), Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('JWKSの鍵が壊れていれば拒否する', async () => {
 		const token = await makeJwt(validClaims());
 		const broken = { ...options(), fetchJwks: async () => ({ keys: [{ kty: 'RSA', kid: KID, n: '!!', e: 'AQAB' }] }) };
-		expect(await verifyAccessJwt(token, broken, Date.now())).toBeNull();
+		expect(await verifyAccessJwt(token, broken, Temporal.Now.instant().epochMilliseconds)).toBeNull();
 	});
 
 	it('audが配列でも一致すれば成功する', async () => {
 		const token = await makeJwt(validClaims({ aud: ['other', AUD] }));
-		expect(await verifyAccessJwt(token, options(), Date.now())).not.toBeNull();
+		expect(await verifyAccessJwt(token, options(), Temporal.Now.instant().epochMilliseconds)).not.toBeNull();
 	});
 
 	it('JWKSはキャッシュされ毎回取得しない', async () => {
 		const token = await makeJwt(validClaims());
 		const shared = options();
-		await verifyAccessJwt(token, shared, Date.now());
-		await verifyAccessJwt(token, shared, Date.now());
+		await verifyAccessJwt(token, shared, Temporal.Now.instant().epochMilliseconds);
+		await verifyAccessJwt(token, shared, Temporal.Now.instant().epochMilliseconds);
 		expect(jwksFetches).toBe(1);
 	});
 });

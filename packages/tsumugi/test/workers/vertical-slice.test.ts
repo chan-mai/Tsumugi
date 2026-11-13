@@ -113,7 +113,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		expect(performed[0]).toMatchObject({ payload: { name: 'world' }, attempt: 1, jobId });
 		const [first] = performed;
 		if (first === undefined) throw new Error('performer was not called');
-		expect(first.deadlineAt).toBeGreaterThan(Date.now());
+		expect(first.deadlineAt).toBeGreaterThan(Temporal.Now.instant().epochMilliseconds);
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
 		const row = await jobRow(shard('HELLO'), jobId);

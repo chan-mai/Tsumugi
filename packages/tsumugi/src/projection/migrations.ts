@@ -62,7 +62,9 @@ export function migrationErrorMessage(missing: readonly string[]): string {
  * 成功は永続, 適用漏れは非キャッシュで再デプロイ無しに復帰
  * 一時障害は短いTTL, 障害中のD1クエリ増加防止(#8)
  */
-export function cachedCheck(now: () => number = () => Date.now()): (db: D1Database) => Promise<MigrationStatus> {
+export function cachedCheck(
+	now: () => number = () => Temporal.Now.instant().epochMilliseconds,
+): (db: D1Database) => Promise<MigrationStatus> {
 	let settled: MigrationStatus | undefined;
 	let settledAt = 0;
 	let inFlight: Promise<MigrationStatus> | undefined;

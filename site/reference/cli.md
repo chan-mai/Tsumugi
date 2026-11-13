@@ -27,6 +27,7 @@ npx tsumugi init [--name <name>] [--format jsonc|toml]
 
 `init`は、`wrangler queues create <name>`と`wrangler d1 create <name>`でリソースを作成します。
 wranglerの設定ファイルが存在しない場合、新たに生成し、`wrangler d1 create`が出力した`database_id`を書き込みます。
+新たに生成するwranglerの設定ファイルには、`compatibility_flags`に`temporal`が含まれます。
 次に、`src/index.ts`, `src/performers/`, `.dev.vars`を生成します。
 最後に、`wrangler d1 migrations apply`(`--local`と`--remote`)と`wrangler types`を実行します。
 
@@ -41,6 +42,7 @@ wranglerの設定ファイルが存在しない場合、新たに生成し、`wr
 
 `init`は、既存のファイルを変更しません。
 wranglerの設定ファイル(`wrangler.json`, `wrangler.jsonc`, `wrangler.toml`)が既に存在する場合は、追記する内容をそのファイルの形式で出力します。
+既存の設定ファイルには追記されないため、利用者が`temporal`を追加する必要があります。
 `src/index.ts`などの雛形のうち、既存のファイルは再生成しません。
 
 ## tsumugi add-performer

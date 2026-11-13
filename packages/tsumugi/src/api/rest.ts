@@ -246,7 +246,7 @@ export function createRest<Env extends RestEnv>(auth: AuthMiddleware<Env>, optio
 		const body = await readJson(c.req);
 		if (body === INVALID_JSON) return c.json(INVALID_JSON_BODY, 400);
 
-		const parsed = validateReschedule(body, Date.now());
+		const parsed = validateReschedule(body, Temporal.Now.instant().epochMilliseconds);
 		if ('error' in parsed) return c.json(error(parsed.error), 400);
 
 		const { body: result, status } = mutationResponse(

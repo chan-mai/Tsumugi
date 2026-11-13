@@ -653,7 +653,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 	});
 
 	it('条件指定のbulk-retryは保持期間を過ぎた行を対象にしない', async () => {
-		await orphan('GONE#0:bulk-old', 'FAILED', Date.now() - 10 * 60 * 1000);
+		await orphan('GONE#0:bulk-old', 'FAILED', Temporal.Now.instant().epochMilliseconds - 10 * 60 * 1000);
 		for (const body of [{ binding: 'GONE' }, {}]) {
 			const res = await fetchWith(
 				shortLived,
@@ -680,7 +680,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 
 	it('保持期間を過ぎた行はretryable=falseで返る', async () => {
 		// retryableは実時刻で判定、T0(未来の固定値)は使用不可
-		await orphan('GONE#0:old', 'FAILED', Date.now() - 10 * 60 * 1000);
+		await orphan('GONE#0:old', 'FAILED', Temporal.Now.instant().epochMilliseconds - 10 * 60 * 1000);
 		const res = await fetchWith(
 			shortLived,
 			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
@@ -697,7 +697,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 			auth: bearerAuth(TOKEN),
 			bindings: { GONE: { failedRetentionMs: 7 * 24 * 60 * 60 * 1000 } },
 		});
-		await orphan('GONE#0:fresh', 'FAILED', Date.now());
+		await orphan('GONE#0:fresh', 'FAILED', Temporal.Now.instant().epochMilliseconds);
 		const res = await fetchWith(
 			generous,
 			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
@@ -709,7 +709,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 	});
 
 	it('終端でない状態はretryable=false', async () => {
-		await orphan('GONE#0:running', 'RUNNING', Date.now());
+		await orphan('GONE#0:running', 'RUNNING', Temporal.Now.instant().epochMilliseconds);
 		const res = await fetchWith(
 			shortLived,
 			new Request('https://example.com/api/jobs?binding=GONE&limit=50', { headers: authorized }),
@@ -1140,7 +1140,7 @@ describe('一括リトライと一括取り消し', () => {
 			`INSERT OR REPLACE INTO job (id, seq, binding, state, priority, attempts, max_attempts, guarantee, created_at, updated_at, payload)
 			 VALUES ('BULKGONE#0:x', 1, 'BULKGONE', 'FAILED', 0, 3, 3, 'at-least-once', 1, ?, '{}')`,
 		)
-			.bind(Date.now())
+			.bind(Temporal.Now.instant().epochMilliseconds)
 			.run();
 
 		const res = await post('retry', { binding: 'BULKGONE' });
@@ -1335,8 +1335,8 @@ describe('runの開始', () => {
 			return (await res.json<{ run: { retryable: boolean } }>()).run.retryable;
 		};
 
-		await seed('GREETINGS:retention-old', Date.now() - 10 * 60_000);
-		await seed('GREETINGS:retention-fresh', Date.now());
+		await seed('GREETINGS:retention-old', Temporal.Now.instant().epochMilliseconds - 10 * 60_000);
+		await seed('GREETINGS:retention-fresh', Temporal.Now.instant().epochMilliseconds);
 		expect(await detail('GREETINGS:retention-old')).toBe(false);
 		expect(await detail('GREETINGS:retention-fresh')).toBe(true);
 	});

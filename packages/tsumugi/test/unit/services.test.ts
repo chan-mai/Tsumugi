@@ -19,7 +19,7 @@ const item = (patch: Partial<JobListItem>): JobListItem => ({
 	attempts: 1,
 	maxAttempts: 1,
 	createdAt: 0,
-	updatedAt: Date.now(),
+	updatedAt: Temporal.Now.instant().epochMilliseconds,
 	dispatchedAt: null,
 	...patch,
 });
@@ -46,7 +46,11 @@ describe('ジョブのservice', () => {
 	it('一覧と詳細にbinding毎の保持期間でretryableを付加する', async () => {
 		const repository = jobRepository({
 			list: async () => ({
-				jobs: [item({ id: 'Hello#0:fresh' }), item({ id: 'Hello#0:old', updatedAt: Date.now() - KEEP * 2 }), item({ state: 'COMPLETED' })],
+				jobs: [
+					item({ id: 'Hello#0:fresh' }),
+					item({ id: 'Hello#0:old', updatedAt: Temporal.Now.instant().epochMilliseconds - KEEP * 2 }),
+					item({ state: 'COMPLETED' }),
+				],
 				total: 3,
 			}),
 			find: async () => ({ ...item({}), attemptsLog: [] }) as unknown as Job,
@@ -93,7 +97,7 @@ describe('ジョブのservice', () => {
 	});
 
 	it('統計は最古の予約からの経過時間を返す', async () => {
-		const now = Date.now();
+		const now = Temporal.Now.instant().epochMilliseconds;
 		const jobs = createJobService({}, () =>
 			jobRepository({ stats: async () => ({ byState: { SCHEDULED: 2 }, oldestScheduledAt: now - 1_000 }) }),
 		);
@@ -114,7 +118,7 @@ describe('Runのservice', () => {
 		nodeDone: 0,
 		nodeFailed: 1,
 		createdAt: 0,
-		updatedAt: Date.now(),
+		updatedAt: Temporal.Now.instant().epochMilliseconds,
 		parentRunId: null,
 		parentNodeId: null,
 		...patch,
@@ -127,7 +131,9 @@ describe('Runのservice', () => {
 	it('詳細に保持期間でretryableを付加する', async () => {
 		const env = {} as ServiceEnv;
 		const fresh = createRunService({ runFailedRetentionMs: KEEP }, () => runRepository(run({})));
-		const old = createRunService({ runFailedRetentionMs: KEEP }, () => runRepository(run({ updatedAt: Date.now() - KEEP * 2 })));
+		const old = createRunService({ runFailedRetentionMs: KEEP }, () =>
+			runRepository(run({ updatedAt: Temporal.Now.instant().epochMilliseconds - KEEP * 2 })),
+		);
 		expect((await fresh.detail(env, 'GREETINGS:a'))?.run.retryable).toBe(true);
 		expect((await old.detail(env, 'GREETINGS:a'))?.run.retryable).toBe(false);
 		expect(await createRunService({}, () => runRepository(null)).detail(env, 'GREETINGS:a')).toBeNull();

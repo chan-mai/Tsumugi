@@ -100,6 +100,15 @@ const num = (value: string | number | null | undefined): number => {
 	return Number.isFinite(parsed) ? parsed : 0;
 };
 
+// 解釈不能はNaN, 例外では応答全体が500
+function utcEpochOf(text: string): number {
+	try {
+		return Temporal.PlainDateTime.from(text.replace(' ', 'T')).toZonedDateTime('UTC').epochMilliseconds;
+	} catch {
+		return Number.NaN;
+	}
+}
+
 // subrequestに既定タイムアウトなし
 const QUERY_TIMEOUT_MS = 10_000;
 
@@ -154,7 +163,7 @@ export async function readMetrics(
 		}),
 		series: overTime.map(row => ({
 			// SQL APIはUTC文字列, 画面はepochミリ秒
-			at: Date.parse(`${String(row.at ?? '')}Z`.replace(' ', 'T')),
+			at: utcEpochOf(String(row.at ?? '')),
 			total: num(row.total),
 			failed: num(row.failed),
 			avgDurationMs: num(row.avg_duration),

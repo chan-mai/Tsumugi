@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidCronError, nextCronAt, parseCron } from '../../src/core/cron.js';
 
-const at = (iso: string) => Date.parse(iso);
+const at = (iso: string) => Temporal.Instant.from(iso).epochMilliseconds;
 
 const next = (expression: string, after: string, timeZone?: string) =>
-	new Date(nextCronAt(parseCron(expression), at(after), timeZone)).toISOString();
+	Temporal.Instant.fromEpochMilliseconds(nextCronAt(parseCron(expression), at(after), timeZone)).toString({ fractionalSecondDigits: 3 });
 
 describe('cron式の解析', () => {
 	it('全域と数値とリストと範囲とステップを受ける', () => {

@@ -408,7 +408,7 @@ describe('縦串: runの開始から完了まで', () => {
 			const inner = internals(instance);
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'sr' }, deadlineMs: 10_000 });
 			await state.storage.deleteAlarm();
-			const now = Date.now();
+			const now = Temporal.Now.instant().epochMilliseconds;
 			inner.repo.insertNodes(
 				[
 					{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 },
@@ -440,7 +440,7 @@ describe('縦串: runの開始から完了まで', () => {
 			const inner = internals(instance);
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cr' } });
 			await state.storage.deleteAlarm();
-			const now = Date.now();
+			const now = Temporal.Now.instant().epochMilliseconds;
 			inner.repo.insertNodes(
 				[
 					{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 },

@@ -28,22 +28,9 @@ const FIELDS = [
 ] as const;
 
 const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
 
 // うるう日含む全周期が範囲内に出現
 const SEARCH_DAYS = 366 * 5;
-
-type LocalDateTime = {
-	year: number;
-	month: number;
-	day: number;
-	hour: number;
-	minute: number;
-	second: number;
-};
-
-const LOCAL_SEARCH_SEEDS = [-2 * DAY_MS, -DAY_MS, -12 * HOUR_MS, 0, 12 * HOUR_MS, DAY_MS, 2 * DAY_MS] as const;
 
 function parseRange(text: string, min: number, max: number, label: string): [number, number] {
 	if (text === '*') return [min, max];
@@ -98,7 +85,7 @@ export function parseCron(expression: string): CronSpec {
 	const hours = parse(hour, FIELDS[1]);
 	const daysOfMonth = parse(dayOfMonth, FIELDS[2]);
 	const months = parse(month, FIELDS[3]);
-	// 曜日7は日曜, getUTCDay()の0へ統一
+	// 曜日7は日曜, 0へ統一
 	const daysOfWeek = new Set([...parse(dayOfWeek, FIELDS[4])].map(value => (value === 7 ? 0 : value)));
 
 	return {
@@ -112,9 +99,9 @@ export function parseCron(expression: string): CronSpec {
 	};
 }
 
-function dayMatches(spec: CronSpec, date: Date): boolean {
-	const domOk = spec.daysOfMonth.has(date.getUTCDate());
-	const dowOk = spec.daysOfWeek.has(date.getUTCDay());
+function dayMatches(spec: CronSpec, date: Temporal.PlainDate): boolean {
+	const domOk = spec.daysOfMonth.has(date.day);
+	const dowOk = spec.daysOfWeek.has(date.dayOfWeek % 7);
 	return spec.restrictedDayOfMonth && spec.restrictedDayOfWeek ? domOk || dowOk : domOk && dowOk;
 }
 
@@ -132,117 +119,50 @@ export function resolveTimeZone(timeZone: string): string {
 	return resolved;
 }
 
-function localFormatter(timeZone: string): Intl.DateTimeFormat {
-	return new Intl.DateTimeFormat('en-US-u-ca-gregory-nu-latn', {
-		timeZone,
-		calendar: 'gregory',
-		numberingSystem: 'latn',
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit',
-		hour: '2-digit',
-		minute: '2-digit',
-		second: '2-digit',
-		hourCycle: 'h23',
-	});
-}
-
-function localDateTime(formatter: Intl.DateTimeFormat, instant: number): LocalDateTime {
-	const value: LocalDateTime = { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
-	for (const part of formatter.formatToParts(new Date(instant))) {
-		switch (part.type) {
-			case 'year':
-			case 'month':
-			case 'day':
-			case 'hour':
-			case 'minute':
-			case 'second':
-				value[part.type] = Number(part.value);
-		}
-	}
-	return value;
-}
-
-const localEpoch = (value: LocalDateTime): number =>
-	Date.UTC(value.year, value.month - 1, value.day, value.hour, value.minute, value.second);
-
-const sameLocalDateTime = (left: LocalDateTime, right: LocalDateTime): boolean =>
-	left.year === right.year &&
-	left.month === right.month &&
-	left.day === right.day &&
-	left.hour === right.hour &&
-	left.minute === right.minute &&
-	left.second === right.second;
-
-// 存在しない日時はnull
-function earliestInstant(formatter: Intl.DateTimeFormat, target: LocalDateTime): number | null {
-	const targetEpoch = localEpoch(target);
-	let earliest: number | null = null;
-
-	for (const seed of LOCAL_SEARCH_SEEDS) {
-		let candidate = targetEpoch + seed;
-		for (let attempt = 0; attempt < 6; attempt++) {
-			const adjustment = targetEpoch - localEpoch(localDateTime(formatter, candidate));
-			if (adjustment === 0) break;
-			candidate += adjustment;
-		}
-
-		if (!sameLocalDateTime(localDateTime(formatter, candidate), target)) continue;
-		if (earliest === null || candidate < earliest) earliest = candidate;
-	}
-
-	return earliest;
-}
+const plainDateTimeOf = (instant: number, timeZone: string): Temporal.PlainDateTime =>
+	Temporal.Instant.fromEpochMilliseconds(instant).toZonedDateTimeISO(timeZone).toPlainDateTime();
 
 function nextCronAtUtc(spec: CronSpec, afterMs: number): number {
 	const hours = [...spec.hours].sort((a, b) => a - b);
 	const minutes = [...spec.minutes].sort((a, b) => a - b);
 
 	// 一致日のみ時分を走査, 分単位の全走査は5年で数百万回
-	let cursor = Math.floor(afterMs / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
+	let cursor = plainDateTimeOf(Math.floor(afterMs / MINUTE_MS) * MINUTE_MS + MINUTE_MS, 'UTC');
 	for (let day = 0; day < SEARCH_DAYS; day++) {
-		const date = new Date(cursor);
-		if (spec.months.has(date.getUTCMonth() + 1) && dayMatches(spec, date)) {
-			const fromHour = date.getUTCHours();
-			const fromMinute = date.getUTCMinutes();
+		const date = cursor.toPlainDate();
+		if (spec.months.has(date.month) && dayMatches(spec, date)) {
 			for (const hour of hours) {
-				if (hour < fromHour) continue;
+				if (hour < cursor.hour) continue;
 				for (const minute of minutes) {
-					if (hour === fromHour && minute < fromMinute) continue;
-					return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour, minute);
+					if (hour === cursor.hour && minute < cursor.minute) continue;
+					return date.toZonedDateTime({ timeZone: 'UTC', plainTime: { hour, minute } }).epochMilliseconds;
 				}
 			}
 		}
-		cursor = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
+		cursor = date.add({ days: 1 }).toPlainDateTime();
 	}
 
 	throw new InvalidCronError(`no occurrence within ${SEARCH_DAYS} days`);
 }
 
 function nextCronAtZoned(spec: CronSpec, afterMs: number, timeZone: string): number {
-	const formatter = localFormatter(timeZone);
-	const start = localDateTime(formatter, afterMs);
-	const startDay = Date.UTC(start.year, start.month - 1, start.day);
+	const start = plainDateTimeOf(afterMs, timeZone);
 	const hours = [...spec.hours].sort((a, b) => a - b);
 	const minutes = [...spec.minutes].sort((a, b) => a - b);
 
 	for (let day = 0; day < SEARCH_DAYS; day++) {
-		const date = new Date(startDay + day * DAY_MS);
-		if (!spec.months.has(date.getUTCMonth() + 1) || !dayMatches(spec, date)) continue;
+		const date = start.toPlainDate().add({ days: day });
+		if (!spec.months.has(date.month) || !dayMatches(spec, date)) continue;
 
 		for (const hour of hours) {
 			if (day === 0 && hour < start.hour) continue;
 			for (const minute of minutes) {
 				if (day === 0 && hour === start.hour && minute < start.minute) continue;
-				const instant = earliestInstant(formatter, {
-					year: date.getUTCFullYear(),
-					month: date.getUTCMonth() + 1,
-					day: date.getUTCDate(),
-					hour,
-					minute,
-					second: 0,
-				});
-				if (instant !== null && instant > afterMs) return instant;
+				const target = date.toPlainDateTime({ hour, minute });
+				// 重複する日時は早い方, 存在しない日時は対象外
+				const zoned = target.toZonedDateTime(timeZone, { disambiguation: 'earlier' });
+				if (!zoned.toPlainDateTime().equals(target)) continue;
+				if (zoned.epochMilliseconds > afterMs) return zoned.epochMilliseconds;
 			}
 		}
 	}

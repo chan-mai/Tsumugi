@@ -6,7 +6,7 @@ import { normalizeTraceparent } from '../core/trace.js';
 import type { FailOptions, JobContext, PerformerLike, Requirements } from '../core/api.js';
 import type { SpawnRequest } from '../core/run.js';
 
-// DOを含む検証は`@cloudflare/vitest-pool-workers`の対象
+// DOを含む検証は`@cloudflare/vitest-plugin`の対象
 
 export type TestContext = JobContext & {
 	logs: string[];
@@ -51,7 +51,7 @@ export function createTestContext(options: TestContextOptions = {}): TestContext
 		attempt: options.attempt ?? 1,
 		// 本番と同じくジョブID, 再試行間で同値
 		idempotencyKey: options.idempotencyKey ?? jobId,
-		deadlineAt: options.deadlineAt ?? Date.now() + 60_000,
+		deadlineAt: options.deadlineAt ?? Temporal.Now.instant().epochMilliseconds + 60_000,
 		spawns,
 		heartbeats,
 		heartbeat: async progress => {

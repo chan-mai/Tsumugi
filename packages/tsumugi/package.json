@@ -57,7 +57,7 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@clack/prompts": "^1.9.0",
-    "@cloudflare/workers-types": "^5.20261110.1",
+    "@cloudflare/workers-types": "^5.20261113.1",
     "@tsumugi/dashboard": "workspace:*",
     "@tsumugi/spec": "workspace:*",
     "publint": "^0.3.25",

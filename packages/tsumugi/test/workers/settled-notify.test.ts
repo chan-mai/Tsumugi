@@ -264,7 +264,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		const scheduler = schedulerNamespace.get(schedulerNamespace.idFromName('scheduler'));
 		await scheduler.sync();
 		// 最短定義は1分間隔, 発火用に時計を前進
-		const ahead = Date.now() + 2 * 60_000;
+		const ahead = Temporal.Now.instant().epochMilliseconds + 2 * 60_000;
 		await runInDurableObject(scheduler, instance => void ((instance as unknown as { clock: Clock }).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 

@@ -268,7 +268,7 @@ export function defineTsumugi<const R extends PerformerRegistry<never>, const F 
 					c.failedRetentionMs === undefined ? [] : [[binding, c.failedRetentionMs]],
 				),
 			);
-			const removed = await sweepReadModel(env.TSUMUGI_DB, Date.now(), config.retention ?? {}, {
+			const removed = await sweepReadModel(env.TSUMUGI_DB, Temporal.Now.instant().epochMilliseconds, config.retention ?? {}, {
 				jobs,
 				...(config.runs?.failedRetentionMs !== undefined ? { runs: config.runs.failedRetentionMs } : {}),
 			});

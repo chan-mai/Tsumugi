@@ -24,7 +24,7 @@ const boom = {
 // 自己解決するとconsumerの中断と競合し成功で終了する場合あり
 const waitForDeadline = {
 	perform: (_payload: unknown, ctx: JobContext): Promise<void> => {
-		const signal = AbortSignal.timeout(Math.max(0, ctx.deadlineAt - Date.now()));
+		const signal = AbortSignal.timeout(Math.max(0, ctx.deadlineAt - Temporal.Now.instant().epochMilliseconds));
 		return new Promise<void>(() => {
 			signal.addEventListener('abort', () => {
 				aborted = true;

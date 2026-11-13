@@ -26,7 +26,7 @@ export function createRunService<Env extends ServiceEnv>(
 			const found = await repositoryOf(env).find(id);
 			if (!found) return null;
 			const { run, nodes } = found;
-			return { run: { ...run, retryable: runRetryable(run, Date.now(), runFailedRetentionMs) }, nodes };
+			return { run: { ...run, retryable: runRetryable(run, Temporal.Now.instant().epochMilliseconds, runFailedRetentionMs) }, nodes };
 		},
 
 		start: start

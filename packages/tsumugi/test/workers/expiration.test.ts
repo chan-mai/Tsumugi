@@ -137,7 +137,7 @@ describe('有効期限(ADR-0047)', () => {
 		expect(sent).toHaveLength(1);
 
 		// consumer判定は実時刻参照, 滞留による期限経過を期限差し替えで再現
-		const stale = { ...(sent[0] as DispatchMessage), expiresAt: Date.now() - 1 };
+		const stale = { ...(sent[0] as DispatchMessage), expiresAt: Temporal.Now.instant().epochMilliseconds - 1 };
 		await install('EXPE', fixedClock(T0), queue);
 		await handleBatch(makeBatch([stale]), consumerEnv, performers);
 

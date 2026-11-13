@@ -101,7 +101,7 @@ describe('uniqueKeyによる重複排除(ADR-0021 / ADR-0022)', () => {
 		await install('UNIQTX#0', T0, queue);
 
 		// 2件目のbinding名がジョブIDとして不正, 1件目の予約と行の書き込み後に例外
-		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
+		// RPC越し例外はvitest-pluginで未処理rejection扱い、DO内で実行
 		await expect(
 			runInDurableObject(shard('UNIQTX#0'), instance =>
 				internals(instance).enqueueMany([
@@ -410,7 +410,7 @@ describe('Queuesのサイズ上限と送信失敗', () => {
 		const { queue } = captureQueue();
 		await install('BIGPAY#0', T0, queue);
 
-		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
+		// RPC越し例外はvitest-pluginで未処理rejection扱い、DO内で実行
 		await expect(
 			runInDurableObject(shard('BIGPAY#0'), instance =>
 				internals(instance).enqueueMany([
