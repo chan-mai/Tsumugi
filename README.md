@@ -24,6 +24,7 @@ See documentation at [https://tsumugi.mq1.dev](https://tsumugi.mq1.dev).
 
 - A **paid Workers plan**. SQLite-backed Durable Objects and Queues both require it.
 - `compatibility_date` of **2025-11-17 or later**, for `ctx.exports`.
+- The `temporal` compatibility flag, or a `compatibility_date` of **2026-12-01 or later**
 - A **D1 database** for the read model. Migrations shipped with the package must be applied.
 - **Analytics Engine** is optional, and only needed for time series metrics.
 
@@ -31,6 +32,7 @@ See documentation at [https://tsumugi.mq1.dev](https://tsumugi.mq1.dev).
 
 - **Workers Paid**が必要, SQLite版のDurable ObjectsとQueuesの両方に必要
 - `compatibility_date`は**2025-11-17以降**, `ctx.exports`のため
+- `compatibility_flags`への`temporal`の追加、あるいは**2026-12-01以降**の`compatibility_date`が必要
 - **D1**が必要, 読み取りモデルの置き場でパッケージ同梱のマイグレーションの適用が必要
 - **Analytics Engine**は任意, 時系列メトリクスを書く場合だけ設定する
 
