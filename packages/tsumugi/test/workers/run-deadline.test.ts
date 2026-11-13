@@ -322,7 +322,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(overridden?.deadline_ms).toBe(5_000);
 		expect(overridden?.deadline_at).toBe(T0 + 5_000);
 
-		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
+		// RPC越し例外はvitest-pluginで未処理rejection扱い、DO内で実行
 		await expect(
 			runInDurableObject(runStub('TIMED:invalid'), (instance) =>
 				(instance as any).start({ flow: 'TIMED', input: { prefix: 'ng' }, deadlineMs: 0 }),

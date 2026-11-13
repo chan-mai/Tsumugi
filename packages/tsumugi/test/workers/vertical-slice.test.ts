@@ -98,7 +98,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 
 		expect(performed).toHaveLength(1);
 		expect(performed[0]).toMatchObject({ payload: { name: 'world' }, attempt: 1, jobId });
-		expect(performed[0]!.deadlineAt).toBeGreaterThan(Date.now());
+		expect(performed[0]!.deadlineAt).toBeGreaterThan(Temporal.Now.instant().epochMilliseconds);
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
 		const row = await runInDurableObject(shard('HELLO'), (instance) => (instance as any).repo.find(jobId) as { attempts: number });

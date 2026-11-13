@@ -12,7 +12,7 @@ const PING_MS = 60_000;
 
 // 過去予定は固定時計と無関係にalarm即発火、未来に配置
 // ジョブIDは予定時刻から確定、テストごとに日を分けて衝突回避
-const day = (n: number) => Date.UTC(2046, 0, 5 + n, 12, 0, 0);
+const day = (n: number) => Temporal.Instant.from('2046-01-05T12:00:00Z').add({ hours: 24 * n }).epochMilliseconds;
 
 // 起点日の次の東京3時(cron `0 3 * * *`)
 const nightlyOf = (base: number) => base + 6 * 60 * 60 * 1000;

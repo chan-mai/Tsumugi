@@ -11,6 +11,14 @@ updatedAt: 2026-10-25
 
 Workers Paidプランが有効なCloudflareアカウントが必要です。
 `compatibility_date`は2025-11-17以降に設定してください。
+`compatibility_flags`に`temporal`を指定するか、`compatibility_date`を2026-12-01以降に設定する必要があります。
+
+```jsonc
+{
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["temporal"]
+}
+```
 
 ## インストール
 

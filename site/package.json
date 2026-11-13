@@ -19,7 +19,7 @@
     "nuxt-og-image": "^7.0.7",
     "typescript": "^6.0.3",
     "vue-tsc": "^3.3.14",
-    "wrangler": "^4.156.2"
+    "wrangler": "^4.161.0"
   },
   "dependencies": {
     "@headlessui/vue": "^1.7.23",

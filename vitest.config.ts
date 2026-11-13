@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import { defineConfig } from 'vitest/config';
 
 const src = (path: string) => fileURLToPath(new URL(`./packages/tsumugi/src/entries/${path}`, import.meta.url));

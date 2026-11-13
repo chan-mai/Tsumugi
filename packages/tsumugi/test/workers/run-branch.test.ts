@@ -132,9 +132,13 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 			const inner = instance as any;
 			await inner.start({ flow: 'BRANCHED', input: { prefix: 'wr', verbose: false } });
 			await inner.ctx.storage.deleteAlarm();
-			inner.repo.updateNode('list', { state: 'COMPLETED', result: JSON.stringify({ names: ['wr-1'] }) }, Date.now());
-			inner.repo.updateNode('detail', { jobId }, Date.now());
-			await inner.ctx.storage.setAlarm(Date.now());
+			inner.repo.updateNode(
+				'list',
+				{ state: 'COMPLETED', result: JSON.stringify({ names: ['wr-1'] }) },
+				Temporal.Now.instant().epochMilliseconds,
+			);
+			inner.repo.updateNode('detail', { jobId }, Temporal.Now.instant().epochMilliseconds);
+			await inner.ctx.storage.setAlarm(Temporal.Now.instant().epochMilliseconds);
 		});
 		await runDurableObjectAlarm(runStub(runId));
 		await settleRun(runId);
@@ -194,7 +198,7 @@ describe('条件分岐と失敗時の継続(ADR-0041)', () => {
 			const inner = instance as any;
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'rc' } });
 			await inner.ctx.storage.deleteAlarm();
-			const now = Date.now();
+			const now = Temporal.Now.instant().epochMilliseconds;
 			inner.repo.insertNodes(
 				[{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 }],
 				now,

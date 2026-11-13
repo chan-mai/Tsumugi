@@ -400,7 +400,7 @@ describe('縦串: runの開始から完了まで', () => {
 			const inner = instance as any;
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'sr' }, deadlineMs: 10_000 });
 			await inner.ctx.storage.deleteAlarm();
-			const now = Date.now();
+			const now = Temporal.Now.instant().epochMilliseconds;
 			inner.repo.insertNodes(
 				[
 					{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 },
@@ -432,7 +432,7 @@ describe('縦串: runの開始から完了まで', () => {
 			const inner = instance as any;
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cr' } });
 			await inner.ctx.storage.deleteAlarm();
-			const now = Date.now();
+			const now = Temporal.Now.instant().epochMilliseconds;
 			inner.repo.insertNodes(
 				[
 					{ id: 'greet:0', binding: 'Greet', container: false, parent: 'greet', origin: 'fanOut', after: [], seq: 3 },

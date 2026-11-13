@@ -3,6 +3,7 @@
   "name": "tsumugi-example-basic",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["temporal"],
   "durable_objects": {
     "bindings": [
       { "name": "JOB_SHARD", "class_name": "TsumugiJobShard" },

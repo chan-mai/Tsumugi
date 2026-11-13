@@ -46,7 +46,7 @@ describe('実行ログの送信', () => {
 		vi.useFakeTimers();
 		const log = createLog(
 			() => new Promise(() => {}),
-			() => Date.now(),
+			() => Temporal.Now.instant().epochMilliseconds,
 		);
 		const pending = log('started');
 		await vi.advanceTimersByTimeAsync(1_000);

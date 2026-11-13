@@ -111,7 +111,7 @@ describe('応答の読み取り', () => {
 	it('時刻をepochミリ秒へ直す', async () => {
 		const { impl } = stub([{ data: [] }, { data: [{ at: '2026-07-26 09:00:00', total: '3', failed: '1', avg_duration: '900' }] }]);
 		const result = await readMetrics(config, { hours: 24 }, impl);
-		expect(result.series[0]?.at).toBe(Date.parse('2026-07-26T09:00:00Z'));
+		expect(result.series[0]?.at).toBe(Temporal.Instant.from('2026-07-26T09:00:00Z').epochMilliseconds);
 	});
 
 	it('2xx以外は理由を持つ例外にする', async () => {

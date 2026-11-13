@@ -65,7 +65,7 @@ describe('投入時の既定値フック(#96)', () => {
 			(instance) => ((instance as any).repo.find('poll-names') as { next_occurrence_at: number }).next_occurrence_at,
 		);
 		// poll-names間隔5分, 初回時刻超過まで時計を前進
-		const ahead = Date.now() + 6 * 60_000;
+		const ahead = Temporal.Now.instant().epochMilliseconds + 6 * 60_000;
 		await runInDurableObject(scheduler, (instance) => void ((instance as any).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 

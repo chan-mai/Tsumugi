@@ -177,7 +177,7 @@ const BUCKET_KEY = 'rate_bucket';
 
 /**
  * 判断は`core/dispatch.ts`の純粋関数, 本クラスはSQLite入出力のみ(ADR-0018)
- * 時刻は`this.clock`経由, `Date.now()`直接呼び出しはテスト不能
+ * 時刻は`this.clock`経由, `Temporal.Now.instant().epochMilliseconds`直接呼び出しはテスト不能
  */
 export class TsumugiJobShard extends DurableObject<ShardEnv> {
 	/** テスト差し替え用にpublic */

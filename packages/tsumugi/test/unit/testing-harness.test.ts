@@ -14,7 +14,7 @@ const boom = {
 
 const interruptible = {
 	perform: async (_payload: unknown, ctx: JobContext): Promise<string> => {
-		const remain = ctx.deadlineAt - Date.now();
+		const remain = ctx.deadlineAt - Temporal.Now.instant().epochMilliseconds;
 		if (remain <= 0) return 'expired';
 		const signal = AbortSignal.timeout(remain);
 		return new Promise((resolve) => {
@@ -47,7 +47,7 @@ describe('performerのハーネス', () => {
 		const ctx = createTestContext();
 		expect(ctx.idempotencyKey).toBe(ctx.jobId);
 		expect(ctx.attempt).toBe(1);
-		expect(ctx.deadlineAt).toBeGreaterThan(Date.now());
+		expect(ctx.deadlineAt).toBeGreaterThan(Temporal.Now.instant().epochMilliseconds);
 		expect(ctx.traceparent).toBeNull();
 	});
 
@@ -63,12 +63,12 @@ describe('performerのハーネス', () => {
 	});
 
 	it('deadlineAtから中断を構築できる', async () => {
-		const ctx = createTestContext({ deadlineAt: Date.now() + 20 });
+		const ctx = createTestContext({ deadlineAt: Temporal.Now.instant().epochMilliseconds + 20 });
 		await expect(runPerformer(interruptible, {}, ctx)).resolves.toEqual({ ok: true, value: 'expired' });
 	});
 
 	it('期限切れから始められる', async () => {
-		const ctx = createTestContext({ deadlineAt: Date.now() - 1 });
+		const ctx = createTestContext({ deadlineAt: Temporal.Now.instant().epochMilliseconds - 1 });
 		await expect(runPerformer(interruptible, {}, ctx)).resolves.toEqual({ ok: true, value: 'expired' });
 	});
 

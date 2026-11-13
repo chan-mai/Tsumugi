@@ -17,14 +17,14 @@
     "format:check": "prettier --check ."
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "@cloudflare/vitest-plugin": "^1.8.1",
     "@types/node": "^26.6.6",
     "concurrently": "^10.0.6",
     "fast-check": "^4.10.2",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.156.2"
+    "wrangler": "^4.161.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

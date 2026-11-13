@@ -10,7 +10,7 @@ const SCHEDULE_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const SCHEDULE_NAME_MAX = 64;
 
 // cron式の到達可能性検査の起点, 正規化の純粋性維持で現在時刻不使用
-const CRON_PROBE_AT = Date.UTC(2024, 0, 1);
+const CRON_PROBE_AT = Temporal.Instant.from('2024-01-01T00:00:00Z').epochMilliseconds;
 
 export class InvalidScheduleError extends Error {
 	constructor(message: string) {

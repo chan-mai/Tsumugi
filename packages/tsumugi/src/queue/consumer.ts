@@ -133,7 +133,7 @@ function withTimeout<T>(
 	return new Promise<T>((resolve, reject) => {
 		let fired = false;
 		const arm = () => {
-			const now = Date.now();
+			const now = Temporal.Now.instant().epochMilliseconds;
 			const byWall = timeoutMs <= 0 || now + timeoutMs > wall.deadline;
 			const delay = byWall ? wall.deadline - now : timeoutMs;
 			return setTimeout(
@@ -180,7 +180,10 @@ export async function handleBatch<Env extends ConsumerEnv>(
 	exports: PerformerSource = {},
 	wallTimeMs: number = CONSUMER_WALL_TIME_MS,
 ): Promise<void> {
-	const wall = { deadline: Date.now() + wallTimeMs - Math.min(WALL_TIME_MARGIN_MS, wallTimeMs / 2), limitMs: wallTimeMs };
+	const wall = {
+		deadline: Temporal.Now.instant().epochMilliseconds + wallTimeMs - Math.min(WALL_TIME_MARGIN_MS, wallTimeMs / 2),
+		limitMs: wallTimeMs,
+	};
 	const results = await Promise.allSettled(batch.messages.map((message) => handleOne(message, env, exports, wall)));
 	// 漏れた例外は再送出せずログのみ, 再送出は未ackでQueuesリトライ発生(ADR-0004)
 	for (const result of results) {
@@ -215,7 +218,7 @@ async function handleOne<Env extends ConsumerEnv>(
 
 		// 期限切れは非実行, 滞留解消時の一括実行防止(ADR-0047)
 		// 報告失敗時はreaperが期限切れとしてCANCELLEDへ遷移
-		if (typeof expiresAt === 'number' && Date.now() >= expiresAt) {
+		if (typeof expiresAt === 'number' && Temporal.Now.instant().epochMilliseconds >= expiresAt) {
 			await shardStub(env, jobId)
 				.expire(jobId)
 				.catch((error: unknown) => {
@@ -267,18 +270,18 @@ async function handleOne<Env extends ConsumerEnv>(
 							if (ack.accepted) touch();
 							return ack;
 						}),
-				() => Date.now(),
+				() => Temporal.Now.instant().epochMilliseconds,
 			);
 			const log = createLog(
 				(message) => starting.then(() => stub.log(stableId, attempt, message)),
-				() => Date.now(),
+				() => Temporal.Now.instant().epochMilliseconds,
 			);
 			const ctx: JobContext = {
 				jobId: stableId,
 				attempt,
 				idempotencyKey: stableId,
 				traceparent: traceparent ?? null,
-				deadlineAt: timeoutMs > 0 ? Math.min(Date.now() + timeoutMs, wall.deadline) : wall.deadline,
+				deadlineAt: timeoutMs > 0 ? Math.min(Temporal.Now.instant().epochMilliseconds + timeoutMs, wall.deadline) : wall.deadline,
 				spawn,
 				heartbeat,
 				log,

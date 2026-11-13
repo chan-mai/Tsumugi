@@ -308,7 +308,7 @@ describe('subflowの縦串', () => {
 		await runInDurableObject(runStub(parent), async (instance) => {
 			await (instance as any).start({ flow: 'PIPELINE', input: { prefix: 'x' } });
 			await (instance as any).ctx.storage.deleteAlarm();
-			(instance as any).repo.updateNode('greetings', { childRunId: child }, Date.now());
+			(instance as any).repo.updateNode('greetings', { childRunId: child }, Temporal.Now.instant().epochMilliseconds);
 		});
 
 		await runStub(parent).cancel();
@@ -321,7 +321,7 @@ describe('subflowの縦串', () => {
 
 	it('入れ子の上限を超える起動を拒否する', async () => {
 		// 既定上限3, 深さ判定は起動先で実施
-		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
+		// RPC越し例外はvitest-pluginで未処理rejection扱い、DO内で実行
 		await expect(
 			runInDurableObject(runStub('GREETINGS:too-deep'), (instance) =>
 				(instance as any).start({ flow: 'GREETINGS', input: { prefix: 'x' }, depth: 4 }),

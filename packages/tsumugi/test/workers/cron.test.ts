@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { InvalidCronError, nextCronAt, parseCron } from '../../src/core/cron.js';
 
 const next = (expression: string, after: string, timeZone: string): string =>
-	new Date(nextCronAt(parseCron(expression), Date.parse(after), timeZone)).toISOString();
+	Temporal.Instant.fromEpochMilliseconds(
+		nextCronAt(parseCron(expression), Temporal.Instant.from(after).epochMilliseconds, timeZone),
+	).toString({ fractionalSecondDigits: 3 });
 
 describe('workerdのcronタイムゾーン', () => {
 	it('IntlでIANAタイムゾーンを評価する', () => {

@@ -336,5 +336,5 @@ await runPerformer(performer, payload, ctx);
 
 ### 投入から実行までのテスト
 
-ジョブの投入から実行までの一連の流れを検証する場合は、`@cloudflare/vitest-pool-workers`を利用してください。
+ジョブの投入から実行までの一連の流れを検証する場合は、`@cloudflare/vitest-plugin`を利用してください。
 `tsumugi/testing`は、この範囲のテストを対象としていません。

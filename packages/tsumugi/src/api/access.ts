@@ -95,11 +95,11 @@ async function loadJwks(options: AccessOptions): Promise<Jwks> {
 	const certsUrl = `https://${options.teamDomain}.cloudflareaccess.com/cdn-cgi/access/certs`;
 	const ttl = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
 	const cached = jwksCache.get(certsUrl);
-	if (cached && cached.expiresAt > Date.now()) return cached.jwks;
+	if (cached && cached.expiresAt > Temporal.Now.instant().epochMilliseconds) return cached.jwks;
 
 	const fetcher = options.fetchJwks ?? (async (url: string) => (await fetch(url)).json<Jwks>());
 	const jwks = await fetcher(certsUrl);
-	jwksCache.set(certsUrl, { jwks, expiresAt: Date.now() + ttl });
+	jwksCache.set(certsUrl, { jwks, expiresAt: Temporal.Now.instant().epochMilliseconds + ttl });
 	return jwks;
 }
 
@@ -118,7 +118,7 @@ export function cloudflareAccess(options: AccessOptions): AuthMiddleware {
 			request.headers.get('cf-access-jwt-assertion') ?? readCookie(request.headers.get('cookie') ?? undefined, 'CF_Authorization');
 		if (!token) return unauthorized();
 
-		const claims = await verifyAccessJwt(token, options, Date.now());
+		const claims = await verifyAccessJwt(token, options, Temporal.Now.instant().epochMilliseconds);
 		if (!claims) return unauthorized();
 		return undefined;
 	};
