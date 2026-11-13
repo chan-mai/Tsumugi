@@ -1,8 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
 
 jobs:
   release:
@@ -38,7 +38,7 @@ jobs:
           fi
           echo "publishing $pkg"
 
-      # CIと同じ検査, タグを打った時点で壊れていないことを確かめてから公開する
+      # CIと同じ検査, リリースを作成した時点で壊れていないことを確かめてから公開する
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
@@ -55,8 +55,3 @@ jobs:
       - name: Publish to npm
         run: npm publish --access public
         working-directory: packages/tsumugi
-
-      - name: Create GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes
-        env:
-          GH_TOKEN: ${{ github.token }}
