@@ -10,16 +10,16 @@ export function expectedDispatchIds(input: DispatchInput): string[] {
 
 	const reaped = new Set(
 		jobs
-			.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && j.dispatchedAt !== null)
+			.filter(j => (j.state === 'QUEUED' || j.state === 'RUNNING') && j.dispatchedAt !== null)
 			.filter(
-				(j) =>
+				j =>
 					now >= j.dispatchedAt! + (j.state === 'QUEUED' ? policy.queueWaitMs : 0) + j.timeoutMs + policy.reaperGraceMs ||
 					(j.cancelRequestedAt !== null && now >= j.cancelRequestedAt + policy.reaperGraceMs),
 			)
-			.map((j) => j.id),
+			.map(j => j.id),
 	);
 
-	const inFlight = jobs.filter((j) => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id));
+	const inFlight = jobs.filter(j => (j.state === 'QUEUED' || j.state === 'RUNNING') && !reaped.has(j.id));
 
 	const keyInFlight = new Map<string, number>();
 	for (const j of inFlight) {
@@ -27,9 +27,9 @@ export function expectedDispatchIds(input: DispatchInput): string[] {
 	}
 
 	const ready = jobs
-		.filter((j) => j.state === 'SCHEDULED' && j.runAfter <= now && (j.expiresAt === null || now < j.expiresAt))
-		.filter((j) => j.cancelRequestedAt === null)
-		.map((j) => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
+		.filter(j => j.state === 'SCHEDULED' && j.runAfter <= now && (j.expiresAt === null || now < j.expiresAt))
+		.filter(j => j.cancelRequestedAt === null)
+		.map(j => ({ job: j, ep: agedPriority(j.priority, j.createdAt, now, policy.agingIntervalMs) }))
 		.sort((a, b) => b.ep - a.ep || a.job.createdAt - b.job.createdAt || (a.job.id < b.job.id ? -1 : 1));
 
 	let slots = policy.paused ? 0 : Math.max(0, policy.concurrency - inFlight.length);

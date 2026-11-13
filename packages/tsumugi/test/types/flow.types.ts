@@ -1,7 +1,8 @@
+import { createFlow } from '../../src/core/flow.js';
 // flow定義の型レベル検証, `tsc --noEmit`で検査
 import { Performer } from '../../src/performer/entrypoint.js';
+
 import type { JobContext } from '../../src/core/api.js';
-import { createFlow } from '../../src/core/flow.js';
 
 class FetchItems extends Performer<{ since: number }, { items: { id: string }[] }> {
 	async perform(_payload: { since: number }, _ctx: JobContext) {
@@ -27,19 +28,19 @@ class SyncInventory extends Performer<{ sku: string }, void, { uniqueKey: true }
 
 const flow = createFlow({ FETCH: FetchItems, PROCESS: ProcessItem, CHARGE: ChargeCard, SYNC: SyncInventory });
 
-export const order = flow<{ orderId: string; since: number }>((f) => {
-	const fetched = f.node('fetch', 'FETCH', { input: (i) => ({ since: i.since }) });
+export const order = flow<{ orderId: string; since: number }>(f => {
+	const fetched = f.node('fetch', 'FETCH', { input: i => ({ since: i.since }) });
 
 	const charge = f.node('charge', 'CHARGE', {
 		after: { fetched },
-		input: (i) => ({ customerId: i.orderId }),
-		concurrencyKey: (i) => i.orderId,
+		input: i => ({ customerId: i.orderId }),
+		concurrencyKey: i => i.orderId,
 	});
 
 	const each = f.fanOut('process', 'PROCESS', {
 		after: { fetched },
 		over: (_i, d) => d.fetched.items,
-		input: (item) => ({ id: item.id }),
+		input: item => ({ id: item.id }),
 	});
 
 	f.node('report', 'PROCESS', {
@@ -48,7 +49,7 @@ export const order = flow<{ orderId: string; since: number }>((f) => {
 	});
 });
 
-export const triggers = flow<{ orderId: string }>((f) => {
+export const triggers = flow<{ orderId: string }>(f => {
 	const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 
 	// successでは依存の戻り値が全て存在
@@ -68,7 +69,7 @@ export const triggers = flow<{ orderId: string }>((f) => {
 	});
 });
 
-export const negatives = flow<{ orderId: string }>((f) => {
+export const negatives = flow<{ orderId: string }>(f => {
 	// @ts-expect-error uniqueKey必須のperformerはノードに指定できない(ADR-0033)
 	f.node('sync', 'SYNC', { input: () => ({ sku: 'x' }) });
 
@@ -79,7 +80,7 @@ export const negatives = flow<{ orderId: string }>((f) => {
 	f.node('fetch', 'FETCH', { input: () => ({ since: 'now' }) });
 
 	// @ts-expect-error concurrencyKeyが必須
-	f.node('charge', 'CHARGE', { input: (i) => ({ customerId: i.orderId }) });
+	f.node('charge', 'CHARGE', { input: i => ({ customerId: i.orderId }) });
 
 	// @ts-expect-error uniqueKeyはノードでは受け付けない(ADR-0033)
 	f.node('fetch2', 'FETCH', { input: () => ({ since: 1 }), uniqueKey: 'sku-1' });

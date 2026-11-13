@@ -1,6 +1,7 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { toPoint, writeMetrics, type MetricPoint } from '../../src/analytics/writer.js';
+
 import type { JobRow } from '../../src/do/schema.js';
 
 const T0 = 2_300_000_000_000;
@@ -90,7 +91,7 @@ describe('tickからの書き出し', () => {
 		const { points, dataset } = captureDataset();
 		const stub = shard('MET#0');
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 			(instance as any).env.TSUMUGI_METRICS = dataset;
@@ -100,7 +101,7 @@ describe('tickからの書き出し', () => {
 		await runDurableObjectAlarm(stub);
 		expect(points).toHaveLength(0);
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = { now: () => T0 + 3_000 };
 			(instance as any).env.TSUMUGI_METRICS = dataset;
 		});
@@ -116,7 +117,7 @@ describe('tickからの書き出し', () => {
 		const { points, dataset } = captureDataset();
 		const stub = shard('MET2#0');
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 			(instance as any).env.TSUMUGI_METRICS = dataset;
@@ -142,7 +143,7 @@ describe('tickからの書き出し', () => {
 		} as unknown as AnalyticsEngineDataset;
 		const stub = shard('MET3#0');
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 			(instance as any).env.TSUMUGI_METRICS = boom;
@@ -150,7 +151,7 @@ describe('tickからの書き出し', () => {
 		const jobId = await stub.enqueue({ binding: 'MET3', payload: {} });
 		await runDurableObjectAlarm(stub);
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = { now: () => T0 + 3_000 };
 			(instance as any).env.TSUMUGI_METRICS = boom;
 		});
@@ -160,7 +161,7 @@ describe('tickからの書き出し', () => {
 		const projected = await env.TSUMUGI_DB.prepare('SELECT state FROM job WHERE id = ?').bind(jobId).first<{ state: string }>();
 		expect(projected?.state).toBe('COMPLETED');
 		// アウトボックス残存時は次tickでメトリクス二重書き込み
-		const outbox = await runInDurableObject(stub, (instance) => (instance as any).repo.countOutbox() as number);
+		const outbox = await runInDurableObject(stub, instance => (instance as any).repo.countOutbox() as number);
 		expect(outbox).toBe(0);
 	});
 });

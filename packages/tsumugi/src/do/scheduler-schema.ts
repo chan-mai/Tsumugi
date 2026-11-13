@@ -61,7 +61,7 @@ export function applySchedulerSchema(sql: SqlStorage): void {
 		sql
 			.exec<{ name: string }>(`SELECT name FROM pragma_table_info('schedule')`)
 			.toArray()
-			.map((row) => row.name),
+			.map(row => row.name),
 	);
 	for (const [from, to] of [
 		['next_run_at', 'next_occurrence_at'],

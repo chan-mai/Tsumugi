@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import ModalShell from './ModalShell.vue';
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { createJob } from '../api';
 import { button, ERROR_TEXT, INPUT as FIELD, LABEL } from '../ui';
+import ModalShell from './ModalShell.vue';
 
 const props = defineProps<{ open: boolean; bindings: string[] }>();
 const emit = defineEmits<{ close: []; created: [id: string] }>();
@@ -23,7 +23,7 @@ const busy = ref(false);
 
 watch(
 	() => props.open,
-	(open) => {
+	open => {
 		if (!open) return;
 		binding.value = props.bindings[0] ?? '';
 		payload.value = '{}';

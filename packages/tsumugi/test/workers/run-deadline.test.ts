@@ -1,9 +1,10 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
-import type { TsumugiRunInstance } from '../../src/do/run.js';
-import type { RunRow } from '../../src/do/run-schema.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+
+import type { DispatchMessage } from '../../src/do/job-shard.js';
+import type { RunRow } from '../../src/do/run-schema.js';
+import type { TsumugiRunInstance } from '../../src/do/run.js';
 
 // flow定義はexamples/basic, GREETINGSはstart時の期限, TIMEDはflow定義の期限を参照(ADR-0039)
 // Job DOの流量を0に制限し、ジョブがSCHEDULEDのまま期限到来する状況を作成
@@ -68,7 +69,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 // 実キューではconsumer自動実行、作成した状況が破損
 async function installQueues(): Promise<void> {
 	for (const binding of BINDINGS) {
-		await runInDurableObject(shard(binding), (instance) => {
+		await runInDurableObject(shard(binding), instance => {
 			(instance as any).env.TSUMUGI_QUEUE = queue;
 		});
 	}
@@ -76,7 +77,7 @@ async function installQueues(): Promise<void> {
 
 // 期限判定はこの時計のみ参照
 const setClock = (runId: string, now: number) =>
-	runInDurableObject(runStub(runId), (instance) => {
+	runInDurableObject(runStub(runId), instance => {
 		(instance as any).clock = { now: () => now };
 	});
 
@@ -107,21 +108,20 @@ async function settleRun(runId: string, rounds = 8): Promise<void> {
 }
 
 const nodesOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) =>
-		((instance as any).repo.views() as { id: string; state: string }[]).map((node) => [node.id, node.state] as const),
+	runInDurableObject(runStub(runId), instance =>
+		((instance as any).repo.views() as { id: string; state: string }[]).map(node => [node.id, node.state] as const),
 	);
 
 const stateOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun()?.state as string | undefined);
+	runInDurableObject(runStub(runId), instance => (instance as any).repo.findRun()?.state as string | undefined);
 
-const runRowOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun() as RunRow | undefined);
+const runRowOf = (runId: string) => runInDurableObject(runStub(runId), instance => (instance as any).repo.findRun() as RunRow | undefined);
 
 const jobIdOf = (runId: string, nodeId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.job_id as string | null);
+	runInDurableObject(runStub(runId), instance => (instance as any).repo.findNode(nodeId)?.job_id as string | null);
 
 const nodeErrorOf = (runId: string, nodeId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.error as string | null);
+	runInDurableObject(runStub(runId), instance => (instance as any).repo.findNode(nodeId)?.error as string | null);
 
 describe('run全体の期限(ADR-0039)', () => {
 	it('期限超過で待機中のノードが中断されrunがFAILEDになる', async () => {
@@ -136,7 +136,7 @@ describe('run全体の期限(ADR-0039)', () => {
 
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'SCHEDULED', greet: 'PENDING', report: 'PENDING' });
 		// 停滞runの超過判定用に期限時刻へalarm設定
-		expect(await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.getAlarm())).toBe(T0 + DEADLINE);
+		expect(await runInDurableObject(stub, instance => (instance as any).ctx.storage.getAlarm())).toBe(T0 + DEADLINE);
 
 		await setClock(runId, T0 + DEADLINE);
 		await runDurableObjectAlarm(stub);
@@ -148,7 +148,7 @@ describe('run全体の期限(ADR-0039)', () => {
 
 		const jobId = await jobIdOf(runId, 'list');
 		if (jobId === null) throw new Error('the first node has no job id');
-		const jobState = await runInDurableObject(shard('ListNames'), (instance) => (instance as any).repo.find(jobId)?.state as string);
+		const jobState = await runInDurableObject(shard('ListNames'), instance => (instance as any).repo.find(jobId)?.state as string);
 		expect(jobState).toBe('CANCELLED');
 	});
 
@@ -166,7 +166,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		if (jobId === null) throw new Error('the first node has no job id');
 
 		const jobStateOf = () =>
-			runInDurableObject(shard('ListNames'), (instance) => (instance as any).repo.find(jobId)?.state as string | undefined);
+			runInDurableObject(shard('ListNames'), instance => (instance as any).repo.find(jobId)?.state as string | undefined);
 		for (let i = 0; i < 5 && (await jobStateOf()) === 'SCHEDULED'; i++) {
 			await runDurableObjectAlarm(shard('ListNames'));
 		}
@@ -213,7 +213,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		expect(row?.expired).toBe(0);
 
 		await settleRun(runId);
-		expect(await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.getAlarm())).toBe(T0 + 60_000 + DEADLINE);
+		expect(await runInDurableObject(stub, instance => (instance as any).ctx.storage.getAlarm())).toBe(T0 + 60_000 + DEADLINE);
 
 		await settle(runId);
 		expect(await stateOf(runId)).toBe('COMPLETED');
@@ -245,7 +245,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		performed.length = 0;
 		await settle(runId);
 		expect(await stateOf(runId)).toBe('COMPLETED');
-		expect(performed.find((p) => p.binding === 'Report')?.payload).toEqual({ total: 1, failed: 0 });
+		expect(performed.find(p => p.binding === 'Report')?.payload).toEqual({ total: 1, failed: 0 });
 	});
 
 	it('再開で期限超過の取り消し要求によりCANCELLEDになったfan-outの子も実行する', async () => {
@@ -264,7 +264,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		await runDurableObjectAlarm(shard('Greet'));
 		const jobId = await jobIdOf(runId, 'greet:0');
 		if (jobId === null) throw new Error('the fan-out child has no job id');
-		expect(await runInDurableObject(shard('Greet'), (instance) => (instance as any).repo.find(jobId)?.state)).toBe('QUEUED');
+		expect(await runInDurableObject(shard('Greet'), instance => (instance as any).repo.find(jobId)?.state)).toBe('QUEUED');
 
 		await setClock(runId, T0 + DEADLINE);
 		await runDurableObjectAlarm(stub);
@@ -286,8 +286,8 @@ describe('run全体の期限(ADR-0039)', () => {
 		performed.length = 0;
 		await settle(runId);
 		expect(await stateOf(runId)).toBe('COMPLETED');
-		expect(performed.filter((p) => p.binding === 'Greet')).toHaveLength(1);
-		expect(performed.find((p) => p.binding === 'Report')?.payload).toEqual({ total: 1, failed: 0 });
+		expect(performed.filter(p => p.binding === 'Greet')).toHaveLength(1);
+		expect(performed.find(p => p.binding === 'Report')?.payload).toEqual({ total: 1, failed: 0 });
 	});
 
 	it('期限前に完了したrunは超過後のtickで反転しない', async () => {
@@ -324,7 +324,7 @@ describe('run全体の期限(ADR-0039)', () => {
 
 		// RPC越し例外はvitest-pool-workersで未処理rejection扱い、DO内で実行
 		await expect(
-			runInDurableObject(runStub('TIMED:invalid'), (instance) =>
+			runInDurableObject(runStub('TIMED:invalid'), instance =>
 				(instance as any).start({ flow: 'TIMED', input: { prefix: 'ng' }, deadlineMs: 0 }),
 			),
 		).rejects.toThrow('deadlineMs must be a positive integer');
@@ -394,7 +394,7 @@ describe('run全体の期限(ADR-0039)', () => {
 		const childId = 'GREETINGS:deadline-sub-unstarted-greetings';
 		const stub = runStub(parentId);
 		await setClock(parentId, T0);
-		await runInDurableObject(stub, async (instance) => {
+		await runInDurableObject(stub, async instance => {
 			await (instance as any).start({ flow: 'PIPELINE', input: { prefix: 'su' }, deadlineMs: DEADLINE });
 			await (instance as any).ctx.storage.deleteAlarm();
 			(instance as any).repo.updateNode('greetings', { childRunId: childId }, T0);
@@ -402,7 +402,7 @@ describe('run全体の期限(ADR-0039)', () => {
 
 		await setClock(parentId, T0 + DEADLINE);
 		// tickの中断とalarmの再設定を再現
-		await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.setAlarm(T0 + DEADLINE));
+		await runInDurableObject(stub, instance => (instance as any).ctx.storage.setAlarm(T0 + DEADLINE));
 		await runDurableObjectAlarm(stub);
 		await settleRun(parentId);
 

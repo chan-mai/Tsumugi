@@ -1,7 +1,8 @@
 import { shardName } from '../core/ids.js';
-import { resolveShard } from '../core/shard.js';
 import { assertPayloadSize } from '../core/message.js';
+import { resolveShard } from '../core/shard.js';
 import { normalizeTraceparent } from '../core/trace.js';
+
 import type { Policy, SettledTarget } from '../core/types.js';
 import type { EnqueueInput, ShardSettings } from '../do/job-shard.js';
 
@@ -131,7 +132,7 @@ export function createClient<Env extends ClientEnv>(
 	async function enqueueMany(env: Env, rawInputs: readonly EnqueueInput[]): Promise<string[]> {
 		// フックは宛先解決前に適用, traceparent検証はフック付与分含む
 		const onEnqueue = hooks.onEnqueue;
-		const inputs = onEnqueue ? rawInputs.map((input) => applyDefaults(input, onEnqueue(input))) : rawInputs;
+		const inputs = onEnqueue ? rawInputs.map(input => applyDefaults(input, onEnqueue(input))) : rawInputs;
 		for (const input of inputs) {
 			normalizeTraceparent(input.traceparent);
 			// RPC前に検証, DO側の例外は型を保持せず
@@ -159,7 +160,7 @@ export function createClient<Env extends ClientEnv>(
 		);
 
 		const cursor = new Map<string, number>();
-		return order.map((key) => {
+		return order.map(key => {
 			const at = cursor.get(key) ?? 0;
 			cursor.set(key, at + 1);
 			return results.get(key)?.[at] as string;

@@ -2,8 +2,9 @@ import { basename, join } from 'node:path';
 import { configFragment, configFragmentToml, type FragmentValues } from '../config/fragment.js';
 import { requiredAsMissing } from '../config/validate.js';
 import { detectWranglerConfig, readWorkerName, type ConfigFormat } from './config-file.js';
-import type { CliDeps } from './index.js';
 import { BARREL_HEADER, devVarsFile, exportLine, indexFile, performerFile, wranglerConfigFile } from './templates.js';
+
+import type { CliDeps } from './index.js';
 
 type InitOptions = {
 	name?: string | undefined;

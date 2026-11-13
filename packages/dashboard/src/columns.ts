@@ -17,7 +17,7 @@ export const TOGGLEABLE = Object.keys(COLUMN) as (keyof typeof COLUMN)[];
 
 export const visible = useStorage<Record<string, boolean>>(
 	'tsumugi:columns',
-	Object.fromEntries(TOGGLEABLE.map((key) => [key, true])),
+	Object.fromEntries(TOGGLEABLE.map(key => [key, true])),
 	undefined,
 	{ mergeDefaults: true },
 );

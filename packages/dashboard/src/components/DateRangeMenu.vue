@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Calendar } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import { Calendar } from '@lucide/vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { fromDateInput, toDateInput } from '../dates';

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const emit = defineEmits<{ ready: [] }>();
 
@@ -135,7 +135,7 @@ onMounted(async () => {
 	});
 
 	const pivot = new THREE.Group();
-	gltf.scene.traverse((object) => {
+	gltf.scene.traverse(object => {
 		if (object instanceof THREE.Mesh) object.material = glass;
 	});
 	pivot.add(gltf.scene);
@@ -149,8 +149,8 @@ onMounted(async () => {
 	function applyPalette() {
 		const uniforms = backgroundMaterial.uniforms;
 		for (const index of [1, 2, 3, 4]) uniforms[`uColor${index}`]!.value.copy(readColor(probe, `--color-hero-gradient-${index}`));
-		const tones = [0, 1, 2].map((index) => readColor(probe, `--color-hero-tone-${index}`).lerp(new THREE.Color(1, 1, 1), 0.55));
-		gltf.scene.traverse((object) => {
+		const tones = [0, 1, 2].map(index => readColor(probe, `--color-hero-tone-${index}`).lerp(new THREE.Color(1, 1, 1), 0.55));
+		gltf.scene.traverse(object => {
 			if (!(object instanceof THREE.Mesh)) return;
 			const geometry = object.geometry as THREE.BufferGeometry;
 			const tone = geometry.getAttribute('_tone');
@@ -239,7 +239,7 @@ onMounted(async () => {
 		intersectionObserver.disconnect();
 		window.removeEventListener('pointermove', onPointerMove);
 		motionQuery.removeEventListener('change', onMotionChange);
-		gltf.scene.traverse((object) => {
+		gltf.scene.traverse(object => {
 			if (object instanceof THREE.Mesh) object.geometry.dispose();
 		});
 		glass.dispose();

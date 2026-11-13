@@ -1,10 +1,11 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
-import type { RestEnv } from '../../src/api/rest.js';
-import type { JobDetailResponse, JobListResponse } from '../../src/api/types.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { RestEnv } from '../../src/api/rest.js';
+import type { JobDetailResponse, JobListResponse } from '../../src/api/types.js';
 
 const T0 = 2_200_000_000_000;
 const TRACEPARENT = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
@@ -32,7 +33,7 @@ function request(method: string, path: string, body?: unknown, extraHeaders: Rec
 }
 
 async function enqueue(body: Record<string, unknown> = {}, extraHeaders: Record<string, string> = {}) {
-	await runInDurableObject(stub(), (instance) => {
+	await runInDurableObject(stub(), instance => {
 		(instance as any).clock = { now: () => T0 };
 		(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 	});
@@ -77,7 +78,7 @@ describe('RESTのトレースとログ', () => {
 		expect(await detail(id)).toMatchObject({ traceparent: null, logs: [] });
 		const response = await request('GET', `/api/jobs?binding=${BINDING}`);
 		const { jobs } = await response.json<JobListResponse>();
-		const job = jobs.find((item) => item.id === id);
+		const job = jobs.find(item => item.id === id);
 		expect(job).toBeDefined();
 		expect(job).not.toHaveProperty('traceparent');
 		expect(job).not.toHaveProperty('logs');
@@ -94,7 +95,7 @@ describe('RESTのトレースとログ', () => {
 		});
 
 		expect(await stub().claim(id)).toBe(true);
-		await runInDurableObject(stub(), (instance) => {
+		await runInDurableObject(stub(), instance => {
 			(instance as any).clock = { now: () => T0 + 1_000 };
 		});
 		expect(await stub().log(id, 1, '処理終了')).toBe(true);

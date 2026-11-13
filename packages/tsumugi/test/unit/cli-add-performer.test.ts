@@ -52,7 +52,7 @@ describe('名前の変換', () => {
 		expect(performerNames(raw)).toEqual({ className, fileBase });
 	});
 
-	it.each([[''], ['9lives'], ['hello/world'], ['---']])('%sは変換できない', (raw) => {
+	it.each([[''], ['9lives'], ['hello/world'], ['---']])('%sは変換できない', raw => {
 		expect(performerNames(raw)).toBeUndefined();
 	});
 

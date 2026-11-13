@@ -30,7 +30,7 @@ describe('実行ログの送信', () => {
 		expect(send).toHaveBeenCalledTimes(1);
 	});
 
-	it.each([false, true])('送信時の例外をperformerへ伝播しない(sync=%s)', async (sync) => {
+	it.each([false, true])('送信時の例外をperformerへ伝播しない(sync=%s)', async sync => {
 		const error = new Error('unavailable');
 		const log = createLog(
 			() => {

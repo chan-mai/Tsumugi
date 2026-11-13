@@ -112,7 +112,7 @@ onMounted(load);
 				:title="t('common.status')"
 				:options="[...STATES]"
 				:selected="state"
-				:label-of="(value) => t(`state.${value}`)"
+				:label-of="value => t(`state.${value}`)"
 				@select="filter(() => (state = $event as typeof state))"
 			/>
 			<button

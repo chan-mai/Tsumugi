@@ -91,7 +91,7 @@ export function parseCron(expression: string): CronSpec {
 	});
 
 	// 曜日7は日曜, getUTCDay()の0へ統一
-	const daysOfWeek = new Set([...parsed[4]!].map((value) => (value === 7 ? 0 : value)));
+	const daysOfWeek = new Set([...parsed[4]!].map(value => (value === 7 ? 0 : value)));
 
 	return {
 		minutes: parsed[0]!,

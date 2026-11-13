@@ -182,7 +182,7 @@ export type FlowShape = readonly FlowShapeNode[];
 
 /** subflowの子flow名はflow定義に無く`nameOf`で取得 */
 export function shapeOf(flow: AnyFlow, nameOf?: (child: AnyFlow) => string | undefined): FlowShape {
-	return flow.nodes.map((node) => ({
+	return flow.nodes.map(node => ({
 		id: node.id,
 		binding: node.binding,
 		container: node.container,

@@ -29,7 +29,7 @@ const steps = [
 const { data: highlighted } = await useAsyncData('home-code', async () => {
 	const { codeToHtml } = await import('shiki');
 	return Promise.all(
-		steps.map(async (step) => {
+		steps.map(async step => {
 			const html = await codeToHtml(step.source, {
 				lang: 'ts',
 				themes: { default: 'github-light', dark: 'github-dark' },

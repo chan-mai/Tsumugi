@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SORT_KEYS, toJobDetail, toRunNode } from '../../src/api/mapper.js';
 import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
+
 import type { Job } from '../../src/core/entity/job.entity.js';
 import type { RunNode } from '../../src/core/entity/run.entity.js';
 

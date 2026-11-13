@@ -1,8 +1,9 @@
 import { attemptsOf } from '../core/attempts.js';
 import { nodeTiming } from '../core/node-timing.js';
-import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
 import { parseAttempts, parseJson } from './job.repository.js';
 import { and, condition, whereOf } from './where.js';
+
+import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
 
 export type RunListQuery = { state: string | null; flow: string | null; limit: number; offset: number };
 
@@ -64,7 +65,7 @@ export class RunReadRepository implements RunRepository {
 		if (!found) return null;
 		return {
 			run: found,
-			nodes: (nodes!.results as JoinedNode[]).map((node) => {
+			nodes: (nodes!.results as JoinedNode[]).map(node => {
 				// 結合先なしは全列null
 				const job =
 					node.job_state != null

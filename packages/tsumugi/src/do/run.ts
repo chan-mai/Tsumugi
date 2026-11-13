@@ -1,6 +1,4 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createLocalId } from './local-id.js';
-import type { BindingConfig, ClientEnv, EnqueueHook } from '../client/enqueue.js';
 import { configOf, createClient } from '../client/enqueue.js';
 import {
 	assertDeadlineMs,
@@ -15,6 +13,7 @@ import {
 } from '../core/flow.js';
 import { formatJobId, formatRunId, parseRunId, shardNameOf } from '../core/ids.js';
 import { assertPayloadSize } from '../core/message.js';
+import { retentionOf } from '../core/retention.js';
 import {
 	advance,
 	isNodeTerminal,
@@ -24,14 +23,16 @@ import {
 	type RunState,
 	type SpawnRequest,
 } from '../core/run.js';
-import { retentionOf } from '../core/retention.js';
 import { resolveShard } from '../core/shard.js';
-import type { SettledTarget } from '../core/types.js';
-import { systemClock, type Clock } from './clock.js';
-import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
 import { projectRun } from '../projection/run-projector.js';
-import type { NodeRow, RunRow } from './run-schema.js';
+import { systemClock, type Clock } from './clock.js';
+import { createLocalId } from './local-id.js';
 import { abortErrorOf, abortErrorsOf, RunRepo, type NewNode } from './run-repo.js';
+
+import type { BindingConfig, ClientEnv, EnqueueHook } from '../client/enqueue.js';
+import type { SettledTarget } from '../core/types.js';
+import type { EnqueueInput, MutationResult, TsumugiJobShard } from './job-shard.js';
+import type { NodeRow, RunRow } from './run-schema.js';
 
 export type RunEnv = ClientEnv & {
 	TSUMUGI_DB: D1Database;
@@ -139,7 +140,7 @@ type RunOptions = {
 export function createRunClass({ flows, bindings, settings = {}, failureBinding, settled, onEnqueue }: RunOptions): RunClass {
 	const maxNodes = settings.maxNodes ?? DEFAULT_MAX_NODES;
 	const maxDepth = settings.maxDepth ?? DEFAULT_MAX_DEPTH;
-	const nameOf = (child: AnyFlow) => Object.keys(flows).find((name) => flows[name] === child);
+	const nameOf = (child: AnyFlow) => Object.keys(flows).find(name => flows[name] === child);
 	const retention = retentionOf(settings);
 	const client = createClient<RunEnv>(
 		bindings,
@@ -214,7 +215,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			this.repo.appendRunOutbox();
 			this.repo.appendNodeOutbox(
 				runId,
-				shape.map((node) => node.id),
+				shape.map(node => node.id),
 			);
 			await this.#armAlarm(now);
 			return { id: runId, created: true };
@@ -348,7 +349,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				return;
 			}
 
-			const definitions = new Map(flow.nodes.map((node) => [node.id, node]));
+			const definitions = new Map(flow.nodes.map(node => [node.id, node]));
 			const runInput = JSON.parse(runRow.input) as unknown;
 			const cancelling = runRow.cancelling === 1;
 			// 期限超過は取り消しと同手順で中断(ADR-0039)
@@ -373,7 +374,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			for (let round = 0; round < ADVANCE_ROUNDS; round++) {
 				const abortError = abortErrorNow();
 				const output = advance({ nodes: this.repo.views(), cancelling, aborted: abortError !== null });
-				const fresh = output.decisions.filter((decision) => !handled.has(decision.id));
+				const fresh = output.decisions.filter(decision => !handled.has(decision.id));
 				if (fresh.length === 0) break;
 
 				const room = TICK_LIMIT - handled.size;
@@ -422,7 +423,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const hasMore =
 				deferred > 0 ||
 				projected >= PROJECTION_LIMIT ||
-				settled.decisions.some((decision) => !waiting.has(decision.id)) ||
+				settled.decisions.some(decision => !waiting.has(decision.id)) ||
 				this.repo.hasOutbox();
 			if (hasMore) await this.#armAlarm(now);
 			else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
@@ -479,7 +480,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				const current = this.repo.findNode(id);
 				// 投入待ち中に完了通知があり得る, 終端ノードを戻すと以後の通知なし
 				if (!current || isNodeTerminal(current.state as NodeState)) continue;
-				this.repo.updateNode(id, { state: subflows.some((child) => child.nodeId === id) ? 'RUNNING' : 'SCHEDULED' }, now);
+				this.repo.updateNode(id, { state: subflows.some(child => child.nodeId === id) ? 'RUNNING' : 'SCHEDULED' }, now);
 				touched.push(id);
 			}
 			return touched;
@@ -653,7 +654,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 			this.repo.insertNodes(children, now);
 			this.repo.updateNode(row.id, { state: 'RUNNING' }, now);
-			return [row.id, ...children.map((child) => child.id)];
+			return [row.id, ...children.map(child => child.id)];
 		}
 
 		// 作成不可は例外でなく理由を返却, 例外では通知滞留
@@ -662,16 +663,16 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			const children = this.#childNodes(
 				parentId,
 				'spawn',
-				spawns.map((spawn) => {
+				spawns.map(spawn => {
 					const { concurrencyKey, ...job } = spawn.options ?? {};
 					return { key: spawn.id, binding: spawn.binding, payload: spawn.payload, job, concurrencyKey };
 				}),
 			);
-			const ids = [...new Set(children.map((child) => child.id))];
+			const ids = [...new Set(children.map(child => child.id))];
 			const existing = this.repo.existingNodeIds(ids);
 			const exceeded = this.#nodeLimitError(ids.length - existing.size, now);
 			if (exceeded) return { ids: [], error: exceeded };
-			const invalid = spawns.find((spawn) => !isNodeId(spawn.id));
+			const invalid = spawns.find(spawn => !isNodeId(spawn.id));
 			if (invalid) return { ids: [], error: `invalid spawn id: ${JSON.stringify(invalid.id)}` };
 
 			this.repo.insertNodes(children, now);
@@ -688,7 +689,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 
 		#childNodes(parent: string, origin: 'fanOut' | 'spawn', specs: readonly ChildSpec[]): NewNode[] {
 			let seq = this.repo.nextSeq();
-			return specs.map((spec) => ({
+			return specs.map(spec => ({
 				id: `${parent}:${spec.key}`,
 				binding: spec.binding,
 				container: false,

@@ -2,8 +2,9 @@ import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest';
 import { createClient } from '../../src/client/enqueue.js';
 import { fixedClock } from '../../src/do/clock.js';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+
+import type { DispatchMessage } from '../../src/do/job-shard.js';
 
 const T0 = 2_500_000_000_000;
 
@@ -36,10 +37,10 @@ function makeBatch(bodies: DispatchMessage[]) {
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 const stateOf = (name: string, id: string) =>
-	runInDurableObject(shard(name), (instance) => (instance as any).repo.find(id)?.state as string | undefined);
+	runInDurableObject(shard(name), instance => (instance as any).repo.find(id)?.state as string | undefined);
 
 async function install(name: string, queue: unknown) {
-	await runInDurableObject(shard(name), (instance) => {
+	await runInDurableObject(shard(name), instance => {
 		(instance as any).clock = fixedClock(T0);
 		(instance as any).env.TSUMUGI_QUEUE = queue;
 	});
@@ -84,7 +85,7 @@ describe('別Workerのperformer(ADR-0026)', () => {
 });
 
 describe('実際のservice binding越し', () => {
-	it.each([false, true])('traceparentとログ関数が別Workerへ渡り記録が残る(fail=%s)', async (fail) => {
+	it.each([false, true])('traceparentとログ関数が別Workerへ渡り記録が残る(fail=%s)', async fail => {
 		const { sent, queue } = captureQueue();
 		await install('MAIL#0', queue);
 		const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
@@ -171,7 +172,7 @@ describe('投入だけを行うclient(ADR-0023)', () => {
 		expect(new Set(ids).size).toBe(12);
 		// 宛先別集約投入, 返却順誤りでIDと入力が不一致
 		for (const [i, id] of ids.entries()) {
-			const state = await runInDurableObject(shard(id.split(':')[0]!), (instance) => (instance as any).repo.find(id)?.payload as string);
+			const state = await runInDurableObject(shard(id.split(':')[0]!), instance => (instance as any).repo.find(id)?.payload as string);
 			expect(JSON.parse(state)).toEqual({ i });
 		}
 	});

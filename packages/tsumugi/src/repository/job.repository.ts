@@ -1,8 +1,9 @@
 import { attemptsOf } from '../core/attempts.js';
-import type { Attempt, Job, JobListItem, JobSortKey } from '../core/entity/job.entity.js';
-import type { JobLogEntry } from '../core/log.js';
 import { READ_MODEL_COLUMNS, type ReadModelRow } from '../projection/columns.js';
 import { and, condition, inList, or, whereOf, type Condition } from './where.js';
+
+import type { Attempt, Job, JobListItem, JobSortKey } from '../core/entity/job.entity.js';
+import type { JobLogEntry } from '../core/log.js';
 
 // 一覧, 詳細はD1の読み取りモデルから取得(ADR-0008)
 // 稼働中も投影済み, ページング, ソートは通常のSQL
@@ -108,7 +109,7 @@ export function parseJson<T>(raw: unknown): T[] {
 type StoredAttempt = { attempt: number; state: string; started_at: number | null; finished_at: number; error: string | null };
 
 export function parseAttempts(raw: unknown): Attempt[] {
-	return parseJson<StoredAttempt>(raw).map((stored) => ({
+	return parseJson<StoredAttempt>(raw).map(stored => ({
 		attempt: stored.attempt,
 		state: stored.state,
 		startedAt: stored.started_at,
@@ -125,7 +126,7 @@ function retainedClause(retention: RetainedFailures | undefined, binding: string
 	const retained = (name: string) => condition('updated_at > ?', now - retention.of(name));
 	if (binding) return retained(binding);
 	if (!retention.bindings || retention.bindings.length === 0) return undefined;
-	return or(...retention.bindings.map((name) => and(condition('binding = ?', name), retained(name))));
+	return or(...retention.bindings.map(name => and(condition('binding = ?', name), retained(name))));
 }
 
 // フィルタ共通の条件
@@ -164,7 +165,7 @@ export class JobReadRepository implements JobRepository {
 
 	async listBindings(): Promise<string[]> {
 		const { results } = await this.#db.prepare(`SELECT DISTINCT binding FROM job ORDER BY binding ASC`).all<{ binding: string }>();
-		return results.map((row) => row.binding);
+		return results.map(row => row.binding);
 	}
 
 	async selectBulkTargets(
@@ -190,7 +191,7 @@ export class JobReadRepository implements JobRepository {
 			this.#db.prepare(`SELECT id FROM job${where.sql} ORDER BY created_at ASC, id ASC LIMIT ?`).bind(...where.params, limit),
 			this.#db.prepare(`SELECT count(*) AS total FROM job${where.sql}`).bind(...where.params),
 		]);
-		const ids = (page!.results as { id: string }[]).map((row) => row.id);
+		const ids = (page!.results as { id: string }[]).map(row => row.id);
 		return { ids, remaining: Math.max(0, ((total!.results[0] as { total: number } | undefined)?.total ?? 0) - ids.length) };
 	}
 
@@ -202,12 +203,12 @@ export class JobReadRepository implements JobRepository {
 			.prepare(`SELECT min(created_at) AS created_at FROM job WHERE state = ?`)
 			.bind('SCHEDULED')
 			.first<{ created_at: number | null }>();
-		return { byState: Object.fromEntries(rows.map((r) => [r.state, r.count])), oldestScheduledAt: oldest?.created_at ?? null };
+		return { byState: Object.fromEntries(rows.map(r => [r.state, r.count])), oldestScheduledAt: oldest?.created_at ?? null };
 	}
 
 	async find(id: string): Promise<Job | null> {
 		const found = await this.#db
-			.prepare(`SELECT ${READ_MODEL_COLUMNS.job.map((column) => `"${column}"`).join(', ')} FROM job WHERE id = ? LIMIT 1`)
+			.prepare(`SELECT ${READ_MODEL_COLUMNS.job.map(column => `"${column}"`).join(', ')} FROM job WHERE id = ? LIMIT 1`)
 			.bind(id)
 			.first<StoredJob>();
 		if (!found) return null;

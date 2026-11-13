@@ -11,12 +11,12 @@ export const LOCALES = [
 ] as const;
 export type Locale = (typeof LOCALES)[number]['key'];
 
-const isLocale = (value: unknown): value is Locale => LOCALES.some((locale) => locale.key === value);
+const isLocale = (value: unknown): value is Locale => LOCALES.some(locale => locale.key === value);
 
 const detected: Locale = navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en';
 
 export const locale = useStorage<Locale>('tsumugi:locale', detected, undefined, {
-	serializer: { read: (raw) => (isLocale(raw) ? raw : detected), write: (value) => value },
+	serializer: { read: raw => (isLocale(raw) ? raw : detected), write: value => value },
 });
 
 export const i18n = createI18n<[typeof en], Locale, false>({
@@ -28,10 +28,10 @@ export const i18n = createI18n<[typeof en], Locale, false>({
 
 watch(
 	locale,
-	(next) => {
+	next => {
 		i18n.global.locale.value = next;
 		document.documentElement.lang = next;
-		timeLocale.value = LOCALES.find((entry) => entry.key === next)?.time;
+		timeLocale.value = LOCALES.find(entry => entry.key === next)?.time;
 	},
 	{ immediate: true },
 );

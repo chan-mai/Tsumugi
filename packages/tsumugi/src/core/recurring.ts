@@ -1,6 +1,7 @@
+import { InvalidCronError, nextCronAt, parseCron, resolveTimeZone } from './cron.js';
+
 import type { PayloadOf, Performers, ReqOf } from './api.js';
 import type { Flows, InputOf, NodeJobOptions } from './flow.js';
-import { InvalidCronError, nextCronAt, parseCron, resolveTimeZone } from './cron.js';
 
 // 定期実行定義, payloadとinputの関数はJSON化不能でコードにのみ存在(ADR-0040)
 // Scheduler DOへは`normalizeSchedules`の正規形のみ送信, 関数は都度closureから取得
@@ -56,7 +57,8 @@ export type FlowSchedule<F extends Flows> = {
 }[keyof F & string];
 
 export type ScheduleTiming = (
-	{ everyMs: number; cron?: never; timeZone?: never } | { cron: string; everyMs?: never; timeZone?: string }
+	| { everyMs: number; cron?: never; timeZone?: never }
+	| { cron: string; everyMs?: never; timeZone?: string }
 ) & {
 	/** 前回実行中に次回時刻到来時の扱い, 既定は'skip'(ADR-0040) */
 	overlap?: 'skip' | 'overlap';
@@ -106,7 +108,7 @@ export function normalizeSchedules(
 ): { schedules: NormalizedSchedule[]; fingerprint: string } {
 	const schedules = Object.keys(defs)
 		.sort()
-		.map((name) => normalizeSchedule(name, defs[name]!, context));
+		.map(name => normalizeSchedule(name, defs[name]!, context));
 	return { schedules, fingerprint: JSON.stringify(schedules) };
 }
 

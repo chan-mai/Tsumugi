@@ -42,7 +42,7 @@ async function load(id: string) {
 
 watch(
 	() => props.jobId,
-	async (id) => {
+	async id => {
 		loadSequence++;
 		loading.value = false;
 		if (!id) return;

@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { Job } from '../api';
 import { at, columnClass, visible } from '../columns';
-import LoadingState from './LoadingState.vue';
 import { EMPTY_ROW, TABLE, TABLE_WRAP, TBODY, TD, TH, THEAD } from '../ui';
 import CheckBox from './CheckBox.vue';
+import LoadingState from './LoadingState.vue';
 import RowActions from './RowActions.vue';
 import SortHeader from './SortHeader.vue';
 import StatusCell from './StatusCell.vue';
+
+import type { Job } from '../api';
 
 const props = defineProps<{ jobs: Job[]; picked: string[]; sort: string; desc: boolean; loading: boolean }>();
 const emit = defineEmits<{
@@ -20,14 +21,14 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 
-const allPicked = computed(() => props.jobs.length > 0 && props.jobs.every((job) => props.picked.includes(job.id)));
+const allPicked = computed(() => props.jobs.length > 0 && props.jobs.every(job => props.picked.includes(job.id)));
 
 function togglePick(id: string) {
-	emit('update:picked', props.picked.includes(id) ? props.picked.filter((value) => value !== id) : [...props.picked, id]);
+	emit('update:picked', props.picked.includes(id) ? props.picked.filter(value => value !== id) : [...props.picked, id]);
 }
 
 function toggleAll() {
-	emit('update:picked', allPicked.value ? [] : props.jobs.map((job) => job.id));
+	emit('update:picked', allPicked.value ? [] : props.jobs.map(job => job.id));
 }
 
 const durationOf = (job: Job) =>

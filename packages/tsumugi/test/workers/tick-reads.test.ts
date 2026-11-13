@@ -1,8 +1,9 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { JobRepo } from '../../src/do/repo.js';
 import { columnList } from '../../src/do/bind.js';
 import { applySchema, COLUMNS } from '../../src/do/schema.js';
+
+import type { JobRepo } from '../../src/do/repo.js';
 
 const T0 = 2_400_000_000_000;
 const N = 2_000;
@@ -25,7 +26,7 @@ function seed(sql: SqlStorage, state: string, runAfter: number, updatedAt: numbe
 // tickごとの滞留全件読み取りでは総読み取り行数が件数の2乗に比例(#104)
 describe('tickの読み取り行数', () => {
 	it('実行可能ジョブの滞留中もreadyの読み取りはlimit程度', async () => {
-		await runInDurableObject(shard('READS1#0'), (instance) => {
+		await runInDurableObject(shard('READS1#0'), instance => {
 			const repo = (instance as any).repo as JobRepo;
 			seed(repo.sql, 'SCHEDULED', T0, T0);
 
@@ -36,7 +37,7 @@ describe('tickの読み取り行数', () => {
 			const plan = repo.sql
 				.exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${text}`, ...params)
 				.toArray()
-				.map((r) => r.detail)
+				.map(r => r.detail)
 				.join('\n');
 			expect(plan).toContain('job_due');
 			expect(plan).not.toContain('TEMP B-TREE');
@@ -48,13 +49,13 @@ describe('tickの読み取り行数', () => {
 			// seedのcreated_atはIDの逆順, 作成順ソートを検出
 			const { jobs, readyCount } = repo.scheduleWindow(T0, LIMIT);
 			expect(readyCount).toBe(LIMIT);
-			const ids = jobs.map((j) => j.id);
+			const ids = jobs.map(j => j.id);
 			expect(ids).toEqual([...ids].sort());
 		});
 	});
 
 	it('終端ジョブが多くてもsweepStateの読み取りは件数に比例しない', async () => {
-		await runInDurableObject(shard('READS2#0'), (instance) => {
+		await runInDurableObject(shard('READS2#0'), instance => {
 			const repo = (instance as any).repo as JobRepo;
 			seed(repo.sql, 'FAILED', T0, T0);
 
@@ -79,7 +80,7 @@ describe('tickの読み取り行数', () => {
 	});
 
 	it('next_dueは状態ごとの保持期間で最小を取る', async () => {
-		await runInDurableObject(shard('READS3#0'), (instance) => {
+		await runInDurableObject(shard('READS3#0'), instance => {
 			const repo = (instance as any).repo as JobRepo;
 			seed(repo.sql, 'COMPLETED', T0, T0);
 			seed(repo.sql, 'STALLED', T0, T0 - 1_000);
@@ -91,7 +92,7 @@ describe('tickの読み取り行数', () => {
 	});
 
 	it('既存DOの旧インデックスを置き換える', async () => {
-		await runInDurableObject(shard('READS4#0'), (instance) => {
+		await runInDurableObject(shard('READS4#0'), instance => {
 			const sql = ((instance as any).repo as JobRepo).sql;
 			sql.exec(`DROP INDEX IF EXISTS job_due`);
 			sql.exec(`DROP INDEX IF EXISTS job_terminal`);
@@ -102,7 +103,7 @@ describe('tickの読み取り行数', () => {
 			const names = sql
 				.exec<{ name: string }>(`SELECT name FROM pragma_index_list('job')`)
 				.toArray()
-				.map((r) => r.name);
+				.map(r => r.name);
 			expect(names).toEqual(expect.arrayContaining(['job_due', 'job_terminal']));
 			expect(names).not.toContain('job_active');
 		});

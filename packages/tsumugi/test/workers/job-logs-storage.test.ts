@@ -1,17 +1,18 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { LOG_KEEP, LOG_MAX_CHARS, LOG_MIN_INTERVAL_MS, type JobLogEntry } from '../../src/core/log.js';
-import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from '../../src/do/job-shard.js';
-import type { JobRepo } from '../../src/do/repo.js';
 import { applySchema, COLUMNS, SCHEMA } from '../../src/do/schema.js';
 import { project } from '../../src/projection/projector.js';
+
+import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from '../../src/do/job-shard.js';
+import type { JobRepo } from '../../src/do/repo.js';
 
 const T0 = 2_400_000_000_000;
 const TRACEPARENT = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 async function install(name: string, now: number, sent: DispatchMessage[] = []): Promise<void> {
-	await runInDurableObject(shard(name), (instance) => {
+	await runInDurableObject(shard(name), instance => {
 		(instance as any).clock = { now: () => now };
 		(instance as any).env.TSUMUGI_QUEUE = {
 			send: async (body: DispatchMessage) => void sent.push(body),
@@ -30,9 +31,9 @@ async function queued(name: string, input: Partial<EnqueueInput> = {}) {
 	return { jobId, sent };
 }
 
-const logsOf = (name: string, id: string) => runInDurableObject(shard(name), (instance) => ((instance as any).repo as JobRepo).logsOf(id));
+const logsOf = (name: string, id: string) => runInDurableObject(shard(name), instance => ((instance as any).repo as JobRepo).logsOf(id));
 
-const writesOf = (name: string) => runInDurableObject(shard(name), (instance) => ((instance as any).repo as JobRepo).writes);
+const writesOf = (name: string) => runInDurableObject(shard(name), instance => ((instance as any).repo as JobRepo).writes);
 
 const readModel = (id: string) =>
 	env.TSUMUGI_DB.prepare('SELECT logs, traceparent, state FROM job WHERE id = ?')
@@ -155,16 +156,16 @@ describe('ジョブログの保存と投影', () => {
 				row: state.storage.sql.exec<{ id: string; traceparent: string | null }>('SELECT id, traceparent FROM job').one(),
 			};
 		});
-		expect(actual.before.map((column) => column.name)).not.toContain('traceparent');
-		expect(actual.job.map((column) => column.name)).toContain('traceparent');
+		expect(actual.before.map(column => column.name)).not.toContain('traceparent');
+		expect(actual.job.map(column => column.name)).toContain('traceparent');
 		expect(actual.row).toEqual({ id: 'legacy', traceparent: null });
-		expect(actual.log.map((column) => column.name).sort()).toEqual([...COLUMNS.job_log].sort());
+		expect(actual.log.map(column => column.name).sort()).toEqual([...COLUMNS.job_log].sort());
 	});
 
 	it('旧スナップショットの投影で追加列をnullにする', async () => {
 		const name = 'LOGSTORE8#0';
 		const { jobId } = await queued(name);
-		const snapshot = await runInDurableObject(shard(name), (instance) => {
+		const snapshot = await runInDurableObject(shard(name), instance => {
 			const { traceparent: _traceparent, ...row } = ((instance as any).repo as JobRepo).find(jobId)!;
 			return row;
 		});
@@ -175,7 +176,7 @@ describe('ジョブログの保存と投影', () => {
 	it('無効なtraceparentを含む一括投入ではジョブを作成しない', async () => {
 		const name = 'LOGSTORE9#0';
 		await install(name, T0);
-		const error = await runInDurableObject(shard(name), async (instance) => {
+		const error = await runInDurableObject(shard(name), async instance => {
 			try {
 				await (instance as TsumugiJobShard).enqueueMany([
 					{ binding: 'LOGSTORE9', payload: {}, traceparent: TRACEPARENT },
@@ -187,7 +188,7 @@ describe('ジョブログの保存と投影', () => {
 			}
 		});
 		expect(error).toContain('traceparent');
-		const count = await runInDurableObject(shard(name), (instance) => ((instance as any).repo as JobRepo).countJobs());
+		const count = await runInDurableObject(shard(name), instance => ((instance as any).repo as JobRepo).countJobs());
 		expect(count).toBe(0);
 	});
 });

@@ -1,11 +1,12 @@
+import { DASHBOARD_HTML } from '@tsumugi/dashboard';
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
-import type { RestEnv } from '../../src/api/rest.js';
 import { Performer } from '../../src/performer/entrypoint.js';
-import { DASHBOARD_HTML } from '@tsumugi/dashboard';
 import { clearUiCache, ui } from '../../src/ui/serve.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { RestEnv } from '../../src/api/rest.js';
 
 const TOKEN = 'ui-token';
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { RunNode } from '../../src/api';
 import { HANDLE_TOP, MAX_CHIPS, runLayout, type ChildData, type TaskData } from '../../src/components/graph/runLayout';
+
+import type { RunNode } from '../../src/api';
 
 const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 	binding: 'GREET',
@@ -27,7 +28,7 @@ const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 const child = (parent: string, index: number, state = 'COMPLETED') =>
 	node({ id: `${parent}:${index}`, parent, origin: 'fanOut', state, position: index });
 
-const taskOf = (result: ReturnType<typeof runLayout>, id: string) => result.nodes.find((n) => n.id === id);
+const taskOf = (result: ReturnType<typeof runLayout>, id: string) => result.nodes.find(n => n.id === id);
 
 describe('Runのグラフの配置', () => {
 	it('ルートはtask, 実行時に増えたノードはchildになる', () => {
@@ -38,7 +39,7 @@ describe('Runのグラフの配置', () => {
 			child('greet', 1),
 		]);
 
-		expect(result.nodes.filter((n) => n.type === 'task').map((n) => n.id)).toEqual(['list', 'greet']);
+		expect(result.nodes.filter(n => n.type === 'task').map(n => n.id)).toEqual(['list', 'greet']);
 		const chip = taskOf(result, 'greet:0');
 		expect(chip?.type).toBe('child');
 		expect(chip?.parentNode).toBe('greet');
@@ -96,7 +97,7 @@ describe('Runのグラフの配置', () => {
 
 	it('同じ依存を重ねて書いても辺は1本になる', () => {
 		const result = runLayout([node({ id: 'a' }), node({ id: 'b', after: ['a', 'a'] })]);
-		expect(result.edges.map((edge) => edge.id)).toEqual(['a->b']);
+		expect(result.edges.map(edge => edge.id)).toEqual(['a->b']);
 	});
 
 	it('自分への依存は辺にしない', () => {
@@ -107,7 +108,7 @@ describe('Runのグラフの配置', () => {
 	it('同じ空きを通る辺は縦の走り位置を分ける', () => {
 		const result = runLayout([node({ id: 'a' }), node({ id: 'b' }), node({ id: 'c', after: ['a'] }), node({ id: 'd', after: ['b'] })]);
 
-		const xs = result.edges.map((edge) => edge.data.route[1]!.x);
+		const xs = result.edges.map(edge => edge.data.route[1]!.x);
 		expect(new Set(xs).size).toBe(xs.length);
 	});
 
@@ -115,22 +116,22 @@ describe('Runのグラフの配置', () => {
 		const result = runLayout([node({ id: 'a' }), node({ id: 'b', after: ['a'] }), node({ id: 'c', after: ['a', 'b'] })]);
 
 		const boxes = result.nodes
-			.filter((n) => n.type === 'task')
-			.map((n) => ({
+			.filter(n => n.type === 'task')
+			.map(n => ({
 				l: n.position.x,
 				r: n.position.x + Number.parseFloat(n.style.width),
 				t: n.position.y,
 				b: n.position.y + Number.parseFloat(n.style.height),
 			}));
 
-		const route = result.edges.find((edge) => edge.id === 'a->c')!.data.route;
+		const route = result.edges.find(edge => edge.id === 'a->c')!.data.route;
 		for (let i = 1; i < route.length; i++) {
 			const from = route[i - 1]!;
 			const to = route[i]!;
 			for (let step = 0; step <= 20; step++) {
 				const x = from.x + ((to.x - from.x) * step) / 20;
 				const y = from.y + ((to.y - from.y) * step) / 20;
-				expect(boxes.some((box) => x > box.l + 1 && x < box.r - 1 && y > box.t + 1 && y < box.b - 1)).toBe(false);
+				expect(boxes.some(box => x > box.l + 1 && x < box.r - 1 && y > box.t + 1 && y < box.b - 1)).toBe(false);
 			}
 		}
 	});
@@ -152,9 +153,9 @@ describe('Runのグラフの配置', () => {
 		const children = Array.from({ length: 40 }, (_unused, i) => child('each', i, i === 39 ? 'FAILED' : 'COMPLETED'));
 		const result = runLayout([node({ id: 'each', container: true }), ...children]);
 
-		const chips = result.nodes.filter((n) => n.type === 'child');
+		const chips = result.nodes.filter(n => n.type === 'child');
 		expect(chips).toHaveLength(MAX_CHIPS);
-		expect(chips.map((n) => n.id)).toContain('each:39');
+		expect(chips.map(n => n.id)).toContain('each:39');
 
 		const data = taskOf(result, 'each')!.data as TaskData;
 		expect(data.progress).toBe('39 / 40');
@@ -173,7 +174,7 @@ describe('Runのグラフの配置', () => {
 		const parent = taskOf(result, 'each')!;
 		const width = Number.parseFloat(parent.style.width);
 		const height = Number.parseFloat(parent.style.height);
-		for (const chip of result.nodes.filter((n) => n.type === 'child')) {
+		for (const chip of result.nodes.filter(n => n.type === 'child')) {
 			expect(chip.position.x).toBeGreaterThanOrEqual(0);
 			expect(chip.position.y).toBeGreaterThanOrEqual(0);
 			expect(chip.position.x + Number.parseFloat(chip.style.width)).toBeLessThanOrEqual(width);
@@ -188,7 +189,7 @@ describe('Runのグラフの配置', () => {
 			node({ id: 'each:0:sub', parent: 'each:0', origin: 'spawn' }),
 		]);
 
-		expect(result.nodes.map((n) => n.id)).toEqual(['each', 'each:0']);
+		expect(result.nodes.map(n => n.id)).toEqual(['each', 'each:0']);
 		expect((taskOf(result, 'each:0')!.data as ChildData).nested).toBe(1);
 	});
 

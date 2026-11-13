@@ -11,11 +11,12 @@ import {
 } from '../core/recurring.js';
 import { resolveShard } from '../core/shard.js';
 import { ACTIVE_STATES } from '../core/transitions.js';
-import type { SettledTarget } from '../core/types.js';
 import { systemClock, type Clock } from './clock.js';
+import { SchedulerRepo, type FiredPatch } from './scheduler-repo.js';
+
+import type { SettledTarget } from '../core/types.js';
 import type { EnqueueInput } from './job-shard.js';
 import type { RunLifecycleStub } from './run.js';
-import { SchedulerRepo, type FiredPatch } from './scheduler-repo.js';
 import type { ScheduleRow } from './scheduler-schema.js';
 
 export type SchedulerEnv = ClientEnv & {
@@ -55,7 +56,9 @@ export type ScheduleView = {
 export type ScheduleMutationResult = { ok: true } | { ok: false; reason: 'unknown' };
 
 export type ScheduleTriggerResult =
-	{ ok: true; kind: 'job' | 'flow'; id: string } | { ok: false; reason: 'unknown' } | { ok: false; reason: 'failed'; error: string };
+	| { ok: true; kind: 'job' | 'flow'; id: string }
+	| { ok: false; reason: 'unknown' }
+	| { ok: false; reason: 'failed'; error: string };
 
 // DOクラス非参照でDO実装不要(ADR-0023)
 interface SchedulerJobStub extends Rpc.DurableObjectBranded {
@@ -106,7 +109,7 @@ export function createSchedulerClass({
 	const { schedules: normalized, fingerprint } = normalizeSchedules(schedules, {
 		bindings: targets.bindings,
 		flows: targets.flows,
-		shardsOf: (binding) => configOf(bindings, binding)?.shards ?? 1,
+		shardsOf: binding => configOf(bindings, binding)?.shards ?? 1,
 	});
 	const client = createClient<SchedulerEnv>(
 		bindings,
@@ -136,7 +139,7 @@ export function createSchedulerClass({
 		}
 
 		async list(): Promise<ScheduleView[]> {
-			return this.repo.rows().map((row) => ({
+			return this.repo.rows().map(row => ({
 				name: row.name,
 				kind: row.kind as 'job' | 'flow',
 				target: row.target,
@@ -237,11 +240,11 @@ export function createSchedulerClass({
 		}
 
 		#reconcile(now: number): void {
-			const rows = new Map(this.repo.rows().map((row) => [row.name, row]));
+			const rows = new Map(this.repo.rows().map(row => [row.name, row]));
 			if (
 				this.repo.readSetting(FINGERPRINT_KEY) === fingerprint &&
 				rows.size === normalized.length &&
-				normalized.every((spec) => {
+				normalized.every(spec => {
 					const row = rows.get(spec.name);
 					return row !== undefined && rowMatchesSpec(row, spec);
 				})

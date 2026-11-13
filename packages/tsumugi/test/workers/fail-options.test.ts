@@ -1,9 +1,10 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { FailOptions, JobContext } from '../../src/core/api.js';
 import { fixedClock } from '../../src/do/clock.js';
-import type { DispatchMessage, EnqueueInput } from '../../src/do/job-shard.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+
+import type { FailOptions, JobContext } from '../../src/core/api.js';
+import type { DispatchMessage, EnqueueInput } from '../../src/do/job-shard.js';
 
 const T0 = 2_500_000_000_000;
 
@@ -36,7 +37,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 const rowOf = (name: string, id: string) =>
-	runInDurableObject(shard(name), (instance) => {
+	runInDurableObject(shard(name), instance => {
 		const row = (instance as any).repo.find(id);
 		return {
 			state: row.state as string,
@@ -48,7 +49,7 @@ const rowOf = (name: string, id: string) =>
 
 async function runOnce(name: string, input: EnqueueInput, perform: (ctx: JobContext) => Promise<unknown>) {
 	const { sent, queue } = captureQueue();
-	await runInDurableObject(shard(name), (instance) => {
+	await runInDurableObject(shard(name), instance => {
 		(instance as any).clock = fixedClock(T0);
 		(instance as any).env.TSUMUGI_QUEUE = queue;
 	});
@@ -94,7 +95,7 @@ describe('performerからの失敗の扱いの指定(#91)', () => {
 	});
 
 	it('指定後に正常returnした試行は完了になる', async () => {
-		const { row } = await runOnce('RET#0', { binding: 'RET', payload: {} }, async (ctx) => {
+		const { row } = await runOnce('RET#0', { binding: 'RET', payload: {} }, async ctx => {
 			ctx.fail({ retry: false });
 			return 'done';
 		});
@@ -102,7 +103,7 @@ describe('performerからの失敗の扱いの指定(#91)', () => {
 	});
 
 	it('最後の指定が有効になる', async () => {
-		const { row } = await runOnce('LAST#0', { binding: 'LAST', payload: {}, maxAttempts: 5 }, async (ctx) => {
+		const { row } = await runOnce('LAST#0', { binding: 'LAST', payload: {}, maxAttempts: 5 }, async ctx => {
 			ctx.fail({ retry: false });
 			ctx.fail({ retryAt: T0 + 120_000 });
 			throw new Error('intentional failure');
@@ -111,7 +112,7 @@ describe('performerからの失敗の扱いの指定(#91)', () => {
 	});
 
 	it('取り消し要求後はretryAtを指定してもCANCELLEDになる(ADR-0052)', async () => {
-		const { row } = await runOnce('CXAT#0', { binding: 'CXAT', payload: {}, maxAttempts: 5 }, async (ctx) => {
+		const { row } = await runOnce('CXAT#0', { binding: 'CXAT', payload: {}, maxAttempts: 5 }, async ctx => {
 			expect(await shard('CXAT#0').cancel(ctx.jobId)).toEqual({ ok: true, requested: true });
 			ctx.fail({ retryAt: T0 + 120_000 });
 			throw new Error('intentional failure');
@@ -123,7 +124,7 @@ describe('performerからの失敗の扱いの指定(#91)', () => {
 		const { row } = await runOnce(
 			'BAD#0',
 			{ binding: 'BAD', payload: {}, maxAttempts: 5, backoff: { kind: 'fixed', delayMs: 1_000 } },
-			async (ctx) => {
+			async ctx => {
 				ctx.fail({ retryAt: Number.NaN });
 			},
 		);
@@ -138,7 +139,7 @@ describe('別Workerのperformerからの指定', () => {
 		[{ retryAt: T0 + 120_000 }, 'SCHEDULED'],
 	])('別Workerからの指定がDOの遷移に反映される(%o)', async (failWith, state) => {
 		const { sent, queue } = captureQueue();
-		await runInDurableObject(shard('MAIL#0'), (instance) => {
+		await runInDurableObject(shard('MAIL#0'), instance => {
 			(instance as any).clock = fixedClock(T0);
 			(instance as any).env.TSUMUGI_QUEUE = queue;
 		});

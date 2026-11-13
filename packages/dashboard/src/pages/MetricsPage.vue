@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import PageHeader from '../components/PageHeader.vue';
 import { getMetrics, isUnauthorized, type Metrics } from '../api';
-import LoadingState from '../components/LoadingState.vue';
 import FilterMenu from '../components/FilterMenu.vue';
+import LoadingState from '../components/LoadingState.vue';
+import PageHeader from '../components/PageHeader.vue';
 import { onRefresh } from '../composables/useAutoRefresh';
 import { bindings, definitionsReady } from '../composables/useDefinitions';
 import { useQueryChoice, useQueryText } from '../composables/useQueryState';
@@ -53,7 +53,7 @@ watch(
 );
 onRefresh(() => void load());
 
-const peak = computed(() => Math.max(1, ...(metrics.value?.series ?? []).map((point) => point.total)));
+const peak = computed(() => Math.max(1, ...(metrics.value?.series ?? []).map(point => point.total)));
 
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
 const ms = (value: number) => (value >= 1_000 ? `${(value / 1_000).toFixed(1)} s` : `${Math.round(value)} ms`);

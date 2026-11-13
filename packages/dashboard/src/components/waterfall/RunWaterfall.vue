@@ -4,10 +4,11 @@ import { ChevronRight, CircleAlert } from '@lucide/vue';
 import { useNow } from '@vueuse/core';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { RunNode } from '../../api';
 import { formatTimestamp, timeLocale } from '../../time';
 import StatusCell from '../StatusCell.vue';
 import { CHILD_PAGE, formatDuration, waterfallLayout, type NodeRow, type Segment } from './waterfallLayout';
+
+import type { RunNode } from '../../api';
 
 const props = defineProps<{ nodes: RunNode[] }>();
 const emit = defineEmits<{ (event: 'select', jobId: string): void; (event: 'run', runId: string): void }>();
@@ -19,10 +20,10 @@ const shown = ref(new Map<string, number>());
 
 const layout = computed(() => waterfallLayout(props.nodes, now.value.getTime(), { collapsed: collapsed.value, shown: shown.value }));
 const span = computed(() => Math.max(layout.value.end - layout.value.start, 1));
-const live = computed(() => layout.value.rows.some((row) => row.kind === 'node' && row.segments.some((s) => s.open)));
+const live = computed(() => layout.value.rows.some(row => row.kind === 'node' && row.segments.some(s => s.open)));
 
 // 実行中のみ毎秒伸長
-watch(live, (active) => (active ? resume() : pause()), { immediate: true });
+watch(live, active => (active ? resume() : pause()), { immediate: true });
 
 const pct = (at: number) => ((at - layout.value.start) / span.value) * 100;
 
@@ -75,10 +76,10 @@ function barClass(segment: Segment) {
 }
 
 const total = (row: NodeRow) =>
-	row.segments.length === 0 ? null : Math.max(...row.segments.map((s) => s.end)) - Math.min(...row.segments.map((s) => s.start));
+	row.segments.length === 0 ? null : Math.max(...row.segments.map(s => s.end)) - Math.min(...row.segments.map(s => s.start));
 
 const durationOf = (row: NodeRow, kind: Segment['kind']) =>
-	row.segments.filter((s) => s.kind === kind).reduce((sum, s) => sum + (s.end - s.start), 0);
+	row.segments.filter(s => s.kind === kind).reduce((sum, s) => sum + (s.end - s.start), 0);
 
 function toggle(id: string) {
 	const next = new Set(collapsed.value);
@@ -224,7 +225,7 @@ const tickLabel = (offset: number) => (offset === 0 ? '0' : duration(offset));
 						<dt>{{ t('waterfall.queued') }}</dt>
 						<dd class="text-right text-ink tabular-nums">{{ duration(durationOf(hovered, 'queued')) }}</dd>
 					</template>
-					<template v-if="hovered.segments.some((s) => s.kind === 'running')">
+					<template v-if="hovered.segments.some(s => s.kind === 'running')">
 						<dt>{{ t('waterfall.execution') }}</dt>
 						<dd class="text-right text-ink tabular-nums">{{ duration(durationOf(hovered, 'running')) }}</dd>
 					</template>

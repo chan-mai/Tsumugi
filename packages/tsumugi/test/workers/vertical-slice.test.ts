@@ -1,10 +1,11 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { JobContext } from '../../src/core/api.js';
 import { parseJobId } from '../../src/core/ids.js';
 import { fixedClock } from '../../src/do/clock.js';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+
+import type { JobContext } from '../../src/core/api.js';
+import type { DispatchMessage } from '../../src/do/job-shard.js';
 
 const T0 = 1_800_000_000_000;
 
@@ -63,7 +64,7 @@ function shard(binding: string) {
 }
 
 async function stateOf(binding: string, jobId: string): Promise<string | undefined> {
-	return runInDurableObject(shard(binding), (instance) => (instance as any).repo.find(jobId)?.state);
+	return runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId)?.state);
 }
 
 describe('縦串: enqueueからCOMPLETEDまで', () => {
@@ -76,7 +77,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		const { sent, queue } = captureQueue();
 		const clock = fixedClock(T0);
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = clock;
 			(instance as any).env.TSUMUGI_QUEUE = queue;
 		});
@@ -101,7 +102,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		expect(performed[0]!.deadlineAt).toBeGreaterThan(Date.now());
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
-		const row = await runInDurableObject(shard('HELLO'), (instance) => (instance as any).repo.find(jobId) as { attempts: number });
+		const row = await runInDurableObject(shard('HELLO'), instance => (instance as any).repo.find(jobId) as { attempts: number });
 		expect(row.attempts).toBe(1);
 	});
 
@@ -109,7 +110,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		const stub = shard('BOOM');
 		const { sent, queue } = captureQueue();
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = fixedClock(T0);
 			(instance as any).env.TSUMUGI_QUEUE = queue;
 		});
@@ -128,7 +129,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		const stub = shard('ECHO');
 		const { sent, queue } = captureQueue();
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = fixedClock(T0);
 			(instance as any).env.TSUMUGI_QUEUE = queue;
 		});
@@ -138,7 +139,7 @@ describe('縦串: enqueueからCOMPLETEDまで', () => {
 		await handleBatch(makeBatch(sent).batch, consumerEnv, performers);
 		expect(await stateOf('ECHO', jobId)).toBe('COMPLETED');
 
-		const row = await runInDurableObject(shard('ECHO'), (instance) => (instance as any).repo.find(jobId) as { result: string | null });
+		const row = await runInDurableObject(shard('ECHO'), instance => (instance as any).repo.find(jobId) as { result: string | null });
 		expect(row.result).toBe(JSON.stringify({ echoed: 'hi' }));
 
 		await runDurableObjectAlarm(stub);
@@ -152,16 +153,16 @@ describe('DOの書き込み回数', () => {
 		const stub = shard('HELLO');
 		const { sent, queue } = captureQueue();
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = fixedClock(T0);
 			(instance as any).env.TSUMUGI_QUEUE = queue;
 		});
 
-		const before = await runInDurableObject(stub, (instance) => (instance as any).repo.writes as number);
+		const before = await runInDurableObject(stub, instance => (instance as any).repo.writes as number);
 		const jobId = await stub.enqueue({ binding: 'HELLO', payload: { name: 'budget' } });
 		await runDurableObjectAlarm(stub);
 		await handleBatch(makeBatch(sent).batch, consumerEnv, performers);
-		const after = await runInDurableObject(stub, (instance) => (instance as any).repo.writes as number);
+		const after = await runInDurableObject(stub, instance => (instance as any).repo.writes as number);
 
 		expect(await stateOf('HELLO', jobId)).toBe('COMPLETED');
 		// insert, QUEUED遷移, RUNNING遷移(ADR-0054), COMPLETED遷移と各アウトボックス追記で8回

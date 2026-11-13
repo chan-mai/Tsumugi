@@ -8,6 +8,7 @@ import {
 	isActive,
 	isTerminal,
 } from '../../src/core/transitions.js';
+
 import type { JobState } from '../../src/core/types.js';
 
 const ALL: readonly JobState[] = ['SCHEDULED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'STALLED'];

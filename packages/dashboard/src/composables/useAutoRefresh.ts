@@ -17,7 +17,7 @@ export function useAutoRefresh() {
 		refreshMs,
 		{ immediate: false },
 	);
-	watch(refreshMs, (ms) => (ms > 0 ? resume() : pause()), { immediate: true });
+	watch(refreshMs, ms => (ms > 0 ? resume() : pause()), { immediate: true });
 }
 
 export function onRefresh(callback: () => void) {

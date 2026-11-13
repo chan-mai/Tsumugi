@@ -1,5 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+
 import type { TsumugiJobShard } from '../../src/do/job-shard.js';
 
 const T0 = 2_400_000_000_000;
@@ -8,7 +9,7 @@ const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)
 
 async function queued(name: string): Promise<string> {
 	const stub = shard(name);
-	await runInDurableObject(stub, (instance) => {
+	await runInDurableObject(stub, instance => {
 		(instance as any).clock = { now: () => T0 };
 		(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 	});
@@ -18,14 +19,14 @@ async function queued(name: string): Promise<string> {
 }
 
 const rowOf = (stub: DurableObjectStub<TsumugiJobShard>, jobId: string) =>
-	runInDurableObject(stub, (instance) => (instance as any).repo.find(jobId));
+	runInDurableObject(stub, instance => (instance as any).repo.find(jobId));
 
 describe('生存報告(#35)', () => {
 	it('実行中のジョブの報告時刻と進捗を記録する', async () => {
 		const stub = shard('HBA#0');
 		const jobId = await queued('HBA#0');
 
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = { now: () => T0 + 30_000 };
 		});
 		expect(await stub.heartbeat(jobId, 0.4)).toEqual({ accepted: true, cancelRequested: false });
@@ -38,12 +39,12 @@ describe('生存報告(#35)', () => {
 	it('報告ごとに即時のtickを起動せず投影のalarmを数秒後に設定する', async () => {
 		const stub = shard('HBG#0');
 		const jobId = await queued('HBG#0');
-		await runInDurableObject(stub, async (instance) => {
+		await runInDurableObject(stub, async instance => {
 			(instance as any).clock = { now: () => T0 + 30_000 };
 			await (instance as any).ctx.storage.deleteAlarm();
 		});
 		await stub.heartbeat(jobId, 0.5);
-		const alarm = await runInDurableObject(stub, (instance) => (instance as any).ctx.storage.getAlarm());
+		const alarm = await runInDurableObject(stub, instance => (instance as any).ctx.storage.getAlarm());
 		expect(alarm).toBe(T0 + 33_000);
 	});
 
@@ -64,7 +65,7 @@ describe('生存報告(#35)', () => {
 		const jobId = await queued('HBC#0');
 
 		for (const at of [T0 + 60_000, T0 + 120_000, T0 + 180_000]) {
-			await runInDurableObject(stub, (instance) => {
+			await runInDurableObject(stub, instance => {
 				(instance as any).clock = { now: () => at };
 			});
 			await stub.heartbeat(jobId);
@@ -73,7 +74,7 @@ describe('生存報告(#35)', () => {
 		expect((await rowOf(stub, jobId)).state).toBe('QUEUED');
 
 		// 報告停止後はtimeoutMs + reaperGraceMsでreaper処理
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = { now: () => T0 + 180_000 + 90_000 };
 		});
 		await runDurableObjectAlarm(stub);

@@ -17,22 +17,22 @@ const flow = createFlow({ FETCH: Fetch, WORK: Work });
 
 describe('flowの構築', () => {
 	it('afterの受け取り口を依存先のノードIDへ写す', () => {
-		const built = flow<{ since: number }>((f) => {
-			const fetched = f.node('fetch', 'FETCH', { input: (i) => ({ since: i.since }) });
+		const built = flow<{ since: number }>(f => {
+			const fetched = f.node('fetch', 'FETCH', { input: i => ({ since: i.since }) });
 			f.node('work', 'WORK', { after: { fetched }, input: (_i, d) => ({ id: d.fetched.items[0] as string }) });
 		});
 
-		expect(built.nodes.map((n) => n.id)).toEqual(['fetch', 'work']);
+		expect(built.nodes.map(n => n.id)).toEqual(['fetch', 'work']);
 		expect(built.nodes[1]?.after).toEqual({ fetched: 'fetch' });
 	});
 
 	it('shapeOfは関数を除いて形だけ返す(ADR-0030)', () => {
-		const built = flow<void>((f) => {
+		const built = flow<void>(f => {
 			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 			f.fanOut('each', 'WORK', {
 				after: { fetched },
 				over: (_i, d) => d.fetched.items,
-				input: (item) => ({ id: item }),
+				input: item => ({ id: item }),
 			});
 		});
 
@@ -47,7 +47,7 @@ describe('flowの構築', () => {
 
 	it('ノードIDの重複を拒否する', () => {
 		expect(() =>
-			flow<void>((f) => {
+			flow<void>(f => {
 				f.node('same', 'FETCH', { input: () => ({ since: 0 }) });
 				f.node('same', 'FETCH', { input: () => ({ since: 0 }) });
 			}),
@@ -55,7 +55,7 @@ describe('flowの構築', () => {
 	});
 
 	it('区切り文字を含むノードIDを拒否する', () => {
-		expect(() => flow<void>((f) => f.node('a:b', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void)).toThrow(InvalidFlowError);
+		expect(() => flow<void>(f => f.node('a:b', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void)).toThrow(InvalidFlowError);
 	});
 
 	it('ノードが1つも無いflowを拒否する', () => {
@@ -63,27 +63,27 @@ describe('flowの構築', () => {
 	});
 
 	it('deadlineMsを持つflowを構築する(ADR-0039)', () => {
-		const built = flow<void>((f) => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void, {
+		const built = flow<void>(f => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void, {
 			deadlineMs: 60_000,
 		});
 		expect(built.deadlineMs).toBe(60_000);
 	});
 
 	it('未指定のdeadlineMsはプロパティごと持たない', () => {
-		const built = flow<void>((f) => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void);
+		const built = flow<void>(f => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void);
 		expect('deadlineMs' in built).toBe(false);
 	});
 
 	it('正の整数でないdeadlineMsを拒否する', () => {
 		for (const deadlineMs of [0, -1, 1.5]) {
-			expect(() => flow<void>((f) => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void, { deadlineMs })).toThrow(
+			expect(() => flow<void>(f => f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) }) as unknown as void, { deadlineMs })).toThrow(
 				InvalidFlowError,
 			);
 		}
 	});
 
 	it('triggerとwhenを持つノードを構築する(ADR-0041)', () => {
-		const built = flow<void>((f) => {
+		const built = flow<void>(f => {
 			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 			f.node('cleanup', 'WORK', {
 				after: { fetched },
@@ -106,13 +106,13 @@ describe('flowの構築', () => {
 	it('依存の無いノードのtrigger指定を拒否する', () => {
 		// 成否判定の対象なし, 記述可能だと意図が不明瞭
 		expect(() =>
-			flow<void>((f) => f.node('lonely', 'FETCH', { trigger: 'failure', input: () => ({ since: 0 }) }) as unknown as void),
+			flow<void>(f => f.node('lonely', 'FETCH', { trigger: 'failure', input: () => ({ since: 0 }) }) as unknown as void),
 		).toThrow(InvalidFlowError);
 	});
 
 	it('不正なtriggerを拒否する', () => {
 		expect(() =>
-			flow<void>((f) => {
+			flow<void>(f => {
 				const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 				f.node('bad', 'WORK', { after: { fetched }, trigger: 'maybe' as never, input: () => ({ id: 'x' }) });
 			}),
@@ -120,20 +120,20 @@ describe('flowの構築', () => {
 	});
 
 	it('別のflowのノードへの依存を拒否する', () => {
-		const other = flow<void>((f) => {
+		const other = flow<void>(f => {
 			f.node('outside', 'FETCH', { input: () => ({ since: 0 }) });
 		});
 		const foreign = { id: other.nodes[0]!.id } as never;
 
 		expect(() =>
-			flow<void>((f) => {
+			flow<void>(f => {
 				f.node('work', 'WORK', { after: { dep: foreign }, input: () => ({ id: 'x' }) });
 			}),
 		).toThrow(InvalidFlowError);
 	});
 
 	it('同じ依存先を複数の受け取り口で受けても形は重複しない', () => {
-		const built = flow<void>((f) => {
+		const built = flow<void>(f => {
 			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 			f.node('work', 'WORK', {
 				after: { first: fetched, second: fetched },
@@ -145,13 +145,13 @@ describe('flowの構築', () => {
 	});
 
 	it('fan-outノードは展開の材料を持つ', () => {
-		const built = flow<void>((f) => {
+		const built = flow<void>(f => {
 			const fetched = f.node('fetch', 'FETCH', { input: () => ({ since: 0 }) });
 			f.fanOut('each', 'WORK', {
 				after: { fetched },
 				over: (_i, d) => d.fetched.items,
 				input: (item, _i, index) => ({ id: `${item}-${index}` }),
-				key: (item) => item,
+				key: item => item,
 			});
 		});
 

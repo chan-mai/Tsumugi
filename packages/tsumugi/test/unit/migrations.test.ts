@@ -11,7 +11,7 @@ describe('マイグレーションの宣言(ADR-0008)', () => {
 	it('EXPECTED_MIGRATIONSが実ファイルと一致する', () => {
 		// 不一致時は適用漏れ検出不能
 		const actual = readdirSync(dir)
-			.filter((name) => name.endsWith('.sql'))
+			.filter(name => name.endsWith('.sql'))
 			.sort();
 
 		expect(actual.length).toBeGreaterThan(0);

@@ -1,5 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { TsumugiRunInstance } from '../../src/do/run.js';
 
@@ -39,7 +40,7 @@ const runStub = (runId: string) => runNamespace.get(runNamespace.idFromName(runI
 describe('tick中に設定されたalarm', () => {
 	it('Job DOは削除の予定で上書きしない', async () => {
 		const { sent, queue } = captureQueue();
-		await runInDurableObject(shard('CLOBBER#0'), (instance) => {
+		await runInDurableObject(shard('CLOBBER#0'), instance => {
 			internals(instance).clock = { now: () => T0 };
 			(internals(instance) as unknown as { env: { TSUMUGI_QUEUE: unknown } }).env.TSUMUGI_QUEUE = queue;
 		});
@@ -48,7 +49,7 @@ describe('tick中に設定されたalarm', () => {
 		await runDurableObjectAlarm(shard('CLOBBER#0'));
 		await shard('CLOBBER#0').report(sent[0]!.jobId, { ok: true });
 
-		await runInDurableObject(shard('CLOBBER#0'), async (instance) => {
+		await runInDurableObject(shard('CLOBBER#0'), async instance => {
 			const inner = internals(instance);
 			// 割り込み報告のalarm設定を再現, ハンドラ直接呼び出しでは消去なし
 			await inner.ctx.storage.setAlarm(T0 + 1_000);
@@ -61,7 +62,7 @@ describe('tick中に設定されたalarm', () => {
 	it('Run DOは削除の予定で上書きしない', async () => {
 		const { queue } = captureQueue();
 		// 実キューではconsumer実行、完了通知のalarm設定で検査が不安定化
-		await runInDurableObject(shard('LIST#0'), (instance) => {
+		await runInDurableObject(shard('LIST#0'), instance => {
 			(internals(instance) as unknown as { env: { TSUMUGI_QUEUE: unknown } }).env.TSUMUGI_QUEUE = queue;
 		});
 
@@ -70,7 +71,7 @@ describe('tick中に設定されたalarm', () => {
 		await stub.cancel();
 		await runDurableObjectAlarm(stub);
 
-		await runInDurableObject(stub, async (instance) => {
+		await runInDurableObject(stub, async instance => {
 			const inner = internals(instance);
 			const now = inner.clock.now();
 			await inner.ctx.storage.setAlarm(now + 1_000);
@@ -83,7 +84,7 @@ describe('tick中に設定されたalarm', () => {
 describe('tickが失敗した場合の再設定', () => {
 	// 再試行予定による割り込み要求の早い予定の上書き防止
 	it('Job DOは早い予定を残す', async () => {
-		await runInDurableObject(shard('CLOBBERFAIL#0'), async (instance) => {
+		await runInDurableObject(shard('CLOBBERFAIL#0'), async instance => {
 			const inner = internals(instance) as Internals & { repo: { scheduleWindow(): never } };
 			inner.clock = { now: () => T0 };
 			inner.repo.scheduleWindow = () => {
@@ -98,11 +99,11 @@ describe('tickが失敗した場合の再設定', () => {
 	it('Run DOは早い予定を残す', async () => {
 		const stub = runStub('GREETINGS:clobberfail1');
 		// 実時刻のalarmは検査中に自動発火
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			internals(instance).clock = { now: () => T0 };
 		});
 		await stub.start({ flow: 'GREETINGS', input: { prefix: 'cf' } });
-		await runInDurableObject(stub, async (instance) => {
+		await runInDurableObject(stub, async instance => {
 			const inner = internals(instance) as Internals & { repo: { findRun(): never } };
 			inner.repo.findRun = () => {
 				throw new Error('intentional failure');
@@ -116,7 +117,7 @@ describe('tickが失敗した場合の再設定', () => {
 	it('Scheduler DOは早い予定を残す', async () => {
 		const namespace = env.SCHEDULER as unknown as DurableObjectNamespace;
 		const stub = namespace.get(namespace.idFromName('scheduler-clobberfail'));
-		await runInDurableObject(stub, async (instance) => {
+		await runInDurableObject(stub, async instance => {
 			const inner = internals(instance) as Internals & { repo: { rows(): never } };
 			inner.clock = { now: () => T0 };
 			inner.repo.rows = () => {

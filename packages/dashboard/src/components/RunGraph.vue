@@ -7,6 +7,7 @@ import RunChildNode from './graph/RunChildNode.vue';
 import RunEdge from './graph/RunEdge.vue';
 import { HANDLE_TOP, runLayout, type ChildData, type TaskData } from './graph/runLayout';
 import RunTaskNode from './graph/RunTaskNode.vue';
+
 import type { RunNode } from '../api';
 
 const props = defineProps<{ nodes: RunNode[] }>();
@@ -24,10 +25,10 @@ function measure(id: string, height: number): void {
 
 // 消えたノードの実寸は破棄, Run再表示ごとの増加防止
 watch(
-	() => props.nodes.map((node) => node.id).join('|'),
+	() => props.nodes.map(node => node.id).join('|'),
 	() => {
-		const alive = new Set(props.nodes.map((node) => node.id));
-		if ([...measured.value.keys()].every((id) => alive.has(id))) return;
+		const alive = new Set(props.nodes.map(node => node.id));
+		if ([...measured.value.keys()].every(id => alive.has(id))) return;
 		measured.value = new Map([...measured.value].filter(([id]) => alive.has(id)));
 	},
 );
@@ -41,8 +42,8 @@ const controls = [
 ];
 
 const edges = computed(() =>
-	graph.value.edges.map((edge) => {
-		const route = edge.data.route.map((point) => ({ ...point }));
+	graph.value.edges.map(edge => {
+		const route = edge.data.route.map(point => ({ ...point }));
 		const source = findNode(edge.source);
 		const target = findNode(edge.target);
 		const first = route[0];
@@ -62,7 +63,7 @@ const edges = computed(() =>
 );
 
 // ノードの構成が変わった時だけ再調整, 状態の更新では視点を維持
-const shape = computed(() => graph.value.nodes.map((node) => node.id).join('|'));
+const shape = computed(() => graph.value.nodes.map(node => node.id).join('|'));
 let fitted: string | null = null;
 
 onNodesInitialized(() => {

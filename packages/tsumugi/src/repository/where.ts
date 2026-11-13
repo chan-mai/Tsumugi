@@ -18,15 +18,15 @@ export function notInList(column: string, values: readonly SqlValue[]): Conditio
 }
 
 export function and(...conditions: (Condition | undefined)[]): Condition | undefined {
-	const present = conditions.filter((c) => c !== undefined);
+	const present = conditions.filter(c => c !== undefined);
 	if (present.length === 0) return undefined;
-	return { sql: present.map((c) => `(${c.sql})`).join(' AND '), params: present.flatMap((c) => c.params) };
+	return { sql: present.map(c => `(${c.sql})`).join(' AND '), params: present.flatMap(c => c.params) };
 }
 
 export function or(...conditions: (Condition | undefined)[]): Condition | undefined {
-	const present = conditions.filter((c) => c !== undefined);
+	const present = conditions.filter(c => c !== undefined);
 	if (present.length === 0) return undefined;
-	return { sql: present.map((c) => `(${c.sql})`).join(' OR '), params: present.flatMap((c) => c.params) };
+	return { sql: present.map(c => `(${c.sql})`).join(' OR '), params: present.flatMap(c => c.params) };
 }
 
 export function whereOf(clause: Condition | undefined): Condition {

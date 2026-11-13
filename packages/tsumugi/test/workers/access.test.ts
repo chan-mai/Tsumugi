@@ -2,8 +2,9 @@ import { env } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { clearJwksCache, cloudflareAccess, verifyAccessJwt, type Jwks } from '../../src/api/access.js';
 import { Performer } from '../../src/performer/entrypoint.js';
-import type { RestEnv } from '../../src/api/rest.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { RestEnv } from '../../src/api/rest.js';
 
 const TEAM = 'acme';
 const AUD = 'aud-tag-123';

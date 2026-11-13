@@ -1,10 +1,10 @@
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 // 日本語の原稿を機械翻訳しsite/<言語>/へ出力
 // 使い方: node scripts/translate-docs.ts [--all] [原稿のパス...]
 import Anthropic from '@anthropic-ai/sdk';
 import GithubSlugger from 'github-slugger';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const siteDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDirs = ['guide', 'reference'];
@@ -32,17 +32,15 @@ type Target = { source: string; output: string; language: Language };
 
 function toTargets(path: string): Target[] {
 	const source = relative(siteDir, resolve(process.cwd(), path));
-	if (!sourceDirs.some((dir) => source.startsWith(`${dir}/`)) || !source.endsWith('.md')) {
+	if (!sourceDirs.some(dir => source.startsWith(`${dir}/`)) || !source.endsWith('.md')) {
 		throw new Error(`Not a source document: ${path}`);
 	}
-	return (Object.keys(languages) as Language[]).map((language) => ({ source, output: join(language, source), language }));
+	return (Object.keys(languages) as Language[]).map(language => ({ source, output: join(language, source), language }));
 }
 
 async function listSources(): Promise<string[]> {
 	const lists = await Promise.all(
-		sourceDirs.map(async (dir) =>
-			(await readdir(join(siteDir, dir))).filter((name) => name.endsWith('.md')).map((name) => join(dir, name)),
-		),
+		sourceDirs.map(async dir => (await readdir(join(siteDir, dir))).filter(name => name.endsWith('.md')).map(name => join(dir, name))),
 	);
 	return lists.flat();
 }
@@ -79,7 +77,7 @@ function localizeLinks(markdown: string, language: Language): string {
 	let fence: string | undefined;
 	return markdown
 		.split('\n')
-		.map((line) => {
+		.map(line => {
 			const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
 			if (marker) {
 				if (!fence) fence = marker;
@@ -101,7 +99,7 @@ function readFrontmatter(markdown: string): Map<string, string> | undefined {
 	const entries = markdown
 		.slice(4, end)
 		.split('\n')
-		.flatMap((line) => {
+		.flatMap(line => {
 			const match = line.match(/^([\w-]+):\s*(.*)$/);
 			return match ? [[match[1]!, match[2]!.trim()] as const] : [];
 		});
@@ -137,7 +135,7 @@ async function translate(client: Anthropic, markdown: string, { source, language
 		throw new Error(`Translation of ${source} into ${language} stopped with ${message.stop_reason}`);
 	}
 	return message.content
-		.flatMap((block) => (block.type === 'text' ? [block.text] : []))
+		.flatMap(block => (block.type === 'text' ? [block.text] : []))
 		.join('')
 		.trim();
 }
@@ -157,7 +155,7 @@ async function processTarget(client: Anthropic, target: Target): Promise<void> {
 	const { text, ids } = annotateHeadingIds(markdown);
 	const translated = localizeLinks(await translate(client, text, target), language);
 	verifyFrontmatter(markdown, translated, output);
-	const missing = ids.filter((id) => !translated.includes(` id="${id}">`));
+	const missing = ids.filter(id => !translated.includes(` id="${id}">`));
 	if (missing.length) throw new Error(`Translation of ${output} lost heading ids: ${missing.join(', ')}`);
 
 	await mkdir(dirname(join(siteDir, output)), { recursive: true });
@@ -167,8 +165,8 @@ async function processTarget(client: Anthropic, target: Target): Promise<void> {
 
 const args = process.argv.slice(2);
 const paths = args.includes('--all')
-	? (await listSources()).map((source) => join(siteDir, source))
-	: args.filter((arg) => !arg.startsWith('--'));
+	? (await listSources()).map(source => join(siteDir, source))
+	: args.filter(arg => !arg.startsWith('--'));
 const targets = paths.flatMap(toTargets);
 if (!targets.length) {
 	console.log('no documents to translate');

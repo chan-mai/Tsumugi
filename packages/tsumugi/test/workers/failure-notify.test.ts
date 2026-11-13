@@ -1,8 +1,9 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
-import type { FailureNotice } from '../../src/core/types.js';
 import { embedJobId } from '../../src/core/ids.js';
+
+import type { FailureNotice } from '../../src/core/types.js';
+import type { DispatchMessage } from '../../src/do/job-shard.js';
 
 const T0 = 2_500_000_000_000;
 const NOTIFY = 'NotifyFailure';
@@ -14,7 +15,7 @@ async function install(name: string, sent: DispatchMessage[] = []): Promise<void
 	const record = (body: DispatchMessage) => {
 		if (body.jobId.startsWith(`${name}:`)) sent.push(body);
 	};
-	await runInDurableObject(shard(name), (instance) => {
+	await runInDurableObject(shard(name), instance => {
 		(instance as any).clock = { now: () => T0 };
 		(instance as any).env.TSUMUGI_QUEUE = {
 			send: async (body: DispatchMessage) => record(body),
@@ -26,7 +27,7 @@ async function install(name: string, sent: DispatchMessage[] = []): Promise<void
 }
 
 const payloadOf = (jobId: string) =>
-	runInDurableObject(shard(`${NOTIFY}#0`), (instance) => {
+	runInDurableObject(shard(`${NOTIFY}#0`), instance => {
 		const row = (instance as any).repo.find(jobId) as { payload: string } | undefined;
 		return row ? (JSON.parse(row.payload) as FailureNotice) : undefined;
 	});
@@ -42,9 +43,9 @@ interface SchedulerFace extends Rpc.DurableObjectBranded {
 }
 
 const bindingOf = (name: string) =>
-	runInDurableObject(shard(name), (instance) => (instance as any).repo.readSetting('failure_binding') as string | undefined);
+	runInDurableObject(shard(name), instance => (instance as any).repo.readSetting('failure_binding') as string | undefined);
 
-const countOf = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countJobs() as number);
+const countOf = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countJobs() as number);
 
 // 実運用ではenqueueに同梱
 const configure = (name: string) => shard(name).configure({ failureBinding: NOTIFY });
@@ -129,7 +130,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		const after = await countOf(`${NOTIFY}#0`);
 
 		// 送信後中断を再現, カーソル未更新で同じ通知を再送
-		await runInDurableObject(shard('FAIL4#0'), (instance) => {
+		await runInDurableObject(shard('FAIL4#0'), instance => {
 			((instance as any).repo.sql as SqlStorage).exec(
 				`INSERT INTO failure_notify (job_id, payload) VALUES (?, ?)`,
 				jobId,
@@ -157,7 +158,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		});
 		await runDurableObjectAlarm(shard('FAIL6#0'));
 		// 無応答で期限と猶予経過後にreaper処理
-		await runInDurableObject(shard('FAIL6#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
+		await runInDurableObject(shard('FAIL6#0'), instance => void ((instance as any).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
 		await runDurableObjectAlarm(shard('FAIL6#0'));
 
 		// 無応答の試行も計上
@@ -224,7 +225,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		await scheduler.sync();
 		// 最短定義は1分間隔, 発火用に時計を前進
 		const ahead = Date.now() + 2 * 60_000;
-		await runInDurableObject(scheduler, (instance) => void ((instance as any).clock = { now: () => ahead }));
+		await runInDurableObject(scheduler, instance => void ((instance as any).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 
 		// Run DOはlistへ, Scheduler DOはpoll-namesとping-helloへ投入
@@ -254,7 +255,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		await runDurableObjectAlarm(shard('FAIL7#0'));
 		await shard('FAIL7#0').report(sent[0]!.jobId, { ok: false, error: 'boom' });
 
-		const alarm = await runInDurableObject(shard('FAIL7#0'), async (instance) => {
+		const alarm = await runInDurableObject(shard('FAIL7#0'), async instance => {
 			const env = (instance as any).env;
 			const original = env.TSUMUGI_DB;
 			env.TSUMUGI_DB = {
@@ -279,7 +280,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		expect(alarm).toBe(T0 + 5_000);
 
 		await runDurableObjectAlarm(shard('FAIL7#0'));
-		const remaining = await runInDurableObject(shard('FAIL7#0'), (instance) => (instance as any).repo.countOutbox() as number);
+		const remaining = await runInDurableObject(shard('FAIL7#0'), instance => (instance as any).repo.countOutbox() as number);
 		expect(remaining).toBe(0);
 		const row = await env.TSUMUGI_DB.prepare('SELECT state FROM job WHERE id = ?').bind(jobId).first<{ state: string }>();
 		expect(row?.state).toBe('FAILED');

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { remote } from '../../src/core/api.js';
-import { cachedValidate, validateConfig } from '../../src/config/validate.js';
 import { configErrorMessage, configFragment, DEFAULT_MIGRATIONS_DIR } from '../../src/config/fragment.js';
+import { cachedValidate, validateConfig } from '../../src/config/validate.js';
+import { remote } from '../../src/core/api.js';
 
 class Noop {
 	async perform(): Promise<void> {}
@@ -20,7 +20,7 @@ const performers = { LOCAL: Noop };
 const withRemote = { LOCAL: Noop, MAIL: remote() };
 const flows = { GREETINGS: { nodes: [] } };
 
-const names = (status: ReturnType<typeof validateConfig>) => (status.ok ? [] : status.missing.map((entry) => entry.name).sort());
+const names = (status: ReturnType<typeof validateConfig>) => (status.ok ? [] : status.missing.map(entry => entry.name).sort());
 
 describe('必須bindingの検証', () => {
 	it('揃っていれば通る', () => {

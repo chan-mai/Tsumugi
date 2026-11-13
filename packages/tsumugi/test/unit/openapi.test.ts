@@ -28,13 +28,13 @@ function registeredRoutes(): string[] {
 		shardsOf: () => 1,
 	});
 
-	return app.routes.map((route) => `${route.method} ${toTemplate(route.path)}`).sort();
+	return app.routes.map(route => `${route.method} ${toTemplate(route.path)}`).sort();
 }
 
 function documentedRoutes(): string[] {
 	const document = openapiDocument();
 	return Object.entries(document.paths)
-		.flatMap(([path, operations]) => Object.keys(operations).map((method) => `${method.toUpperCase()} ${path}`))
+		.flatMap(([path, operations]) => Object.keys(operations).map(method => `${method.toUpperCase()} ${path}`))
 		.sort();
 }
 
@@ -60,16 +60,16 @@ describe('OpenAPI定義', () => {
 		// $refの綴り違いは生成時まで未発覚, ここで検出
 		const document = openapiDocument();
 		const names = new Set(Object.keys(document.components.schemas));
-		const referenced = [...JSON.stringify(document).matchAll(/#\/components\/schemas\/([A-Za-z]+)/g)].map((m) => m[1] as string);
+		const referenced = [...JSON.stringify(document).matchAll(/#\/components\/schemas\/([A-Za-z]+)/g)].map(m => m[1] as string);
 
 		expect(referenced.length).toBeGreaterThan(0);
-		expect([...new Set(referenced)].filter((name) => !names.has(name))).toEqual([]);
+		expect([...new Set(referenced)].filter(name => !names.has(name))).toEqual([]);
 	});
 
 	it('並べ替えの選択肢が実装と一致する', () => {
 		const sort = (
 			openapiDocument().paths['/api/jobs']?.get as { parameters: { name: string; schema: { enum?: string[] } }[] }
-		).parameters.find((parameter) => parameter.name === 'sort');
+		).parameters.find(parameter => parameter.name === 'sort');
 		expect(sort?.schema.enum).toEqual([...SORTABLE_COLUMNS]);
 	});
 

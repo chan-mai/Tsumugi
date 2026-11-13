@@ -50,7 +50,7 @@ async function load(id: string) {
 
 watch(
 	() => props.runId,
-	async (id) => {
+	async id => {
 		loadSequence++;
 		loading = false;
 		if (!id) return;

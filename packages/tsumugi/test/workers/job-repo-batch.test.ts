@@ -1,5 +1,6 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+
 import type { JobRepo } from '../../src/do/repo.js';
 
 // 対象キーはtick投入候補から決定, 最大TICK_LIMIT件(ADR-0045)
@@ -11,16 +12,16 @@ const keys = Array.from({ length: 120 }, (_, i) => `k${i}`);
 
 describe('キー別バケットの分割', () => {
 	it('上限を超える件数のキーを読める', async () => {
-		const size = await runInDurableObject(shard('BUCKET:read'), (instance) => {
+		const size = await runInDurableObject(shard('BUCKET:read'), instance => {
 			const repo = (instance as unknown as { repo: JobRepo }).repo;
-			repo.writeKeyBuckets(Object.fromEntries(keys.map((k) => [k, { tokens: 1, refilledAt: 1 }])));
+			repo.writeKeyBuckets(Object.fromEntries(keys.map(k => [k, { tokens: 1, refilledAt: 1 }])));
 			return Object.keys(repo.readKeyBuckets(keys)).length;
 		});
 		expect(size).toBe(120);
 	});
 
 	it('`__proto__`のキーが読める', async () => {
-		const read = await runInDurableObject(shard('BUCKET:proto'), (instance) => {
+		const read = await runInDurableObject(shard('BUCKET:proto'), instance => {
 			const repo = (instance as unknown as { repo: JobRepo }).repo;
 			repo.writeKeyBuckets(Object.fromEntries([['__proto__', { tokens: 1, refilledAt: 1 }]]));
 			const buckets = repo.readKeyBuckets(['__proto__']);
@@ -30,9 +31,9 @@ describe('キー別バケットの分割', () => {
 	});
 
 	it('上限を超える件数のキーを削除できる', async () => {
-		const size = await runInDurableObject(shard('BUCKET:delete'), (instance) => {
+		const size = await runInDurableObject(shard('BUCKET:delete'), instance => {
 			const repo = (instance as unknown as { repo: JobRepo }).repo;
-			repo.writeKeyBuckets(Object.fromEntries(keys.map((k) => [k, { tokens: 1, refilledAt: 1 }])));
+			repo.writeKeyBuckets(Object.fromEntries(keys.map(k => [k, { tokens: 1, refilledAt: 1 }])));
 			repo.deleteKeyBuckets(keys);
 			return Object.keys(repo.readKeyBuckets(keys)).length;
 		});

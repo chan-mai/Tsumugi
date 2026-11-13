@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createClient } from '../../src/client/enqueue.js';
+
 import type { EnqueueInput } from '../../src/do/job-shard.js';
 
 function capture() {

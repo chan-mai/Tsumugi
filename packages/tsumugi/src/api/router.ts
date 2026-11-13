@@ -73,12 +73,12 @@ export function createRouter<Env>() {
 				req: {
 					raw: request,
 					url: request.url,
-					param: (name) => params[name] ?? '',
-					header: (name) => request.headers.get(name) ?? undefined,
+					param: name => params[name] ?? '',
+					header: name => request.headers.get(name) ?? undefined,
 					json: () => request.json(),
 				},
 				json: (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
-				html: (body) => new Response(body, { headers: { 'content-type': 'text/html; charset=UTF-8' } }),
+				html: body => new Response(body, { headers: { 'content-type': 'text/html; charset=UTF-8' } }),
 			});
 			if (response) return response;
 		}

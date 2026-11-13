@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { JobContext } from '../../src/core/api.js';
 import { createTestContext, fixedClock, nextAttempt, runPerformer, planDispatch } from '../../src/entries/testing.js';
+
+import type { JobContext } from '../../src/core/api.js';
 
 const greet = {
 	perform: (payload: { name: string }): string => `hello, ${payload.name}`,
@@ -17,7 +18,7 @@ const interruptible = {
 		const remain = ctx.deadlineAt - Date.now();
 		if (remain <= 0) return 'expired';
 		const signal = AbortSignal.timeout(remain);
-		return new Promise((resolve) => {
+		return new Promise(resolve => {
 			signal.addEventListener('abort', () => resolve('expired'), { once: true });
 		});
 	},

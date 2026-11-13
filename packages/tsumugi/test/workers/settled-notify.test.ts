@@ -1,8 +1,9 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
-import type { SettledNotice, SettledTarget } from '../../src/core/types.js';
 import { embedJobId } from '../../src/core/ids.js';
+
+import type { SettledNotice, SettledTarget } from '../../src/core/types.js';
+import type { DispatchMessage } from '../../src/do/job-shard.js';
 
 const T0 = 2_600_000_000_000;
 const TARGET = 'NotifySettled';
@@ -12,7 +13,7 @@ const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name)
 
 // 実キューはconsumer実行で状態変化
 async function install(name: string, sent: DispatchMessage[] = []): Promise<void> {
-	await runInDurableObject(shard(name), (instance) => {
+	await runInDurableObject(shard(name), instance => {
 		(instance as any).clock = { now: () => T0 };
 		(instance as any).env.TSUMUGI_QUEUE = {
 			send: async (body: DispatchMessage) => void sent.push(body),
@@ -24,17 +25,16 @@ async function install(name: string, sent: DispatchMessage[] = []): Promise<void
 }
 
 const payloadOf = (shardName: string, jobId: string) =>
-	runInDurableObject(shard(shardName), (instance) => {
+	runInDurableObject(shard(shardName), instance => {
 		const row = (instance as any).repo.find(jobId) as { payload: string } | undefined;
 		return row ? (JSON.parse(row.payload) as SettledNotice) : undefined;
 	});
 
 const noticeIdOf = (jobId: string, attempts: number, state: string) => `${TARGET}#0:settled-${embedJobId(jobId)}-${attempts}-${state}`;
 
-const countOf = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countJobs() as number);
+const countOf = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countJobs() as number);
 
-const settledRowsOf = (name: string) =>
-	runInDurableObject(shard(name), (instance) => (instance as any).repo.countSettledNotify() as number);
+const settledRowsOf = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countSettledNotify() as number);
 
 // 実運用ではenqueueに同梱
 const configure = (name: string, states: SettledTarget['states']) => shard(name).configure({ settled: { binding: TARGET, states } });
@@ -48,7 +48,7 @@ interface SchedulerFace extends Rpc.DurableObjectBranded {
 }
 
 const targetOf = (name: string) =>
-	runInDurableObject(shard(name), (instance) => {
+	runInDurableObject(shard(name), instance => {
 		const raw = (instance as any).repo.readSetting('settled_target') as string | undefined;
 		return raw !== undefined ? (JSON.parse(raw) as SettledTarget) : undefined;
 	});
@@ -182,7 +182,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		const after = await countOf(`${TARGET}#0`);
 
 		// 送信後中断を再現, カーソル未更新で同じ通知を再送
-		await runInDurableObject(shard('SET6#0'), (instance) => {
+		await runInDurableObject(shard('SET6#0'), instance => {
 			((instance as any).repo.sql as SqlStorage).exec(
 				`INSERT INTO settled_notify (job_id, payload) VALUES (?, ?)`,
 				jobId,
@@ -211,7 +211,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		});
 		await runDurableObjectAlarm(shard('SET7#0'));
 		// 無応答で期限と猶予経過後にreaper処理
-		await runInDurableObject(shard('SET7#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
+		await runInDurableObject(shard('SET7#0'), instance => void ((instance as any).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
 		await runDurableObjectAlarm(shard('SET7#0'));
 
 		await shard('SET7#0').retry(jobId);
@@ -248,7 +248,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		await scheduler.sync();
 		// 最短定義は1分間隔, 発火用に時計を前進
 		const ahead = Date.now() + 2 * 60_000;
-		await runInDurableObject(scheduler, (instance) => void ((instance as any).clock = { now: () => ahead }));
+		await runInDurableObject(scheduler, instance => void ((instance as any).clock = { now: () => ahead }));
 		await runDurableObjectAlarm(scheduler);
 
 		// Run DOはlistへ, Scheduler DOはpoll-namesとping-helloへ投入

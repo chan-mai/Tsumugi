@@ -1,8 +1,9 @@
+import { createFlow } from '../../src/core/flow.js';
 // scheduleの型レベル検証, `tsc --noEmit`で検査
 import { Performer } from '../../src/performer/entrypoint.js';
-import type { JobContext } from '../../src/core/api.js';
-import { createFlow } from '../../src/core/flow.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { JobContext } from '../../src/core/api.js';
 
 class Poll extends Performer<{ prefix: string }, { names: string[] }> {
 	async perform(_payload: { prefix: string }, _ctx: JobContext) {
@@ -22,7 +23,7 @@ const performers = { POLL: Poll, CHARGE: Charge, SYNC: Sync };
 const flow = createFlow(performers);
 
 const flows = {
-	REPORT: flow<{ until: number }>((f) => {
+	REPORT: flow<{ until: number }>(f => {
 		f.node('poll', 'POLL', { input: () => ({ prefix: 'x' }) });
 	}),
 };

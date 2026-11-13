@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { BaseEdge } from '@vue-flow/core';
 import { computed } from 'vue';
+
 import type { Point } from './runLayout';
 
 const props = defineProps<{

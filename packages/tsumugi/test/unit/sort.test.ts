@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { attemptsOf } from '../../src/core/attempts.js';
 import { resolveSort, SORTABLE_COLUMNS } from '../../src/api/sort.js';
+import { attemptsOf } from '../../src/core/attempts.js';
 import { describeError } from '../../src/queue/consumer.js';
 
 describe('一覧の並べ替え', () => {
@@ -65,7 +65,7 @@ describe('例外の文字列化(ADR-0028)', () => {
 		// stack1行目にName: message含む, 連結すると同じ行が重複
 		const error = new Error('boom');
 		const text = describeError(error);
-		expect(text.split('\n').filter((l) => l.includes('Error: boom'))).toHaveLength(1);
+		expect(text.split('\n').filter(l => l.includes('Error: boom'))).toHaveLength(1);
 	});
 
 	it('stackが無ければ名前とメッセージで構築する', () => {

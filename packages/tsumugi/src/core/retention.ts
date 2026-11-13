@@ -1,4 +1,5 @@
 import { RETRYABLE_STATES } from './transitions.js';
+
 import type { Retention } from './types.js';
 
 // 投影遅延考慮
@@ -12,7 +13,7 @@ export const DEFAULT_FAILED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
  * 実際の可否はDOが判定し410が最終回答, ここは操作前の目安
  */
 export function jobRetryable(row: { state: string; updatedAt: number }, now: number, retentionMs: number | undefined): boolean {
-	if (!RETRYABLE_STATES.some((state) => state === row.state)) return false;
+	if (!RETRYABLE_STATES.some(state => state === row.state)) return false;
 	if (retentionMs === undefined) return true;
 	return row.updatedAt > now - retentionMs;
 }

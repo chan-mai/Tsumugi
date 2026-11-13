@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { RunNode } from '../../src/api';
 import { CHILD_PAGE, formatDuration, tickStep, waterfallLayout, type NodeRow } from '../../src/components/waterfall/waterfallLayout';
+
+import type { RunNode } from '../../src/api';
 
 const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 	binding: 'GREET',
@@ -27,7 +28,7 @@ const node = (over: Partial<RunNode> & { id: string }): RunNode => ({
 const job = (id: string, over: Partial<RunNode> = {}) => node({ id, job_id: `GREET#0:${id}`, ...over });
 
 const nodeRows = (rows: ReturnType<typeof waterfallLayout>['rows']) => rows.filter((row): row is NodeRow => row.kind === 'node');
-const rowOf = (result: ReturnType<typeof waterfallLayout>, id: string) => nodeRows(result.rows).find((row) => row.node.id === id)!;
+const rowOf = (result: ReturnType<typeof waterfallLayout>, id: string) => nodeRows(result.rows).find(row => row.node.id === id)!;
 
 describe('ウォーターフォールの配置', () => {
 	it('親子を前順で並べ兄弟はposition順', () => {
@@ -40,7 +41,7 @@ describe('ウォーターフォールの配置', () => {
 			],
 			0,
 		);
-		expect(nodeRows(result.rows).map((row) => [row.node.id, row.depth])).toEqual([
+		expect(nodeRows(result.rows).map(row => [row.node.id, row.depth])).toEqual([
 			['a', 0],
 			['a:0', 1],
 			['a:1', 1],
@@ -122,7 +123,7 @@ describe('ウォーターフォールの配置', () => {
 		const result = waterfallLayout([node({ id: 'fan', container: true }), node({ id: 'fan:0', parent: 'fan' })], 0, {
 			collapsed: new Set(['fan']),
 		});
-		expect(nodeRows(result.rows).map((row) => row.node.id)).toEqual(['fan']);
+		expect(nodeRows(result.rows).map(row => row.node.id)).toEqual(['fan']);
 		expect(rowOf(result, 'fan')).toMatchObject({ childCount: 1, collapsed: true });
 	});
 
@@ -133,7 +134,7 @@ describe('ウォーターフォールの配置', () => {
 		expect(result.rows.at(-1)).toEqual({ kind: 'more', parent: 'fan', depth: 1, remaining: 5 });
 
 		const expanded = waterfallLayout([node({ id: 'fan', container: true }), ...many], 0, { shown: new Map([['fan', CHILD_PAGE * 2]]) });
-		expect(expanded.rows.every((row) => row.kind === 'node')).toBe(true);
+		expect(expanded.rows.every(row => row.kind === 'node')).toBe(true);
 	});
 
 	it('存在しない親を持つノードはルートに置く', () => {
@@ -155,7 +156,7 @@ describe('目盛り', () => {
 
 	it('範囲の先頭から間隔ごとに置く', () => {
 		const result = waterfallLayout([job('n', { queued_at: 0, started_at: 0, finished_at: 1_000 })], 0);
-		expect(result.ticks.map((tick) => tick.offset)).toEqual([0, 200, 400, 600, 800, 1_000]);
+		expect(result.ticks.map(tick => tick.offset)).toEqual([0, 200, 400, 600, 800, 1_000]);
 	});
 
 	it('所要時間を単位付きで表示する', () => {

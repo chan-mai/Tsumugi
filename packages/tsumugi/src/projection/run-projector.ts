@@ -1,6 +1,7 @@
-import type { NodeSnapshot, RunSnapshot } from '../do/run-repo.js';
 import { upsertOf, type ReadModelRow, type Upsert } from './columns.js';
 import { latestPerKey } from './projector.js';
+
+import type { NodeSnapshot, RunSnapshot } from '../do/run-repo.js';
 
 export type RunOutboxRow = { seq: number; kind: string; target: string; snapshot: string };
 
@@ -14,7 +15,7 @@ function toNodeValues(snapshot: NodeSnapshot, seq: number): ReadModelRow<'run_no
 }
 
 export function toUpserts(rows: readonly RunOutboxRow[]): Upsert[] {
-	return latestPerKey(rows, (row) => `${row.kind}:${row.target}`).map((row) =>
+	return latestPerKey(rows, row => `${row.kind}:${row.target}`).map(row =>
 		row.kind === 'run'
 			? upsertOf('run', toRunValues(JSON.parse(row.snapshot) as RunSnapshot, row.seq), ['id'], ['created_at', 'flow'])
 			: upsertOf(
@@ -28,5 +29,5 @@ export function toUpserts(rows: readonly RunOutboxRow[]): Upsert[] {
 
 export async function projectRun(db: D1Database, rows: readonly RunOutboxRow[]): Promise<void> {
 	if (rows.length === 0) return;
-	await db.batch(toUpserts(rows).map((upsert) => db.prepare(upsert.sql).bind(...upsert.params)));
+	await db.batch(toUpserts(rows).map(upsert => db.prepare(upsert.sql).bind(...upsert.params)));
 }

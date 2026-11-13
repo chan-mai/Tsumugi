@@ -1,7 +1,8 @@
-import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
-import type { NodeTrigger } from '../core/flow.js';
 import { assignments, chunk, columnList, placeholders, valuesOf } from './bind.js';
 import { applyRunSchema, RUN_COLUMNS, type NodeRow, type RunRow } from './run-schema.js';
+
+import type { NodeTrigger } from '../core/flow.js';
+import type { NodeOrigin, NodeState, NodeView, RunState } from '../core/run.js';
 
 const RUN_SELECT = columnList(RUN_COLUMNS.run);
 const NODE_SELECT = columnList(RUN_COLUMNS.node);
@@ -18,7 +19,7 @@ export const abortErrorOf = (run: HaltSource): string | null =>
 export const abortErrorsOf = (run: HaltSource): string[] =>
 	run.cancelling === 1
 		? []
-		: [run.abort_error, run.expired === 1 ? deadlineErrorOf(run.deadline_ms) : null].filter((error) => error !== null);
+		: [run.abort_error, run.expired === 1 ? deadlineErrorOf(run.deadline_ms) : null].filter(error => error !== null);
 
 export type NewNode = {
 	id: string;
@@ -161,7 +162,7 @@ export class RunRepo {
 		this.sql.exec(
 			// 同一IDのspawnは既存維持(ADR-0032)
 			`INSERT INTO node (${NODE_SELECT}) VALUES ${nodes.map(() => row).join(', ')} ON CONFLICT DO NOTHING`,
-			...nodes.flatMap((n) =>
+			...nodes.flatMap(n =>
 				valuesOf(RUN_COLUMNS.node, {
 					id: n.id,
 					binding: n.binding,
@@ -191,7 +192,7 @@ export class RunRepo {
 		const rows = this.#all<Pick<NodeRow, 'id' | 'state' | 'container' | 'subflow' | 'parent' | 'origin' | 'after' | 'trigger'>>(
 			`SELECT id, state, container, subflow, parent, origin, "after", "trigger" FROM node ORDER BY seq ASC, id ASC`,
 		);
-		return rows.map((row) => ({
+		return rows.map(row => ({
 			id: row.id,
 			state: row.state as NodeState,
 			container: row.container === 1,
@@ -259,15 +260,15 @@ export class RunRepo {
 			AND (origin <> 'fanOut' OR (state = 'FAILED' AND error IN (${placeholders(aborted.length)}))${resumeCancelled ? ` OR state = 'CANCELLED'` : ''})`;
 		// 子孫を戻すコンテナは集約待ちへ, COMPLETEDのままでは集計値が古いまま
 		const parents = new Map(
-			this.#all<{ id: string; parent: string | null }>(`SELECT id, parent FROM node`).map((row) => [row.id, row.parent]),
+			this.#all<{ id: string; parent: string | null }>(`SELECT id, parent FROM node`).map(row => [row.id, row.parent]),
 		);
 		const ancestors = new Set<string>();
 		for (const row of this.#all<{ parent: string }>(`SELECT parent FROM node WHERE parent IS NOT NULL AND ${reopenable}`, ...aborted)) {
 			for (let id: string | null | undefined = row.parent; id && !ancestors.has(id); id = parents.get(id)) ancestors.add(id);
 		}
 		const reopened = this.#all<{ id: string }>(`SELECT id FROM node WHERE container = 1 AND state = 'COMPLETED'`)
-			.map((row) => row.id)
-			.filter((id) => ancestors.has(id));
+			.map(row => row.id)
+			.filter(id => ancestors.has(id));
 		for (const id of reopened) this.updateNode(id, { state: 'RUNNING' }, now);
 		const cursor = this.sql.exec<{ id: string }>(
 			`UPDATE node SET
@@ -281,14 +282,14 @@ export class RunRepo {
 			now,
 			...aborted,
 		);
-		const reset = new Set([...reopened, ...cursor.toArray().map((row) => row.id)]);
+		const reset = new Set([...reopened, ...cursor.toArray().map(row => row.id)]);
 		const downstream = this.#all<{ id: string; after: string }>(
 			`SELECT id, "after" FROM node
 			WHERE state = 'COMPLETED' AND container = 0 AND subflow IS NULL
 				AND NOT EXISTS(SELECT 1 FROM node child WHERE child.parent = node.id)
 			ORDER BY seq ASC, id ASC`,
-		).filter((row) => {
-			if (!(JSON.parse(row.after) as string[]).some((id) => reset.has(id))) return false;
+		).filter(row => {
+			if (!(JSON.parse(row.after) as string[]).some(id => reset.has(id))) return false;
 			reset.add(row.id);
 			return true;
 		});
@@ -353,7 +354,7 @@ export class RunRepo {
 		if (rows.length === 0) return;
 		this.sql.exec(
 			`INSERT INTO run_outbox (kind, target, snapshot) VALUES ${rows.map(() => '(?, ?, ?)').join(', ')}`,
-			...rows.flatMap((row) => {
+			...rows.flatMap(row => {
 				const snapshot: NodeSnapshot = {
 					run_id: runId,
 					node_id: row.id,

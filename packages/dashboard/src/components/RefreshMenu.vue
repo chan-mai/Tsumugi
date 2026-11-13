@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Check } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import { Check } from '@lucide/vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { REFRESH_OPTIONS } from '../refresh';
@@ -11,7 +11,7 @@ const emit = defineEmits<{ 'update:interval': [value: number] }>();
 const { t } = useI18n();
 
 const labelOf = (ms: number) =>
-	ms === 0 ? t('toolbar.off') : (REFRESH_OPTIONS.find((option) => option.ms === ms)?.label ?? t('toolbar.off'));
+	ms === 0 ? t('toolbar.off') : (REFRESH_OPTIONS.find(option => option.ms === ms)?.label ?? t('toolbar.off'));
 const label = computed(() => labelOf(props.interval));
 </script>
 

@@ -1,8 +1,9 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+
 import type { JobContext } from '../../src/core/api.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
 const consumerEnv: ConsumerEnv = env;
 

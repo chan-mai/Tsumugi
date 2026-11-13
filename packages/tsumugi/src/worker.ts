@@ -1,25 +1,25 @@
-import { createLocalId } from './do/local-id.js';
-import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
+import { createRest, type RestEnv } from './api/rest.js';
 import { configOf, createClient, type BindingConfig, type ClientEnv, type EnqueueHook } from './client/enqueue.js';
-import { TERMINAL_STATES } from './core/transitions.js';
-import type { SettledState } from './core/types.js';
-import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from './do/job-shard.js';
-import { createRunClass, type RunClass, type RunSettings } from './do/run.js';
+import { configErrorMessage } from './config/fragment.js';
+import { cachedValidate } from './config/validate.js';
+import { assertValidFlow, formatRunId, shardName } from './core/ids.js';
 import { DEFAULT_FAILED_RETENTION_MS } from './core/retention.js';
+import { TERMINAL_STATES } from './core/transitions.js';
+import { createLocalId } from './do/local-id.js';
+import { createRunClass, type RunClass, type RunSettings } from './do/run.js';
 import { createSchedulerClass, SCHEDULER_DO_NAME, type SchedulerClass } from './do/scheduler.js';
-import type { AnySchedules, ScheduleDefs } from './core/recurring.js';
+import { sweepReadModel, type SweepOptions } from './projection/sweep.js';
 import { handleBatch, type ConsumerEnv, type PerformerRegistry, type PerformerSource } from './queue/consumer.js';
+
+import type { MetricsResolver } from './analytics/reader.js';
+import type { AuthMiddleware } from './api/auth.js';
 import type { EnvOf, FailurePerformer, JobQueue, Performers, PerformersOf, SettledPerformer, TypedEnqueueInput } from './core/api.js';
 import type { Flows, InputOf } from './core/flow.js';
-import type { AuthMiddleware } from './api/auth.js';
-import { createRest, type RestEnv } from './api/rest.js';
-import { sweepReadModel, type SweepOptions } from './projection/sweep.js';
-import type { Ui } from './ui/serve.js';
-import type { MetricsResolver } from './analytics/reader.js';
-import { cachedValidate } from './config/validate.js';
-import { configErrorMessage } from './config/fragment.js';
-
+import type { AnySchedules, ScheduleDefs } from './core/recurring.js';
+import type { SettledState } from './core/types.js';
 import type { RunControlStub, SchedulerControl, StartOptions } from './do/control.js';
+import type { DispatchMessage, EnqueueInput, TsumugiJobShard } from './do/job-shard.js';
+import type { Ui } from './ui/serve.js';
 
 export type { BindingConfig, ClientEnv, RunControlStub, SchedulerControl, StartOptions };
 
@@ -194,7 +194,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 		if (!env.SCHEDULER) return;
 		primed = schedulerFor(env)
 			.sync()
-			.catch((error) => {
+			.catch(error => {
 				console.error('tsumugi: scheduler sync failed', error);
 				// 失敗は保存せず次のイベントで再試行
 				primed = undefined;
@@ -219,10 +219,10 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 				...(config.ui ? { dashboard: config.ui } : {}),
 				bindings: Object.keys(performers),
 				// 流量変更の全shard適用用(#27)
-				shardsOf: (binding) => configOf(config.bindings ?? {}, binding)?.shards ?? 1,
+				shardsOf: binding => configOf(config.bindings ?? {}, binding)?.shards ?? 1,
 				enqueue: (env, input) => client.enqueue(env, input),
 				// 一覧のretryable判定用, 操作前の可否表示(ADR-0027)
-				failedRetentionMs: (binding) => configOf(config.bindings ?? {}, binding)?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
+				failedRetentionMs: binding => configOf(config.bindings ?? {}, binding)?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 				runFailedRetentionMs: config.runs?.failedRetentionMs ?? DEFAULT_FAILED_RETENTION_MS,
 				flows: Object.keys(flows),
 				// 未設定時`/api/metrics`は501
@@ -277,7 +277,7 @@ export function defineTsumugi<const R extends PerformerRegistry<any>, const F ex
 					assertConfigured(env);
 					return client.enqueueMany(
 						env,
-						items.map((it) => ({ binding: it.binding, payload: it.payload, ...it.options }) as EnqueueInput),
+						items.map(it => ({ binding: it.binding, payload: it.payload, ...it.options }) as EnqueueInput),
 					);
 				},
 			} as JobQueue<PerformersOf<R>>;

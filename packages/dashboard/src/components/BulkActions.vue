@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ListChecks } from '@lucide/vue';
 import { Menu, MenuButton, MenuItem, MenuItems, TransitionRoot } from '@headlessui/vue';
+import { ListChecks } from '@lucide/vue';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { bulkAction } from '../api';
@@ -39,7 +39,7 @@ async function run(action: 'retry' | 'cancel') {
 	}
 }
 
-const states = (action: 'retry' | 'cancel') => TARGET_STATES[action].map((state) => t(`state.${state}`)).join(t('bulk.and'));
+const states = (action: 'retry' | 'cancel') => TARGET_STATES[action].map(state => t(`state.${state}`)).join(t('bulk.and'));
 </script>
 
 <template>

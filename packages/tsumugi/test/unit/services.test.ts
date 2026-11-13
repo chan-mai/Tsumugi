@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { createBindingService } from '../../src/service/bindings.service.js';
+import { createJobService } from '../../src/service/jobs.service.js';
+import { createRunService } from '../../src/service/runs.service.js';
+
 import type { Job, JobListItem } from '../../src/core/entity/job.entity.js';
 import type { Run, RunNode } from '../../src/core/entity/run.entity.js';
 import type { JobRepository } from '../../src/repository/job.repository.js';
 import type { RunRepository } from '../../src/repository/run.repository.js';
-import { createBindingService } from '../../src/service/bindings.service.js';
-import { createJobService } from '../../src/service/jobs.service.js';
-import { createRunService } from '../../src/service/runs.service.js';
 import type { ServiceEnv } from '../../src/service/types.js';
 
 const KEEP = 60_000;
@@ -54,7 +55,7 @@ describe('ジョブのservice', () => {
 		const env = {} as ServiceEnv;
 
 		const { jobs: listed } = await jobs.list(env, { state: null, binding: null, limit: 20, offset: 0, sort: 'updatedAt', desc: true });
-		expect(listed.map((job) => job.retryable)).toEqual([true, false, false]);
+		expect(listed.map(job => job.retryable)).toEqual([true, false, false]);
 		expect((await jobs.detail(env, 'Hello#0:a'))?.retryable).toBe(true);
 		expect(await createJobService({}, () => jobRepository({})).detail(env, 'Hello#0:a')).toBeNull();
 	});

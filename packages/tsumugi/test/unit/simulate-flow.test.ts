@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { PerformerLike } from '../../src/core/api.js';
 import { createFlow } from '../../src/core/flow.js';
 import { simulateFlow } from '../../src/testing/flow.js';
+
+import type { PerformerLike } from '../../src/core/api.js';
 
 // `createFlow`はctorのインスタンス型から型導出のみ, 実体の呼び出しなし
 // `Performer`は`cloudflare:workers`依存, workerd非起動の本プロジェクトでは読込不可
@@ -15,12 +16,12 @@ const performers = {
 
 const flow = createFlow(performers);
 
-const greetings = flow<{ prefix: string }>((f) => {
-	const list = f.node('list', 'LIST', { input: (i) => ({ prefix: i.prefix }) });
+const greetings = flow<{ prefix: string }>(f => {
+	const list = f.node('list', 'LIST', { input: i => ({ prefix: i.prefix }) });
 	const each = f.fanOut('greet', 'GREET', {
 		after: { list },
 		over: (_i, d) => d.list.names,
-		input: (name) => ({ name }),
+		input: name => ({ name }),
 	});
 	f.node('report', 'REPORT', {
 		after: { each },
@@ -28,9 +29,9 @@ const greetings = flow<{ prefix: string }>((f) => {
 	});
 });
 
-const ids = (result: ReturnType<typeof simulateFlow>) => result.nodes.map((node) => node.id);
+const ids = (result: ReturnType<typeof simulateFlow>) => result.nodes.map(node => node.id);
 
-const stateOf = (result: { nodes: { id: string; state: string }[] }, id: string) => result.nodes.find((node) => node.id === id)?.state;
+const stateOf = (result: { nodes: { id: string; state: string }[] }, id: string) => result.nodes.find(node => node.id === id)?.state;
 
 describe('flowの通し実行', () => {
 	it('依存の順にノードを実行する', () => {
@@ -42,7 +43,7 @@ describe('flowの通し実行', () => {
 
 	it('各ノードへ渡るpayloadを返す', () => {
 		const result = simulateFlow(greetings, { prefix: 'hello' }, { results: { list: { names: ['a', 'b'] } } });
-		const payloads = Object.fromEntries(result.nodes.map((node) => [node.id, node.payload]));
+		const payloads = Object.fromEntries(result.nodes.map(node => [node.id, node.payload]));
 
 		expect(payloads.list).toEqual({ prefix: 'hello' });
 		expect(payloads['greet:0']).toEqual({ name: 'a' });
@@ -52,26 +53,26 @@ describe('flowの通し実行', () => {
 
 	it('fan-outの件数がoverの結果で決まる', () => {
 		const result = simulateFlow(greetings, { prefix: 'x' }, { results: { list: { names: ['a', 'b', 'c', 'd'] } } });
-		expect(result.nodes.filter((node) => node.parent === 'greet')).toHaveLength(4);
+		expect(result.nodes.filter(node => node.parent === 'greet')).toHaveLength(4);
 	});
 
 	it('子が0件でも後段へ進む', () => {
 		const result = simulateFlow(greetings, { prefix: 'x' }, { results: { list: { names: [] } } });
 
 		expect(ids(result)).toEqual(['list', 'greet', 'report']);
-		expect(result.nodes.find((node) => node.id === 'report')?.payload).toEqual({ total: 0, failed: 0 });
+		expect(result.nodes.find(node => node.id === 'report')?.payload).toEqual({ total: 0, failed: 0 });
 	});
 
 	it('fan-outの子の失敗は要約に載り後段は進む', () => {
 		const result = simulateFlow(greetings, { prefix: 'x' }, { results: { list: { names: ['a', 'b'] } }, fails: ['greet:1'] });
 
-		expect(result.nodes.find((node) => node.id === 'report')?.payload).toEqual({ total: 2, failed: 1 });
+		expect(result.nodes.find(node => node.id === 'report')?.payload).toEqual({ total: 2, failed: 1 });
 		expect(result.state).toBe('COMPLETED');
 	});
 
 	it('失敗したノードの下流をSKIPPEDにする', () => {
 		const result = simulateFlow(greetings, { prefix: 'x' }, { fails: ['list'] });
-		const states = Object.fromEntries(result.nodes.map((node) => [node.id, node.state]));
+		const states = Object.fromEntries(result.nodes.map(node => [node.id, node.state]));
 
 		expect(states.list).toBe('FAILED');
 		expect(states.greet).toBe('SKIPPED');
@@ -80,12 +81,12 @@ describe('flowの通し実行', () => {
 	});
 
 	it('結果を関数で与えられる', () => {
-		const result = simulateFlow(greetings, { prefix: 'p' }, { results: (node) => (node.id === 'list' ? { names: ['z'] } : undefined) });
-		expect(result.nodes.find((node) => node.id === 'greet:0')?.payload).toEqual({ name: 'z' });
+		const result = simulateFlow(greetings, { prefix: 'p' }, { results: node => (node.id === 'list' ? { names: ['z'] } : undefined) });
+		expect(result.nodes.find(node => node.id === 'greet:0')?.payload).toEqual({ name: 'z' });
 	});
 
 	it('失敗時の後処理が実行され成功時は実行されない(ADR-0041)', () => {
-		const withCleanup = flow<void>((f) => {
+		const withCleanup = flow<void>(f => {
 			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
 			f.node('cleanup', 'REPORT', {
 				after: { list },
@@ -107,7 +108,7 @@ describe('flowの通し実行', () => {
 	});
 
 	it('alwaysは成否を問わず通る', () => {
-		const withAlways = flow<void>((f) => {
+		const withAlways = flow<void>(f => {
 			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
 			f.node('always', 'REPORT', { after: { list }, trigger: 'always', input: () => ({ total: 0, failed: 0 }) });
 		});
@@ -117,7 +118,7 @@ describe('flowの通し実行', () => {
 	});
 
 	it('whenが経路を選ぶ(ADR-0041)', () => {
-		const branched = flow<{ big: boolean }>((f) => {
+		const branched = flow<{ big: boolean }>(f => {
 			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
 			f.node('heavy', 'REPORT', {
 				after: { list },
@@ -126,7 +127,7 @@ describe('flowの通し実行', () => {
 			});
 			f.node('light', 'REPORT', {
 				after: { list },
-				when: (i) => !i.big,
+				when: i => !i.big,
 				input: () => ({ total: 1, failed: 0 }),
 			});
 		});
@@ -142,7 +143,7 @@ describe('flowの通し実行', () => {
 	});
 
 	it('whenの例外はノードをFAILEDにする(ADR-0041)', () => {
-		const broken = flow<void>((f) => {
+		const broken = flow<void>(f => {
 			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
 			f.node('boom', 'REPORT', {
 				after: { list },
@@ -161,7 +162,7 @@ describe('flowの通し実行', () => {
 	});
 
 	it('SKIPPEDの依存では後始末が通らない(ADR-0041)', () => {
-		const branched = flow<void>((f) => {
+		const branched = flow<void>(f => {
 			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
 			const gated = f.node('gated', 'REPORT', { after: { list }, when: () => false, input: () => ({ total: 0, failed: 0 }) });
 			f.node('cleanup', 'REPORT', { after: { gated }, trigger: 'failure', input: () => ({ total: 0, failed: 1 }) });
@@ -175,13 +176,13 @@ describe('flowの通し実行', () => {
 	});
 
 	it('子ノードIDの決め方をkeyで変えられる', () => {
-		const keyed = flow<void>((f) => {
+		const keyed = flow<void>(f => {
 			const list = f.node('list', 'LIST', { input: () => ({ prefix: '' }) });
 			f.fanOut('greet', 'GREET', {
 				after: { list },
 				over: (_i, d) => d.list.names,
-				input: (name) => ({ name }),
-				key: (name) => name,
+				input: name => ({ name }),
+				key: name => name,
 			});
 		});
 
@@ -191,11 +192,11 @@ describe('flowの通し実行', () => {
 });
 
 describe('subflow', () => {
-	const reporting = flow<{ ids: string[] }>((f) => {
-		f.node('report', 'REPORT', { input: (i) => ({ total: i.ids.length, failed: 0 }) });
+	const reporting = flow<{ ids: string[] }>(f => {
+		f.node('report', 'REPORT', { input: i => ({ total: i.ids.length, failed: 0 }) });
 	});
-	const pipeline = flow<{ prefix: string }>((f) => {
-		const list = f.node('list', 'LIST', { input: (i) => ({ prefix: i.prefix }) });
+	const pipeline = flow<{ prefix: string }>(f => {
+		const list = f.node('list', 'LIST', { input: i => ({ prefix: i.prefix }) });
 		const reported = f.subflow('reported', reporting, { after: { list }, input: (_i, d) => ({ ids: d.list.names }) });
 		f.node('greet', 'GREET', { after: { reported }, input: () => ({ name: 'done' }) });
 	});
@@ -204,7 +205,7 @@ describe('subflow', () => {
 		const result = simulateFlow(pipeline, { prefix: 'p' }, { results: { list: { names: ['a', 'b'] }, reported: 'ignored' } });
 
 		expect(ids(result)).toEqual(['list', 'reported', 'greet']);
-		const reported = result.nodes.find((node) => node.id === 'reported');
+		const reported = result.nodes.find(node => node.id === 'reported');
 		expect(reported).toMatchObject({ payload: { ids: ['a', 'b'] }, state: 'COMPLETED', result: undefined });
 		expect(result.state).toBe('COMPLETED');
 	});

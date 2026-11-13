@@ -1,13 +1,14 @@
 import { env, listDurableObjectIds, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createRest, type Rest, type RestEnv } from '../../src/api/rest.js';
+import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
+import { hashToShard } from '../../src/core/shard.js';
+import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
 // 公開エントリ経由で再エクスポート欠落も検出
 import { bearerAuth, createFlow, unsafeNoAuth } from '../../src/entries/index.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { defineTsumugi } from '../../src/worker.js';
-import { createRest, type Rest, type RestEnv } from '../../src/api/rest.js';
-import { SORTABLE_COLUMNS } from '../../src/api/sort.js';
-import { ERROR_MAX_CHARS } from '../../src/do/repo.js';
-import { hashToShard } from '../../src/core/shard.js';
+
 import type { ScheduleView } from '../../src/do/scheduler.js';
 
 const T0 = 2_200_000_000_000;
@@ -56,7 +57,7 @@ const request = (rest: Rest<RestEnv>, path: string, init: RequestInit, target: R
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 async function seedJob(): Promise<string> {
-	await runInDurableObject(shard('REST#0'), (instance) => {
+	await runInDurableObject(shard('REST#0'), instance => {
 		(instance as any).clock = { now: () => T0 };
 		(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 	});
@@ -177,7 +178,7 @@ describe('REST API', () => {
 
 		const list = await call(withAuth, 'GET', '/api/jobs', authorized);
 		const { jobs } = await list.json<{ jobs: { id: string }[] }>();
-		expect(jobs.some((job) => job.id === jobId)).toBe(true);
+		expect(jobs.some(job => job.id === jobId)).toBe(true);
 
 		const detail = await call(withAuth, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`, authorized);
 		expect(detail.status).toBe(200);
@@ -642,7 +643,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 				{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 			);
 			const result = await res.json<{ failed: { id: string }[]; remaining: number }>();
-			expect(result.failed.map((f) => f.id)).not.toContain('GONE#0:bulk-old');
+			expect(result.failed.map(f => f.id)).not.toContain('GONE#0:bulk-old');
 		}
 	});
 
@@ -663,7 +664,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 		);
 		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
-		expect(jobs.find((j) => j.id === 'GONE#0:old')?.retryable).toBe(false);
+		expect(jobs.find(j => j.id === 'GONE#0:old')?.retryable).toBe(false);
 	});
 
 	it('保持期間内の失敗ジョブはretryable=true', async () => {
@@ -679,7 +680,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 		);
 		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
-		expect(jobs.find((j) => j.id === 'GONE#0:fresh')?.retryable).toBe(true);
+		expect(jobs.find(j => j.id === 'GONE#0:fresh')?.retryable).toBe(true);
 	});
 
 	it('終端でない状態はretryable=false', async () => {
@@ -690,7 +691,7 @@ describe('保持期間を過ぎたジョブの操作(ADR-0027)', () => {
 			{ waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
 		);
 		const { jobs } = await res.json<{ jobs: { id: string; retryable: boolean }[] }>();
-		expect(jobs.find((j) => j.id === 'GONE#0:running')?.retryable).toBe(false);
+		expect(jobs.find(j => j.id === 'GONE#0:running')?.retryable).toBe(false);
 	});
 });
 
@@ -699,7 +700,7 @@ describe('一覧の並べ替え', () => {
 
 	// 全て同時刻では並び順検証不成立、時刻をずらして投入
 	async function seedAt(now: number): Promise<void> {
-		await runInDurableObject(shard('SORT#0'), (instance) => {
+		await runInDurableObject(shard('SORT#0'), instance => {
 			(instance as any).clock = { now: () => now };
 			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 		});
@@ -727,7 +728,7 @@ describe('一覧の並べ替え', () => {
 
 		const times = async (order: string) => {
 			const body = await (await list(`binding=SORT&sort=created_at&order=${order}`)).json<{ jobs: { created_at: number }[] }>();
-			return body.jobs.map((j) => j.created_at);
+			return body.jobs.map(j => j.created_at);
 		};
 
 		const asc = await times('asc');
@@ -744,7 +745,7 @@ describe('試行履歴(ADR-0028)', () => {
 	const q = { send: async () => {}, sendBatch: async () => {} };
 
 	async function runFailing(name: string, binding: string, maxAttempts: number) {
-		await runInDurableObject(shard(name), (instance) => {
+		await runInDurableObject(shard(name), instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = q;
 		});
@@ -787,7 +788,7 @@ describe('試行履歴(ADR-0028)', () => {
 
 	it('1回目で成功したジョブは履歴を持たない', async () => {
 		// ジョブ行から導出可能な情報の保存は1ジョブあたり書き込み1回増加
-		await runInDurableObject(shard('LOG3#0'), (instance) => {
+		await runInDurableObject(shard('LOG3#0'), instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = q;
 		});
@@ -805,7 +806,7 @@ describe('試行履歴(ADR-0028)', () => {
 
 	it('失敗の後に成功すれば両方残る', async () => {
 		// 失敗のみではCOMPLETEDの経緯が履歴から不明
-		await runInDurableObject(shard('LOG6#0'), (instance) => {
+		await runInDurableObject(shard('LOG6#0'), instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = q;
 		});
@@ -814,7 +815,7 @@ describe('試行履歴(ADR-0028)', () => {
 		await shard('LOG6#0').report(jobId, { ok: false, error: 'first failure' });
 
 		// リトライ待ち経過後の再投入
-		await runInDurableObject(shard('LOG6#0'), (instance) => {
+		await runInDurableObject(shard('LOG6#0'), instance => {
 			(instance as any).clock = { now: () => T0 + 10 * 60 * 1000 };
 		});
 		await runDurableObjectAlarm(shard('LOG6#0'));
@@ -822,7 +823,7 @@ describe('試行履歴(ADR-0028)', () => {
 		await runDurableObjectAlarm(shard('LOG6#0'));
 
 		const { job } = await detail(jobId);
-		expect(job.attempts_log.map((a) => [a.attempt, a.state])).toEqual([
+		expect(job.attempts_log.map(a => [a.attempt, a.state])).toEqual([
 			[2, 'COMPLETED'],
 			[1, 'FAILED'],
 		]);
@@ -830,7 +831,7 @@ describe('試行履歴(ADR-0028)', () => {
 
 	it('エラー本文を上限で切り詰める', async () => {
 		// performer例外はHTMLページ全体の場合あり, 無制限ではDOとD1の容量を圧迫
-		await runInDurableObject(shard('LOG4#0'), (instance) => {
+		await runInDurableObject(shard('LOG4#0'), instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = q;
 		});
@@ -848,7 +849,7 @@ describe('試行履歴(ADR-0028)', () => {
 		const jobId = await runFailing('LOG5#0', 'LOG5', 1);
 		const res = await call(withAuth, 'GET', '/api/jobs?binding=LOG5', authorized);
 		const { jobs } = await res.json<{ jobs: Record<string, unknown>[] }>();
-		const row = jobs.find((j) => j.id === jobId);
+		const row = jobs.find(j => j.id === jobId);
 		expect(row).toBeDefined();
 		expect(row).not.toHaveProperty('attempts_log');
 	});
@@ -931,7 +932,7 @@ describe('一覧の抽出条件', () => {
 	const idsOf = async (query: string) => {
 		const res = await call(withAuth, 'GET', `/api/jobs?binding=FILTER&${query}`, authorized);
 		const { jobs } = await res.json<{ jobs: { id: string }[] }>();
-		return jobs.map((job) => job.id).sort();
+		return jobs.map(job => job.id).sort();
 	};
 
 	it('ID, キー, 期間で抽出できる', async () => {
@@ -976,7 +977,7 @@ describe('一括リトライと一括取り消し', () => {
 	// DO側の状態判定込みでFAILEDジョブ作成
 	async function failedJob(run?: { runId: string; nodeId: string }): Promise<string> {
 		const stub = shard('REST#0');
-		await runInDurableObject(stub, (instance) => {
+		await runInDurableObject(stub, instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 		});
@@ -1091,7 +1092,7 @@ describe('一括リトライと一括取り消し', () => {
 		const res = await post('retry', { binding: 'REST' });
 		const body = await res.json<{ ok: string[]; failed: { id: string }[]; remaining: number }>();
 		expect(body.ok).not.toContain(jobId);
-		expect(body.failed.map((f) => f.id)).not.toContain(jobId);
+		expect(body.failed.map(f => f.id)).not.toContain(jobId);
 		expect(body.remaining).toBe(0);
 	});
 
@@ -1147,7 +1148,7 @@ describe('予約済みジョブの実行時刻の変更', () => {
 		);
 
 	async function scheduled(runAt: number): Promise<string> {
-		await runInDurableObject(shard('REST#0'), (instance) => {
+		await runInDurableObject(shard('REST#0'), instance => {
 			(instance as any).clock = { now: () => T0 };
 			(instance as any).env.TSUMUGI_QUEUE = { send: async () => {}, sendBatch: async () => {} };
 		});
@@ -1220,7 +1221,7 @@ describe('runの開始', () => {
 	const alarms = new Set<Promise<void>>();
 	let restoreAlarm = () => {};
 	beforeAll(async () => {
-		await runInDurableObject(runs.get(runs.idFromName('rest-alarm-probe')), (instance) => {
+		await runInDurableObject(runs.get(runs.idFromName('rest-alarm-probe')), instance => {
 			const proto = Object.getPrototypeOf(instance) as { alarm(): Promise<void> };
 			const alarm = proto.alarm;
 			proto.alarm = function (this: unknown) {
@@ -1245,7 +1246,7 @@ describe('runの開始', () => {
 	const flow = createFlow({ REST: Noop });
 	const withFlows = defineTsumugi({
 		performers: { REST: Noop },
-		flows: { GREETINGS: flow<{ prefix: string }>((f) => void f.node('only', 'REST', { input: (i) => i })) },
+		flows: { GREETINGS: flow<{ prefix: string }>(f => void f.node('only', 'REST', { input: i => i })) },
 		auth: bearerAuth(TOKEN),
 	});
 
@@ -1282,7 +1283,7 @@ describe('runの開始', () => {
 		// Run DOは失敗後failedRetentionMsで削除, D1の行は残り再開は410
 		const shortLived = defineTsumugi({
 			performers: { REST: Noop },
-			flows: { GREETINGS: flow<{ prefix: string }>((f) => void f.node('only', 'REST', { input: (i) => i })) },
+			flows: { GREETINGS: flow<{ prefix: string }>(f => void f.node('only', 'REST', { input: i => i })) },
 			auth: bearerAuth(TOKEN),
 			runs: { failedRetentionMs: 60_000 },
 		});

@@ -1,9 +1,10 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { JobContext } from '../../src/core/api.js';
 import { fixedClock, type Clock } from '../../src/do/clock.js';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+
+import type { JobContext } from '../../src/core/api.js';
+import type { DispatchMessage } from '../../src/do/job-shard.js';
 
 const T0 = 1_900_000_000_000;
 const QUEUE_WAIT = 15 * 60_000;
@@ -62,17 +63,17 @@ const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`$
 
 // DO再生成で時計が既定へ復帰、操作直前に再設定
 async function install(binding: string, clock: Clock, queue: unknown) {
-	await runInDurableObject(shard(binding), (instance) => {
+	await runInDurableObject(shard(binding), instance => {
 		(instance as any).clock = clock;
 		(instance as any).env.TSUMUGI_QUEUE = queue;
 	});
 }
 
 const stateOf = (binding: string, jobId: string) =>
-	runInDurableObject(shard(binding), (instance) => (instance as any).repo.find(jobId)?.state as string | undefined);
+	runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId)?.state as string | undefined);
 
 const rowOf = (binding: string, jobId: string) =>
-	runInDurableObject(shard(binding), (instance) => (instance as any).repo.find(jobId) as { attempts: number; run_after: number });
+	runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId) as { attempts: number; run_after: number });
 
 const alarmOf = (binding: string) => runInDurableObject(shard(binding), (_i, state) => state.storage.getAlarm());
 
@@ -188,13 +189,13 @@ describe('consumerのwall time上限', () => {
 			backoff: { kind: 'fixed', delayMs: 1_000 },
 		});
 		await runDurableObjectAlarm(shard('SLOW'));
-		await handleBatch(makeBatch(sent.filter((m) => m.jobId === jobId)), consumerEnv, performers, 200);
+		await handleBatch(makeBatch(sent.filter(m => m.jobId === jobId)), consumerEnv, performers, 200);
 
 		expect(aborted).toBe(true);
 		expect(await stateOf('SLOW', jobId)).toBe('SCHEDULED');
 		const attempts = await runInDurableObject(
 			shard('SLOW'),
-			(instance) => (instance as any).repo.attemptsOf(jobId) as { error: string | null }[],
+			instance => (instance as any).repo.attemptsOf(jobId) as { error: string | null }[],
 		);
 		expect(attempts.at(-1)?.error).toContain('job exceeded the consumer wall time limit');
 	});
@@ -212,7 +213,7 @@ describe('consumerのwall time上限', () => {
 			maxAttempts: 3,
 		});
 		await runDurableObjectAlarm(shard('SLOWONCE'));
-		await handleBatch(makeBatch(sent.filter((m) => m.jobId === jobId)), consumerEnv, performers, 200);
+		await handleBatch(makeBatch(sent.filter(m => m.jobId === jobId)), consumerEnv, performers, 200);
 
 		expect(await stateOf('SLOWONCE', jobId)).toBe('STALLED');
 	});
@@ -311,7 +312,7 @@ describe('reaper', () => {
 		await install('BOOM', clock, queue);
 		await runDurableObjectAlarm(shard('BOOM'));
 		expect(await stateOf('BOOM', jobId)).toBe('RUNNING');
-		expect(sent.filter((m) => m.jobId === jobId)).toHaveLength(1);
+		expect(sent.filter(m => m.jobId === jobId)).toHaveLength(1);
 	});
 });
 
@@ -411,7 +412,7 @@ describe('無応答の試行の計上', () => {
 
 		expect(await shard('STALE5').retry(jobId)).toEqual({ ok: true });
 		await runDurableObjectAlarm(shard('STALE5'));
-		expect(sent.map((m) => m.attempt)).toEqual([1, 2]);
+		expect(sent.map(m => m.attempt)).toEqual([1, 2]);
 		expect(await shard('STALE5').claim(jobId, 1)).toBe(false);
 		expect(await shard('STALE5').claim(jobId, 2)).toBe(true);
 	});
@@ -427,7 +428,7 @@ describe('無応答の試行の計上', () => {
 			await install('STALE6', clock, queue);
 		}
 		expect(await stateOf('STALE6', jobId)).toBe('FAILED');
-		expect(sent.map((m) => m.attempt)).toEqual([1, 2]);
+		expect(sent.map(m => m.attempt)).toEqual([1, 2]);
 		expect((await rowOf('STALE6', jobId)).attempts).toBe(2);
 
 		// 手動リトライ後は新しい試行番号
@@ -497,6 +498,6 @@ describe('configure', () => {
 		await shard('PAUSE').configure({ policy: { paused: false } });
 		expect(await runDurableObjectAlarm(shard('PAUSE'))).toBe(true);
 		expect(await stateOf('PAUSE', jobId)).toBe('QUEUED');
-		expect(sent.map((m) => m.jobId)).toEqual([jobId]);
+		expect(sent.map(m => m.jobId)).toEqual([jobId]);
 	});
 });

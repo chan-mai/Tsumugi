@@ -6,9 +6,9 @@ import { useRoute } from 'vue-router';
 import { isUnauthorized, listJobs, type Job } from '../api';
 import { TOGGLEABLE, toggleColumn, visible } from '../columns';
 import BulkActions from '../components/BulkActions.vue';
-import JobDetailPanel from '../components/JobDetailPanel.vue';
 import DateRangeMenu from '../components/DateRangeMenu.vue';
 import FilterMenu from '../components/FilterMenu.vue';
+import JobDetailPanel from '../components/JobDetailPanel.vue';
 import JobsTable from '../components/JobsTable.vue';
 import NewJobModal from '../components/NewJobModal.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -50,7 +50,7 @@ const message = ref<string | null>(null);
 const error = ref<string | null>(null);
 
 const filtered = computed(() => state.value || binding.value || search.value || createdFrom.value !== null || createdTo.value !== null);
-const selectedIds = computed(() => picked.value.filter((id) => jobs.value.some((job) => job.id === id)));
+const selectedIds = computed(() => picked.value.filter(id => jobs.value.some(job => job.id === id)));
 
 // 条件変更は先頭ページから, 同一tickの更新は1回の遷移
 function filter(apply: () => void) {
@@ -148,7 +148,7 @@ onRefresh(() => inFlight === 0 && void load());
 onMounted(load);
 
 function sortBy(column: string) {
-	const next = SORTABLE.find((key) => key === column);
+	const next = SORTABLE.find(key => key === column);
 	if (!next) return;
 	filter(() => {
 		if (sort.value === next) order.value = order.value === 'desc' ? 'asc' : 'desc';
@@ -189,7 +189,7 @@ function sortBy(column: string) {
 					:title="t('common.status')"
 					:options="STATES"
 					:selected="state"
-					:label-of="(value) => t(`state.${value}`)"
+					:label-of="value => t(`state.${value}`)"
 					@select="filter(() => (state = $event))"
 				/>
 				<DateRangeMenu

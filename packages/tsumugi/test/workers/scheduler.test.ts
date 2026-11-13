@@ -1,5 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+
 import type { RunRow } from '../../src/do/run-schema.js';
 import type { ScheduleRow } from '../../src/do/scheduler-schema.js';
 import type { ScheduleView } from '../../src/do/scheduler.js';
@@ -31,9 +32,9 @@ const callSync = () => inside().sync();
 const callList = async () => (await inside().list()) as ScheduleView[];
 const shard = (binding: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(`${binding}#0`));
 
-const rowsOf = () => runInDurableObject(inside(), (instance) => (instance as any).repo.rows() as ScheduleRow[]);
-const rowOf = async (name: string) => (await rowsOf()).find((row) => row.name === name);
-const alarmOf = () => runInDurableObject(inside(), (instance) => (instance as any).ctx.storage.getAlarm() as number | null);
+const rowsOf = () => runInDurableObject(inside(), instance => (instance as any).repo.rows() as ScheduleRow[]);
+const rowOf = async (name: string) => (await rowsOf()).find(row => row.name === name);
+const alarmOf = () => runInDurableObject(inside(), instance => (instance as any).ctx.storage.getAlarm() as number | null);
 
 // 実キューではconsumer実行でジョブ終端化、skip判定が変化
 const BINDINGS = ['ListNames', 'Hello', 'Greet', 'Report'] as const;
@@ -41,7 +42,7 @@ const queue = { send: async () => {}, sendBatch: async () => {} };
 
 async function installQueues(): Promise<void> {
 	for (const binding of BINDINGS) {
-		await runInDurableObject(shard(binding), (instance) => {
+		await runInDurableObject(shard(binding), instance => {
 			(instance as any).env.TSUMUGI_QUEUE = queue;
 		});
 	}
@@ -50,7 +51,7 @@ async function installQueues(): Promise<void> {
 const jobIdOf = (binding: string, name: string, occurrence: number) => `${binding}#0:${name}-${occurrence}`;
 
 const jobStateOf = (binding: string, jobId: string) =>
-	runInDurableObject(shard(binding), (instance) => (instance as any).repo.find(jobId)?.state as string | undefined);
+	runInDurableObject(shard(binding), instance => (instance as any).repo.find(jobId)?.state as string | undefined);
 
 const fired = async (binding: string, name: string, occurrence: number) =>
 	(await jobStateOf(binding, jobIdOf(binding, name, occurrence))) !== undefined;
@@ -62,13 +63,10 @@ interface RunFace extends Rpc.DurableObjectBranded {
 const runNamespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
 
 const runRowOf = (runId: string) =>
-	runInDurableObject(
-		runNamespace.get(runNamespace.idFromName(runId)),
-		(instance) => (instance as any).repo.findRun() as RunRow | undefined,
-	);
+	runInDurableObject(runNamespace.get(runNamespace.idFromName(runId)), instance => (instance as any).repo.findRun() as RunRow | undefined);
 
 async function tickAt(now: number): Promise<void> {
-	await runInDurableObject(inside(), (instance) => {
+	await runInDurableObject(inside(), instance => {
 		(instance as any).clock = { now: () => now };
 	});
 	await runDurableObjectAlarm(inside());
@@ -78,7 +76,7 @@ async function tickAt(now: number): Promise<void> {
 // deleteAllは表ごと削除, 生成済みrepoはスキーマ再作成なし
 async function sync(now: number): Promise<void> {
 	await installQueues();
-	await runInDurableObject(inside(), async (instance) => {
+	await runInDurableObject(inside(), async instance => {
 		(instance as any).clock = { now: () => now };
 		(instance as any).repo.sql.exec('DELETE FROM schedule');
 		(instance as any).repo.sql.exec('DELETE FROM setting');
@@ -93,7 +91,7 @@ describe('定期実行(ADR-0040)', () => {
 		await sync(base);
 
 		const rows = await rowsOf();
-		expect(rows.map((row) => row.name)).toEqual(['nightly', 'ping-hello', 'poll-names']);
+		expect(rows.map(row => row.name)).toEqual(['nightly', 'ping-hello', 'poll-names']);
 		expect(await rowOf('poll-names')).toMatchObject({
 			kind: 'job',
 			target: 'ListNames',
@@ -128,7 +126,7 @@ describe('定期実行(ADR-0040)', () => {
 	it('保存済み予定が現在のタイムゾーン規則と異なる場合は再計算する', async () => {
 		const base = day(12);
 		await sync(base);
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).repo.sql.exec(`UPDATE schedule SET next_occurrence_at = ? WHERE name = 'nightly'`, base + 15 * 60 * 60 * 1000);
 		});
 
@@ -139,7 +137,7 @@ describe('定期実行(ADR-0040)', () => {
 	it('タイムゾーンの変更をタイミング変更として次回へ反映する', async () => {
 		const base = day(13);
 		await sync(base);
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).repo.sql.exec(
 				`UPDATE schedule SET time_zone = 'UTC', next_occurrence_at = ? WHERE name = 'nightly'`,
 				base + 15 * 60 * 60 * 1000,
@@ -155,7 +153,7 @@ describe('定期実行(ADR-0040)', () => {
 		const legacy = namespace.get(namespace.idFromName('scheduler-time-zone-upgrade'));
 		const base = day(14);
 		const existingNext = base + 123_456;
-		await runInDurableObject(legacy, (instance) => {
+		await runInDurableObject(legacy, instance => {
 			const sql = (instance as any).ctx.storage.sql as SqlStorage;
 			sql.exec(`CREATE TABLE schedule (
 				name TEXT PRIMARY KEY,
@@ -188,14 +186,14 @@ describe('定期実行(ADR-0040)', () => {
 
 		await legacy.sync();
 		const rows = (await legacy.list()) as ScheduleView[];
-		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_occurrence_at: existingNext });
+		expect(rows.find(row => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_occurrence_at: existingNext });
 	});
 
 	it('NULLのtime_zoneをUTCへ補正し既存のnext_run_atを維持する', async () => {
 		const legacy = namespace.get(namespace.idFromName('scheduler-time-zone-null'));
 		const base = day(15);
 		const existingNext = base + 123_456;
-		await runInDurableObject(legacy, (instance) => {
+		await runInDurableObject(legacy, instance => {
 			const sql = (instance as any).ctx.storage.sql as SqlStorage;
 			sql.exec(`CREATE TABLE schedule (
 				name TEXT PRIMARY KEY,
@@ -229,7 +227,7 @@ describe('定期実行(ADR-0040)', () => {
 
 		await legacy.sync();
 		const rows = (await legacy.list()) as ScheduleView[];
-		expect(rows.find((row) => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_occurrence_at: existingNext });
+		expect(rows.find(row => row.name === 'poll-names')).toMatchObject({ time_zone: 'UTC', next_occurrence_at: existingNext });
 	});
 
 	it('予定時刻に決定的なIDでジョブを投入する', async () => {
@@ -261,7 +259,7 @@ describe('定期実行(ADR-0040)', () => {
 		expect(await jobStateOf('Hello', jobId)).toBe('CANCELLED');
 
 		// 予定を戻して同時刻を再発火, 決定的IDで既存を返却(ADR-0029)
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).repo.markSkipped('ping-hello', occurrence, occurrence);
 		});
 		await tickAt(occurrence);
@@ -333,13 +331,13 @@ describe('定期実行(ADR-0040)', () => {
 		await sync(base);
 		const occurrence = nightlyOf(base);
 
-		const restore = await runInDurableObject(inside(), (instance) => {
+		const restore = await runInDurableObject(inside(), instance => {
 			const saved = (instance as any).env.RUN;
 			(instance as any).env.RUN = undefined;
 			return saved;
 		});
 		await tickAt(occurrence);
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).env.RUN = restore;
 		});
 
@@ -356,13 +354,13 @@ describe('定期実行(ADR-0040)', () => {
 		// nightlyは名前順で先頭, 同tickで後続ping-helloの発火を確認
 		const occurrence = nightlyOf(base);
 
-		const restore = await runInDurableObject(inside(), (instance) => {
+		const restore = await runInDurableObject(inside(), instance => {
 			const saved = (instance as any).env.RUN;
 			(instance as any).env.RUN = undefined;
 			return saved;
 		});
 		await tickAt(occurrence);
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).env.RUN = restore;
 		});
 
@@ -392,7 +390,7 @@ describe('定期実行(ADR-0040)', () => {
 	it('list()が一覧をそのまま返す', async () => {
 		await sync(day(9));
 		const list = await callList();
-		expect(list.map((row) => row.name)).toEqual(['nightly', 'ping-hello', 'poll-names']);
+		expect(list.map(row => row.name)).toEqual(['nightly', 'ping-hello', 'poll-names']);
 		expect(list[0]).toMatchObject({ kind: 'flow', target: 'GREETINGS', time_zone: 'Asia/Tokyo', last_job_id: null, skipped_count: 0 });
 	});
 
@@ -424,7 +422,7 @@ describe('一時停止と手動発火', () => {
 		await inside().setPaused('ping-hello', true);
 
 		const later = base + PING_MS * 3 + 1_000;
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).clock = { now: () => later };
 		});
 		await inside().setPaused('ping-hello', false);
@@ -445,7 +443,7 @@ describe('一時停止と手動発火', () => {
 	it('停止中でない行へのresumeは発火待ちの予定を破棄しない', async () => {
 		const base = day(25);
 		await sync(base);
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).clock = { now: () => base + PING_MS + 1_000 };
 		});
 		await inside().setPaused('ping-hello', false);
@@ -505,13 +503,13 @@ describe('一時停止と手動発火', () => {
 		const base = day(24);
 		await sync(base);
 
-		const restore = await runInDurableObject(inside(), (instance) => {
+		const restore = await runInDurableObject(inside(), instance => {
 			const saved = (instance as any).env.RUN;
 			(instance as any).env.RUN = undefined;
 			return saved;
 		});
 		const result = await inside().trigger('nightly');
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).env.RUN = restore;
 		});
 
@@ -537,7 +535,7 @@ describe('一時停止と手動発火', () => {
 		await sync(base);
 
 		// ping-hello投入中の割り込みRPCでpoll-names一時停止
-		const restore = await runInDurableObject(inside(), (instance) => {
+		const restore = await runInDurableObject(inside(), instance => {
 			const real = (instance as any).env.JOB_SHARD;
 			(instance as any).env.JOB_SHARD = {
 				idFromName: (name: string) => ({ name, id: real.idFromName(name) }),
@@ -557,7 +555,7 @@ describe('一時停止と手動発火', () => {
 		});
 		// 両方期限到来, 予定の早いping-helloが先に発火
 		await tickAt(base + POLL_MS);
-		await runInDurableObject(inside(), (instance) => {
+		await runInDurableObject(inside(), instance => {
 			(instance as any).env.JOB_SHARD = restore;
 		});
 

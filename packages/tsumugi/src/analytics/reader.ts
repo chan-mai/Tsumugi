@@ -1,5 +1,6 @@
-import type { MetricsResponse } from '../api/types.js';
 import { FAILURE_STATES } from '../core/transitions.js';
+
+import type { MetricsResponse } from '../api/types.js';
 
 // `writeDataPoint`の値はWorker bindingから読込不可, アカウントのAPIトークンが必要
 // トークンはsecretで`env`経由のみ読込可, 設定形式は`bearerAuth`と同一
@@ -135,7 +136,7 @@ export async function readMetrics(
 
 	return {
 		hours: input.hours,
-		bindings: byBinding.map((row) => {
+		bindings: byBinding.map(row => {
 			const total = num(row.total);
 			const failed = num(row.failed);
 			return {
@@ -149,7 +150,7 @@ export async function readMetrics(
 				avgAttempts: num(row.avg_attempts),
 			};
 		}),
-		series: overTime.map((row) => ({
+		series: overTime.map(row => ({
 			// SQL APIはUTC文字列, 画面はepochミリ秒
 			at: Date.parse(`${String(row.at ?? '')}Z`.replace(' ', 'T')),
 			total: num(row.total),

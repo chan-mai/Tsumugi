@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Check, ChevronDown, X } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import { Check, ChevronDown, X } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { SEARCH_FIELDS as FIELDS, type SearchField } from '../search';
@@ -13,7 +13,7 @@ const { t } = useI18n();
 const draft = ref(props.value);
 watch(
 	() => props.value,
-	(next) => {
+	next => {
 		draft.value = next;
 	},
 );

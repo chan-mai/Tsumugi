@@ -5,7 +5,7 @@ function harness() {
 	const sent: (number | undefined)[] = [];
 	let at = 1_000_000;
 	const heartbeat = createHeartbeat(
-		async (progress) => {
+		async progress => {
 			sent.push(progress);
 			return { accepted: true, cancelRequested: false };
 		},
@@ -124,7 +124,7 @@ describe('取り消し要求の伝達(#95)', () => {
 		let at = 1_000_000;
 		const heartbeat = createHeartbeat(
 			() =>
-				new Promise((resolve) => {
+				new Promise(resolve => {
 					release = () => resolve({ accepted: true, cancelRequested: true });
 				}),
 			() => at,
@@ -133,7 +133,7 @@ describe('取り消し要求の伝達(#95)', () => {
 		);
 		await expect(heartbeat()).resolves.toEqual({ cancelRequested: false });
 		release!();
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await new Promise(resolve => setTimeout(resolve, 0));
 		at += HEARTBEAT_MIN_INTERVAL_MS;
 		await expect(heartbeat()).resolves.toEqual({ cancelRequested: true });
 	});

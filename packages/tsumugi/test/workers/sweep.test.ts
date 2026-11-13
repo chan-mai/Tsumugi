@@ -1,7 +1,8 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { DispatchMessage } from '../../src/do/job-shard.js';
 import { sweepReadModel } from '../../src/projection/sweep.js';
+
+import type { DispatchMessage } from '../../src/do/job-shard.js';
 
 const T0 = 2_400_000_000_000;
 const DAY = 24 * 60 * 60 * 1000;
@@ -22,15 +23,15 @@ function captureQueue() {
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 async function install(name: string, now: number, queue: unknown) {
-	await runInDurableObject(shard(name), (instance) => {
+	await runInDurableObject(shard(name), instance => {
 		(instance as any).clock = { now: () => now };
 		(instance as any).env.TSUMUGI_QUEUE = queue;
 	});
 }
 
-const countJobs = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countJobs() as number);
+const countJobs = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countJobs() as number);
 const stateOf = (name: string, id: string) =>
-	runInDurableObject(shard(name), (instance) => (instance as any).repo.find(id)?.state as string | undefined);
+	runInDurableObject(shard(name), instance => (instance as any).repo.find(id)?.state as string | undefined);
 
 describe('DOの終端ジョブ削除', () => {
 	it('保持期間を過ぎた終端ジョブを削除する', async () => {
@@ -60,10 +61,10 @@ describe('DOの終端ジョブ削除', () => {
 		await shard('SWEEP5#0').enqueue({ binding: 'SWEEP5', payload: {} });
 		await runDurableObjectAlarm(shard('SWEEP5#0'));
 
-		const before = await runInDurableObject(shard('SWEEP5#0'), (i) => (i as any).repo.writes as number);
+		const before = await runInDurableObject(shard('SWEEP5#0'), i => (i as any).repo.writes as number);
 		await install('SWEEP5#0', T0 + 1_000, queue);
 		await runDurableObjectAlarm(shard('SWEEP5#0'));
-		const after = await runInDurableObject(shard('SWEEP5#0'), (i) => (i as any).repo.writes as number);
+		const after = await runInDurableObject(shard('SWEEP5#0'), i => (i as any).repo.writes as number);
 
 		expect(after - before).toBe(0);
 	});

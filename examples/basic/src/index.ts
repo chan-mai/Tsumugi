@@ -1,7 +1,8 @@
 import { bearerAuth, createFlow, defineTsumugi, remote } from 'tsumugi';
 import { ui } from 'tsumugi/ui';
-import type { SendMail } from '../../remote-performer/src/index.js';
 import * as local from './performers/index.js';
+
+import type { SendMail } from '../../remote-performer/src/index.js';
 
 // performerはトップレベルからexport必須
 export * from './performers/index.js';
@@ -10,12 +11,12 @@ const performers = { ...local, MAIL: remote<SendMail>() };
 
 const flow = createFlow(performers);
 
-const GREETINGS = flow<{ prefix: string }>((f) => {
-	const list = f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
+const GREETINGS = flow<{ prefix: string }>(f => {
+	const list = f.node('list', 'ListNames', { input: i => ({ prefix: i.prefix }) });
 	const each = f.fanOut('greet', 'Greet', {
 		after: { list },
 		over: (_i, d) => d.list.names,
-		input: (name) => ({ name }),
+		input: name => ({ name }),
 	});
 	f.node('report', 'Report', {
 		after: { each },
@@ -25,18 +26,18 @@ const GREETINGS = flow<{ prefix: string }>((f) => {
 
 const flows = {
 	GREETINGS,
-	PIPELINE: flow<{ prefix: string }>((f) => {
-		const greetings = f.subflow('greetings', GREETINGS, { input: (i) => ({ prefix: i.prefix }) });
+	PIPELINE: flow<{ prefix: string }>(f => {
+		const greetings = f.subflow('greetings', GREETINGS, { input: i => ({ prefix: i.prefix }) });
 		f.node('summary', 'Report', { after: { greetings }, input: () => ({ total: 1, failed: 0 }) });
 	}),
 	TIMED: flow<{ prefix: string }>(
-		(f) => {
-			f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
+		f => {
+			f.node('list', 'ListNames', { input: i => ({ prefix: i.prefix }) });
 		},
 		{ deadlineMs: 10 * 60 * 1000 },
 	),
-	BRANCHED: flow<{ prefix: string; verbose: boolean }>((f) => {
-		const list = f.node('list', 'ListNames', { input: (i) => ({ prefix: i.prefix }) });
+	BRANCHED: flow<{ prefix: string; verbose: boolean }>(f => {
+		const list = f.node('list', 'ListNames', { input: i => ({ prefix: i.prefix }) });
 		f.node('cleanup', 'Report', { after: { list }, trigger: 'failure', input: () => ({ total: 0, failed: 1 }) });
 		f.node('detail', 'Report', {
 			after: { list },
@@ -53,7 +54,7 @@ const tsumugi = defineTsumugi({
 	onFailure: 'NotifyFailure',
 	// statesは明示必須
 	onSettled: { binding: 'NotifySettled', states: ['FAILED', 'CANCELLED', 'STALLED'] },
-	onEnqueue: (input) => (input.binding === 'ListNames' ? { timeoutMs: 45_000 } : undefined),
+	onEnqueue: input => (input.binding === 'ListNames' ? { timeoutMs: 45_000 } : undefined),
 	schedules: {
 		// 前回未完了なら発火なし
 		'poll-names': { binding: 'ListNames', payload: { prefix: 'poll' }, everyMs: 5 * 60 * 1000 },

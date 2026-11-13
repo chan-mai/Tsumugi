@@ -1,13 +1,14 @@
 import { InvalidRunIdError, parseRunId } from '../core/ids.js';
 import { runRetryable } from '../core/retention.js';
-import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
 import { RunReadRepository, type RunListQuery, type RunRepository } from '../repository/run.repository.js';
+
+import type { Run, RunListItem, RunNode } from '../core/entity/run.entity.js';
 import type { StartRunInput } from './inputs.js';
 import type { MutationOutcome, Retryable, ServiceEnv, ServiceOptions, Unavailable } from './types.js';
 
 export function createRunService<Env extends ServiceEnv>(
 	{ flows, start, runFor, runFailedRetentionMs }: ServiceOptions<Env>,
-	repositoryOf: (env: Env) => RunRepository = (env) => new RunReadRepository(env.TSUMUGI_DB),
+	repositoryOf: (env: Env) => RunRepository = env => new RunReadRepository(env.TSUMUGI_DB),
 ) {
 	return {
 		// Run DOはrun毎に独立, 横断一覧は読み取りモデルからのみ取得可能

@@ -1,9 +1,8 @@
 {
   "name": "tsumugi-root",
   "private": true,
-  "type": "module",
   "license": "MIT",
-  "packageManager": "pnpm@10.33.4",
+  "type": "module",
   "scripts": {
     "dev": "pnpm build && pnpm dev:migrate && concurrently --kill-others-on-fail -n tsumugi,worker,dashboard -c blue,green,magenta \"pnpm --filter tsumugi dev\" \"pnpm dev:worker\" \"pnpm --filter @tsumugi/dashboard dev\"",
     "dev:migrate": "wrangler d1 migrations apply TSUMUGI_DB --local -c examples/basic/wrangler.jsonc",
@@ -30,6 +29,7 @@
     "vitest": "^4.1.11",
     "wrangler": "^4.156.2"
   },
+  "packageManager": "pnpm@10.33.4",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",

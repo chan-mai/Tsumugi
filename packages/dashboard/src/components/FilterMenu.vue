@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { CirclePlus } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import { CirclePlus } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
 import { CHIP_DASHED, CHIP_VALUE, MENU_CAPTION, MENU_ITEM, MENU_ITEM_HOVER, MENU_PANEL } from '../ui';
 import CheckBox from './CheckBox.vue';

@@ -1,10 +1,11 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { bearerAuth } from '../../src/api/auth.js';
-import type { RestEnv } from '../../src/api/rest.js';
 import { Performer } from '../../src/performer/entrypoint.js';
 import { cachedCheck, checkMigrations, EXPECTED_MIGRATIONS } from '../../src/projection/migrations.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { RestEnv } from '../../src/api/rest.js';
 
 const TOKEN = 'secret-token';
 
@@ -55,7 +56,7 @@ function withError(message: string): D1Database {
 
 describe('マイグレーション適用漏れの検出', () => {
 	it('全て適用済みなら通る', async () => {
-		const status = await checkMigrations(withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
+		const status = await checkMigrations(withLedger(EXPECTED_MIGRATIONS.map(name => ({ name }))));
 		expect(status).toEqual({ ok: true });
 	});
 
@@ -117,7 +118,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		let clock = 1_000;
 		const flipping = proxyD1(() => {
 			if (down) throw new Error('D1_ERROR: down');
-			return ledgerOf(EXPECTED_MIGRATIONS.map((name) => ({ name })));
+			return ledgerOf(EXPECTED_MIGRATIONS.map(name => ({ name })));
 		});
 		const check = cachedCheck(() => clock);
 
@@ -137,13 +138,13 @@ describe('マイグレーション適用漏れの検出', () => {
 	});
 
 	it('適用済みならAPIが通る', async () => {
-		const res = await call('/api/stats', withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
+		const res = await call('/api/stats', withLedger(EXPECTED_MIGRATIONS.map(name => ({ name }))));
 		expect(res.status).toBe(200);
 	});
 
 	it('batchを使う経路も通る', async () => {
 		// 展開でのモック作成ではプロトタイプのメソッドが欠落、ここで初めて失敗
-		const res = await call('/api/jobs', withLedger(EXPECTED_MIGRATIONS.map((name) => ({ name }))));
+		const res = await call('/api/jobs', withLedger(EXPECTED_MIGRATIONS.map(name => ({ name }))));
 		expect(res.status).toBe(200);
 	});
 
@@ -151,7 +152,7 @@ describe('マイグレーション適用漏れの検出', () => {
 		let calls = 0;
 		const counting = proxyD1(() => {
 			calls++;
-			return ledgerOf(EXPECTED_MIGRATIONS.map((name) => ({ name })));
+			return ledgerOf(EXPECTED_MIGRATIONS.map(name => ({ name })));
 		});
 
 		const check = cachedCheck();
@@ -164,7 +165,7 @@ describe('マイグレーション適用漏れの検出', () => {
 	it('未適用の結果は再利用しない, 適用後に自動で復帰する', async () => {
 		let applied = false;
 		const flipping = proxyD1(() =>
-			ledgerOf(applied ? EXPECTED_MIGRATIONS.map((name) => ({ name })) : [{ name: '0001_create_job_read_model.sql' }]),
+			ledgerOf(applied ? EXPECTED_MIGRATIONS.map(name => ({ name })) : [{ name: '0001_create_job_read_model.sql' }]),
 		);
 
 		const check = cachedCheck();

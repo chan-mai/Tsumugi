@@ -12,14 +12,14 @@ const noopQueue = {
 const shard = (name: string) => env.JOB_SHARD.get(env.JOB_SHARD.idFromName(name));
 
 async function install(name: string, now: number, db?: unknown) {
-	await runInDurableObject(shard(name), (instance) => {
+	await runInDurableObject(shard(name), instance => {
 		(instance as any).clock = { now: () => now };
 		(instance as any).env.TSUMUGI_QUEUE = noopQueue;
 		if (db !== undefined) (instance as any).env.TSUMUGI_DB = db;
 	});
 }
 
-const outboxCount = (name: string) => runInDurableObject(shard(name), (instance) => (instance as any).repo.countOutbox() as number);
+const outboxCount = (name: string) => runInDurableObject(shard(name), instance => (instance as any).repo.countOutbox() as number);
 
 const readD1 = async (jobId: string) =>
 	env.TSUMUGI_DB.prepare('SELECT id, seq, state, attempts FROM job WHERE id = ?').bind(jobId).first<{
@@ -106,5 +106,5 @@ describe('D1への投影(ADR-0008)', () => {
 });
 
 async function snapshotOf(name: string, jobId: string) {
-	return runInDurableObject(shard(name), (instance) => (instance as any).repo.find(jobId) as Record<string, unknown>);
+	return runInDurableObject(shard(name), instance => (instance as any).repo.find(jobId) as Record<string, unknown>);
 }

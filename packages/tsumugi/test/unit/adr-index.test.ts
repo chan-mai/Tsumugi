@@ -9,17 +9,17 @@ describe('ADR索引の網羅', () => {
 	it('実在するADRが全て索引に含まれている', () => {
 		// 索引は手書き、記載漏れでコードの参照先が解決不能
 		const files = readdirSync(decisionDir)
-			.filter((name) => /^\d{4}-.+\.md$/.test(name))
+			.filter(name => /^\d{4}-.+\.md$/.test(name))
 			.sort();
 		const index = readFileSync(join(decisionDir, 'README.md'), 'utf8');
 
-		const missing = files.filter((name) => !index.includes(`(${name})`));
+		const missing = files.filter(name => !index.includes(`(${name})`));
 		expect(missing).toEqual([]);
 	});
 
 	it('索引の番号が連番で欠番がない', () => {
 		const numbers = readdirSync(decisionDir)
-			.map((name) => /^(\d{4})-/.exec(name)?.[1])
+			.map(name => /^(\d{4})-/.exec(name)?.[1])
 			.filter((n): n is string => n !== undefined)
 			.map(Number)
 			.sort((a, b) => a - b);

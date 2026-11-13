@@ -68,7 +68,7 @@ export async function verifyAccessJwt(token: string, options: AccessOptions, now
 	if (typeof claims.nbf === 'number' && claims.nbf > seconds) return null;
 
 	const jwks = await loadJwks(options);
-	const jwk = jwks.keys.find((key) => key.kid === header.kid);
+	const jwk = jwks.keys.find(key => key.kid === header.kid);
 	if (!jwk) return null;
 
 	// 鍵取り込み失敗も検証失敗扱い, 例外では401でなく500
@@ -113,7 +113,7 @@ export function cloudflareAccess(options: AccessOptions): AuthMiddleware {
 		throw new Error('cloudflareAccess requires teamDomain and aud, otherwise the fail-closed premise breaks');
 	}
 
-	return async (request) => {
+	return async request => {
 		const token =
 			request.headers.get('cf-access-jwt-assertion') ?? readCookie(request.headers.get('cookie') ?? undefined, 'CF_Authorization');
 		if (!token) return unauthorized();

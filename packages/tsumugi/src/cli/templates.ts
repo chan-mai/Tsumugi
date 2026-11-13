@@ -8,7 +8,7 @@ const COMPATIBILITY_DATE = '2026-07-01';
 const indent = (text: string, prefix: string): string =>
 	text
 		.split('\n')
-		.map((line) => (line.length === 0 ? line : prefix + line))
+		.map(line => (line.length === 0 ? line : prefix + line))
 		.join('\n');
 
 export function wranglerConfigFile(name: string, fragment: string, format: ConfigFormat): string {

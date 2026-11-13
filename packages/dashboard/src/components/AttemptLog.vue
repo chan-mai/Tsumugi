@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
-import type { Attempt } from '../api';
 import { formatTimestamp } from '../time';
 import { CODE } from '../ui';
 import StatusCell from './StatusCell.vue';
+
+import type { Attempt } from '../api';
 
 const props = defineProps<{ attempts: Attempt[] }>();
 const { t } = useI18n();

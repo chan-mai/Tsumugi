@@ -1,4 +1,5 @@
 import { Graph, layout } from '@dagrejs/dagre';
+
 import type { RunNode } from '../../api';
 
 // w-64相当
@@ -91,7 +92,7 @@ function summarize(children: readonly RunNode[], hidden: number): string | null 
 
 function pack(node: RunNode, childrenOf: (id: string) => RunNode[], measured: number | undefined): Packed {
 	const children = childrenOf(node.id);
-	const done = children.filter((child) => child.state === 'COMPLETED').length;
+	const done = children.filter(child => child.state === 'COMPLETED').length;
 	const progress = node.container && children.length > 0 ? `${done} / ${children.length}` : null;
 
 	// 孫は描画せず, 子のチップに件数のみ表示(ADR-0032)
@@ -133,13 +134,13 @@ type Gutter = { left: number; right: number };
 // 横の区間の高さはdagreの値, ランクを跨ぐ辺とノードの重なり回避
 function route(pairs: readonly [string, string][], boxes: ReadonlyMap<string, Box>, lanes: ReadonlyMap<string, Point[]>): LayoutEdge[] {
 	// dagreのrankは非連番, 整列して列番号へ変換
-	const ranks = [...new Set([...boxes.values()].map((box) => box.rank))].sort((a, b) => a - b);
+	const ranks = [...new Set([...boxes.values()].map(box => box.rank))].sort((a, b) => a - b);
 	const rankOf = new Map([...boxes].map(([id, box]) => [id, ranks.indexOf(box.rank)]));
 
 	const gutters: Gutter[] = [];
 	for (let i = 0; i + 1 < ranks.length; i++) {
-		const left = Math.max(...[...boxes.values()].filter((box) => box.rank === ranks[i]).map((box) => box.x + box.w));
-		const right = Math.min(...[...boxes.values()].filter((box) => box.rank === ranks[i + 1]).map((box) => box.x));
+		const left = Math.max(...[...boxes.values()].filter(box => box.rank === ranks[i]).map(box => box.x + box.w));
+		const right = Math.min(...[...boxes.values()].filter(box => box.rank === ranks[i + 1]).map(box => box.x));
 		gutters.push(right - left >= MIN_GUTTER ? { left, right } : { left, right: left + MIN_GUTTER });
 	}
 
@@ -207,9 +208,9 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 	}
 	const childrenOf = (id: string) => byParent.get(id) ?? [];
 
-	const roots = nodes.filter((node) => node.parent === null);
-	const packed = roots.map((node) => pack(node, childrenOf, measured?.get(node.id)));
-	const known = new Set(roots.map((node) => node.id));
+	const roots = nodes.filter(node => node.parent === null);
+	const packed = roots.map(node => pack(node, childrenOf, measured?.get(node.id)));
+	const known = new Set(roots.map(node => node.id));
 
 	const graph = new Graph({ directed: true, compound: false, multigraph: false });
 	// 辺の経路用に間隔広め
@@ -233,7 +234,7 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 	layout(graph);
 
 	const boxes = new Map<string, Box>(
-		packed.map((item) => {
+		packed.map(item => {
 			const placed = graph.node(item.node.id);
 			return [
 				item.node.id,
@@ -246,7 +247,7 @@ export function runLayout(nodes: readonly RunNode[], measured?: ReadonlyMap<stri
 		pairs,
 		boxes,
 		new Map(
-			pairs.map(([from, to]) => [`${from}->${to}`, (graph.edge(from, to)?.points ?? []).slice(1, -1).map((p) => ({ x: p.x, y: p.y }))]),
+			pairs.map(([from, to]) => [`${from}->${to}`, (graph.edge(from, to)?.points ?? []).slice(1, -1).map(p => ({ x: p.x, y: p.y }))]),
 		),
 	);
 

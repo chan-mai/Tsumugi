@@ -94,5 +94,5 @@ export const toRunNode = (node: RunNode): RunNodeResponse => ({
 	run_after: node.runAfter,
 	started_at: node.startedAt,
 	finished_at: node.finishedAt,
-	attempts_log: node.attempts.map((attempt) => ({ ...toAttemptRecord(attempt), error: null })),
+	attempts_log: node.attempts.map(attempt => ({ ...toAttemptRecord(attempt), error: null })),
 });

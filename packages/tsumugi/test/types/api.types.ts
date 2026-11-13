@@ -1,8 +1,9 @@
 // 型レベル検証, vitest対象外で`tsc --noEmit`で検査
 // 不要になった@ts-expect-errorはTS2578で失敗、検査の形骸化防止
 import { Performer } from '../../src/performer/entrypoint.js';
-import type { JobContext } from '../../src/core/api.js';
 import { defineTsumugi } from '../../src/worker.js';
+
+import type { JobContext } from '../../src/core/api.js';
 
 class SendMail extends Performer<{ to: string; subject: string }> {
 	async perform(payload: { to: string; subject: string }, _ctx: JobContext) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Columns3 } from '@lucide/vue';
 import { Popover, PopoverButton, PopoverPanel, TransitionRoot } from '@headlessui/vue';
+import { Columns3 } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
 import { CHIP, MENU_ITEM, MENU_ITEM_HOVER, MENU_PANEL } from '../ui';
 import CheckBox from './CheckBox.vue';

@@ -10,17 +10,6 @@
     "typecheck": "nuxt typecheck && tsc -p scripts",
     "deploy": "nuxt build && wrangler deploy"
   },
-  "devDependencies": {
-    "@anthropic-ai/sdk": "^1.4.0",
-    "@nuxt/fonts": "^1.2.0",
-    "@takumi-rs/core": "^2.19.0",
-    "@types/three": "^0.187.0",
-    "github-slugger": "^2.0.0",
-    "nuxt-og-image": "^7.0.7",
-    "typescript": "^6.0.3",
-    "vue-tsc": "^3.3.14",
-    "wrangler": "^4.156.2"
-  },
   "dependencies": {
     "@headlessui/vue": "^1.7.23",
     "@nuxt/content": "^3.16.2",
@@ -36,5 +25,16 @@
     "three": "^0.187.0",
     "vue": "^3.5.44",
     "vue-router": "^5.4.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
+    "@nuxt/fonts": "^1.2.0",
+    "@takumi-rs/core": "^2.19.0",
+    "@types/three": "^0.187.0",
+    "github-slugger": "^2.0.0",
+    "nuxt-og-image": "^7.0.7",
+    "typescript": "^6.0.3",
+    "vue-tsc": "^3.3.14",
+    "wrangler": "^4.156.2"
   }
 }

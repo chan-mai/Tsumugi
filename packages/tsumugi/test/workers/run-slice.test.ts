@@ -1,9 +1,10 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
+
 import type { JobContext } from '../../src/core/api.js';
 import type { DispatchMessage } from '../../src/do/job-shard.js';
 import type { TsumugiRunInstance } from '../../src/do/run.js';
-import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
 // flow定義はexamples/basic(GREETINGS), Run DOが参照(ADR-0030)
 
@@ -76,7 +77,7 @@ function makeBatch(bodies: DispatchMessage[]) {
 // 実キューではconsumer自動実行、完了通知の割り込みで作成した状況が破損
 async function installQueues(): Promise<void> {
 	for (const binding of BINDINGS) {
-		await runInDurableObject(shard(binding), (instance) => {
+		await runInDurableObject(shard(binding), instance => {
 			(instance as any).env.TSUMUGI_QUEUE = queue;
 		});
 	}
@@ -98,11 +99,11 @@ async function settle(runId: string, source: Record<string, any> = performers, r
 }
 
 const jobIdOf = (runId: string, nodeId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.job_id as string | null);
+	runInDurableObject(runStub(runId), instance => (instance as any).repo.findNode(nodeId)?.job_id as string | null);
 
 const nodesOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) =>
-		((instance as any).repo.views() as { id: string; state: string }[]).map((node) => [node.id, node.state] as const),
+	runInDurableObject(runStub(runId), instance =>
+		((instance as any).repo.views() as { id: string; state: string }[]).map(node => [node.id, node.state] as const),
 	);
 
 // 削除alarmは終端後も設定継続、alarm枯渇では収束判定不可
@@ -119,10 +120,10 @@ async function settleRun(runId: string, rounds = 8): Promise<void> {
 }
 
 const stateOf = (runId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findRun()?.state as string | undefined);
+	runInDurableObject(runStub(runId), instance => (instance as any).repo.findRun()?.state as string | undefined);
 
 const errorOf = (runId: string, nodeId: string) =>
-	runInDurableObject(runStub(runId), (instance) => (instance as any).repo.findNode(nodeId)?.error as string | null);
+	runInDurableObject(runStub(runId), instance => (instance as any).repo.findNode(nodeId)?.error as string | null);
 
 describe('縦串: runの開始から完了まで', () => {
 	it('fan-outを含むflowが最後まで進む', async () => {
@@ -151,9 +152,9 @@ describe('縦串: runの開始から完了まで', () => {
 		});
 
 		// 子は並列実行で順不同
-		const greeted = performed.filter((p) => p.binding === 'Greet').map((p) => (p.payload as { name: string }).name);
+		const greeted = performed.filter(p => p.binding === 'Greet').map(p => (p.payload as { name: string }).name);
 		expect([...greeted].sort()).toEqual(['hello-1', 'hello-2', 'hello-3']);
-		expect(performed.find((p) => p.binding === 'Report')?.payload).toEqual({ total: 3, failed: 0 });
+		expect(performed.find(p => p.binding === 'Report')?.payload).toEqual({ total: 3, failed: 0 });
 	});
 
 	it('performの中で追加した子を親が待つ(ADR-0032)', async () => {
@@ -168,7 +169,7 @@ describe('縦串: runの開始から完了まで', () => {
 		expect(nodes['report']).toBe('COMPLETED');
 		expect(await stateOf(runId)).toBe('COMPLETED');
 		// 3件の展開それぞれが子を1つ持ち6回実行
-		expect(performed.filter((p) => p.binding === 'Greet')).toHaveLength(6);
+		expect(performed.filter(p => p.binding === 'Greet')).toHaveLength(6);
 	});
 
 	it('不正なspawnのIDはノードのFAILEDになりtickを止めない', async () => {
@@ -276,7 +277,7 @@ describe('縦串: runの開始から完了まで', () => {
 
 		expect(Object.fromEntries(await nodesOf(runId))).toEqual({ list: 'FAILED', greet: 'SKIPPED', report: 'SKIPPED' });
 		expect(await stateOf(runId)).toBe('FAILED');
-		expect(performed.filter((entry) => entry.binding === 'Greet')).toEqual([]);
+		expect(performed.filter(entry => entry.binding === 'Greet')).toEqual([]);
 	});
 
 	it('再開はfan-outで許容済みの子の失敗を再実行しない(ADR-0034)', async () => {
@@ -336,7 +337,7 @@ describe('縦串: runの開始から完了まで', () => {
 		await finish('greet:0:child', 'FAILED');
 		await settleRun(runId);
 
-		const greet = await runInDurableObject(stub, (instance) => (instance as any).repo.findNode('greet')?.result as string | null);
+		const greet = await runInDurableObject(stub, instance => (instance as any).repo.findNode('greet')?.result as string | null);
 		expect(greet === null ? null : JSON.parse(greet)).toEqual({ total: 2, succeeded: 1, failed: 1 });
 		await finish('report', 'COMPLETED');
 		await settleRun(runId);
@@ -396,7 +397,7 @@ describe('縦串: runの開始から完了まで', () => {
 
 	it('再開でspawnの子孫を未実行へ戻すと、COMPLETEDのfan-outノードも集約待ちへ戻る', async () => {
 		const runId = 'GREETINGS:spawnretry';
-		await runInDurableObject(runStub(runId), async (instance) => {
+		await runInDurableObject(runStub(runId), async instance => {
 			const inner = instance as any;
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'sr' }, deadlineMs: 10_000 });
 			await inner.ctx.storage.deleteAlarm();
@@ -428,7 +429,7 @@ describe('縦串: runの開始から完了まで', () => {
 
 	it('取り消されたrunの再開では、CANCELLEDのfan-outの子も再実行する', async () => {
 		const runId = 'GREETINGS:cancelretry';
-		await runInDurableObject(runStub(runId), async (instance) => {
+		await runInDurableObject(runStub(runId), async instance => {
 			const inner = instance as any;
 			await inner.start({ flow: 'GREETINGS', input: { prefix: 'cr' } });
 			await inner.ctx.storage.deleteAlarm();
@@ -476,7 +477,7 @@ describe('縦串: runの開始から完了まで', () => {
 
 		const spawns = Array.from({ length: 9_996 }, (_, i) => ({ id: `c${i}`, binding: 'Greet', payload: {} }));
 		const event = { nodeId: 'greet:0', jobId, state: 'COMPLETED' as const, result: null, error: null, spawns };
-		await runInDurableObject(stub, async (instance) => {
+		await runInDurableObject(stub, async instance => {
 			const inner = instance as any;
 			await inner.notify([event]);
 			await inner.notify([event]);
@@ -484,7 +485,7 @@ describe('縦串: runの開始から完了まで', () => {
 		});
 
 		expect(await errorOf(runId, 'greet:0')).toBeNull();
-		const aborted = await runInDurableObject(stub, (instance) => (instance as any).repo.findRun()?.abort_error as string | null);
+		const aborted = await runInDurableObject(stub, instance => (instance as any).repo.findRun()?.abort_error as string | null);
 		expect(aborted).toBeNull();
 	});
 
@@ -538,8 +539,8 @@ describe('縦串: runの開始から完了まで', () => {
 		const nodes = await env.TSUMUGI_DB.prepare('SELECT node_id, state, container FROM run_node WHERE run_id = ? ORDER BY position')
 			.bind(runId)
 			.all<{ node_id: string; state: string; container: number }>();
-		expect(nodes.results.map((n) => n.node_id)).toEqual(['list', 'greet', 'report', 'greet:0', 'greet:1', 'greet:2']);
-		expect(nodes.results.find((n) => n.node_id === 'greet')?.container).toBe(1);
+		expect(nodes.results.map(n => n.node_id)).toEqual(['list', 'greet', 'report', 'greet:0', 'greet:1', 'greet:2']);
+		expect(nodes.results.find(n => n.node_id === 'greet')?.container).toBe(1);
 
 		// ジョブ側にも宛先記録, 画面から相互参照可(ADR-0015)
 		const job = await env.TSUMUGI_DB.prepare('SELECT run_id, node_id FROM job WHERE run_id = ? AND node_id = ?')
