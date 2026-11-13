@@ -343,6 +343,9 @@ model Policy {
 
 	@doc("Extra wait after timeoutMs before a silent job is reaped")
 	reaperGraceMs: integer;
+
+	@doc("Extra wait for a job that has not started yet, added to its reap deadline to tolerate a backlog in Queues")
+	queueWaitMs: integer;
 }
 
 @doc("Fields left out keep their current value.")
@@ -376,6 +379,9 @@ model UpdatePolicyRequest {
 
 	@minValue(0)
 	reaperGraceMs?: integer;
+
+	@minValue(0)
+	queueWaitMs?: integer;
 }
 
 model Diagnostics {

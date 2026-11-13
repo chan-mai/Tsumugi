@@ -142,6 +142,7 @@ describe('公開している純粋関数', () => {
 				perKeyRate: null,
 				agingIntervalMs: null,
 				reaperGraceMs: 0,
+				queueWaitMs: 0,
 			},
 			bucket: { tokens: Number.POSITIVE_INFINITY, refilledAt: 0 },
 		});

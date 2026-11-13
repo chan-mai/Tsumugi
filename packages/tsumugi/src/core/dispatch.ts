@@ -8,8 +8,11 @@ export function effectivePriority(job: JobView, now: number, agingIntervalMs: nu
 // heartbeat起点, 所要時間可変ジョブのtimeoutMs延長不要
 function silenceDeadline(job: JobView, policy: Policy): number | null {
 	if (job.dispatchedAt === null) return null;
-	const since = job.heartbeatAt === null ? job.dispatchedAt : Math.max(job.dispatchedAt, job.heartbeatAt);
-	return since + job.timeoutMs + policy.reaperGraceMs;
+	if (job.heartbeatAt === null) {
+		const waiting = job.state === 'QUEUED' ? policy.queueWaitMs : 0;
+		return job.dispatchedAt + waiting + job.timeoutMs + policy.reaperGraceMs;
+	}
+	return Math.max(job.dispatchedAt, job.heartbeatAt) + job.timeoutMs + policy.reaperGraceMs;
 }
 
 // 無応答判定より先に到来し得る(#95)

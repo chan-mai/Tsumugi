@@ -130,6 +130,7 @@ export const DEFAULT_POLICY: Policy = {
 	perKeyRate: null,
 	agingIntervalMs: 60_000,
 	reaperGraceMs: 30_000,
+	queueWaitMs: 15 * 60_000,
 };
 
 const DEFAULTS: {

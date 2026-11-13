@@ -44,6 +44,7 @@ export type Policy = {
 	agingIntervalMs: number | null;
 	/** timeoutMs経過後の回収猶予 */
 	reaperGraceMs: number;
+	queueWaitMs: number;
 };
 
 /** 失敗通知のpayload(#30), ジョブ明細は読み取りモデルから取得 */

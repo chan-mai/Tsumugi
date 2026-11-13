@@ -306,6 +306,7 @@ describe('REST API', () => {
 		expect((await post({ perKeyRate: { tokens: 1, intervalMs: 0 } })).status).toBe(400);
 		expect((await post({ perKeyRate: 5 })).status).toBe(400);
 		expect((await post({ agingIntervalMs: 0 })).status).toBe(400);
+		expect((await post({ queueWaitMs: -1 })).status).toBe(400);
 		// 変更項目なしは誤用扱い
 		expect((await post({})).status).toBe(400);
 		expect((await post({ paused: true }, 'NOPE')).status).toBe(404);
@@ -313,6 +314,7 @@ describe('REST API', () => {
 		expect((await post({ concurrency: 0 })).status).toBe(200);
 		expect((await post({ rate: null, agingIntervalMs: null })).status).toBe(200);
 		expect((await post({ perKeyRate: null })).status).toBe(200);
+		expect((await post({ queueWaitMs: 0 })).status).toBe(200);
 
 		// 変更はshardに残存, 後続テスト前に破棄
 		await withAuth.fetch!(

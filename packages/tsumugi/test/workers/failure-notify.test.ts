@@ -157,7 +157,7 @@ describe('失敗したジョブの通知(#30)', () => {
 		});
 		await runDurableObjectAlarm(shard('FAIL6#0'));
 		// 無応答で期限と猶予経過後にreaper処理
-		await runInDurableObject(shard('FAIL6#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 120_000 }));
+		await runInDurableObject(shard('FAIL6#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
 		await runDurableObjectAlarm(shard('FAIL6#0'));
 
 		// 無応答の試行も計上

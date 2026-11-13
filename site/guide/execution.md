@@ -96,7 +96,10 @@ Cloudflare Queuesのconsumerの1回の呼び出しは、実行時間(wall time)�
 また、`ctx.deadlineAt`は、この期限よりも後の時刻になりません。
 
 `RUNNING`のジョブは、実行開始(または最後の`heartbeat`)から`timeoutMs`と`reaperGraceMs`(既定30秒)を過ぎても試行結果が記録されない場合に無応答と判定されます。
-`QUEUED`のジョブは、Queuesへの送信(または最後の`heartbeat`)から同じ時間を過ぎた場合に無応答と判定されます。
+`QUEUED`のジョブは、Queuesへの送信から`queueWaitMs`(既定15分), `timeoutMs`, `reaperGraceMs`の合計を超過後も実行が開始されない場合に無応答と判定されます。
+`QUEUED`のジョブで`heartbeat`が記録されている場合、最後の`heartbeat`から`timeoutMs`と`reaperGraceMs`を過ぎた場合に無応答と判定されます。
+`queueWaitMs`は、Queuesにメッセージが滞留している間に実行が始まっていないジョブが無応答と判定されないための時間です。
+`queueWaitMs`の値を大きくすると、Queuesのメッセージが失われた場合に、ジョブが再投入されるまでの時間が長くなります。
 `at-most-once`のジョブは、試行回数に関係なく`STALLED`へ遷移します。
 `at-least-once`のジョブは、試行回数が上限に達していなければ再投入され、達していれば`FAILED`に遷移します。
 

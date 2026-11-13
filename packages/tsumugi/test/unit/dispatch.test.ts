@@ -12,6 +12,7 @@ const policy = (over: Partial<Policy> = {}): Policy => ({
 	perKeyRate: null,
 	agingIntervalMs: null,
 	reaperGraceMs: 30_000,
+	queueWaitMs: 0,
 	...over,
 });
 
@@ -467,6 +468,23 @@ describe('reaper (ADR-0006 / ADR-0007 / ADR-0012)', () => {
 	it('回収予定がなければ,次の無応答判定時刻に起動する', () => {
 		const out = planDispatch({ now: T0, jobs: [dispatched({ id: 'a' })], policy: policy(), bucket: unlimited });
 		expect(out.nextAlarmAt).toBe(T0 + 60_000 + 30_000);
+	});
+
+	it('実行が始まっていないQUEUEDのジョブはqueueWaitMsを加えた期限まで回収しない', () => {
+		const jobs = [dispatched({ id: 'a' })];
+		const waiting = policy({ queueWaitMs: 600_000 });
+
+		expect(planDispatch({ now: T0 + 600_000 + 90_000 - 1, jobs, policy: waiting, bucket: unlimited }).decisions).toEqual([]);
+		expect(planDispatch({ now: T0 + 600_000 + 90_000, jobs, policy: waiting, bucket: unlimited }).decisions).toEqual([
+			{ type: 'reap', id: 'a', attempts: 1 },
+		]);
+		expect(planDispatch({ now: T0, jobs, policy: waiting, bucket: unlimited }).nextAlarmAt).toBe(T0 + 600_000 + 90_000);
+	});
+
+	it('実行が始まったRUNNINGのジョブの期限にはqueueWaitMsを加えない', () => {
+		const jobs = [dispatched({ id: 'a', state: 'RUNNING', heartbeatAt: T0 + 40_000 })];
+		const out = planDispatch({ now: T0 + 40_000 + 90_000, jobs, policy: policy({ queueWaitMs: 600_000 }), bucket: unlimited });
+		expect(out.decisions).toEqual([{ type: 'reap', id: 'a', attempts: 1 }]);
 	});
 
 	it('RUNNING中に落ちたジョブが滞留しない', () => {

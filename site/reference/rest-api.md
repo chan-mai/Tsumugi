@@ -363,7 +363,8 @@ bindingごとに、実行待ちのジョブが実行されない原因を取得�
         "rate": null,
         "perKeyRate": null,
         "agingIntervalMs": 60000,
-        "reaperGraceMs": 30000
+        "reaperGraceMs": 30000,
+        "queueWaitMs": 900000
       }
     }
   }
@@ -415,6 +416,7 @@ bindingごとに、実行待ちのジョブが実行されない原因を取得�
 | `perKeyRate` | `{ tokens, intervalMs }`。キーごとのレート。`null`で制限を解除 |
 | `agingIntervalMs` | エージングの間隔。`null`でエージングなし |
 | `reaperGraceMs` | 無応答と判定するまでの猶予。0以上の整数 |
+| `queueWaitMs` | 実行が始まっていないジョブに限る、Queuesでの滞留の許容時間。0以上の整数 |
 
 指定した項目のみが変更され、省略した項目は維持されます。
 成功時には、変更後の設定と適用されたshardの数がレスポンスに含まれます。
@@ -431,7 +433,8 @@ bindingごとに、実行待ちのジョブが実行されない原因を取得�
     "rate": null,
     "perKeyRate": null,
     "agingIntervalMs": 60000,
-    "reaperGraceMs": 30000
+    "reaperGraceMs": 30000,
+    "queueWaitMs": 900000
   }
 }
 ```

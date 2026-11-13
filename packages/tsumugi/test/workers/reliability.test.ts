@@ -6,6 +6,7 @@ import type { DispatchMessage } from '../../src/do/job-shard.js';
 import { handleBatch, type ConsumerEnv } from '../../src/queue/consumer.js';
 
 const T0 = 1_900_000_000_000;
+const QUEUE_WAIT = 15 * 60_000;
 const consumerEnv: ConsumerEnv = env;
 
 let aborted = false;
@@ -228,7 +229,7 @@ describe('reaper', () => {
 		expect(await stateOf('BOOM', jobId)).toBe('QUEUED');
 
 		// 完了報告なしでtimeout + grace経過
-		clock.advance(60_000 + 30_000);
+		clock.advance(QUEUE_WAIT + 60_000 + 30_000);
 		await install('BOOM', clock, queue);
 		await runDurableObjectAlarm(shard('BOOM'));
 
@@ -250,7 +251,7 @@ describe('reaper', () => {
 		await runDurableObjectAlarm(shard('ONCE'));
 		expect(sent[0]?.claimRequired).toBe(true);
 
-		clock.advance(60_000 + 30_000);
+		clock.advance(QUEUE_WAIT + 60_000 + 30_000);
 		await install('ONCE', clock, queue);
 		await runDurableObjectAlarm(shard('ONCE'));
 
@@ -266,7 +267,7 @@ describe('reaper', () => {
 		const jobId = await shard('BOOM').enqueue({ binding: 'BOOM', payload: {}, timeoutMs: 60_000 });
 		await runDurableObjectAlarm(shard('BOOM'));
 
-		clock.advance(60_000 + 30_000 - 1);
+		clock.advance(QUEUE_WAIT + 60_000 + 30_000 - 1);
 		await install('BOOM', clock, queue);
 		await runDurableObjectAlarm(shard('BOOM'));
 
@@ -322,7 +323,7 @@ describe('前の試行からの通知', () => {
 		await install(binding, clock, queue);
 		const jobId = await shard(binding).enqueue({ binding, payload: {}, timeoutMs: 60_000, maxAttempts: 5, guarantee });
 		await runDurableObjectAlarm(shard(binding));
-		clock.advance(60_000 + 30_000);
+		clock.advance(QUEUE_WAIT + 60_000 + 30_000);
 		await install(binding, clock, queue);
 		await runDurableObjectAlarm(shard(binding));
 		if (guarantee === 'at-least-once') {
@@ -402,7 +403,7 @@ describe('無応答の試行の計上', () => {
 		await install('STALE5', clock, queue);
 		const jobId = await shard('STALE5').enqueue({ binding: 'STALE5', payload: {}, guarantee: 'at-most-once', timeoutMs: 60_000 });
 		await runDurableObjectAlarm(shard('STALE5'));
-		clock.advance(60_000 + 30_000);
+		clock.advance(QUEUE_WAIT + 60_000 + 30_000);
 		await install('STALE5', clock, queue);
 		await runDurableObjectAlarm(shard('STALE5'));
 		expect(await stateOf('STALE5', jobId)).toBe('STALLED');
@@ -422,7 +423,7 @@ describe('無応答の試行の計上', () => {
 		const jobId = await shard('STALE6').enqueue({ binding: 'STALE6', payload: {}, timeoutMs: 60_000, maxAttempts: 2 });
 		for (let i = 0; i < 4; i++) {
 			await runDurableObjectAlarm(shard('STALE6'));
-			clock.advance(60_000 + 30_000);
+			clock.advance(QUEUE_WAIT + 60_000 + 30_000);
 			await install('STALE6', clock, queue);
 		}
 		expect(await stateOf('STALE6', jobId)).toBe('FAILED');

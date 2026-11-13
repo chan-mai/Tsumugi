@@ -165,6 +165,7 @@ const tsumugi = defineTsumugi({
 | `perKeyRate` | `null` | `{ tokens, intervalMs }`。キーごとの`intervalMs`あたり`tokens`件までの実行 |
 | `agingIntervalMs` | `60000` | 実効優先度が1上がるまでの待ち時間。`null`はエージングなし |
 | `reaperGraceMs` | `30000` | `timeoutMs`の経過後、結果が報告されないジョブを無応答と判定するまでの猶予 |
+| `queueWaitMs` | `900000` | 実行が始まっていないジョブ(`QUEUED`)を無応答と判定する期限に加える、Queuesでの滞留の許容時間 |
 
 ## EnqueueInput
 

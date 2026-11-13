@@ -211,7 +211,7 @@ describe('終端に達したジョブの通知(#96)', () => {
 		});
 		await runDurableObjectAlarm(shard('SET7#0'));
 		// 無応答で期限と猶予経過後にreaper処理
-		await runInDurableObject(shard('SET7#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 120_000 }));
+		await runInDurableObject(shard('SET7#0'), (instance) => void ((instance as any).clock = { now: () => T0 + 15 * 60_000 + 120_000 }));
 		await runDurableObjectAlarm(shard('SET7#0'));
 
 		await shard('SET7#0').retry(jobId);
