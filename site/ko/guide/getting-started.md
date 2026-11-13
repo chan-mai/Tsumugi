@@ -10,7 +10,15 @@ updatedAt: 2026-10-25
 <h2 id="前提条件">사전 요구 사항</h2>
 
 Workers Paid 플랜이 활성화된 Cloudflare 계정이 필요합니다.
-`compatibility_date`는 2025-11-17 이후로 설정하세요.
+`compatibility_date`는 2025-11-17 이후로 설정하십시오.
+`compatibility_flags`에 `temporal`을 지정하거나 `compatibility_date`를 2026-12-01 이후로 설정해야 합니다.
+
+```jsonc
+{
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["temporal"]
+}
+```
 
 <h2 id="インストール">설치</h2>
 
@@ -26,31 +34,31 @@ pnpm add tsumugi
 npx tsumugi init
 ```
 
-새 프로젝트에서 `init`을 실행하면 필요한 Cloudflare 리소스를 만들고 `wrangler.jsonc`, `src/index.ts`, `src/performers/`, `.dev.vars`를 생성합니다.
+새 프로젝트에서 `init`을 실행하면 필요한 Cloudflare 리소스를 생성하고 `wrangler.jsonc`, `src/index.ts`, `src/performers/`, `.dev.vars`를 만듭니다.
 마지막으로 데이터베이스 마이그레이션을 적용하고 종료합니다.
-중간에 실패하면 경고와 함께 다시 실행할 명령을 출력합니다.
+도중에 실패하면 경고와 함께 다시 실행할 명령을 출력합니다.
 
-wrangler 설정 파일이 이미 있으면 `init`은 설정 파일을 수정하지 않고 추가해야 할 내용을 출력합니다.
-이 경우 마이그레이션도 적용되지 않습니다.
-설정 파일을 편집한 후 출력된 절차에 따라 마이그레이션을 적용하세요.
+wrangler 설정 파일이 이미 있는 경우 `init`은 설정 파일을 수정하지 않고 추가해야 할 내용을 출력합니다.
+이때는 마이그레이션도 적용되지 않습니다.
+설정 파일을 편집한 후 출력된 절차에 따라 마이그레이션을 적용하십시오.
 옵션과 생성되는 파일은 [CLI](/ko/reference/cli)에서 설명합니다.
 
 `TSUMUGI_METRICS` binding은 선택 사항입니다.
-설정하지 않으면 메트릭이 기록되지 않지만, 다른 동작은 달라지지 않습니다.
-Flow와 정기 실행을 사용하는 경우에는 추가 binding을 설정하세요.
+설정하지 않으면 메트릭이 기록되지 않지만 다른 동작에는 영향이 없습니다.
+Flow와 정기 실행을 사용하는 경우 추가 binding을 설정하십시오.
 설정 내용은 [wrangler의 binding](/ko/reference/config#wranglerのbinding), [Flow 설정](/ko/guide/flow#設定), [정기 실행 설정](/ko/guide/schedule#設定)에 기재되어 있습니다.
 
 ::callout{type="warning"}
-Tsumugi를 업데이트한 후에는 마이그레이션을 다시 적용하세요.
+Tsumugi를 업데이트한 후에는 마이그레이션을 다시 적용하십시오.
 새 버전에서 마이그레이션이 추가되었을 수 있습니다.
-적용되지 않은 마이그레이션이 남아 있으면 REST API는 503으로 응답하며, 응답 본문에 적용되지 않은 파일 이름을 포함합니다.
+적용되지 않은 마이그레이션이 남아 있으면 REST API는 503으로 응답하며, 응답 본문에 적용되지 않은 파일명을 포함합니다.
 ::
 
 <h2 id="performer">performer</h2>
 
 작업 처리는 performer로 정의합니다.
-`init`이 생성하는 `src/performers/hello.ts`가 가장 작은 예제입니다.
-`perform`의 처리와 payload의 타입을 용도에 맞게 수정하세요.
+`init`이 생성하는 `src/performers/hello.ts`가 가장 간단한 예입니다.
+`perform`의 처리와 payload의 타입을 용도에 맞게 수정하십시오.
 
 ```ts
 // src/performers/hello.ts
@@ -63,7 +71,7 @@ export class Hello extends Performer<{ name: string }, void, {}, Env> {
 }
 ```
 
-performer를 추가할 때는 `add-performer`를 실행하세요.
+performer를 추가할 때는 `add-performer`를 실행하십시오.
 
 ```bash
 npx tsumugi add-performer send-mail
@@ -81,7 +89,7 @@ export { SendMail } from './send-mail.js';
 
 `init`은 다음 내용의 `src/index.ts`를 생성합니다.
 performer는 Worker의 엔트리포인트에서 export하며, 그 이름이 binding 이름으로 사용됩니다.
-binding 이름의 규칙은 [binding 이름](/ko/guide/performer#binding名)에서 설명합니다.
+binding 이름의 규칙은 [binding名](/ko/guide/performer#binding名)에서 설명합니다.
 
 ```ts
 import { bearerAuth, defineTsumugi } from 'tsumugi';
@@ -108,20 +116,20 @@ export default {
       const id = await tsumugi.enqueue(env, { binding: 'Hello', payload: { name: 'world' } });
       return Response.json({ id });
     }
-    // 나머지는 대시보드와 REST API로 전달
+    // 나머지는 대시보드와 REST API로
     return tsumugi.fetch!(request, env, ctx);
   },
 } satisfies ExportedHandler<Env>;
 ```
 
-`defineTsumugi`의 반환값에는 `fetch`, `queue`, `scheduled` 핸들러 외에 작업을 투입하는 함수와 Flow를 시작하는 함수가 포함됩니다.
-반환값 목록은 [설정](/ko/reference/config#definetsumugi)에, 투입 방법별 차이는 [작업 투입](/ko/guide/enqueue#投入方法)에 기재되어 있습니다.
+`defineTsumugi`의 반환값에는 `fetch`, `queue`, `scheduled` 핸들러와 함께 작업을 enqueue하는 함수와 Flow를 시작하는 함수가 포함됩니다.
+반환값의 목록은 [설정](/ko/reference/config#definetsumugi)에, enqueue 방법별 차이는 [작업 enqueue](/ko/guide/enqueue#投入方法)에 기재되어 있습니다.
 
 <h2 id="トークンの設定">토큰 설정</h2>
 
 `auth`를 지정하지 않으면 `tsumugi.fetch`는 모든 요청에 404로 응답합니다.
-위 예제에서는 `bearerAuth`를 사용합니다. 로컬 환경에서는 `.dev.vars`에 정의된 `TSUMUGI_TOKEN`을 참조합니다.
-프로덕션 환경에서는 아래 명령을 실행하여 Secret을 등록하세요.
+위 예에서는 `bearerAuth`를 사용합니다. 로컬 환경에서는 `.dev.vars`에 정의된 `TSUMUGI_TOKEN`을 참조합니다.
+프로덕션 환경에서는 다음 명령을 실행하여 Secret을 등록하십시오.
 
 ```bash
 pnpm wrangler secret put TSUMUGI_TOKEN
@@ -133,13 +141,13 @@ pnpm wrangler secret put TSUMUGI_TOKEN
 pnpm wrangler dev
 ```
 
-`/enqueue`에 접속하면 Hello 작업이 투입되고, 작업 ID를 포함한 `{ "id": "..." }` 응답이 반환됩니다.
-투입한 작업은 대시보드(`/`)의 목록에 표시됩니다.
-토큰 입력을 요청받으면 `.dev.vars`의 `TSUMUGI_TOKEN` 값을 입력하세요.
+`/enqueue`에 접근하면 Hello 작업이 enqueue되고, 작업 ID를 포함한 `{ "id": "..." }` 응답이 반환됩니다.
+enqueue된 작업은 대시보드(`/`)의 목록에 표시됩니다.
+토큰 입력을 요청받으면 `.dev.vars`의 `TSUMUGI_TOKEN` 값을 입력하십시오.
 `init`이 생성한 직후의 값은 `dev-token`입니다.
 
-<h2 id="次に参照するページ">다음으로 볼 페이지</h2>
+<h2 id="次に参照するページ">다음으로 참고할 페이지</h2>
 
 - [Performer](/ko/guide/performer): 작업 처리를 정의합니다.
-- [작업 투입](/ko/guide/enqueue): 예약 실행, 우선순위, 중복 제거
-- [실행 제어](/ko/guide/execution): 작업 상태 관리, 재시도 설정, 실행량 제한, 실행 보장에 대해 설명합니다.
+- [ジョブの投入](/ko/guide/enqueue): 예약 실행, 우선순위, 중복 제거
+- [実行の制御](/ko/guide/execution): 작업 상태 관리, 재시도 설정, 실행량 제한, 실행 보장에 대해 설명합니다.
