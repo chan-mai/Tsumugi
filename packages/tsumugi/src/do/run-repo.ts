@@ -280,7 +280,19 @@ export class RunRepo {
 			now,
 			...aborted,
 		);
-		return [...reopened, ...cursor.toArray().map((row) => row.id)];
+		const reset = new Set([...reopened, ...cursor.toArray().map((row) => row.id)]);
+		const downstream = this.#all<{ id: string; after: string }>(
+			`SELECT id, "after" FROM node
+			WHERE state = 'COMPLETED' AND container = 0 AND subflow IS NULL
+				AND NOT EXISTS(SELECT 1 FROM node child WHERE child.parent = node.id)
+			ORDER BY seq ASC, id ASC`,
+		).filter((row) => {
+			if (!(JSON.parse(row.after) as string[]).some((id) => reset.has(id))) return false;
+			reset.add(row.id);
+			return true;
+		});
+		for (const row of downstream) this.updateNode(row.id, { state: 'PENDING', jobId: null, result: null, error: null }, now);
+		return [...reset];
 	}
 
 	countNodes(): number {
