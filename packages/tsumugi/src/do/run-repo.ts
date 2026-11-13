@@ -133,8 +133,8 @@ export class RunRepo {
 		this.sql.exec(`UPDATE run SET state = ?, updated_at = ? WHERE id = ?`, state, now, id);
 	}
 
-	markParentNotified(id: string, now: number): void {
-		this.sql.exec(`UPDATE run SET parent_notified = 1, updated_at = ? WHERE id = ?`, now, id);
+	markParentNotified(id: string, state: RunState, now: number): void {
+		this.sql.exec(`UPDATE run SET parent_notified = 1, updated_at = ? WHERE id = ? AND state = ?`, now, id, state);
 	}
 
 	markCancelling(id: string, now: number): void {

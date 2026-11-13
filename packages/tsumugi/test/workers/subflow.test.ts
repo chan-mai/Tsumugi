@@ -226,6 +226,68 @@ describe('subflowの縦串', () => {
 		expect(alarm).toBeGreaterThan(T);
 	});
 
+	async function failWithInterleavedRetry(child: string, at: 'project' | 'notify') {
+		await runStub(child).start({
+			flow: 'GREETINGS',
+			input: { prefix: 'x' },
+			parent: { runId: `PIPELINE:${child}`, nodeId: 'greetings' },
+			depth: 1,
+		});
+		await settleRuns([child]);
+		sent.length = 0;
+		const jobId = (await nodeOf(child, 'list'))?.job_id;
+		if (!jobId) throw new Error('the first node of the child run has no job id');
+
+		return runInDurableObject(runStub(child), async (instance) => {
+			const inner = instance as any;
+			const notified: string[] = [];
+			const originalDb = inner.env.TSUMUGI_DB;
+			const originalRun = inner.env.RUN;
+			if (at === 'project') {
+				inner.env.TSUMUGI_DB = {
+					prepare: (sql: string) => originalDb.prepare(sql),
+					batch: async (statements: unknown[]) => {
+						await inner.retry();
+						return originalDb.batch(statements);
+					},
+				};
+			}
+			inner.env.RUN = {
+				idFromName: (name: string) => ({ name }),
+				get: () => ({
+					notifyChild: async (_nodeId: string, _childRunId: string, state: string) => {
+						notified.push(state);
+						if (at === 'notify') await inner.retry();
+					},
+				}),
+			};
+			try {
+				await inner.notify([{ nodeId: 'list', jobId, state: 'FAILED', result: null, error: 'boom' }]);
+				await inner.ctx.storage.deleteAlarm();
+				await inner.alarm();
+				return { notified, run: inner.repo.findRun() as { state: string; parent_notified: number } };
+			} finally {
+				inner.env.TSUMUGI_DB = originalDb;
+				inner.env.RUN = originalRun;
+			}
+		});
+	}
+
+	it('D1への投影のawait中に再開された場合、子のrunは親へFAILEDを通知しない', async () => {
+		const { notified, run } = await failWithInterleavedRetry('GREETINGS:retry-during-project', 'project');
+
+		expect(notified).toEqual([]);
+		expect(run.state).toBe('RUNNING');
+	});
+
+	it('親への通知のawait中に再開された場合、親への通知済みフラグを1にしない', async () => {
+		const { notified, run } = await failWithInterleavedRetry('GREETINGS:retry-during-notify', 'notify');
+
+		expect(notified).toEqual(['FAILED']);
+		expect(run.state).toBe('RUNNING');
+		expect(run.parent_notified).toBe(0);
+	});
+
 	it('親を取り消すと子も取り消される', async () => {
 		const parent = 'PIPELINE:sub-cancel';
 		const child = 'GREETINGS:sub-cancel-greetings';

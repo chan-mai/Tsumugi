@@ -414,7 +414,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			this.repo.appendNodeOutbox(runRow.id, [...touched]);
 
 			const projected = await this.#project();
-			const notified = await this.#notifyParent(settled.state, now);
+			const notified = await this.#notifyParent(now);
 			if (notified && (await this.#sweep(now))) return;
 
 			// 通知待ちノードの決定は除外, 次の起動はnotify(ADR-0052)
@@ -436,7 +436,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 			if (runRow.state === 'RUNNING') this.#failRun(runRow.id, `flow is not registered: ${runRow.flow}`, now);
 			const projected = await this.#project();
 			// 親への通知と削除は通常の決着と同手順, 省略時は親ノードとDOが残存
-			const notified = await this.#notifyParent(this.repo.findRun()?.state as RunState, now);
+			const notified = await this.#notifyParent(now);
 			if (notified && (await this.#sweep(now))) return;
 			if (projected >= PROJECTION_LIMIT || this.repo.hasOutbox()) await this.#armAlarm(now);
 			else if (!notified) await this.#armAlarm(now + NOTIFY_RETRY_MS);
@@ -769,9 +769,10 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 		}
 
 		// 親なし, 非終端のrunはtrue(削除の阻害理由なし)
-		async #notifyParent(state: RunState, now: number): Promise<boolean> {
+		async #notifyParent(now: number): Promise<boolean> {
 			const row = this.repo.findRun();
 			if (!row || row.parent_run_id === null || row.parent_node_id === null) return true;
+			const state = row.state as RunState;
 			if (state === 'RUNNING') return true;
 			if (row.parent_notified === 1) return true;
 
@@ -781,7 +782,7 @@ export function createRunClass({ flows, bindings, settings = {}, failureBinding,
 				console.error('tsumugi: notifyParent failed', error);
 				return false;
 			}
-			this.repo.markParentNotified(row.id, now);
+			this.repo.markParentNotified(row.id, state, now);
 			return true;
 		}
 
