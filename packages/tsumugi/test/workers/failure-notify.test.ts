@@ -234,7 +234,9 @@ describe('失敗したジョブの通知(#30)', () => {
 	it('flowと定期実行が投入するshardにも宛先が届く', async () => {
 		// 投入経路ごとに別クライアント, 設定漏れ時はその経路の失敗のみ破棄
 		const runNamespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
-		await runNamespace.get(runNamespace.idFromName('GREETINGS:notify-wiring')).start({ flow: 'GREETINGS', input: { prefix: 'wiring' } });
+		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:notify-wiring'));
+		await run.start({ flow: 'GREETINGS', input: { prefix: 'wiring' } });
+		await runDurableObjectAlarm(run);
 
 		const schedulerNamespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 		const scheduler = schedulerNamespace.get(schedulerNamespace.idFromName('scheduler'));

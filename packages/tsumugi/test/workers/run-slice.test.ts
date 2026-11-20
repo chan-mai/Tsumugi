@@ -373,6 +373,10 @@ describe('縦串: runの開始から完了まで', () => {
 			]);
 		};
 		await finish('list', 'COMPLETED', { names: ['a', 'b'] });
+		// greet:1を配送済みへ, 未配送では即時取り消し
+		await settleRun(runId);
+		await installQueues();
+		await runDurableObjectAlarm(shard('Greet'));
 		const spawns = Array.from({ length: 10_001 }, (_, i) => ({ id: `c${i}`, binding: 'Greet', payload: {} }));
 		await finish('greet:0', 'COMPLETED', null, spawns);
 		await settleRun(runId);
