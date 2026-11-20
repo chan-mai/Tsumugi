@@ -1,5 +1,5 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { fixedClock } from '../../src/do/clock.js';
 import { handleBatch } from '../../src/queue/consumer.js';
 
@@ -13,7 +13,11 @@ const T0 = 1_900_000_000_000;
 const QUEUE_WAIT = 15 * 60_000;
 const consumerEnv: ConsumerEnv = env;
 
-let aborted = false;
+let onAbort = () => {};
+const abortOf = () =>
+	new Promise<void>(resolve => {
+		onAbort = resolve;
+	});
 
 const boom = {
 	perform: async (): Promise<void> => {
@@ -26,9 +30,7 @@ const waitForDeadline = {
 	perform: (_payload: unknown, ctx: JobContext): Promise<void> => {
 		const signal = AbortSignal.timeout(Math.max(0, ctx.deadlineAt - Temporal.Now.instant().epochMilliseconds));
 		return new Promise<void>(() => {
-			signal.addEventListener('abort', () => {
-				aborted = true;
-			});
+			signal.addEventListener('abort', () => onAbort());
 		});
 	},
 };
@@ -93,10 +95,6 @@ const rowOf = (binding: string, jobId: string) =>
 const alarmOf = (binding: string) => runInDurableObject(shard(binding), (_i, state) => state.storage.getAlarm());
 
 describe('リトライ', () => {
-	beforeEach(() => {
-		aborted = false;
-	});
-
 	it('失敗するとバックオフぶん先の時刻にalarmが設定される', async () => {
 		// 時刻を進めるAPI無し、次alarmの予定時刻で検証
 		const clock = fixedClock(T0);
@@ -162,9 +160,10 @@ describe('timeout', () => {
 			backoff: { kind: 'fixed', delayMs: 1_000 },
 		});
 		await runDurableObjectAlarm(shard('SLOW'));
+		const aborted = abortOf();
 		await handleBatch(makeBatch(sent), consumerEnv, performers);
 
-		expect(aborted).toBe(true);
+		await aborted;
 		expect(await stateOf('SLOW', jobId)).toBe('SCHEDULED');
 	});
 
@@ -191,7 +190,6 @@ describe('timeout', () => {
 
 describe('consumerのwall time上限', () => {
 	it('timeoutMsより先に上限へ達した試行は失敗として報告する', async () => {
-		aborted = false;
 		const clock = fixedClock(T0);
 		const { sent, queue } = captureQueue();
 		await install('SLOW', clock, queue);
@@ -204,9 +202,10 @@ describe('consumerのwall time上限', () => {
 			backoff: { kind: 'fixed', delayMs: 1_000 },
 		});
 		await runDurableObjectAlarm(shard('SLOW'));
+		const aborted = abortOf();
 		await handleBatch(makeBatch(sent.filter(m => m.jobId === jobId)), consumerEnv, performers, 200);
 
-		expect(aborted).toBe(true);
+		await aborted;
 		expect(await stateOf('SLOW', jobId)).toBe('SCHEDULED');
 		const attempts = await runInDurableObject(shard('SLOW'), instance => internals(instance).repo.attemptsOf(jobId));
 		expect(attempts.at(-1)?.error).toContain('job exceeded the consumer wall time limit');

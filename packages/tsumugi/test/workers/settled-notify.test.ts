@@ -256,9 +256,9 @@ describe('終端に達したジョブの通知(#96)', () => {
 	it('flowと定期実行が投入するshardにも設定が届く', async () => {
 		// 経路ごとに別クライアント, 設定欠落経路の終端は通知対象外
 		const runNamespace = env.RUN as unknown as DurableObjectNamespace<RunFace>;
-		await runNamespace
-			.get(runNamespace.idFromName('GREETINGS:settled-wiring'))
-			.start({ flow: 'GREETINGS', input: { prefix: 'settled-wiring' } });
+		const run = runNamespace.get(runNamespace.idFromName('GREETINGS:settled-wiring'));
+		await run.start({ flow: 'GREETINGS', input: { prefix: 'settled-wiring' } });
+		await runDurableObjectAlarm(run);
 
 		const schedulerNamespace = env.SCHEDULER as unknown as DurableObjectNamespace<SchedulerFace>;
 		const scheduler = schedulerNamespace.get(schedulerNamespace.idFromName('scheduler'));
