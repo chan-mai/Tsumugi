@@ -26,7 +26,7 @@
     "oxlint": "^1.94.0",
     "oxlint-tsgolint": "^7.0.2007",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11",
+    "vitest": "^5.1.0",
     "wrangler": "^4.163.0"
   },
   "packageManager": "pnpm@10.33.4",
