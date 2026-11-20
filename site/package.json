@@ -24,10 +24,10 @@
     "tailwindcss": "^4.3.5",
     "three": "^0.187.0",
     "vue": "^3.5.45",
-    "vue-router": "^5.4.0"
+    "vue-router": "^5.5.1"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^1.7.0",
+    "@anthropic-ai/sdk": "^1.9.0",
     "@nuxt/fonts": "^1.2.0",
     "@takumi-rs/core": "^2.20.0",
     "@types/three": "^0.187.0",
@@ -35,6 +35,6 @@
     "nuxt-og-image": "^7.0.7",
     "typescript": "^6.0.3",
     "vue-tsc": "^3.3.14",
-    "wrangler": "^4.161.0"
+    "wrangler": "^4.163.0"
   }
 }
